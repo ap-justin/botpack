@@ -821,7 +821,6 @@ test {
     _ = @import("core/mcp_host/verbs.zig");
     _ = @import("core/mcp/tool_lookup.zig");
     _ = @import("core/recovery/recovery.zig");
-    _ = @import("napi_fetch_state.zig");
     _ = @import("core/config/model_provider.zig");
     _ = @import("core/config/configured_provider.zig");
     _ = @import("gateway/chat_completions_protocol.zig");
@@ -994,8 +993,4 @@ test {
     _ = @import("gateway/host_stream_provider.zig");
     _ = @import("gateway/open_job.zig");
     _ = @import("gateway/vercel_failure_diagnostics.zig");
-    _ = @import("gateway/host_model_catalog.zig");
-    _ = @import("gateway/host_openai_codex.zig");
-    _ = @import("gateway/host_xai_grok.zig");
-    _ = @import("gateway/host_chat_completions.zig");
 }

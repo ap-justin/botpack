@@ -86,8 +86,6 @@ Key rules:
 
 * `src/acp/` owns the ACP (Agent Client Protocol) JSON-RPC 2.0 server.
 
-* `src/wasm_core_main.zig`, `src/wasm_term_main.zig`, and `src/napi_core_main.zig` are the libfx SDK entry points. Read `sdk/AGENTS.md` before changing them or anything under `sdk/`.
-
 ### Adding a Feature
 
 Before implementing, answer in order:
@@ -322,17 +320,15 @@ Do not run the complete deterministic test suite locally as the default developm
 
 After the focused checks pass, create a clean checkpoint commit, push the non-`main` feature branch, and open a draft PR immediately. Linux is the gate for every change because most fx behavior is identical on every platform:
 
-* `.github/workflows/ci.yml` runs on Linux x86_64. It checks formatting, the PGSO corpus, the public surface, and the agents, compactor, indexer, and recovery boundaries, model-checks request recovery and the empty-reply nudge, runs the ReleaseSafe unit tests, runs the E2E files in four weighted shards plus the MCP conformance baseline, and qualifies the SDK packages. A failed E2E file is retried once. A file that passes only on retry gets a warning annotation; investigate it as a possible race. `Build & Test` fails when any SDK job fails.
+* `.github/workflows/ci.yml` runs on Linux x86_64. It checks formatting, the PGSO corpus, the public surface, and the agents, compactor, indexer, and recovery boundaries, model-checks request recovery and the empty-reply nudge, runs the ReleaseSafe unit tests, runs the E2E files in four weighted shards plus the MCP conformance baseline, . A failed E2E file is retried once. A file that passes only on retry gets a warning annotation; investigate it as a possible race.
 * `.github/workflows/binary-size.yml` builds each release target on its native runner, reports the size change, and smoke-tests every target's binary. See **Binary Size Observability**.
 * `.github/workflows/bench.yml` enforces the startup latency budget. See **Benchmarks**.
 
 Linux jobs install Zig through `.github/actions/setup-zig`, which restores the Zig cache that runs on `main` save with `.github/actions/save-zig-cache`. Pull requests never save a Zig cache through these actions, so they cannot push `main`'s entries out of the repository's cache quota. The PGSO workflow keeps its own cache through `.github/actions/setup-pgso`.
 
-macOS runs only when `scripts/detect-macos-need.sh` finds a change that can behave differently there, such as a Zig file with a macOS, BSD, or Linux code path, `build.zig`, the macOS signing script, the native SDK addon, or a platform E2E file. If the detector cannot read the change, the `macOS arm64` check fails instead of passing. When the change does not need macOS, the check passes without starting a macOS runner. To request macOS for any other change, add the `ci:macos` label or run `gh workflow run macos.yml --ref <branch>`. The label needs triage access and the dispatch needs write access, so an outside contributor asks in the PR and a maintainer starts the run. Every E2E file that branches on `process.platform` or `platform()` being `darwin` or `linux` must appear in `tests/e2e/macos-platform-tests.json`, and `tests/e2e/ci-shards.test.ts` enforces that.
+macOS runs only when `scripts/detect-macos-need.sh` finds a change that can behave differently there, such as a Zig file with a macOS, BSD, or Linux code path, `build.zig`, the macOS signing script, or a platform E2E file. If the detector cannot read the change, the `macOS arm64` check fails instead of passing. When the change does not need macOS, the check passes without starting a macOS runner. To request macOS for any other change, add the `ci:macos` label or run `gh workflow run macos.yml --ref <branch>`. The label needs triage access and the dispatch needs write access, so an outside contributor asks in the PR and a maintainer starts the run. Every E2E file that branches on `process.platform` or `platform()` being `darwin` or `linux` must appear in `tests/e2e/macos-platform-tests.json`, and `tests/e2e/ci-shards.test.ts` enforces that.
 
-The durable-session model check in the `SDK (Bun + N-API/WASM)` job takes about 40 minutes, so a pull request runs it only when `scripts/detect-ci-need.sh` finds a change to code libfx owns: `sdk/`, `tests/tla/sdk/`, the drivers in `tests/tla/drivers/*.mjs`, the Node-API and WebAssembly core entry points, `src/acp/`, `src/core/hosts/`, `src/core/session_manager/`, `build.zig`, `build.zig.zon`, or `.github/workflows/ci.yml`. Every push to `main` runs it, which catches a durable-session regression in shared code such as the agent loop after it merges. To run it for any other change, run `gh workflow run ci.yml --ref <branch>`. If the detector cannot read the change, `Build & Test` fails instead of passing.
-
-The `TLA+ MCP models and drivers` job takes about 20 minutes, so a pull request runs its model checks and drivers only when the same detector finds a change to `src/mcp/`, `src/core/mcp_host/`, `src/core/mcp/`, the models in `tests/tla/mcp/` and `tests/tla/mcp_host/`, their drivers in `tests/tla/drivers/mcp/`, `tests/tla/drivers/mcp_host/`, and `tests/tla/drivers/lib/`, the `tests/e2e/fixtures/mcp-*` servers, the helpers those drivers load (`tests/e2e/tmux-helpers.ts`, `tests/evals/eval-helpers.ts`, and `tests/e2e/render-lab/tape.ts`), `build.zig`, `build.zig.zon`, or `.github/workflows/ci.yml`. Every push to `main` runs them, and the same `gh workflow run ci.yml --ref <branch>` runs them for any other change.
+The `TLA+ MCP models and drivers` job takes about 20 minutes, so a pull request runs its model checks and drivers only when the same detector finds a change to `src/mcp/`, `src/core/mcp_host/`, `src/core/mcp/`, the models in `tests/tla/mcp/` and `tests/tla/mcp_host/`, their drivers in `tests/tla/drivers/mcp/`, `tests/tla/drivers/mcp_host/`, and `tests/tla/drivers/lib/`, the `tests/e2e/fixtures/mcp-*` servers, the helpers those drivers load (`tests/e2e/fake-gateway.ts` and `tests/evals/eval-helpers.ts`), `build.zig`, `build.zig.zon`, or `.github/workflows/ci.yml`. Every push to `main` runs them, and the same `gh workflow run ci.yml --ref <branch>` runs them for any other change.
 
 The `fx mcp call` model check, `.github/workflows/tla-mcp-call.yml`, runs `tests/tla/mcp_call/check.sh`: TLC on the bridge model, the core's tests, both drivers against the real core, and every planted bug. Every push to `main` runs it. A pull request runs it only with the `ci:tla-mcp-call` label, and `gh workflow run tla-mcp-call.yml --ref <branch>` runs it on any branch. Like `ci:macos`, the label needs triage access.
 
@@ -355,7 +351,7 @@ Startup latency benchmarks live in `benchmarks/` and run in CI via `.github/work
 
 The `Startup Latency` job builds a ReleaseSafe binary, measures six CLI paths with hyperfine, and enforces per-command latency budgets. A PR that exceeds a budget fails the check.
 
-The long-turn memory and libfx runtime benchmarks run only on request. Start them with `gh workflow run bench.yml --ref <branch> -f long_turn_memory=true` or `-f libfx_runtime=true`.
+The long-turn memory benchmark runs only on request. Start it with `gh workflow run bench.yml --ref <branch> -f long_turn_memory=true`.
 
 The startup benchmark uses `FX_BENCH=1`, an environment variable that runs through arg parsing and CLI dispatch, then exits before TTY initialization. This lives in `src/core/app/app_entry_runtime.zig`.
 
@@ -385,8 +381,7 @@ production ceilings (6.500 MiB for macOS arm64, 6.750 MiB for Linux arm64, and
 When adding or changing user-facing behavior, update the documentation this repository owns in the same change:
 
 1. `--help` output via command specs in `src/builtins/commands.zig`
-2. `sdk/README.md` if libfx's supported public behavior or setup changes, as `sdk/AGENTS.md` describes
-3. `CONTRIBUTING.md` if build steps, development setup, or collaboration rules change
+2. `CONTRIBUTING.md` if build steps, development setup, or collaboration rules change
 
 The user manual at fx.sh/docs is built from a private repository. When a change makes a page wrong or incomplete, updating the manual is part of the change:
 
