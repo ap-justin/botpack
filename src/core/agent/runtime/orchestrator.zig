@@ -2642,7 +2642,10 @@ fn restoreCalledMcpTools(
             if (already) continue;
             const resolved = resolve(deps.ctx, arena, call.name) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
-                else => continue,
+                else => {
+                    debug_trace.logf("mcp", "restoring called MCP tool failed tool={s} err={s}", .{ call.name, @errorName(err) });
+                    continue;
+                },
             };
             const definition = resolved orelse continue;
             if (!std.mem.eql(u8, definition.name, call.name) or definition.mcp_binding == null) continue;
