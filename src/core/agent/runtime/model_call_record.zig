@@ -110,7 +110,7 @@ test "a settled request's record keeps its outcome, cost and checked provider id
     try std.testing.expectEqual(@as(?u64, 56), record.output_tokens);
 
     var failed: agent_stream_provider.Result = .{ .failed = .{ .kind = .rate_limited, .retry_after_seconds = 4 } };
-    const refused = ofResult("codex", "gpt-5.2", .compaction, 5_000, 4_000, &failed, false);
+    const refused = ofResult("gateway", "gpt-5.2", .compaction, 5_000, 4_000, &failed, false);
     try std.testing.expectEqual(types.ModelCallOutcome.failed, refused.outcome);
     try std.testing.expectEqualStrings("rate_limited", refused.failure.?);
     try std.testing.expectEqual(@as(?u32, 4), refused.retry_after_s);

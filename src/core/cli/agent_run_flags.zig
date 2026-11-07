@@ -119,8 +119,8 @@ test "agent-run flags keep the last value and keep Fast and Ultra apart" {
     try overrides.apply(alloc, .provider_order, "c");
     try std.testing.expectEqual(@as(usize, 1), overrides.provider_order.?.len);
     try overrides.apply(alloc, .effort, "high");
-    try overrides.apply(alloc, .provider, "codex");
-    try std.testing.expectEqualStrings("codex", overrides.provider.?.label());
+    try overrides.apply(alloc, .provider, "local");
+    try std.testing.expectEqualStrings("local", overrides.provider.?.label());
 
     for ([_]struct { flag: Flag, value: []const u8 }{
         .{ .flag = .permission_mode, .value = "sometimes" },

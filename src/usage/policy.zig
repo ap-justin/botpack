@@ -77,8 +77,8 @@ pub const Plan = struct {
     }
 };
 
-/// A provider plan (Codex, Grok) is read whole on every fetch: no finished
-/// days and no budget.
+/// What one fetch reads: finished days when the scope has reports and they are
+/// not yet cached for today, and the budget for a member.
 pub fn plan(scope: report.Scope, cached_finished_day: ?i64, now_ms: i64) Plan {
     const day = report.utcDay(now_ms);
     return .{
@@ -141,8 +141,4 @@ test "finished days are read once per UTC day" {
     try testing.expect(!plan(.member, today, now).finished);
     try testing.expect(plan(.api_key, today - 1, now).finished);
     try testing.expect(!plan(.api_key, today, now).budget);
-    const codex_plan = plan(.codex, null, now);
-    try testing.expect(!codex_plan.finished and !codex_plan.budget);
-    const grok_plan = plan(.grok, null, now);
-    try testing.expect(!grok_plan.finished and !grok_plan.budget);
 }

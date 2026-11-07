@@ -24,24 +24,6 @@ pub const entries = [_]Entry{
         .subscription = false,
         .login_source = .fx_login,
     },
-    .{
-        .id = .codex,
-        .slug = "codex",
-        .name = "Codex",
-        .route_name = "Codex subscription",
-        .description = "ChatGPT Plus, Pro, Business, Enterprise, or Edu subscription",
-        .subscription = true,
-        .login_source = .chatgpt_subscription,
-    },
-    .{
-        .id = .grok,
-        .slug = "grok",
-        .name = "Grok",
-        .route_name = "Grok subscription",
-        .description = "SuperGrok or X Premium subscription",
-        .subscription = true,
-        .login_source = .grok_subscription,
-    },
 };
 
 pub fn parse(value: []const u8) ?model_provider.ProviderId {
@@ -75,11 +57,5 @@ pub fn label(id: model_provider.ProviderId) []const u8 {
 test "auth provider catalog uses the model provider identity and explicit aliases" {
     try std.testing.expectEqual(model_provider.ProviderId.gateway, parse("vercel").?);
     try std.testing.expectEqual(model_provider.ProviderId.gateway, parse("gateway").?);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, parse("codex").?);
-    try std.testing.expectEqual(model_provider.ProviderId.grok, parse("grok").?);
-    try std.testing.expect(parse("openai-codex") == null);
-    try std.testing.expect(parse("chatgpt") == null);
     try std.testing.expect(parse("unknown") == null);
-    try std.testing.expect(find(.codex).subscription);
-    try std.testing.expect(find(.grok).subscription);
 }

@@ -3728,75 +3728,6 @@ fn shouldRejectRecoveryAuthority(
     );
 }
 
-test "potentially sent recovery rejects missing or changed credential authority" {
-    const identity = credential_authority.derive(
-        .chatgpt_subscription,
-        "acct_1",
-    ).?;
-    const checkpoint = session_codec.RecoveryCheckpoint{
-        .turn_id = 1,
-        .user = .{ .text = @constCast("continue") },
-        .assistant_source = @constCast("partial"),
-        .cause = .response_interrupted,
-        .action = .continuing_response,
-        .authority = .{
-            .provider = .codex,
-            .model = @constCast("gpt-5.4"),
-            .credential_source = .chatgpt_subscription,
-            .credential_identity = identity,
-        },
-        .requested_fast_mode = false,
-        .fast_mode = false,
-        .max_provider_attempts = 3,
-        .consumed_provider_attempts = 1,
-    };
-    try std.testing.expect(!shouldRejectRecoveryAuthority(
-        checkpoint,
-        .chatgpt_subscription,
-        "acct_1",
-    ));
-    try std.testing.expect(shouldRejectRecoveryAuthority(
-        checkpoint,
-        .chatgpt_subscription,
-        "acct_2",
-    ));
-
-    var legacy = checkpoint;
-    legacy.authority.credential_source = null;
-    legacy.authority.credential_identity = null;
-    try std.testing.expect(shouldRejectRecoveryAuthority(
-        legacy,
-        .chatgpt_subscription,
-        "acct_1",
-    ));
-    legacy.authority.credential_source = .ai_gateway_api_key;
-    legacy.authority.credential_identity = credential_authority.derive(
-        .ai_gateway_api_key,
-        null,
-    );
-    try std.testing.expect(!shouldRejectRecoveryAuthority(
-        legacy,
-        .ai_gateway_api_key,
-        null,
-    ));
-    try std.testing.expect(shouldRejectRecoveryAuthority(
-        legacy,
-        .stored_key,
-        null,
-    ));
-    legacy.authority.credential_source = null;
-    legacy.authority.credential_identity = null;
-    legacy.consumed_provider_attempts = 0;
-    try std.testing.expect(!shouldRejectRecoveryAuthority(
-        legacy,
-        .chatgpt_subscription,
-        "acct_1",
-    ));
-    legacy.disposition = .history_only;
-    try std.testing.expect(shouldRejectRecoveryAuthority(legacy, .chatgpt_subscription, "acct_1"));
-    try std.testing.expect(shouldRejectRecoveryAuthority(legacy, null, null));
-}
-
 /// Saved as `max_provider_attempts` in the recovery checkpoint. Attempts no
 /// longer have a limit, but the field stays for older readers and its
 /// validation (consumed <= max, and < max with a send outstanding). The
@@ -4553,7 +4484,7 @@ fn needsUserFailureKind(
 fn signInRepairs(credential_source: ?types.CredentialSource) bool {
     const source = credential_source orelse return false;
     return switch (source) {
-        .fx_login, .chatgpt_subscription, .grok_subscription => true,
+        .fx_login => true,
         .vercel_oidc_token, .ai_gateway_api_key, .stored_key, .host_managed, .configured => false,
     };
 }
@@ -4659,53 +4590,6 @@ fn shouldRecoverContextOverflow(
         has_compactable_context and
         replay_safe and
         isContextOverflowFailure(failure);
-}
-
-test "context overflow recovery is typed safe and bounded" {
-    const context_failure = agent_stream_provider.Failure{
-        .kind = .invalid_request,
-        .detail = @constCast("AI_APICallError: input exceeds the context window"),
-    };
-    const unrelated_failure = agent_stream_provider.Failure{
-        .kind = .invalid_request,
-        .detail = @constCast("invalid tool schema"),
-    };
-    const grok_prompt_overflow = agent_stream_provider.Failure{
-        .kind = .invalid_request,
-        .detail = @constCast("This model's maximum prompt length is 1000000 but the request contains 1003383 tokens."),
-    };
-    const anthropic_prompt_overflow = agent_stream_provider.Failure{
-        .kind = .invalid_request,
-        .detail = @constCast("AI_APICallError: prompt is too long: 1077372 tokens > 1000000 maximum"),
-    };
-    const request_too_large = agent_stream_provider.Failure{
-        .kind = .request_too_large,
-    };
-    const cases = [_]struct {
-        failure: agent_stream_provider.Failure,
-        has_compactable_context: bool = true,
-        replay_safe: bool = true,
-        recovery_available: bool = true,
-        cancelled: bool = false,
-        expected: bool,
-    }{
-        .{ .failure = context_failure, .expected = true },
-        .{ .failure = grok_prompt_overflow, .expected = true },
-        .{ .failure = anthropic_prompt_overflow, .expected = true },
-        .{ .failure = request_too_large, .expected = true },
-        .{ .failure = unrelated_failure, .expected = false },
-        .{ .failure = context_failure, .has_compactable_context = false, .expected = false },
-        .{ .failure = context_failure, .replay_safe = false, .expected = false },
-        .{ .failure = context_failure, .recovery_available = false, .expected = false },
-        .{ .failure = context_failure, .cancelled = true, .expected = false },
-    };
-    for (cases) |case| try std.testing.expectEqual(case.expected, shouldRecoverContextOverflow(
-        case.failure,
-        case.has_compactable_context,
-        case.replay_safe,
-        case.recovery_available,
-        case.cancelled,
-    ));
 }
 
 /// A size rejection is retried without compaction while the rejected request
@@ -6348,86 +6232,6 @@ fn catalogUnreachableImageLine(arena: Allocator, failure: ?model_catalog.Failure
     return try arena.print(
         "fx couldn't connect to {s} to load the model catalog, so it couldn't confirm that this model accepts images. Check your network connection or firewall.",
         .{service},
-    );
-}
-
-test "catalogDownNotice names a failed connection in one line and keeps the other failures' lines" {
-    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-    const fast_line = "Fast mode is unavailable for this model right now; continuing at standard speed.";
-    const withheld = [_]struct { tools: image_route.ToolImages, earlier: image_route.ToolImages }{
-        .{ .tools = .none, .earlier = .none },
-        .{ .tools = .none, .earlier = .withheld_unknown },
-        .{ .tools = .withheld_unknown, .earlier = .none },
-        .{ .tools = .withheld_unknown, .earlier = .withheld_unknown },
-    };
-    // Every input: each failure, no image decision or each withheld mix, and
-    // fast mode dropped or not.
-    for (std.enums.values(model_catalog.FailureCategory)) |failure| {
-        for ([_]?usize{ null, 0, 1, 2, 3 }) |mix| {
-            for ([_]bool{ false, true }) |fast_off| {
-                const images: ?image_route.Decision = if (mix) |index| .{
-                    .route = .unavailable,
-                    .mode = .unavailable,
-                    .tool_images = withheld[index].tools,
-                    .earlier_images = withheld[index].earlier,
-                } else null;
-                const subject = if (images) |chosen| withheldImageSubject(chosen) else null;
-                const lines = try catalogDownNotice(arena, .{ .failure = failure, .service = "AI Gateway", .images = images, .fast_off = fast_off });
-                if (failure == .transport) {
-                    if (subject == null and !fast_off) {
-                        try std.testing.expectEqual(@as(usize, 0), lines.len);
-                        continue;
-                    }
-                    try std.testing.expectEqual(@as(usize, 1), lines.len);
-                    const line = lines.slice()[0];
-                    try std.testing.expect(std.mem.startsWith(u8, line, "fx couldn't connect to AI Gateway to load the model catalog, so "));
-                    try std.testing.expect(std.mem.endsWith(u8, line, " until it loads. Check your network connection or firewall."));
-                    try std.testing.expect(std.mem.findScalar(u8, line, '\n') == null);
-                    try std.testing.expectEqual(fast_off, std.mem.find(u8, line, "fast mode is off") != null);
-                    try std.testing.expectEqual(subject != null, std.mem.find(u8, line, "aren't reaching the model") != null);
-                    if (subject) |words| try std.testing.expect(std.mem.find(u8, line, words) != null);
-                    continue;
-                }
-                var expected: CatalogDownLines = .{};
-                if (subject != null) expected.append(catalogDownImageText(images.?));
-                if (fast_off) expected.append(fast_line);
-                try std.testing.expectEqual(expected.len, lines.len);
-                for (expected.slice(), lines.slice()) |want, got| {
-                    try std.testing.expectEqualStrings(want, got);
-                    try std.testing.expect(std.mem.find(u8, got, "couldn't connect") == null);
-                }
-            }
-        }
-    }
-
-    const both = try catalogDownNotice(arena, .{
-        .failure = .transport,
-        .service = model_catalog.serviceName(.gateway),
-        .images = .{ .route = .unavailable, .mode = .unavailable, .tool_images = .none, .earlier_images = .withheld_unknown },
-        .fast_off = true,
-    });
-    try std.testing.expectEqualStrings(
-        "fx couldn't connect to AI Gateway to load the model catalog, so earlier images aren't reaching the model and fast mode is off until it loads. Check your network connection or firewall.",
-        both.slice()[0],
-    );
-    const codex = try catalogDownNotice(arena, .{ .failure = .transport, .service = model_catalog.serviceName(.codex), .fast_off = true });
-    try std.testing.expectEqualStrings(
-        "fx couldn't connect to the model provider to load the model catalog, so fast mode is off until it loads. Check your network connection or firewall.",
-        codex.slice()[0],
-    );
-
-    // An attached image the turn cannot send gets a cause line only for a
-    // failed connection; the host's own error follows it.
-    for (std.enums.values(model_catalog.FailureCategory)) |failure| {
-        const line = try catalogUnreachableImageLine(arena, failure, "AI Gateway");
-        try std.testing.expectEqual(failure == .transport, line != null);
-    }
-    try std.testing.expect(try catalogUnreachableImageLine(arena, null, "AI Gateway") == null);
-    try std.testing.expectEqualStrings(
-        "fx couldn't connect to AI Gateway to load the model catalog, so it couldn't confirm that this model accepts images. Check your network connection or firewall.",
-        (try catalogUnreachableImageLine(arena, .transport, "AI Gateway")).?,
     );
 }
 
@@ -12644,4 +12448,126 @@ test "malformed duplicate unauthorized and path Vision calls settle no image ids
         &catalog,
     ));
     try std.testing.expectEqual(@as(usize, 0), settled_ids.items.len);
+}
+
+test "context overflow recovery is typed safe and bounded" {
+    const context_failure = agent_stream_provider.Failure{
+        .kind = .invalid_request,
+        .detail = @constCast("AI_APICallError: input exceeds the context window"),
+    };
+    const unrelated_failure = agent_stream_provider.Failure{
+        .kind = .invalid_request,
+        .detail = @constCast("invalid tool schema"),
+    };
+    const grok_prompt_overflow = agent_stream_provider.Failure{
+        .kind = .invalid_request,
+        .detail = @constCast("This model's maximum prompt length is 1000000 but the request contains 1003383 tokens."),
+    };
+    const anthropic_prompt_overflow = agent_stream_provider.Failure{
+        .kind = .invalid_request,
+        .detail = @constCast("AI_APICallError: prompt is too long: 1077372 tokens > 1000000 maximum"),
+    };
+    const request_too_large = agent_stream_provider.Failure{
+        .kind = .request_too_large,
+    };
+    const cases = [_]struct {
+        failure: agent_stream_provider.Failure,
+        has_compactable_context: bool = true,
+        replay_safe: bool = true,
+        recovery_available: bool = true,
+        cancelled: bool = false,
+        expected: bool,
+    }{
+        .{ .failure = context_failure, .expected = true },
+        .{ .failure = grok_prompt_overflow, .expected = true },
+        .{ .failure = anthropic_prompt_overflow, .expected = true },
+        .{ .failure = request_too_large, .expected = true },
+        .{ .failure = unrelated_failure, .expected = false },
+        .{ .failure = context_failure, .has_compactable_context = false, .expected = false },
+        .{ .failure = context_failure, .replay_safe = false, .expected = false },
+        .{ .failure = context_failure, .recovery_available = false, .expected = false },
+        .{ .failure = context_failure, .cancelled = true, .expected = false },
+    };
+    for (cases) |case| try std.testing.expectEqual(case.expected, shouldRecoverContextOverflow(
+        case.failure,
+        case.has_compactable_context,
+        case.replay_safe,
+        case.recovery_available,
+        case.cancelled,
+    ));
+}
+
+test "catalogDownNotice names a failed connection in one line and keeps the other failures' lines" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const fast_line = "Fast mode is unavailable for this model right now; continuing at standard speed.";
+    const withheld = [_]struct { tools: image_route.ToolImages, earlier: image_route.ToolImages }{
+        .{ .tools = .none, .earlier = .none },
+        .{ .tools = .none, .earlier = .withheld_unknown },
+        .{ .tools = .withheld_unknown, .earlier = .none },
+        .{ .tools = .withheld_unknown, .earlier = .withheld_unknown },
+    };
+    // Every input: each failure, no image decision or each withheld mix, and
+    // fast mode dropped or not.
+    for (std.enums.values(model_catalog.FailureCategory)) |failure| {
+        for ([_]?usize{ null, 0, 1, 2, 3 }) |mix| {
+            for ([_]bool{ false, true }) |fast_off| {
+                const images: ?image_route.Decision = if (mix) |index| .{
+                    .route = .unavailable,
+                    .mode = .unavailable,
+                    .tool_images = withheld[index].tools,
+                    .earlier_images = withheld[index].earlier,
+                } else null;
+                const subject = if (images) |chosen| withheldImageSubject(chosen) else null;
+                const lines = try catalogDownNotice(arena, .{ .failure = failure, .service = "AI Gateway", .images = images, .fast_off = fast_off });
+                if (failure == .transport) {
+                    if (subject == null and !fast_off) {
+                        try std.testing.expectEqual(@as(usize, 0), lines.len);
+                        continue;
+                    }
+                    try std.testing.expectEqual(@as(usize, 1), lines.len);
+                    const line = lines.slice()[0];
+                    try std.testing.expect(std.mem.startsWith(u8, line, "fx couldn't connect to AI Gateway to load the model catalog, so "));
+                    try std.testing.expect(std.mem.endsWith(u8, line, " until it loads. Check your network connection or firewall."));
+                    try std.testing.expect(std.mem.findScalar(u8, line, '\n') == null);
+                    try std.testing.expectEqual(fast_off, std.mem.find(u8, line, "fast mode is off") != null);
+                    try std.testing.expectEqual(subject != null, std.mem.find(u8, line, "aren't reaching the model") != null);
+                    if (subject) |words| try std.testing.expect(std.mem.find(u8, line, words) != null);
+                    continue;
+                }
+                var expected: CatalogDownLines = .{};
+                if (subject != null) expected.append(catalogDownImageText(images.?));
+                if (fast_off) expected.append(fast_line);
+                try std.testing.expectEqual(expected.len, lines.len);
+                for (expected.slice(), lines.slice()) |want, got| {
+                    try std.testing.expectEqualStrings(want, got);
+                    try std.testing.expect(std.mem.find(u8, got, "couldn't connect") == null);
+                }
+            }
+        }
+    }
+
+    const both = try catalogDownNotice(arena, .{
+        .failure = .transport,
+        .service = model_catalog.serviceName(.gateway),
+        .images = .{ .route = .unavailable, .mode = .unavailable, .tool_images = .none, .earlier_images = .withheld_unknown },
+        .fast_off = true,
+    });
+    try std.testing.expectEqualStrings(
+        "fx couldn't connect to AI Gateway to load the model catalog, so earlier images aren't reaching the model and fast mode is off until it loads. Check your network connection or firewall.",
+        both.slice()[0],
+    );
+
+    // An attached image the turn cannot send gets a cause line only for a
+    // failed connection; the host's own error follows it.
+    for (std.enums.values(model_catalog.FailureCategory)) |failure| {
+        const line = try catalogUnreachableImageLine(arena, failure, "AI Gateway");
+        try std.testing.expectEqual(failure == .transport, line != null);
+    }
+    try std.testing.expect(try catalogUnreachableImageLine(arena, null, "AI Gateway") == null);
+    try std.testing.expectEqualStrings(
+        "fx couldn't connect to AI Gateway to load the model catalog, so it couldn't confirm that this model accepts images. Check your network connection or firewall.",
+        (try catalogUnreachableImageLine(arena, .transport, "AI Gateway")).?,
+    );
 }

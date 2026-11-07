@@ -85,8 +85,6 @@ pub const UsageSnapshot = struct {
 
     pub fn renderText(self: UsageSnapshot, alloc: Allocator) ![]u8 {
         const s = self.snapshot;
-        if (s.scope == .codex) return self.renderCodexText(alloc);
-        if (s.scope == .grok) return self.renderGrokText(alloc);
         const v = s.of(self.period);
         var out: std.Io.Writer.Allocating = .init(alloc);
         defer out.deinit();
@@ -134,122 +132,6 @@ pub const UsageSnapshot = struct {
         return try out.toOwnedSlice();
     }
 
-    /// A ChatGPT plan through Codex: the plan, credits and each limit window.
-    fn renderCodexText(self: UsageSnapshot, alloc: Allocator) ![]u8 {
-        const s = self.snapshot;
-        var out: std.Io.Writer.Allocating = .init(alloc);
-        defer out.deinit();
-
-        const profile: ?usage.codex.Profile = if (s.codex_usage) |u| u.profile else null;
-        try out.writer.writeAll("Codex usage from ChatGPT");
-        if (profile) |p| if (p.name) |name| {
-            try out.writer.writeAll(" for ");
-            try writeTerminalSafe(&out.writer, alloc, name);
-        };
-        if (s.fetchedAtMs()) |ms| try writeLocalClock(&out.writer, ", updated ", ms);
-        try out.writer.writeByte('\n');
-        switch (s.status) {
-            .ready => {},
-            .fetching => if (s.codex_usage == null) try out.writer.writeAll("Fetching usage from ChatGPT.\n"),
-            .failed => |f| try writeUsageFailure(&out.writer, f, "ChatGPT"),
-            .unavailable => {},
-        }
-        const u = s.codex_usage orelse return try out.toOwnedSlice();
-        if (profile) |p| try writeCodexProfileText(&out.writer, alloc, s, p);
-        if (s.codexBreakdown() != null) try writeCodexSharesText(&out.writer, alloc, s, self.period);
-        try out.writer.writeAll("Plan          ");
-        try writeTerminalSafe(&out.writer, alloc, u.plan);
-        try out.writer.writeAll("\nCredits       ");
-        if (u.credits) |c| {
-            if (c.unlimited) {
-                try out.writer.writeAll("unlimited");
-            } else if (c.balance) |b| {
-                try writeTerminalSafe(&out.writer, alloc, b);
-            } else {
-                try out.writer.writeAll(if (c.has_credits) "yes" else "none");
-            }
-        } else try out.writer.writeAll("-");
-        try out.writer.print("\nSpend limit   {s}\n", .{if (u.spend_limit_reached) "reached" else "not reached"});
-        if (!u.hasWindows()) {
-            try out.writer.writeAll("Limits        none on this plan\n");
-            return try out.toOwnedSlice();
-        }
-        try out.writer.writeAll("\nLimits\n");
-        for (u.limits) |limit| {
-            for ([_]?usage.codex.Window{ limit.primary, limit.secondary }) |maybe| {
-                const w = maybe orelse continue;
-                try out.writer.writeAll("- ");
-                try writeTerminalSafe(&out.writer, alloc, limit.name);
-                try out.writer.print(" ({d}h window): {d:.0}% used", .{ @divFloor(w.window_seconds, 3600), w.used_percent });
-                if (w.resets_at_ms) |at| try writeLocalClock(&out.writer, ", resets ", at);
-                try out.writer.writeByte('\n');
-            }
-        }
-        return try out.toOwnedSlice();
-    }
-
-    /// A Grok plan: its allowance this period, by product, and its credits.
-    fn renderGrokText(self: UsageSnapshot, alloc: Allocator) ![]u8 {
-        const s = self.snapshot;
-        var out: std.Io.Writer.Allocating = .init(alloc);
-        defer out.deinit();
-
-        try out.writer.writeAll("Grok usage from xAI");
-        if (s.fetchedAtMs()) |ms| try writeLocalClock(&out.writer, ", updated ", ms);
-        try out.writer.writeByte('\n');
-        switch (s.status) {
-            .ready => {},
-            .fetching => if (s.grok_usage == null) try out.writer.writeAll("Fetching usage from Grok.\n"),
-            .failed => |f| try writeUsageFailure(&out.writer, f, "Grok"),
-            .unavailable => {},
-        }
-        const u = s.grok_usage orelse return try out.toOwnedSlice();
-        try out.writer.writeAll("Plan          ");
-        if (u.plan()) |plan| try writeTerminalSafe(&out.writer, alloc, plan) else try out.writer.writeAll("-");
-        try out.writer.writeByte('\n');
-        if (u.settings) |settings| if (settings.usage_url) |url| {
-            try out.writer.writeAll("Usage page    ");
-            try writeTerminalSafe(&out.writer, alloc, url);
-            try out.writer.writeAll(" (managed by your team)\n");
-        };
-        if (!u.hasBilling()) {
-            try out.writer.writeAll("Billing       none reported for this plan\n");
-            return try out.toOwnedSlice();
-        }
-        if (u.used_percent) |used| {
-            try out.writer.print("Used          {d:.0}% of the {s} allowance", .{ @floor(used), if (u.period) |p| @tagName(p) else "plan's" });
-            if (u.resets_at_ms) |at| {
-                try out.writer.writeAll(", resets ");
-                if (local_time.local(at)) |reading| {
-                    var date_buf: [24]u8 = undefined;
-                    try out.writer.print("{s} ", .{formatDate(&date_buf, &reading)});
-                    try writeClock(&out.writer, &reading);
-                } else try out.writer.writeAll("unknown");
-            }
-            try out.writer.writeByte('\n');
-        }
-        for (u.products, 0..) |product, i| {
-            try out.writer.writeAll(if (i == 0) "By product    " else ", ");
-            try writeTerminalSafe(&out.writer, alloc, product.name);
-            try out.writer.print(" {d:.1}%", .{product.used_percent});
-        }
-        if (u.products.len > 0) try out.writer.writeByte('\n');
-        try out.writer.writeAll("Credits       ");
-        if ((u.prepaid_cents orelse 1) == 0) try out.writer.writeAll("none") else try writeOptionalCents(&out.writer, u.prepaid_cents);
-        try out.writer.writeAll("\nPay as you go ");
-        const turned_off = if (u.settings) |settings| (if (settings.on_demand_enabled) |on| !on else false) else false;
-        if (turned_off or (u.on_demand_cap_cents orelse 0) == 0) {
-            try out.writer.writeAll("off");
-        } else {
-            try writeOptionalCents(&out.writer, u.on_demand_used_cents orelse 0);
-            try out.writer.writeAll(" of ");
-            try writeOptionalCents(&out.writer, u.on_demand_cap_cents);
-            try out.writer.writeAll(" this month");
-        }
-        try out.writer.writeByte('\n');
-        return try out.toOwnedSlice();
-    }
-
     pub fn renderJson(self: UsageSnapshot, alloc: Allocator) ![]u8 {
         const s = self.snapshot;
         const v = s.of(self.period);
@@ -257,8 +139,6 @@ pub const UsageSnapshot = struct {
         defer out.deinit();
 
         try out.writer.print("{{\"kind\":\"usage\",\"schema_version\":2,\"source\":\"{s}\",\"period\":", .{switch (s.scope orelse .member) {
-            .codex => "chatgpt",
-            .grok => "grok",
             .member, .api_key => "ai_gateway",
         }});
         try std.json.Stringify.value(v.period.label(), .{}, &out.writer);
@@ -289,68 +169,10 @@ pub const UsageSnapshot = struct {
             try writeUsageTotalsJson(&out.writer, model.totals);
             try out.writer.writeByte('}');
         }
-        try out.writer.writeAll("],\"codex\":");
-        try std.json.Stringify.value(s.codex_usage, .{}, &out.writer);
-        try out.writer.writeAll(",\"grok\":");
-        try std.json.Stringify.value(s.grok_usage, .{}, &out.writer);
-        try out.writer.writeByte('}');
+        try out.writer.writeAll("]}");
         return try out.toOwnedSlice();
     }
 };
-
-/// Tokens by period, then records, habits and the most used plugins and
-/// skills. Missing numbers read `-`.
-fn writeCodexProfileText(writer: *std.Io.Writer, alloc: Allocator, s: *const usage.Snapshot, p: usage.codex.Profile) !void {
-    try writer.writeAll("Tokens        ");
-    const periods = [_]struct { value: ?u64, label: []const u8 }{
-        .{ .value = s.codexTokens(.today), .label = "today" },
-        .{ .value = s.codexTokens(.days_7), .label = "7d" },
-        .{ .value = s.codexTokens(.month), .label = "month" },
-        .{ .value = p.lifetime_tokens, .label = "lifetime" },
-    };
-    for (periods, 0..) |period, i| {
-        if (i > 0) try writer.writeAll(", ");
-        try writeOptionalCount(writer, period.value);
-        try writer.print(" {s}", .{period.label});
-    }
-    try writer.writeAll("\nRecord        peak day ");
-    try writeOptionalCount(writer, p.peak_day_tokens);
-    try writer.writeAll(" tokens, longest chat ");
-    if (p.longest_turn_seconds) |sec| try writer.print("{d}h {d}m", .{ sec / 3600, sec % 3600 / 60 }) else try writer.writeAll("-");
-    try writer.writeAll(", streak ");
-    try writeOptionalCount(writer, p.streak_days);
-    try writer.writeAll(" days (best ");
-    try writeOptionalCount(writer, p.best_streak_days);
-    try writer.writeAll("), ");
-    try writeOptionalCount(writer, p.chats);
-    try writer.writeAll(" chats\nHabits        fast mode ");
-    if (p.fast_mode_percent) |pct| try writer.print("{d:.0}%", .{pct}) else try writer.writeAll("-");
-    try writer.writeAll(", reasoning ");
-    if (p.reasoning) |r| try writeTerminalSafe(writer, alloc, r) else try writer.writeAll("-");
-    if (p.reasoning_percent) |pct| try writer.print(" ({d:.0}%)", .{pct});
-    try writer.writeByte('\n');
-}
-
-/// Each model's and surface's share of `period`, largest first.
-fn writeCodexSharesText(writer: *std.Io.Writer, alloc: Allocator, s: *const usage.Snapshot, period: usage.Period) !void {
-    var buf: [usage.codex.max_shares]usage.codex.Share = undefined;
-    inline for (.{ "model", "surface" }) |what| {
-        const shares = if (comptime std.mem.eql(u8, what, "model")) s.codexModelShares(period, &buf) else s.codexSurfaceShares(period, &buf);
-        try writer.print("Share by {s} ({s}): ", .{ what, period.label() });
-        if (shares.len == 0) try writer.writeAll("none");
-        for (shares, 0..) |share, i| {
-            if (i > 0) try writer.writeAll(", ");
-            try writeTerminalSafe(writer, alloc, share.name);
-            if (share.speed.len > 0) {
-                try writer.writeByte(' ');
-                try writeTerminalSafe(writer, alloc, share.speed);
-            }
-            var share_buf: [8]u8 = undefined;
-            try writer.print(" {s}", .{usage.codex.formatShare(&share_buf, share.percent)});
-        }
-        try writer.writeByte('\n');
-    }
-}
 
 fn writeOptionalCount(writer: *std.Io.Writer, value: ?u64) !void {
     if (value) |v| try writer.print("{d}", .{v}) else try writer.writeAll("-");
@@ -747,31 +569,13 @@ fn countText(alloc: Allocator, count: usize) ![]const u8 {
 
 fn gatewayProviderConnected(auth: auth_runtime.StatusSnapshot) bool {
     const source = auth.active_source orelse return auth.gateway_connected;
-    return auth.gateway_connected or (source != .chatgpt_subscription and source != .grok_subscription and source != .configured);
-}
-
-fn chatGptProviderConnected(auth: auth_runtime.StatusSnapshot) bool {
-    return auth.chatgpt_connected or auth.active_source == .chatgpt_subscription;
-}
-
-fn grokProviderConnected(auth: auth_runtime.StatusSnapshot) bool {
-    return auth.grok_connected or auth.active_source == .grok_subscription;
+    return auth.gateway_connected or source != .configured;
 }
 
 fn writeConnectedProvidersText(writer: *std.Io.Writer, auth: auth_runtime.StatusSnapshot) !void {
     var wrote_provider = false;
     if (gatewayProviderConnected(auth)) {
         try writer.writeAll("Vercel AI Gateway");
-        wrote_provider = true;
-    }
-    if (chatGptProviderConnected(auth)) {
-        if (wrote_provider) try writer.writeAll(", Codex");
-        if (!wrote_provider) try writer.writeAll("Codex");
-        wrote_provider = true;
-    }
-    if (grokProviderConnected(auth)) {
-        if (wrote_provider) try writer.writeAll(", Grok");
-        if (!wrote_provider) try writer.writeAll("Grok");
         wrote_provider = true;
     }
     if (!wrote_provider) try writer.writeAll("none");
@@ -1023,7 +827,7 @@ pub const StatusSnapshot = struct {
     fn writeConnections(self: StatusSnapshot, writer: *std.Io.Writer) !void {
         if (self.provider == .configured and self.auth.active_source == .configured) {
             try writer.writeAll(self.provider.label());
-            if (!gatewayProviderConnected(self.auth) and !chatGptProviderConnected(self.auth) and !grokProviderConnected(self.auth)) return;
+            if (!gatewayProviderConnected(self.auth)) return;
             try writer.writeAll(", ");
         }
         try writeConnectedProvidersText(writer, self.auth);
@@ -1085,15 +889,6 @@ pub const StatusSnapshot = struct {
                 if (wrote_provider) try writer.writeByte(',');
                 try std.json.Stringify.value("vercel-ai-gateway", .{}, writer);
                 wrote_provider = true;
-            }
-            if (chatGptProviderConnected(self.auth)) {
-                if (wrote_provider) try writer.writeByte(',');
-                try std.json.Stringify.value("codex", .{}, writer);
-                wrote_provider = true;
-            }
-            if (grokProviderConnected(self.auth)) {
-                if (wrote_provider) try writer.writeByte(',');
-                try std.json.Stringify.value("grok", .{}, writer);
             }
             try writer.writeByte(']');
         }
@@ -1394,8 +1189,6 @@ pub const ModelListSnapshot = struct {
     fn emptyCatalogProviderName(self: ModelListSnapshot) []const u8 {
         return switch (self.provider) {
             .gateway => "gateway",
-            .codex => provider_catalog.label(.codex),
-            .grok => provider_catalog.label(.grok),
             .configured => "configured provider",
         };
     }
@@ -1411,8 +1204,6 @@ pub const ModelListSnapshot = struct {
             .credential_refresh_required => "The selected sign-in must refresh before authenticated models can load.",
             .credential_refresh_failed => "Vercel sign-in refresh failed; using the public model catalog.",
             .authenticated_credential_rejected => "Your Gateway credential was rejected; using the public model catalog.",
-            .chatgpt_subscription => "Codex models require an authenticated Codex catalog.",
-            .grok_subscription => "Grok models require an authenticated Grok catalog.",
         };
     }
 };
@@ -2576,53 +2367,6 @@ test "core status snapshot includes selected team when present" {
     );
 }
 
-test "status distinguishes the selected model route from connected providers" {
-    const snapshot = StatusSnapshot{
-        .model = "gpt-5.4",
-        .provider = .codex,
-        .auth = .{
-            .active_source = .chatgpt_subscription,
-            .gateway_connected = true,
-            .chatgpt_connected = true,
-        },
-        .permission_mode = .auto,
-        .workspace_root = "/tmp/fx",
-        .history_turns = 0,
-        .session_permission_grants = 0,
-        .agent_step_limit = 24,
-    };
-    const text = try snapshot.renderText(std.testing.allocator);
-    defer std.testing.allocator.free(text);
-    try std.testing.expect(std.mem.find(u8, text, "model_source=Codex subscription") != null);
-    try std.testing.expect(std.mem.find(u8, text, "connected_providers=Vercel AI Gateway, Codex") != null);
-
-    const json = try snapshot.renderJson(std.testing.allocator);
-    defer std.testing.allocator.free(json);
-    try std.testing.expect(std.mem.find(u8, json, "\"model_source\":\"Codex subscription\"") != null);
-    try std.testing.expect(std.mem.find(u8, json, "\"connected_providers\":[\"vercel-ai-gateway\",\"codex\"]") != null);
-    try std.testing.expect(std.mem.find(u8, json, "model_origin") == null);
-}
-
-test "status reports where the model came from alongside the model" {
-    const snapshot = StatusSnapshot{
-        .model = "gpt-5.4",
-        .model_origin = "FX_MODEL",
-        .provider = .codex,
-        .permission_mode = .auto,
-        .workspace_root = "/tmp/fx",
-        .history_turns = 0,
-        .session_permission_grants = 0,
-        .agent_step_limit = 24,
-    };
-    const text = try snapshot.renderText(std.testing.allocator);
-    defer std.testing.allocator.free(text);
-    try std.testing.expect(std.mem.startsWith(u8, text, "[status] model=gpt-5.4\n[status] model_origin=FX_MODEL\n"));
-
-    const json = try snapshot.renderJson(std.testing.allocator);
-    defer std.testing.allocator.free(json);
-    try std.testing.expect(std.mem.startsWith(u8, json, "{\"kind\":\"status\",\"model\":\"gpt-5.4\",\"model_origin\":\"FX_MODEL\","));
-}
-
 test "status reports the effort a new session starts with after the model" {
     const snapshot = StatusSnapshot{
         .model = "provider/model",
@@ -2847,69 +2591,6 @@ test "core permissions snapshot text and json stay stable" {
         "{\"kind\":\"permissions\",\"mode\":\"auto\",\"grant_count\":2,\"grant_scope\":\"session\",\"runtime_grants_available\":true,\"rules_scope\":\"persistent_config\",\"rules\":[{\"permission\":\"edit\",\"pattern\":\"src/*\",\"action\":\"allow\"},{\"permission\":\"open_url\",\"pattern\":\"*\",\"action\":\"ask\"}],\"grants\":[{\"tool_name\":\"write_file\",\"target_path\":\"/tmp/workspace/src/app.zig\",\"display_target\":\"src/app.zig\"},{\"tool_name\":\"run_command\",\"target_path\":\"/tmp/workspace::npm test\",\"display_target\":\"/tmp/workspace::npm test\"}]}",
         json,
     );
-}
-
-test "model list explains public-only and rejected-credential catalogs" {
-    const alloc = std.testing.allocator;
-    const ids = [_][]const u8{"alpha"};
-    const rejected = ModelListSnapshot{ .ids = &ids, .private_models_hidden = true, .public_only_reason = .authenticated_credential_rejected };
-    const shown = ModelListSnapshot{ .ids = &ids };
-    const cases = [_]struct {
-        snapshot: ModelListSnapshot,
-        text: []const u8,
-        body: []const u8,
-    }{
-        .{
-            .snapshot = .{ .ids = &ids, .private_models_hidden = true, .public_only_reason = .no_credential },
-            .text = "[models] 1 available\n - alpha\n[models] Using the public model catalog; sign in with Vercel or use an AI Gateway API key for team-private models.\n",
-            .body = "1 available\n - alpha\nUsing the public model catalog; sign in with Vercel or use an AI Gateway API key for team-private models.",
-        },
-        .{
-            .snapshot = rejected,
-            .text = "[models] 1 available\n - alpha\n[models] Your Gateway credential was rejected; using the public model catalog.\n",
-            .body = "1 available\n - alpha\nYour Gateway credential was rejected; using the public model catalog.",
-        },
-        .{
-            .snapshot = .{ .ids = &.{}, .private_models_hidden = true, .public_only_reason = .no_credential },
-            .text = "[models] no models returned by gateway\n[models] Using the public model catalog; sign in with Vercel or use an AI Gateway API key for team-private models.\n",
-            .body = "no models returned by gateway\nUsing the public model catalog; sign in with Vercel or use an AI Gateway API key for team-private models.",
-        },
-        .{
-            .snapshot = .{ .ids = &.{}, .private_models_hidden = true, .public_only_reason = .authenticated_credential_rejected },
-            .text = "[models] no models returned by gateway\n[models] Your Gateway credential was rejected; using the public model catalog.\n",
-            .body = "no models returned by gateway\nYour Gateway credential was rejected; using the public model catalog.",
-        },
-        .{
-            .snapshot = .{ .ids = &.{}, .provider = .codex },
-            .text = "[models] no models returned by Codex subscription\n",
-            .body = "no models returned by Codex subscription",
-        },
-    };
-
-    for (cases) |case| {
-        const text = try case.snapshot.renderText(alloc);
-        defer alloc.free(text);
-        try std.testing.expectEqualStrings(case.text, text);
-
-        const body = try case.snapshot.renderInteractiveBody(alloc);
-        defer alloc.free(body);
-        try std.testing.expectEqualStrings(case.body, body);
-    }
-
-    const json = try rejected.renderJson(alloc);
-    defer alloc.free(json);
-    try std.testing.expectEqualStrings(
-        "{\"kind\":\"models\",\"count\":1,\"shown_count\":1,\"more_count\":0,\"private_models_hidden\":true,\"ids\":[\"alpha\"]}",
-        json,
-    );
-
-    // An API key hides nothing, so the note must stay absent.
-    const quiet_text = try shown.renderText(alloc);
-    defer alloc.free(quiet_text);
-    try std.testing.expect(std.mem.find(u8, quiet_text, "team-private") == null);
-    const quiet_body = try shown.renderInteractiveBody(alloc);
-    defer alloc.free(quiet_body);
-    try std.testing.expect(std.mem.find(u8, quiet_body, "team-private") == null);
 }
 
 test "model list json describes each shown model when details are known" {
@@ -3828,186 +3509,7 @@ test "usage text and JSON render the same AI Gateway facts" {
     try std.testing.expectEqual(@as(i64, 3), root.get("totals").?.object.get("request_count").?.integer);
     try std.testing.expectEqual(@as(i64, 15), root.get("models").?.array.items[0].object.get("totals").?.object.get("total_tokens").?.integer);
     try std.testing.expectEqualStrings("monthly", root.get("budget").?.object.get("period").?.string);
-    try std.testing.expect(root.get("codex").? == .null);
     try std.testing.expectEqualStrings("ai_gateway", root.get("source").?.string);
-}
-
-test "usage text and JSON render a Grok plan's allowance and credits" {
-    const alloc = std.testing.allocator;
-    var views: [usage.Period.all.len]usage.View = undefined;
-    for (&views, usage.Period.all) |*v, period| {
-        v.* = .{
-            .arena = std.heap.ArenaAllocator.init(alloc),
-            .period = period,
-            .models = &.{},
-            .totals = .{},
-            .today_current = false,
-            .finished_current = false,
-            .fetched_at_ms = null,
-            .budget = null,
-        };
-    }
-    const at = 20737 * std.time.ms_per_day + 8 * std.time.ms_per_hour + 14 * std.time.ms_per_min;
-    var snapshot: usage.Snapshot = .{
-        .arena = std.heap.ArenaAllocator.init(alloc),
-        .views = views,
-        .status = .ready,
-        .label = "grok (xAI)",
-        .now_ms = at,
-        .scope = .grok,
-        .grok_usage = .{
-            .used_percent = 42.7,
-            .period = .weekly,
-            .resets_at_ms = 20741 * std.time.ms_per_day,
-            .products = &.{.{ .name = "grok build", .used_percent = 61.2 }},
-            .prepaid_cents = 0,
-            .on_demand_used_cents = 300,
-            .on_demand_cap_cents = 10000,
-            .settings = .{ .plan = "SuperGrok" },
-        },
-        .grok_at_ms = at,
-    };
-    defer snapshot.deinit();
-
-    const text = try (UsageSnapshot{ .snapshot = &snapshot }).render(alloc, .text);
-    defer alloc.free(text);
-    try std.testing.expectEqualStrings(
-        "Grok usage from xAI, updated 08:14 UTC\n" ++
-            "Plan          SuperGrok\n" ++
-            "Used          42% of the weekly allowance, resets Oct 15, 2026 00:00 UTC\n" ++
-            "By product    grok build 61.2%\n" ++
-            "Credits       none\n" ++
-            "Pay as you go $3.00 of $100.00 this month\n",
-        text,
-    );
-
-    {
-        // West of UTC, the reset falls on the previous calendar day.
-        local_time.test_zone = .{ .offset_s = -5 * std.time.s_per_hour, .name = "EST" };
-        defer local_time.test_zone = .utc;
-        const local_text = try (UsageSnapshot{ .snapshot = &snapshot }).render(alloc, .text);
-        defer alloc.free(local_text);
-        try std.testing.expect(std.mem.startsWith(u8, local_text, "Grok usage from xAI, updated 03:14 EST\n"));
-        try std.testing.expect(std.mem.find(u8, local_text, ", resets Oct 14, 2026 19:00 EST\n") != null);
-    }
-
-    var failed = snapshot;
-    failed.status = .{ .failed = .network };
-    const failed_text = try (UsageSnapshot{ .snapshot = &failed }).render(alloc, .text);
-    defer alloc.free(failed_text);
-    try std.testing.expect(std.mem.find(u8, failed_text, "Refresh failed: couldn't reach Grok.\n") != null);
-
-    const json = try (UsageSnapshot{ .snapshot = &snapshot }).render(alloc, .json);
-    defer alloc.free(json);
-    const parsed = try std.json.parseFromSlice(std.json.Value, alloc, json, .{});
-    defer parsed.deinit();
-    const root = parsed.value.object;
-    try std.testing.expectEqualStrings("grok", root.get("source").?.string);
-    try std.testing.expect(root.get("codex").? == .null);
-    const grok = root.get("grok").?.object;
-    try std.testing.expectEqual(@as(f64, 42.7), grok.get("used_percent").?.float);
-    try std.testing.expectEqualStrings("weekly", grok.get("period").?.string);
-    try std.testing.expectEqualStrings("SuperGrok", grok.get("settings").?.object.get("plan").?.string);
-}
-
-test "usage text and JSON render a Codex plan's limits" {
-    const alloc = std.testing.allocator;
-    var views: [usage.Period.all.len]usage.View = undefined;
-    for (&views, usage.Period.all) |*v, period| {
-        v.* = .{
-            .arena = std.heap.ArenaAllocator.init(alloc),
-            .period = period,
-            .models = &.{},
-            .totals = .{},
-            .today_current = false,
-            .finished_current = false,
-            .fetched_at_ms = null,
-            .budget = null,
-        };
-    }
-    const at = 20737 * std.time.ms_per_day + 8 * std.time.ms_per_hour + 14 * std.time.ms_per_min;
-    var snapshot: usage.Snapshot = .{
-        .arena = std.heap.ArenaAllocator.init(alloc),
-        .views = views,
-        .status = .ready,
-        .label = "codex (ChatGPT)",
-        .now_ms = at,
-        .scope = .codex,
-        .codex_usage = .{
-            .plan = "plus",
-            .limits = &.{.{ .name = "codex", .primary = .{ .used_percent = 42, .window_seconds = 18000, .resets_at_ms = at + 2 * std.time.ms_per_hour } }},
-            .credits = .{ .has_credits = false, .unlimited = false },
-        },
-        .codex_at_ms = at,
-    };
-    defer snapshot.deinit();
-    const contract: UsageSnapshot = .{ .snapshot = &snapshot };
-
-    // With activity: tokens by period, records, habits, and shares by model
-    // and surface for the period asked for.
-    var with_profile = snapshot;
-    var limits = snapshot.codex_usage.?;
-    limits.profile = .{
-        .name = "samdoe",
-        .as_of_day = 20737,
-        .lifetime_tokens = 315686778511,
-        .peak_day_tokens = 11594630891,
-        .longest_turn_seconds = 110473,
-        .streak_days = 132,
-        .best_streak_days = 132,
-        .chats = 11374,
-        .fast_mode_percent = 66.5,
-        .reasoning = "xhigh",
-        .reasoning_percent = 85.1,
-        .days = &.{ .{ .day = 20736, .tokens = 52293426 }, .{ .day = 20737, .tokens = 39877412 } },
-    };
-    limits.breakdown = .{ .days = &.{.{
-        .day = 20737,
-        .models = &.{ .{ .model = "gpt-6.1-sol", .speed = "fast", .value = 3 }, .{ .model = "gpt-6.1-sol", .speed = "standard", .value = 1 } },
-        .surfaces = &.{.{ .surface = "desktop_app", .value = 4 }},
-    }} };
-    with_profile.codex_usage = limits;
-    const profile_text = try (UsageSnapshot{ .snapshot = &with_profile }).render(alloc, .text);
-    defer alloc.free(profile_text);
-    try std.testing.expectEqualStrings(
-        "Codex usage from ChatGPT for samdoe, updated 08:14 UTC\n" ++
-            "Tokens        39877412 today, 92170838 7d, 92170838 month, 315686778511 lifetime\n" ++
-            "Record        peak day 11594630891 tokens, longest chat 30h 41m, streak 132 days (best 132), 11374 chats\n" ++
-            "Habits        fast mode 67%, reasoning xhigh (85%)\n" ++
-            "Share by model (month): gpt-6.1-sol fast 75.0%, gpt-6.1-sol standard 25.0%\n" ++
-            "Share by surface (month): desktop app 100.0%\n" ++
-            "Plan          plus\nCredits       none\nSpend limit   not reached\n\nLimits\n- codex (5h window): 42% used, resets 10:14 UTC\n",
-        profile_text,
-    );
-
-    const text = try contract.render(alloc, .text);
-    defer alloc.free(text);
-    try std.testing.expectEqualStrings(
-        "Codex usage from ChatGPT, updated 08:14 UTC\nPlan          plus\nCredits       none\nSpend limit   not reached\n\nLimits\n- codex (5h window): 42% used, resets 10:14 UTC\n",
-        text,
-    );
-
-    {
-        local_time.test_zone = .{ .offset_s = 5 * std.time.s_per_hour + 30 * std.time.s_per_min, .name = "IST" };
-        defer local_time.test_zone = .utc;
-        const local_text = try contract.render(alloc, .text);
-        defer alloc.free(local_text);
-        try std.testing.expectEqualStrings(
-            "Codex usage from ChatGPT, updated 13:44 IST\nPlan          plus\nCredits       none\nSpend limit   not reached\n\nLimits\n- codex (5h window): 42% used, resets 15:44 IST\n",
-            local_text,
-        );
-    }
-
-    const json = try contract.render(alloc, .json);
-    defer alloc.free(json);
-    const parsed = try std.json.parseFromSlice(std.json.Value, alloc, json, .{});
-    defer parsed.deinit();
-    const root = parsed.value.object;
-    try std.testing.expectEqualStrings("chatgpt", root.get("source").?.string);
-    try std.testing.expectEqual(@as(i64, at), root.get("fetched_at_ms").?.integer);
-    const codex = root.get("codex").?.object;
-    try std.testing.expectEqualStrings("plus", codex.get("plan").?.string);
-    try std.testing.expectEqual(@as(i64, 18000), codex.get("limits").?.array.items[0].object.get("primary").?.object.get("window_seconds").?.integer);
 }
 
 pub const SlackSnapshot = struct {
@@ -4073,4 +3575,81 @@ test "slack text reads the access expiry in the local zone" {
     const unknown_text = try snapshot.render(alloc, .text);
     defer alloc.free(unknown_text);
     try std.testing.expect(std.mem.find(u8, unknown_text, "Access expiration time is unavailable.\n") != null);
+}
+
+test "status reports where the model came from alongside the model" {
+    const snapshot = StatusSnapshot{
+        .model = "gpt-5.4",
+        .model_origin = "FX_MODEL",
+        .permission_mode = .auto,
+        .workspace_root = "/tmp/fx",
+        .history_turns = 0,
+        .session_permission_grants = 0,
+        .agent_step_limit = 24,
+    };
+    const text = try snapshot.renderText(std.testing.allocator);
+    defer std.testing.allocator.free(text);
+    try std.testing.expect(std.mem.startsWith(u8, text, "[status] model=gpt-5.4\n[status] model_origin=FX_MODEL\n"));
+
+    const json = try snapshot.renderJson(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.startsWith(u8, json, "{\"kind\":\"status\",\"model\":\"gpt-5.4\",\"model_origin\":\"FX_MODEL\","));
+}
+
+test "model list explains public-only and rejected-credential catalogs" {
+    const alloc = std.testing.allocator;
+    const ids = [_][]const u8{"alpha"};
+    const rejected = ModelListSnapshot{ .ids = &ids, .private_models_hidden = true, .public_only_reason = .authenticated_credential_rejected };
+    const shown = ModelListSnapshot{ .ids = &ids };
+    const cases = [_]struct {
+        snapshot: ModelListSnapshot,
+        text: []const u8,
+        body: []const u8,
+    }{
+        .{
+            .snapshot = .{ .ids = &ids, .private_models_hidden = true, .public_only_reason = .no_credential },
+            .text = "[models] 1 available\n - alpha\n[models] Using the public model catalog; sign in with Vercel or use an AI Gateway API key for team-private models.\n",
+            .body = "1 available\n - alpha\nUsing the public model catalog; sign in with Vercel or use an AI Gateway API key for team-private models.",
+        },
+        .{
+            .snapshot = rejected,
+            .text = "[models] 1 available\n - alpha\n[models] Your Gateway credential was rejected; using the public model catalog.\n",
+            .body = "1 available\n - alpha\nYour Gateway credential was rejected; using the public model catalog.",
+        },
+        .{
+            .snapshot = .{ .ids = &.{}, .private_models_hidden = true, .public_only_reason = .no_credential },
+            .text = "[models] no models returned by gateway\n[models] Using the public model catalog; sign in with Vercel or use an AI Gateway API key for team-private models.\n",
+            .body = "no models returned by gateway\nUsing the public model catalog; sign in with Vercel or use an AI Gateway API key for team-private models.",
+        },
+        .{
+            .snapshot = .{ .ids = &.{}, .private_models_hidden = true, .public_only_reason = .authenticated_credential_rejected },
+            .text = "[models] no models returned by gateway\n[models] Your Gateway credential was rejected; using the public model catalog.\n",
+            .body = "no models returned by gateway\nYour Gateway credential was rejected; using the public model catalog.",
+        },
+    };
+
+    for (cases) |case| {
+        const text = try case.snapshot.renderText(alloc);
+        defer alloc.free(text);
+        try std.testing.expectEqualStrings(case.text, text);
+
+        const body = try case.snapshot.renderInteractiveBody(alloc);
+        defer alloc.free(body);
+        try std.testing.expectEqualStrings(case.body, body);
+    }
+
+    const json = try rejected.renderJson(alloc);
+    defer alloc.free(json);
+    try std.testing.expectEqualStrings(
+        "{\"kind\":\"models\",\"count\":1,\"shown_count\":1,\"more_count\":0,\"private_models_hidden\":true,\"ids\":[\"alpha\"]}",
+        json,
+    );
+
+    // An API key hides nothing, so the note must stay absent.
+    const quiet_text = try shown.renderText(alloc);
+    defer alloc.free(quiet_text);
+    try std.testing.expect(std.mem.find(u8, quiet_text, "team-private") == null);
+    const quiet_body = try shown.renderInteractiveBody(alloc);
+    defer alloc.free(quiet_body);
+    try std.testing.expect(std.mem.find(u8, quiet_body, "team-private") == null);
 }

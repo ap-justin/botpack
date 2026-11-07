@@ -530,11 +530,11 @@ test "early threaded io is resolved after global launch args" {
     }));
     try std.testing.expect(needsEarlyThreadedIo(&.{
         @as([:0]const u8, "--provider"),
-        @as([:0]const u8, "grok"),
+        @as([:0]const u8, "gateway"),
         @as([:0]const u8, "login"),
     }));
     try std.testing.expect(needsFullEntryConfig(&.{
-        @as([:0]const u8, "--provider=grok"),
+        @as([:0]const u8, "--provider=gateway"),
         @as([:0]const u8, "ask"),
     }));
     try std.testing.expect(needsFullEntryConfig(&.{
@@ -867,17 +867,8 @@ test {
     _ = @import("core/shared/history_range.zig");
     _ = @import("core/cli/doctor_runtime.zig");
     _ = @import("core/auth/login_flow.zig");
-    _ = @import("core/auth/chatgpt_oauth.zig");
     _ = @import("core/auth/provider_catalog.zig");
-    _ = @import("gateway/openai_codex_models.zig");
-    _ = @import("gateway/openai_codex.zig");
     _ = @import("gateway/responses_protocol.zig");
-    _ = @import("gateway/openai_codex_permission_reviewer.zig");
-    _ = @import("core/auth/grok_session.zig");
-    _ = @import("core/auth/grok_oauth.zig");
-    _ = @import("gateway/xai_grok_models.zig");
-    _ = @import("gateway/xai_grok.zig");
-    _ = @import("gateway/xai_grok_permission_reviewer.zig");
     _ = credentials;
     _ = @import("core/auth/oauth.zig");
     _ = @import("core/auth/oauth_session.zig");

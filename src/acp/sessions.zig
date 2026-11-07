@@ -910,11 +910,7 @@ fn handleRestoreSession(
         if (err != error.ProviderCredentialUnavailable) return err;
         return state.writer.writeError(alloc, msg.id, .{
             .code = ErrorCode.invalid_request,
-            .message = if (effective_provider == .codex)
-                credentials.missing_chatgpt_credential_message
-            else if (effective_provider == .grok)
-                credentials.missing_grok_credential_message
-            else if (effective_provider == .configured)
+            .message = if (effective_provider == .configured)
                 "Configured provider authentication is unavailable"
             else
                 credentials.missing_credential_message,
@@ -2071,9 +2067,8 @@ pub fn writeProviderConfigOption(
 ) !void {
     try w.writeAll("{\"id\":\"provider\",\"name\":\"Provider\",\"category\":\"model\",\"type\":\"select\",\"currentValue\":");
     try writeJsonStr(current.label(), w);
-    try w.writeAll(",\"options\":[{\"value\":\"gateway\",\"name\":\"Vercel AI Gateway\"},{\"value\":\"codex\",\"name\":\"Codex subscription\"}");
+    try w.writeAll(",\"options\":[{\"value\":\"gateway\",\"name\":\"Vercel AI Gateway\"}");
     if (comptime !host_target.is_wasm) {
-        try w.writeAll(",{\"value\":\"grok\",\"name\":\"Grok subscription\"}");
         for (definitions) |definition| {
             try w.writeAll(",{\"value\":");
             try writeJsonStr(definition.id, w);

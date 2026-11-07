@@ -61,7 +61,7 @@ pub const Key = struct {
     maximum: ?i64 = null,
     /// The most items a `strings` key may hold.
     max_items: ?usize = null,
-    /// An object whose keys are free-form, such as `models.codex`.
+    /// An object whose keys are free-form, such as `models.gateway`.
     map: bool = false,
     /// The current name of a setting that was renamed. fx still reads the
     /// older name, writes only the current one, and the current one wins for
@@ -109,11 +109,10 @@ pub const keys = [_]Key{
     .{ .name = "auto_compact_percent", .where = .profile, .kind = .integer, .minimum = 10, .maximum = 80, .description = "Start automatic compaction at this percentage of usable input capacity" },
     .{ .name = "auto_upgrade", .where = .profile, .kind = .boolean, .description = "Download and install updates in the background" },
     .{ .name = "cache_warming", .where = .profile, .kind = .boolean, .description = "Keep a waiting Claude conversation's prompt cache alive for up to 30 minutes" },
-    .{ .name = "codex_model", .where = .profile, .kind = .string, .superseded_by = "models.codex", .description = "Older form of models.codex" },
     .{ .name = "collapse_tool_calls", .where = .profile, .kind = .boolean, .description = "Show a summary for each group of tool calls" },
     .{ .name = "context", .where = .project_safe, .kind = .boolean, .description = "Load project instructions such as AGENTS.md" },
     .{ .name = "context_limits", .where = .profile, .kind = .object, .map = true, .description = "Context limits by name, in bytes or off, as --context-limit takes them" },
-    .{ .name = "credential_source", .where = .profile, .kind = .string, .values = &.{ "vercel_oidc_token", "ai_gateway_api_key", "fx_login", "stored_key", "chatgpt_subscription", "grok_subscription" }, .description = "The saved credential fx uses; fx login sets it" },
+    .{ .name = "credential_source", .where = .profile, .kind = .string, .values = &.{ "vercel_oidc_token", "ai_gateway_api_key", "fx_login", "stored_key" }, .description = "The saved credential fx uses; fx login sets it" },
     .{ .name = "disabledMcpjsonServers", .where = .profile, .kind = .strings, .workspace_only = true, .description = "Project MCP servers rejected in this workspace; manage them with fx mcp approve and reject" },
     .{ .name = "effort", .where = .profile, .kind = .string_or_null, .description = "Reasoning effort: auto or a name the model supports; null means auto" },
     .{ .name = "enableAllProjectMcpServers", .where = .profile, .kind = .boolean, .workspace_only = true, .description = "Approve every server in this workspace's .mcp.json; manage it with fx mcp approve and reject" },
@@ -121,7 +120,6 @@ pub const keys = [_]Key{
     .{ .name = "fast_mode", .where = .profile, .kind = .boolean, .description = "Use faster inference when the model supports it" },
     .{ .name = "fast_mode_model_bound", .where = .profile, .kind = .boolean, .description = "Managed by fx alongside fast_mode" },
     .{ .name = "first_call_tool_choice", .where = .profile, .kind = .string, .values = &.{ "auto", "none" }, .description = "Tool choice for the first request of a turn" },
-    .{ .name = "grok_model", .where = .profile, .kind = .string, .superseded_by = "models.grok", .description = "Older form of models.grok" },
     .{ .name = "input_appearance", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "max_agent_steps", .where = .project_safe, .kind = .integer, .minimum = 0, .description = "Most agent steps per turn; 0 means no limit" },
     .{ .name = "max_tool_result_bytes", .where = .project_safe, .kind = .integer, .minimum = 1024, .description = "Tool output budget in model context, in bytes" },
@@ -132,7 +130,7 @@ pub const keys = [_]Key{
     .{ .name = "permission", .where = .profile, .kind = .object, .map = true, .description = "Permission rules; manage them with /permissions" },
     .{ .name = "permission_mode", .where = .profile, .kind = .string, .values = &.{ "ask", "auto", "full-access", "yolo" }, .description = "How fx handles tool calls that need permission; yolo is an older name for full-access" },
     .{ .name = "prompt_history", .where = .profile, .kind = .switches, .children = &.{"enabled"}, .child_descriptions = &.{"Save prompts and slash commands for input history"}, .description = "Input history" },
-    .{ .name = "provider", .where = .profile, .kind = .string, .description = "The service for model requests: gateway, codex, grok, or a name under providers" },
+    .{ .name = "provider", .where = .profile, .kind = .string, .description = "The service for model requests: gateway or a name under providers" },
     .{ .name = "provider_order", .where = .project_safe, .kind = .strings, .max_items = 8, .description = "Preferred AI Gateway providers, in order" },
     .{ .name = "provider_strict", .where = .project_safe, .kind = .boolean, .description = "Send AI Gateway requests only to the providers in provider_order" },
     .{ .name = "providers", .where = .profile, .kind = .object, .map = true, .top_level_only = true, .description = "Named custom model connections" },
@@ -315,7 +313,7 @@ pub const UnknownPart = struct {
 
 /// Null when a dotted `path` names a setting: a listed key, a fixed child
 /// such as `statusLine.context`, or any path into a map such as
-/// `models.codex`. Otherwise the part that isn't known. Retired keys aren't
+/// `models.gateway`. Otherwise the part that isn't known. Retired keys aren't
 /// settings. Slices borrow from `path` and the list.
 pub fn unknownPart(path: []const u8) ?UnknownPart {
     const dot = std.mem.findScalar(u8, path, '.');
@@ -473,7 +471,7 @@ test "a project file is checked at its top level only" {
 }
 
 test "dotted paths name listed keys, fixed children, and paths into maps" {
-    for ([_][]const u8{ "fast_mode", "status_line", "status_line.context", "statusLine.context", "models", "models.codex", "providers.local.base_url" }) |path| {
+    for ([_][]const u8{ "fast_mode", "status_line", "status_line.context", "statusLine.context", "models", "models.gateway", "providers.local.base_url" }) |path| {
         try std.testing.expect(unknownPart(path) == null);
     }
 

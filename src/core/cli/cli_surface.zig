@@ -3,8 +3,6 @@ const builtin = @import("builtin");
 const io_mod = @import("../shared/io.zig");
 const app_lifecycle = @import("../app/app_lifecycle.zig");
 const auth_runtime = @import("../auth/auth_runtime.zig");
-const chatgpt_oauth = @import("../auth/chatgpt_oauth.zig");
-const grok_oauth = @import("../auth/grok_oauth.zig");
 const acp_runner = @import("acp_runner.zig");
 const cli_ask = @import("cli_ask.zig");
 const cli_flags = @import("cli_flags.zig");
@@ -236,7 +234,7 @@ const LoginArgs = struct {
 const LoginFlag = enum { api_key };
 const login_flag_ids = cli_flags.idTable(LoginFlag, &builtin_commands.login_options);
 
-/// `fx login [vercel|codex|grok] [--api-key]`, in either order.
+/// `fx login [vercel] [--api-key]`, in either order.
 fn parseLoginArgs(rest: []const [:0]const u8) error{ InvalidLoginProviderArgs, ApiKeyNeedsVercel }!LoginArgs {
     var parsed: LoginArgs = .{};
     var provider_arg: ?[]const u8 = null;
@@ -988,8 +986,6 @@ fn activateProviderSelection(
 fn runProviderLogin(alloc: Allocator, cfg: Config, provider: model_provider.ProviderId) !void {
     switch (provider) {
         .gateway => try login_flow.runLogin(alloc, cfg.gateway_provider.oauth_transport, cfg.url_opener),
-        .codex => try chatgpt_oauth.runLogin(alloc, cfg.gateway_provider.oauth_transport, cfg.url_opener),
-        .grok => try grok_oauth.runLogin(alloc, cfg.gateway_provider.oauth_transport, cfg.url_opener),
         .configured => return error.ConfiguredProviderUsesEnvironmentAuth,
     }
 }
@@ -1005,8 +1001,8 @@ fn writeProviderLoginFailure(alloc: Allocator, deps: RunDeps, provider: model_pr
     }
     try writeProviderActivationError(alloc, deps, caller, switch (err) {
         error.ClientIdMissing => "missing FX_OAUTH_CLIENT_ID; configure the fx Vercel App client id first",
-        error.AccessDenied, error.ChatGptAuthorizationFailed, error.GrokAuthorizationFailed => "authorization denied",
-        error.ExpiredToken, error.LoginTimedOut, error.ChatGptLoginTimedOut, error.GrokLoginTimedOut => "authorization expired; run fx login again",
+        error.AccessDenied => "authorization denied",
+        error.ExpiredToken, error.LoginTimedOut => "authorization expired; run fx login again",
         else => "failed to sign in",
     });
 }
@@ -1080,8 +1076,6 @@ fn activateProviderSelectionFallible(
     {
         try writeStdout(deps, switch (target) {
             .gateway => "Gateway is already selected.\n",
-            .codex => "Codex is already selected.\n",
-            .grok => "Grok is already selected.\n",
             .configured => "Configured provider is already selected.\n",
         });
         return true;
@@ -1113,8 +1107,6 @@ fn activateProviderSelectionFallible(
             deps,
             caller,
             switch (target) {
-                .codex => "Codex credential is unavailable",
-                .grok => "Grok credential is unavailable",
                 .gateway => "configure a Gateway credential first",
                 .configured => "configure the provider auth environment variable first",
             },
@@ -1123,8 +1115,6 @@ fn activateProviderSelectionFallible(
     };
     const catalog_provider = cfg.provider_set.select(target).model_catalog orelse {
         try writeProviderActivationError(alloc, deps, caller, switch (target) {
-            .codex => "Codex model catalog is unavailable",
-            .grok => "Grok model catalog is unavailable",
             .gateway => "Gateway model catalog is unavailable",
             .configured => "Configured model catalog is unavailable",
         });
@@ -1196,15 +1186,11 @@ fn activateProviderSelectionFallible(
         .outcome => {},
     }
     if (performed_login) |provider| switch (provider) {
-        .codex => try writeStdout(deps, "Signed in with Codex.\n"),
-        .grok => try writeStdout(deps, "Signed in with Grok.\n"),
         .gateway, .configured => unreachable,
     };
     if (caller == .provider_command) {
         try writeStdout(deps, switch (target) {
             .gateway => "Provider set to Gateway.\n",
-            .codex => "Provider set to Codex.\n",
-            .grok => "Provider set to Grok.\n",
             .configured => "Provider set to configured connection.\n",
         });
     }
@@ -1363,7 +1349,7 @@ fn runNonInteractiveWithDeps(
                     error.ApiKeyNeedsVercel => try writeStderr(deps, "fx login: --api-key works only with vercel\n"),
                     error.InvalidLoginProviderArgs => {
                         try writeFlagFailure(alloc, deps, .login, rest);
-                        try writeStderr(deps, "usage: fx login [vercel|codex|grok] [--api-key]\n");
+                        try writeStderr(deps, "usage: fx login [vercel] [--api-key]\n");
                     },
                 }
                 return usage_failure;
@@ -1391,65 +1377,18 @@ fn runNonInteractiveWithDeps(
             )) return .handled_failure;
             try writeStdout(deps, switch (login_provider) {
                 .gateway => "Signed in to Vercel.\nAI Gateway access may still require billing or API setup for the selected account.\n",
-                .codex => "Signed in with Codex.\n",
-                .grok => "Signed in with Grok.\n",
                 .configured => "Configured providers use settings.json authentication.\n",
             });
             return .handled_success;
         },
         .logout => |rest| {
-            const maybe_login_provider = parseLoginProvider(rest) catch {
-                try writeStderr(deps, "usage: fx logout [vercel|codex|grok]\n");
+            _ = parseLoginProvider(rest) catch {
+                try writeStderr(deps, "usage: fx logout [vercel]\n");
                 return usage_failure;
             };
             if (cfg.auth_mode == .host_managed) {
                 try writeHostManagedAuthResult(deps);
                 return .handled_success;
-            }
-            // Preserve the original `fx logout` behavior for scripts and users.
-            const login_provider = maybe_login_provider orelse .gateway;
-            if (login_provider == .codex) {
-                const outcome = chatgpt_oauth.logout() catch {
-                    try writeStderr(deps, "fx logout: failed to durably remove saved Codex login\n");
-                    return .handled_failure;
-                };
-                return switch (outcome) {
-                    .deleted => result: {
-                        try writeStdout(deps, "Signed out of Codex.\n");
-                        break :result .handled_success;
-                    },
-                    .missing => result: {
-                        try writeStdout(deps, "No Codex login session found.\n");
-                        break :result .handled_success;
-                    },
-                    .deleted_not_durable => result: {
-                        try writeStderr(deps, "fx logout: failed to durably remove saved Codex login\n");
-                        break :result .handled_failure;
-                    },
-                };
-            }
-            if (login_provider == .grok) {
-                const outcome = grok_oauth.logout(alloc, cfg.gateway_provider.oauth_transport) catch {
-                    try writeStderr(deps, "fx logout: failed to durably remove saved Grok login\n");
-                    return .handled_failure;
-                };
-                if (outcome.revocation_failed) {
-                    try writeStderr(deps, "fx logout: local Grok session removed, but remote revocation could not be confirmed\n");
-                }
-                return switch (outcome.deletion) {
-                    .deleted => result: {
-                        try writeStdout(deps, "Signed out of Grok.\n");
-                        break :result .handled_success;
-                    },
-                    .missing => result: {
-                        try writeStdout(deps, "No Grok login session found.\n");
-                        break :result .handled_success;
-                    },
-                    .deleted_not_durable => result: {
-                        try writeStderr(deps, "fx logout: failed to durably remove saved Grok login\n");
-                        break :result .handled_failure;
-                    },
-                };
             }
             const result = login_flow.logout(alloc, cfg.gateway_provider.oauth_transport) catch |err| switch (err) {
                 error.SessionDeleteFailed => {
@@ -1536,7 +1475,7 @@ fn runNonInteractiveWithDeps(
                 return usage_failure;
             }
             const target = model_provider.parse(rest[0]) orelse {
-                try writeStderr(deps, "fx provider: expected gateway, codex, grok, or a configured name\n");
+                try writeStderr(deps, "fx provider: expected gateway or a configured name\n");
                 return usage_failure;
             };
             const activated = activateProviderSelection(alloc, cfg, deps, target, .provider_command, null) catch |err| switch (err) {
@@ -1689,8 +1628,6 @@ fn runNonInteractiveWithDeps(
             const catalog_provider = available_providers.select(startup.provider).cli_model_catalog orelse {
                 try writeStderr(deps, switch (startup.provider) {
                     .gateway => "fx models: Gateway model catalog is unavailable\n",
-                    .codex => "fx models: Codex model catalog is unavailable\n",
-                    .grok => "fx models: Grok model catalog is unavailable\n",
                     .configured => "fx models: Configured model catalog is unavailable\n",
                 });
                 return .handled_failure;
@@ -3627,7 +3564,7 @@ fn globalLaunchErrorMessage(err: anyerror) ?[]const u8 {
         error.MissingAddDirectoryValue => "--add-dir requires a directory path",
         error.MissingModelValue => "--model requires a model id",
         error.InvalidEffortValue => "--effort value is not a valid reasoning effort",
-        error.InvalidProviderValue => "--provider accepts gateway, codex, grok, or a configured provider name",
+        error.InvalidProviderValue => "--provider accepts gateway or a configured provider name",
         error.InvalidProviderOrderValue => "--provider-order accepts comma-separated provider slugs (letters, digits, '-')",
         error.InvalidPermissionModeValue => "--permission-mode accepts ask, auto, or full-access",
         else => null,
@@ -3666,14 +3603,14 @@ test "ACP arguments take the agent-run flags and a log file" {
     try std.testing.expectEqualStrings("provider/astra", enabled.agent.model.?);
     try std.testing.expectEqual(@as(?bool, true), enabled.agent.ultrafast);
 
-    var last = try parseAcpArgs(alloc, &.{ "--ultrafast", "--no-ultrafast", "--model=a", "--model", "b", "--effort", "high", "--fast", "--ask", "--provider", "codex", "--log-file", "/tmp/acp.log" }, &bad);
+    var last = try parseAcpArgs(alloc, &.{ "--ultrafast", "--no-ultrafast", "--model=a", "--model", "b", "--effort", "high", "--fast", "--ask", "--provider", "gateway", "--log-file", "/tmp/acp.log" }, &bad);
     defer last.deinit(alloc);
     try std.testing.expectEqual(@as(?bool, false), last.agent.ultrafast);
     try std.testing.expectEqualStrings("b", last.agent.model.?);
     try std.testing.expectEqualStrings("high", last.agent.effort.?.label());
     try std.testing.expect(last.agent.fast.?);
     try std.testing.expectEqual(types.PermissionMode.ask, last.agent.permission.?);
-    try std.testing.expectEqualStrings("codex", last.agent.provider.?.label());
+    try std.testing.expectEqualStrings("gateway", last.agent.provider.?.label());
     try std.testing.expectEqualStrings("/tmp/acp.log", last.log_file.?);
 
     try std.testing.expectError(error.InvalidAgentRunValue, parseAcpArgs(alloc, &.{ "--effort", "high effort" }, &bad));
@@ -4328,7 +4265,7 @@ test "global launch modifiers own repeatable additional directories and suppress
 test "global launch modifiers own provider model effort and fast overrides before the command" {
     var parsed = try parseGlobalLaunchArgs(std.testing.allocator, &.{
         @constCast("--provider"),
-        @constCast("grok"),
+        @constCast("gateway"),
         @constCast("--model"),
         @constCast("provider/launch-model"),
         @constCast("--effort=high"),
@@ -4338,7 +4275,7 @@ test "global launch modifiers own provider model effort and fast overrides befor
     });
     defer parsed.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(@as(?model_provider.ProviderId, .grok), parsed.modifiers.provider_override);
+    try std.testing.expectEqual(@as(?model_provider.ProviderId, .gateway), parsed.modifiers.provider_override);
     try std.testing.expectEqualStrings("provider/launch-model", parsed.modifiers.model_override.?);
     try std.testing.expect(parsed.modifiers.effort_override.?.eql(types.ReasoningEffort.literal("high")));
     try std.testing.expectEqual(@as(?bool, true), parsed.modifiers.fast_override);
@@ -5184,9 +5121,7 @@ test "login --api-key stores a pasted key like setup, without the deprecation wa
 
 test "login arguments take one provider and --api-key only for vercel" {
     try std.testing.expectEqual(LoginArgs{}, try parseLoginArgs(&.{}));
-    try std.testing.expectEqual(LoginArgs{ .provider = .codex }, try parseLoginArgs(&.{"codex"}));
     try std.testing.expectEqual(LoginArgs{ .provider = .gateway, .api_key = true }, try parseLoginArgs(&.{ "--api-key", "vercel" }));
-    try std.testing.expectError(error.ApiKeyNeedsVercel, parseLoginArgs(&.{ "codex", "--api-key" }));
     try std.testing.expectError(error.InvalidLoginProviderArgs, parseLoginArgs(&.{ "vercel", "codex" }));
     try std.testing.expectError(error.InvalidLoginProviderArgs, parseLoginArgs(&.{"--bogus"}));
 }
@@ -5609,43 +5544,6 @@ test "runIfRequested models json describes each model from its catalog entry" {
             "\"efforts\":[\"low\",\"high\"],\"fast\":true,\"ultrafast\":true}]}\n",
         capture.stdout.written(),
     );
-}
-
-test "modelDetails lets the catalog entry decide and keeps Ultrafast to the Gateway" {
-    const Fallback = struct {
-        fn capabilities(_: []const u8) model_capabilities.Capabilities {
-            return .{
-                .supports_fast_mode = true,
-                .reasoning_efforts = .fromSlice(&.{types.ReasoningEffort.literal("medium")}),
-            };
-        }
-    };
-    var bundle = testConfig().provider_set.gateway;
-    bundle.fallback_model_capabilities_fn = Fallback.capabilities;
-    const entries = [_]model_catalog.ModelCatalogEntry{.{
-        .id = @constCast("openai/gpt-6-astra"),
-        .name = @constCast("GPT-6 Astra"),
-        .model_type = @constCast("language"),
-        .supports_ultrafast_mode = true,
-    }};
-    const ids = [_][]const u8{ "openai/gpt-6-astra", "provider/unlisted" };
-
-    const gateway = try modelDetails(std.testing.allocator, &ids, &entries, bundle, .gateway);
-    defer std.testing.allocator.free(gateway);
-    try std.testing.expectEqualStrings("GPT-6 Astra", gateway[0].name.?);
-    try std.testing.expect(gateway[0].ultrafast);
-    try std.testing.expect(!gateway[0].fast);
-    try std.testing.expectEqual(@as(usize, 0), gateway[0].efforts.len);
-    try std.testing.expectEqual(@as(?[]const u8, null), gateway[1].name);
-    try std.testing.expect(gateway[1].fast);
-    try std.testing.expectEqualStrings("medium", gateway[1].efforts.slice()[0].label());
-
-    const codex = try modelDetails(std.testing.allocator, &ids, &entries, bundle, .codex);
-    defer std.testing.allocator.free(codex);
-    try std.testing.expect(!codex[0].ultrafast);
-
-    const undescribed = try modelDetails(std.testing.allocator, &ids, &.{}, bundle, .gateway);
-    try std.testing.expectEqual(@as(usize, 0), undescribed.len);
 }
 
 test "runIfRequested credits renders through the configured provider" {
@@ -6255,4 +6153,37 @@ const CreditsProviderProbe = struct {
 
 fn ownedCreditsErrorSnapshot(alloc: Allocator, message: []const u8) output_contracts.CreditsSnapshot {
     return .{ .err_message = alloc.dupe(u8, message) catch null };
+}
+
+test "modelDetails lets the catalog entry decide and keeps Ultrafast to the Gateway" {
+    const Fallback = struct {
+        fn capabilities(_: []const u8) model_capabilities.Capabilities {
+            return .{
+                .supports_fast_mode = true,
+                .reasoning_efforts = .fromSlice(&.{types.ReasoningEffort.literal("medium")}),
+            };
+        }
+    };
+    var bundle = testConfig().provider_set.gateway;
+    bundle.fallback_model_capabilities_fn = Fallback.capabilities;
+    const entries = [_]model_catalog.ModelCatalogEntry{.{
+        .id = @constCast("openai/gpt-6-astra"),
+        .name = @constCast("GPT-6 Astra"),
+        .model_type = @constCast("language"),
+        .supports_ultrafast_mode = true,
+    }};
+    const ids = [_][]const u8{ "openai/gpt-6-astra", "provider/unlisted" };
+
+    const gateway = try modelDetails(std.testing.allocator, &ids, &entries, bundle, .gateway);
+    defer std.testing.allocator.free(gateway);
+    try std.testing.expectEqualStrings("GPT-6 Astra", gateway[0].name.?);
+    try std.testing.expect(gateway[0].ultrafast);
+    try std.testing.expect(!gateway[0].fast);
+    try std.testing.expectEqual(@as(usize, 0), gateway[0].efforts.len);
+    try std.testing.expectEqual(@as(?[]const u8, null), gateway[1].name);
+    try std.testing.expect(gateway[1].fast);
+    try std.testing.expectEqualStrings("medium", gateway[1].efforts.slice()[0].label());
+
+    const undescribed = try modelDetails(std.testing.allocator, &ids, &.{}, bundle, .gateway);
+    try std.testing.expectEqual(@as(usize, 0), undescribed.len);
 }

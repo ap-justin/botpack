@@ -109,26 +109,6 @@
       "job": "test",
       "stability": "internal"
     },
-    "FX_TEST_CHATGPT_ISSUER_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_CHATGPT_ORIGIN": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_CHATGPT_TOKEN_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_CODEX_CLIENT_VERSION": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_CODEX_VERSION_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
     "FX_TEST_COMMAND_INDETERMINATE_AFTER_EXIT": {
       "job": "test",
       "stability": "internal"
@@ -157,47 +137,11 @@
       "job": "test",
       "stability": "internal"
     },
-    "FX_TEST_GROK_CLIENT_VERSION": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_GROK_ISSUER_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_GROK_ORIGIN": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_GROK_REVOKE_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_GROK_TOKEN_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_GROK_USERINFO_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_GROK_VERSION_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
     "FX_TEST_INPUT_LOOP_NETWORK_GUARD": {
       "job": "test",
       "stability": "internal"
     },
     "FX_TEST_OAUTH_ISSUER_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_OPENAI_CODEX_MODELS_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_OPENAI_CODEX_RESPONSES_URL": {
       "job": "test",
       "stability": "internal"
     },
@@ -246,18 +190,6 @@
       "stability": "internal"
     },
     "FX_TEST_USAGE_CLOCK_FILE": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_XAI_GROK_MODALITIES_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_XAI_GROK_MODELS_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_XAI_GROK_RESPONSES_URL": {
       "job": "test",
       "stability": "internal"
     },
