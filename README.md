@@ -15,7 +15,7 @@
 
 fx is a minimal coding agent CLI that still comes with batteries included. It's one native binary written in Zig, so there is no runtime to install, and it runs the same on your laptop, in CI, or inside an agent sandbox.
 
-fx is meant to be embedded and extended. Scripts call it with `fx ask`, editors connect over the Agent Client Protocol (ACP), and JavaScript apps run the same agent core through [libfx](sdk/README.md) with their own tools. Skills, MCP servers, and your project's `AGENTS.md` add to what the agent knows and can do.
+fx is meant to be embedded and extended. Scripts call it with `fx ask`, and editors connect over the Agent Client Protocol (ACP). Skills, MCP servers, and your project's `AGENTS.md` add to what the agent knows and can do.
 
 <p>
   <a href="https://vercel.com/labs#labs-products"><img alt="Vercel Labs Product" src="https://img.shields.io/badge/LABS-PRODUCT-0a0a0a.svg?style=for-the-badge&amp;logo=Vercel&amp;labelColor=000000" height="28"></a>
@@ -64,24 +64,13 @@ fx ask --json "summarize the failing tests" | jq -r .final_output
 | --- | --- |
 | <code>fx&nbsp;ask</code> | One request from a script or CI job. `--json` returns structured output, and `--resume` continues a saved session. |
 | <code>fx&nbsp;acp</code> | Editors and other [Agent Client Protocol](https://fx.sh/docs/using-fx/acp) clients, over stdio. |
-| [libfx](https://www.npmjs.com/package/libfx) | The agent core as a JavaScript library, built as a native Node.js addon and as WebAssembly. `createFxAgent()` runs an agent with your own tools, MCP clients, and skills, and `createFxTerminal()` embeds the fx terminal. |
 
-The [libfx README](sdk/README.md) and the [libfx docs](https://fx.sh/docs/lib) cover the API. The WebAssembly build is experimental.
 
 The CLI also picks up these extensions:
 
 - **Skills**: fx loads skills from `.fx/skills` and `~/.fx/skills`, and from the folders other agents use, such as `.claude/skills` and `.agents/skills`. The model sees each skill's name and description and reads the full instructions only when it needs them, so installed skills take little room in the context ([skills](https://fx.sh/docs/capabilities/skills)).
 - **MCP servers**: `fx mcp` manages servers from your terminal. A server's tool schemas load when the model looks for them ([MCP](https://fx.sh/docs/capabilities/mcp)).
 - **Project instructions**: fx follows the `AGENTS.md` in your project, nested `AGENTS.md` files for the directories they cover, and `~/.fx/AGENTS.md` for your own instructions across projects ([project instructions](https://fx.sh/docs/configure-fx/project-instructions)).
-
-## Examples
-
-[`examples/`](examples) has small libfx apps you can run with an AI Gateway API key:
-
-- [`node-chat`](examples/node-chat): a terminal chat with streamed replies.
-- [`browser-agent`](examples/browser-agent): the agent in WebAssembly behind a plain HTML form.
-- [`nextjs-agent`](examples/nextjs-agent): a Next.js App Router form with a streaming route handler.
-- [`nuxt-agent`](examples/nuxt-agent): the same idea in Nuxt, with a Nitro route.
 
 ## Documentation
 
@@ -130,7 +119,6 @@ fx/
 │   ├── gateway/     model provider transport
 │   ├── mcp/         MCP engine
 │   └── acp/         Agent Client Protocol server
-├── sdk/             libfx, the JavaScript library
 ├── tests/           end-to-end tests and model evals
 └── benchmarks/      startup, memory, and latency benchmarks
 ```

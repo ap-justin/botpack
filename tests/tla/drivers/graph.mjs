@@ -1,5 +1,4 @@
-// The state graphs tests/tla/sdk/check.sh has TLC write, as the drivers read
-// them, and the walk drive-intake.mjs and drive-images.mjs take along one.
+// The state graphs a model's check.sh has TLC write, as the drivers read them.
 import { strict as assert } from "node:assert";
 import { readFile } from "node:fs/promises";
 
@@ -68,7 +67,7 @@ export function parseValue(text) {
 /** The graph check.sh wrote to `path`: each state by id, its successors, and the initial state. */
 export async function loadGraph(path) {
   const dot = await readFile(path, "utf8").catch(() => {
-    throw new Error(`${path} is missing; run tests/tla/sdk/check.sh first`);
+    throw new Error(`${path} is missing; run the model's check.sh first`);
   });
   const states = new Map();
   const next = new Map();
