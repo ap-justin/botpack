@@ -28,7 +28,6 @@ const model_catalog_metadata = @import("../gateway/model_catalog_metadata.zig");
 const model_capabilities = @import("../config/model_capabilities.zig");
 const provider_set = @import("../gateway/provider_set.zig");
 const execution_process_provider = @import("../execution/process_provider.zig");
-const github_publish = @import("../github/github_publish.zig");
 const github_workflows = @import("../github/github_workflows.zig");
 const host = @import("../hosts/host.zig");
 const login_flow = @import("../auth/login_flow.zig");
@@ -62,7 +61,6 @@ const workspace_commands = @import("../workspace/workspace_commands.zig");
 const usage = @import("../../usage/usage.zig");
 const usage_host = @import("../app/usage_host.zig");
 
-const slack_install = @import("../slack/install.zig");
 const Allocator = std.mem.Allocator;
 const CommandCatalog = command_specs.TopLevelRegistry;
 const TopLevelKind = command_specs.TopLevelKind;
@@ -80,7 +78,6 @@ pub const Command = union(enum) {
     status: []const [:0]const u8,
     permissions: []const [:0]const u8,
     mcp: []const [:0]const u8,
-    slack: []const [:0]const u8,
     models: []const [:0]const u8,
     provider: []const [:0]const u8,
     doctor: []const [:0]const u8,
@@ -333,7 +330,6 @@ const AcpOptions = struct {
 
 const WorkflowOptions = struct {
     agent: agent_run_flags.Overrides = .{},
-    create: bool = false,
     context: []u8 = &.{},
 
     fn deinit(self: *WorkflowOptions, alloc: Allocator) void {
@@ -676,7 +672,6 @@ pub fn parse(command_catalog: CommandCatalog, args: []const [:0]const u8) Comman
             if (command_specs.matchesTopLevel(command_catalog, command, .session)) {
                 return .{ .session = args[1..] };
             }
-            if (command_specs.matchesTopLevel(command_catalog, command, .slack)) return .{ .slack = args[1..] };
         },
         't' => {
             if (command_specs.matchesTopLevel(command_catalog, command, .teams)) return .{ .teams = args[1..] };
@@ -1570,28 +1565,6 @@ fn runNonInteractiveWithDeps(
             try writeFormattedOutput(deps, text, opts.format);
             return .handled_success;
         },
-        .slack => |rest| {
-            if (rest.len == 0) {
-                const help = try command_specs.renderTopLevelCommandHelp(alloc, cfg.command_catalog, .slack);
-                defer alloc.free(help);
-                try writeStdout(deps, help);
-                return .handled_success;
-            }
-            const opts = slack_install.parse(rest) catch |err| {
-                try writeUsageOrJsonError(alloc, cfg.command_catalog, deps, .slack, "slack", err, rest);
-                return usage_failure;
-            };
-            var arena: std.heap.ArenaAllocator = .init(alloc);
-            defer arena.deinit();
-            const snapshot = slack_install.run(arena.allocator(), opts.action, cfg.gateway_provider.oauth_transport, cfg.url_opener) catch |err| {
-                try writeCommandFailure(alloc, deps, "slack", err, opts.format);
-                return .handled_failure;
-            };
-            const text = try snapshot.render(alloc, opts.format);
-            defer alloc.free(text);
-            try writeFormattedOutput(deps, text, opts.format);
-            return .handled_success;
-        },
         .mcp => |rest| {
             return runTopLevelMcp(alloc, rest, cfg, deps);
         },
@@ -2102,47 +2075,8 @@ fn runGithubWorkflow(
     defer alloc.free(prompt);
 
     const workflow_cfg = workflowConfigWithLaunchModifiers(cfg, launch_modifiers);
-    if (!opts.create) {
-        const exit_code = try cli_ask.runPrompt(alloc, prompt, opts.agent, workflow_cfg, cfg.context_registry, cfg.tool_set);
-        return if (exit_code == 0) .handled_success else .handled_failure;
-    }
-
-    const run_result = try cli_ask.runPromptCapture(alloc, prompt, opts.agent, workflow_cfg, cfg.context_registry, cfg.tool_set);
-    defer run_result.deinit(alloc);
-    if (run_result.exit_code != 0) return .handled_failure;
-
-    const draft = draftFromRun(alloc, run_result) catch {
-        try writeStderr(deps, switch (workflow) {
-            .pull_request => "fx pr: failed to parse drafted PR title/body\n",
-            .issue => "fx issue: failed to parse drafted issue title/body\n",
-        });
-        return .handled_failure;
-    };
-    defer draft.deinit(alloc);
-
-    const published = try github_publish.publish(alloc, switch (workflow) {
-        .pull_request => .pull_request,
-        .issue => .issue,
-    }, draft);
-    defer published.deinit(alloc);
-    if (!published.ok) {
-        try writeStderr(deps, switch (workflow) {
-            .pull_request => "fx pr: ",
-            .issue => "fx issue: ",
-        });
-        try writeStderr(deps, published.text);
-        try writeStderr(deps, "\n");
-        return .handled_failure;
-    }
-    try writeStdout(deps, published.text);
-    try writeStdout(deps, "\n");
-    return .handled_success;
-}
-
-/// Parses the draft from the completed final response only, so text the model
-/// wrote before a tool call never becomes the title or body.
-fn draftFromRun(alloc: Allocator, run_result: cli_ask.PromptRunResult) !github_publish.Draft {
-    return github_publish.parseDraft(alloc, run_result.final_source);
+    const exit_code = try cli_ask.runPrompt(alloc, prompt, opts.agent, workflow_cfg, cfg.context_registry, cfg.tool_set);
+    return if (exit_code == 0) .handled_success else .handled_failure;
 }
 
 fn writeStdout(deps: RunDeps, text: []const u8) !void {
@@ -2680,7 +2614,6 @@ fn writeUsageOrJsonError(
 fn parsedOptions(kind: TopLevelKind) ?[]const command_specs.OptionDoc {
     return switch (kind) {
         .status, .doctor, .models, .permissions, .credits => &builtin_commands.json_only_options,
-        .slack => &command_specs.slack_options,
         .sessions => &builtin_commands.sessions_options,
         .login => &builtin_commands.login_options,
         .usage => &builtin_commands.usage_options,
@@ -3327,7 +3260,6 @@ fn commandFailureMessage(err: anyerror) ?[]const u8 {
         error.InvalidSessionRecoveryArgs,
         error.InvalidUpgradeArgs,
         error.InvalidConfigArgs,
-        error.InvalidSlackArguments,
         => "invalid arguments",
         error.UnknownConfigSetting => "unknown setting",
         error.WorkspaceConfigWrite => workspace_write_message,
@@ -3623,12 +3555,11 @@ test "ACP arguments take the agent-run flags and a log file" {
 test "pr and issue take the agent-run flags before their context" {
     const alloc = std.testing.allocator;
     var bad: ?BadAgentValue = null;
-    var opts = try parseWorkflowArgs(alloc, &.{ "--auto", "--model", "m", "--effort=low", "--provider-order", "a,b", "--create", "fix", "the", "--model", "x" }, &bad);
+    var opts = try parseWorkflowArgs(alloc, &.{ "--auto", "--model", "m", "--effort=low", "--provider-order", "a,b", "fix", "the", "--model", "x" }, &bad);
     defer opts.deinit(alloc);
     try std.testing.expectEqual(types.PermissionMode.auto, opts.agent.permission.?);
     try std.testing.expectEqualStrings("m", opts.agent.model.?);
     try std.testing.expectEqual(@as(usize, 2), opts.agent.provider_order.?.len);
-    try std.testing.expect(opts.create);
     // Flags after the context are part of it.
     try std.testing.expectEqualStrings("fix the --model x", opts.context);
 
@@ -4028,11 +3959,11 @@ fn parseSessionRecoveryArgs(
     };
 }
 
-const WorkflowFlag = enum { permission_mode, ask, auto, full_access, yolo, provider, model, effort, fast, no_fast, ultrafast, no_ultrafast, provider_order, provider_strict, no_provider_strict, create };
+const WorkflowFlag = enum { permission_mode, ask, auto, full_access, yolo, provider, model, effort, fast, no_fast, ultrafast, no_ultrafast, provider_order, provider_strict, no_provider_strict };
 // `fx issue` documents the same flags as `fx pr`.
 const workflow_flag_ids = cli_flags.idTable(WorkflowFlag, &builtin_commands.pr_options);
 
-/// Reads `--auto` and `--create`, then joins the rest into the context.
+/// Reads the agent-run flags, then joins the rest into the context.
 fn parseWorkflowArgs(alloc: Allocator, args: []const [:0]const u8, bad: *?BadAgentValue) !WorkflowOptions {
     var opts: WorkflowOptions = .{};
     errdefer opts.agent.deinit(alloc);
@@ -4040,14 +3971,8 @@ fn parseWorkflowArgs(alloc: Allocator, args: []const [:0]const u8, bad: *?BadAge
     // Prefix mode stops at positionals, so every item is an option.
     while (parser.next() catch return error.InvalidWorkflowArgs) |item| {
         const id = workflow_flag_ids[item.option.index].?;
-        if (agent_run_flags.fromId(id)) |flag| {
-            try applyAgentFlag(alloc, &opts.agent, flag, &builtin_commands.pr_options, item.option, bad);
-            continue;
-        }
-        switch (id) {
-            .create => opts.create = true,
-            else => unreachable,
-        }
+        const flag = agent_run_flags.fromId(id).?;
+        try applyAgentFlag(alloc, &opts.agent, flag, &builtin_commands.pr_options, item.option, bad);
     }
     // Context starts at the first argument that isn't a flag. A dash word
     // there is a flag this command doesn't take, such as a typo, not
@@ -4804,40 +4729,16 @@ test "parse session recovery args accepts exact ids and rejects ambiguity" {
     );
 }
 
-test "workflow drafts come only from the completed final response" {
-    const alloc = std.testing.allocator;
-    const final = "Add greeting constant\n\n## Summary\n\n- Export `greeting` from **greeting.ts**.";
-
-    const draft = try draftFromRun(alloc, .{
-        .exit_code = 0,
-        .assistant_output = @constCast("Let me look at the branch first.\n\n" ++ final),
-        .final_source = @constCast(final),
-    });
-    defer draft.deinit(alloc);
-    try std.testing.expectEqualStrings("Add greeting constant", draft.title);
-    try std.testing.expectEqualStrings("## Summary\n\n- Export `greeting` from **greeting.ts**.", draft.body);
-
-    for ([_][]const u8{ "", "Done." }) |final_source| {
-        try std.testing.expectError(error.InvalidGithubDraft, draftFromRun(alloc, .{
-            .exit_code = 0,
-            .assistant_output = @constCast("Let me look at the branch first."),
-            .final_source = @constCast(final_source),
-        }));
-    }
-}
-
 test "parse workflow args consumes leading flags and joins remaining context exactly" {
     var bad: ?BadAgentValue = null;
-    var opts = try parseWorkflowArgs(std.testing.allocator, &.{ "--auto", "--create", "ready", "for", "review" }, &bad);
+    var opts = try parseWorkflowArgs(std.testing.allocator, &.{ "--auto", "ready", "for", "review" }, &bad);
     defer opts.deinit(std.testing.allocator);
     try std.testing.expectEqual(types.PermissionMode.auto, opts.agent.permission.?);
-    try std.testing.expect(opts.create);
     try std.testing.expectEqualStrings("ready for review", opts.context);
 
     var later_flag = try parseWorkflowArgs(std.testing.allocator, &.{ "context", "--auto" }, &bad);
     defer later_flag.deinit(std.testing.allocator);
     try std.testing.expect(later_flag.agent.permission == null);
-    try std.testing.expect(!later_flag.create);
     try std.testing.expectEqualStrings("context --auto", later_flag.context);
 
     var empty = try parseWorkflowArgs(std.testing.allocator, &.{}, &bad);
@@ -4851,9 +4752,8 @@ test "pr and issue reject a flag they don't take instead of sending it as contex
     try std.testing.expectError(error.InvalidWorkflowArgs, parseWorkflowArgs(std.testing.allocator, &.{ "--auto", "--add-dir", "/tmp" }, &bad));
     try std.testing.expectError(error.InvalidWorkflowArgs, parseWorkflowArgs(std.testing.allocator, &.{ "--config", "fast_mode=true" }, &bad));
 
-    var dashed = try parseWorkflowArgs(std.testing.allocator, &.{ "--create", "--", "--verbose", "is", "gone" }, &bad);
+    var dashed = try parseWorkflowArgs(std.testing.allocator, &.{ "--", "--verbose", "is", "gone" }, &bad);
     defer dashed.deinit(std.testing.allocator);
-    try std.testing.expect(dashed.create);
     try std.testing.expectEqualStrings("--verbose is gone", dashed.context);
 }
 
