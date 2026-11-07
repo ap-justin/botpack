@@ -312,17 +312,6 @@ pub fn resolveUltrafastProviderOptions(
     return options;
 }
 
-test "Ultrafast requires explicit opt-in and verified OpenAI Gateway capability" {
-    const caps = Capabilities{ .supports_fast_mode = true, .supports_ultrafast_mode = true };
-    const normal = try resolveUltrafastProviderOptions(caps, .gateway, "openai/gpt-6-astra", .auto, true, false);
-    try std.testing.expect(normal.fast and !normal.ultrafast);
-    const ultra = try resolveUltrafastProviderOptions(caps, .gateway, "openai/gpt-6-astra", .auto, true, true);
-    try std.testing.expect(ultra.ultrafast and !ultra.fast);
-    try std.testing.expectError(error.UltrafastUnavailable, resolveUltrafastProviderOptions(.{}, .gateway, "openai/gpt-6-astra", .auto, false, true));
-    try std.testing.expectError(error.UltrafastUnavailable, resolveUltrafastProviderOptions(caps, .codex, "openai/gpt-6-astra", .auto, false, true));
-    try std.testing.expectError(error.UltrafastUnavailable, resolveUltrafastProviderOptions(caps, .gateway, "anthropic/model", .auto, false, true));
-}
-
 test "capabilities infer intrinsic fast identity but not controls from model IDs" {
     const models = [_]struct { id: []const u8, intrinsic_fast: bool }{
         .{ .id = "openai/gpt-5.6-sol", .intrinsic_fast = false },
@@ -483,4 +472,14 @@ test "request controls remain safe across repeated state transitions" {
 test "generic fallback capabilities contain no vendor policy" {
     const fallback = capabilitiesForModel("anthropic/claude-any");
     try std.testing.expect(fallback.context_window == null);
+}
+
+test "Ultrafast requires explicit opt-in and verified OpenAI Gateway capability" {
+    const caps = Capabilities{ .supports_fast_mode = true, .supports_ultrafast_mode = true };
+    const normal = try resolveUltrafastProviderOptions(caps, .gateway, "openai/gpt-6-astra", .auto, true, false);
+    try std.testing.expect(normal.fast and !normal.ultrafast);
+    const ultra = try resolveUltrafastProviderOptions(caps, .gateway, "openai/gpt-6-astra", .auto, true, true);
+    try std.testing.expect(ultra.ultrafast and !ultra.fast);
+    try std.testing.expectError(error.UltrafastUnavailable, resolveUltrafastProviderOptions(.{}, .gateway, "openai/gpt-6-astra", .auto, false, true));
+    try std.testing.expectError(error.UltrafastUnavailable, resolveUltrafastProviderOptions(caps, .gateway, "anthropic/model", .auto, false, true));
 }

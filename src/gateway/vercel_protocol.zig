@@ -1879,21 +1879,6 @@ test "buildGatewayRequestBodyWithOptions serializes provider routing options" {
     try std.testing.expect(std.mem.find(u8, strict, "\"gateway\":{\"speed\":\"fast\",\"only\":[\"azure\",\"anthropic\"]}") != null);
 }
 
-test "buildGatewayRequestBodyWithOptions combines Gateway Fast and xai options" {
-    const alloc = std.testing.allocator;
-    const messages = [_]ChatMessage{
-        .{ .role = .user, .content = "question" },
-    };
-
-    const body = try buildGatewayRequestBodyWithOptions(alloc, "[]", &messages, .{
-        .fast = true,
-        .parallel_tool_calls = true,
-    }, .auto);
-    defer alloc.free(body);
-
-    try std.testing.expect(std.mem.find(u8, body, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"},\"xai\":{\"parallelToolCalls\":true}}") != null);
-}
-
 test "formatGatewayRequestShapeSummary reports content kinds without request content" {
     const alloc = std.testing.allocator;
     var calls = [_]ToolCall{.{
@@ -2431,4 +2416,19 @@ test "freeGatewayCompletion frees parsed completions under testing allocator" {
 
     const completion = try parseGatewayCompletion(alloc, body);
     freeGatewayCompletion(alloc, completion);
+}
+
+test "buildGatewayRequestBodyWithOptions combines Gateway Fast and xai options" {
+    const alloc = std.testing.allocator;
+    const messages = [_]ChatMessage{
+        .{ .role = .user, .content = "question" },
+    };
+
+    const body = try buildGatewayRequestBodyWithOptions(alloc, "[]", &messages, .{
+        .fast = true,
+        .parallel_tool_calls = true,
+    }, .auto);
+    defer alloc.free(body);
+
+    try std.testing.expect(std.mem.find(u8, body, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\"},\"xai\":{\"parallelToolCalls\":true}}") != null);
 }

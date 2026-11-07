@@ -441,8 +441,6 @@ pub fn loadStartupStatusWithAuthMode(
         auth_runtime.StatusSnapshot{
             .active_source = .host_managed,
             .gateway_connected = true,
-            .chatgpt_connected = true,
-            .grok_connected = true,
         }
     else
         try auth_runtime.loadStatusSnapshotForProvider(
@@ -514,7 +512,7 @@ fn keychainReadDeferrable(
     const source = preferred orelse return !env_credential_present;
     return switch (source) {
         .fx_login, .stored_key => true,
-        .vercel_oidc_token, .ai_gateway_api_key, .chatgpt_subscription, .grok_subscription, .host_managed, .configured => false,
+        .vercel_oidc_token, .ai_gateway_api_key, .host_managed, .configured => false,
     };
 }
 
@@ -825,131 +823,6 @@ fn initialModelId(default_model: []const u8, configured: ?[]const u8) []const u8
     return config_runtime.modelEnvOverride() orelse configured orelse default_model;
 }
 
-test "loadStartupState starts Codex from FX_PROVIDER and FX_MODEL without a saved model" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
-    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
-    const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
-    defer std.testing.allocator.free(home_root);
-    const workspace_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "workspace");
-    defer std.testing.allocator.free(workspace_root);
-
-    var env = try TestEnv.install(std.testing.allocator, &.{
-        .{ .key = "HOME", .value = home_root },
-        .{ .key = "FX_PROVIDER", .value = "codex" },
-        .{ .key = "FX_MODEL", .value = "  gpt-env  " },
-    });
-    defer env.deinit();
-
-    var state = try loadStartupStateForWorkspace(std.testing.allocator, workspace_root, "default/model", 25);
-    defer state.deinit(std.testing.allocator);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, state.provider);
-    try std.testing.expectEqualStrings("gpt-env", state.selected_model);
-    try std.testing.expectEqualStrings("gpt-env", state.configured_model);
-    try std.testing.expectEqual(config_runtime.ModelSource.process_override, state.model_source);
-
-    // A blank FX_MODEL is no model at all, so the setup error still surfaces.
-    var blank_env = try TestEnv.install(std.testing.allocator, &.{
-        .{ .key = "HOME", .value = home_root },
-        .{ .key = "FX_PROVIDER", .value = "codex" },
-        .{ .key = "FX_MODEL", .value = " \t " },
-    });
-    defer blank_env.deinit();
-    try std.testing.expectError(
-        error.CodexModelNotSelected,
-        loadStartupStateForWorkspace(std.testing.allocator, workspace_root, "default/model", 25),
-    );
-}
-
-test "loadStartupState seeds a provider without a saved model from the launch --model" {
-    const alloc = std.testing.allocator;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
-    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
-    const home_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
-    defer alloc.free(home_root);
-    const workspace_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
-    defer alloc.free(workspace_root);
-
-    var env = try TestEnv.install(alloc, &.{
-        .{ .key = "HOME", .value = home_root },
-        .{ .key = "FX_MODEL", .value = "gpt-env" },
-    });
-    defer env.deinit();
-
-    // fx --provider codex --model gpt-flag from a Gateway-only profile: the
-    // flag outranks FX_MODEL as the seeded preference; callers apply it last.
-    var state = try loadStartupStateFromOwnedWorkspace(
-        alloc,
-        oauth_transport.unavailable_provider,
-        host.unavailable_secret_store,
-        try alloc.dupe(u8, workspace_root),
-        "default/model",
-        25,
-        .local,
-        null,
-        null,
-        .codex,
-        "gpt-flag",
-    );
-    defer state.deinit(alloc);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, state.provider);
-    try std.testing.expectEqualStrings("gpt-flag", state.configured_model);
-}
-
-test "loadStartupStatus reports where the selected model came from" {
-    const alloc = std.testing.allocator;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
-    const home_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
-    defer alloc.free(home_root);
-
-    {
-        var env = try TestEnv.install(alloc, &.{
-            .{ .key = "HOME", .value = home_root },
-            .{ .key = "FX_PROVIDER", .value = "codex" },
-            .{ .key = "FX_MODEL", .value = "gpt-env" },
-        });
-        defer env.deinit();
-        var status = try loadStartupStatusWithAuthMode(alloc, host.unavailable_secret_store, "default/model", 25, .host_managed);
-        defer status.deinit(alloc);
-        try std.testing.expectEqual(model_provider.ProviderId.codex, status.provider);
-        try std.testing.expectEqualStrings("gpt-env", status.selected_model);
-        try std.testing.expectEqual(ModelOrigin.env, status.model_origin);
-    }
-    {
-        var env = try TestEnv.install(alloc, &.{
-            .{ .key = "HOME", .value = home_root },
-            .{ .key = "FX_PROVIDER", .value = "codex" },
-        });
-        defer env.deinit();
-        try std.testing.expectError(
-            error.CodexModelNotSelected,
-            loadStartupStatusWithAuthMode(alloc, host.unavailable_secret_store, "default/model", 25, .host_managed),
-        );
-    }
-    {
-        var env = try TestEnv.install(alloc, &.{.{ .key = "HOME", .value = home_root }});
-        defer env.deinit();
-        var status = try loadStartupStatusWithAuthMode(alloc, host.unavailable_secret_store, "default/model", 25, .host_managed);
-        defer status.deinit(alloc);
-        try std.testing.expectEqualStrings("default/model", status.selected_model);
-        try std.testing.expectEqual(ModelOrigin.default, status.model_origin);
-    }
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", "{\"provider\":\"codex\",\"models\":{\"codex\":\"gpt-saved\"}}\n");
-    {
-        var env = try TestEnv.install(alloc, &.{.{ .key = "HOME", .value = home_root }});
-        defer env.deinit();
-        var status = try loadStartupStatusWithAuthMode(alloc, host.unavailable_secret_store, "default/model", 25, .host_managed);
-        defer status.deinit(alloc);
-        try std.testing.expectEqualStrings("gpt-saved", status.selected_model);
-        try std.testing.expectEqual(ModelOrigin.settings, status.model_origin);
-    }
-}
-
 fn loadInitialModel(alloc: Allocator, default_model: []const u8, configured: ?[]const u8) ![]u8 {
     return alloc.dupe(u8, initialModelId(default_model, configured));
 }
@@ -1164,81 +1037,6 @@ test "host-managed startup skips every local credential source" {
     try std.testing.expectEqual(credentials.CatalogAccess.host_managed, state.modelCatalogAccess());
 }
 
-test "loadStartupState defaults fast mode off and requires bound explicit preferences" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
-    try tmp.dir.createDirPath(io_mod.getIo(), "absent");
-    try tmp.dir.createDirPath(io_mod.getIo(), "configured");
-    try tmp.dir.createDirPath(io_mod.getIo(), "disabled");
-    try tmp.dir.createDirPath(io_mod.getIo(), "legacy-fast");
-    try tmp.dir.createDirPath(io_mod.getIo(), "bound-fast");
-    try tmp.dir.createDirPath(io_mod.getIo(), "codex");
-
-    const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
-    defer std.testing.allocator.free(home_root);
-    const absent_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "absent");
-    defer std.testing.allocator.free(absent_root);
-    const configured_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "configured");
-    defer std.testing.allocator.free(configured_root);
-    const disabled_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "disabled");
-    defer std.testing.allocator.free(disabled_root);
-    const legacy_fast_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "legacy-fast");
-    defer std.testing.allocator.free(legacy_fast_root);
-    const bound_fast_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "bound-fast");
-    defer std.testing.allocator.free(bound_fast_root);
-    const codex_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "codex");
-    defer std.testing.allocator.free(codex_root);
-
-    const fixture = try std.testing.allocator.print(
-        "{{\"workspaces\":{{\"{s}\":{{\"model\":\"openai/gpt-5\"}},\"{s}\":{{\"fast_mode\":false}},\"{s}\":{{\"model\":\"zai/glm-5.3\",\"fast_mode\":true}},\"{s}\":{{\"model\":\"provider/fast-toggle\",\"fast_mode\":true,\"fast_mode_model_bound\":true}},\"{s}\":{{\"provider\":\"codex\",\"codex_model\":\"gpt-5.4-mini\"}}}}}}\n",
-        .{ configured_root, disabled_root, legacy_fast_root, bound_fast_root, codex_root },
-    );
-    defer std.testing.allocator.free(fixture);
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", fixture);
-
-    var env = try TestEnv.install(std.testing.allocator, &.{.{ .key = "HOME", .value = home_root }});
-    defer env.deinit();
-
-    var absent = try loadStartupStateForWorkspace(std.testing.allocator, absent_root, "zai/glm-5.2", 25);
-    defer absent.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("zai/glm-5.2", absent.selected_model);
-    try std.testing.expectEqualStrings("zai/glm-5.2", absent.configured_model);
-    try std.testing.expect(!absent.fast_mode);
-    try std.testing.expect(!absent.fast_mode_model_bound);
-
-    var configured = try loadStartupStateForWorkspace(std.testing.allocator, configured_root, "zai/glm-5.2", 25);
-    defer configured.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("openai/gpt-5", configured.selected_model);
-    try std.testing.expectEqualStrings("openai/gpt-5", configured.configured_model);
-    try std.testing.expect(!configured.fast_mode);
-    try std.testing.expect(!configured.fast_mode_model_bound);
-
-    var disabled = try loadStartupStateForWorkspace(std.testing.allocator, disabled_root, "zai/glm-5.2", 25);
-    defer disabled.deinit(std.testing.allocator);
-    try std.testing.expect(!disabled.fast_mode);
-    try std.testing.expect(!disabled.fast_mode_model_bound);
-
-    var legacy_fast = try loadStartupStateForWorkspace(std.testing.allocator, legacy_fast_root, "zai/glm-5.2", 25);
-    defer legacy_fast.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("zai/glm-5.3", legacy_fast.selected_model);
-    try std.testing.expect(legacy_fast.fast_mode);
-    try std.testing.expect(!legacy_fast.fast_mode_model_bound);
-
-    var bound_fast = try loadStartupStateForWorkspace(std.testing.allocator, bound_fast_root, "zai/glm-5.2", 25);
-    defer bound_fast.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("provider/fast-toggle", bound_fast.selected_model);
-    try std.testing.expect(bound_fast.fast_mode);
-    try std.testing.expect(bound_fast.fast_mode_model_bound);
-
-    var codex = try loadStartupStateForWorkspace(std.testing.allocator, codex_root, "zai/glm-5.2", 25);
-    defer codex.deinit(std.testing.allocator);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, codex.provider);
-    try std.testing.expectEqualStrings("gpt-5.4-mini", codex.selected_model);
-    try std.testing.expect(!codex.fast_mode);
-}
-
 test "loadStartupState resolves startup scrollback default and explicit false" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -1408,19 +1206,6 @@ test "credential onboarding can be skipped independently from Keychain" {
     try std.testing.expect(onboarding_skipped);
 }
 
-test "only a Keychain-backed Gateway credential is deferred past the first frame" {
-    try std.testing.expect(keychainReadDeferrable(true, false, .gateway, .fx_login, false));
-    try std.testing.expect(keychainReadDeferrable(true, false, .gateway, .stored_key, true));
-    try std.testing.expect(keychainReadDeferrable(true, false, .gateway, null, false));
-    // An environment credential wins automatic precedence without the Keychain.
-    try std.testing.expect(!keychainReadDeferrable(true, false, .gateway, null, true));
-    try std.testing.expect(!keychainReadDeferrable(true, false, .gateway, .ai_gateway_api_key, false));
-    try std.testing.expect(!keychainReadDeferrable(true, false, .gateway, .vercel_oidc_token, false));
-    try std.testing.expect(!keychainReadDeferrable(true, false, .codex, .fx_login, false));
-    try std.testing.expect(!keychainReadDeferrable(true, true, .gateway, .fx_login, false));
-    try std.testing.expect(!keychainReadDeferrable(false, false, .gateway, .fx_login, false));
-}
-
 fn keychainEnabledForTest(_: ?*anyopaque) bool {
     return false;
 }
@@ -1467,4 +1252,120 @@ fn writeFixtureFile(dir: std.Io.Dir, sub_path: []const u8, text: []const u8) !vo
     var file = try dir.createFile(io_mod.getIo(), sub_path, .{ .truncate = true });
     defer file.close(io_mod.getIo());
     try file.writeStreamingAll(io_mod.getIo(), text);
+}
+
+test "loadStartupStatus reports where the selected model came from" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    const home_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
+    defer alloc.free(home_root);
+
+    {
+        var env = try TestEnv.install(alloc, &.{
+            .{ .key = "HOME", .value = home_root },
+            .{ .key = "FX_MODEL", .value = "gpt-env" },
+        });
+        defer env.deinit();
+        var status = try loadStartupStatusWithAuthMode(alloc, host.unavailable_secret_store, "default/model", 25, .host_managed);
+        defer status.deinit(alloc);
+        try std.testing.expectEqualStrings("gpt-env", status.selected_model);
+        try std.testing.expectEqual(ModelOrigin.env, status.model_origin);
+    }
+    {
+        var env = try TestEnv.install(alloc, &.{.{ .key = "HOME", .value = home_root }});
+        defer env.deinit();
+        var status = try loadStartupStatusWithAuthMode(alloc, host.unavailable_secret_store, "default/model", 25, .host_managed);
+        defer status.deinit(alloc);
+        try std.testing.expectEqualStrings("default/model", status.selected_model);
+        try std.testing.expectEqual(ModelOrigin.default, status.model_origin);
+    }
+    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", "{\"models\":{\"gateway\":\"gpt-saved\"}}\n");
+    {
+        var env = try TestEnv.install(alloc, &.{.{ .key = "HOME", .value = home_root }});
+        defer env.deinit();
+        var status = try loadStartupStatusWithAuthMode(alloc, host.unavailable_secret_store, "default/model", 25, .host_managed);
+        defer status.deinit(alloc);
+        try std.testing.expectEqualStrings("gpt-saved", status.selected_model);
+        try std.testing.expectEqual(ModelOrigin.settings, status.model_origin);
+    }
+}
+
+test "loadStartupState defaults fast mode off and requires bound explicit preferences" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "absent");
+    try tmp.dir.createDirPath(io_mod.getIo(), "configured");
+    try tmp.dir.createDirPath(io_mod.getIo(), "disabled");
+    try tmp.dir.createDirPath(io_mod.getIo(), "legacy-fast");
+    try tmp.dir.createDirPath(io_mod.getIo(), "bound-fast");
+
+    const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
+    defer std.testing.allocator.free(home_root);
+    const absent_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "absent");
+    defer std.testing.allocator.free(absent_root);
+    const configured_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "configured");
+    defer std.testing.allocator.free(configured_root);
+    const disabled_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "disabled");
+    defer std.testing.allocator.free(disabled_root);
+    const legacy_fast_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "legacy-fast");
+    defer std.testing.allocator.free(legacy_fast_root);
+    const bound_fast_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "bound-fast");
+    defer std.testing.allocator.free(bound_fast_root);
+
+    const fixture = try std.testing.allocator.print(
+        "{{\"workspaces\":{{\"{s}\":{{\"model\":\"openai/gpt-5\"}},\"{s}\":{{\"fast_mode\":false}},\"{s}\":{{\"model\":\"zai/glm-5.3\",\"fast_mode\":true}},\"{s}\":{{\"model\":\"provider/fast-toggle\",\"fast_mode\":true,\"fast_mode_model_bound\":true}}}}}}\n",
+        .{ configured_root, disabled_root, legacy_fast_root, bound_fast_root },
+    );
+    defer std.testing.allocator.free(fixture);
+    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", fixture);
+
+    var env = try TestEnv.install(std.testing.allocator, &.{.{ .key = "HOME", .value = home_root }});
+    defer env.deinit();
+
+    var absent = try loadStartupStateForWorkspace(std.testing.allocator, absent_root, "zai/glm-5.2", 25);
+    defer absent.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("zai/glm-5.2", absent.selected_model);
+    try std.testing.expectEqualStrings("zai/glm-5.2", absent.configured_model);
+    try std.testing.expect(!absent.fast_mode);
+    try std.testing.expect(!absent.fast_mode_model_bound);
+
+    var configured = try loadStartupStateForWorkspace(std.testing.allocator, configured_root, "zai/glm-5.2", 25);
+    defer configured.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("openai/gpt-5", configured.selected_model);
+    try std.testing.expectEqualStrings("openai/gpt-5", configured.configured_model);
+    try std.testing.expect(!configured.fast_mode);
+    try std.testing.expect(!configured.fast_mode_model_bound);
+
+    var disabled = try loadStartupStateForWorkspace(std.testing.allocator, disabled_root, "zai/glm-5.2", 25);
+    defer disabled.deinit(std.testing.allocator);
+    try std.testing.expect(!disabled.fast_mode);
+    try std.testing.expect(!disabled.fast_mode_model_bound);
+
+    var legacy_fast = try loadStartupStateForWorkspace(std.testing.allocator, legacy_fast_root, "zai/glm-5.2", 25);
+    defer legacy_fast.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("zai/glm-5.3", legacy_fast.selected_model);
+    try std.testing.expect(legacy_fast.fast_mode);
+    try std.testing.expect(!legacy_fast.fast_mode_model_bound);
+
+    var bound_fast = try loadStartupStateForWorkspace(std.testing.allocator, bound_fast_root, "zai/glm-5.2", 25);
+    defer bound_fast.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("provider/fast-toggle", bound_fast.selected_model);
+    try std.testing.expect(bound_fast.fast_mode);
+    try std.testing.expect(bound_fast.fast_mode_model_bound);
+}
+
+test "only a Keychain-backed Gateway credential is deferred past the first frame" {
+    try std.testing.expect(keychainReadDeferrable(true, false, .gateway, .fx_login, false));
+    try std.testing.expect(keychainReadDeferrable(true, false, .gateway, .stored_key, true));
+    try std.testing.expect(keychainReadDeferrable(true, false, .gateway, null, false));
+    // An environment credential wins automatic precedence without the Keychain.
+    try std.testing.expect(!keychainReadDeferrable(true, false, .gateway, null, true));
+    try std.testing.expect(!keychainReadDeferrable(true, false, .gateway, .ai_gateway_api_key, false));
+    try std.testing.expect(!keychainReadDeferrable(true, false, .gateway, .vercel_oidc_token, false));
+    try std.testing.expect(!keychainReadDeferrable(true, true, .gateway, .fx_login, false));
+    try std.testing.expect(!keychainReadDeferrable(false, false, .gateway, .fx_login, false));
 }

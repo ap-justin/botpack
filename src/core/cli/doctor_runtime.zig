@@ -730,16 +730,10 @@ test "doctor startup check fails when the provider has no model to run" {
         .checks = &.{},
     };
 
-    try appendResolvedStartupCheck(&snapshot, &checks, alloc, error.CodexModelNotSelected, .{ .max_agent_steps = 7 }, 25);
-    try std.testing.expectEqualStrings("", snapshot.model);
-    try std.testing.expectEqual(@as(usize, 7), snapshot.agent_step_limit);
-    try std.testing.expectEqual(CheckStatus.fail, checks.items[0].status);
-    try std.testing.expect(std.mem.startsWith(u8, checks.items[0].detail, "no Codex model is selected;"));
-
-    try appendResolvedStartupCheck(&snapshot, &checks, alloc, .{ .provider = .codex, .model = "gpt-saved" }, .{}, 25);
+    try appendResolvedStartupCheck(&snapshot, &checks, alloc, .{ .provider = .gateway, .model = "gpt-saved" }, .{}, 25);
     defer if (snapshot.owned_model) |model| alloc.free(model);
     try std.testing.expectEqualStrings("gpt-saved", snapshot.model);
-    try std.testing.expectEqual(CheckStatus.ok, checks.items[1].status);
+    try std.testing.expectEqual(CheckStatus.ok, checks.items[0].status);
 }
 
 test "bounded doctor warnings use existing check stream" {

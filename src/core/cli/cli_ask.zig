@@ -5011,30 +5011,6 @@ test "fx ask publishes a complete refreshed credential before later consumers" {
     );
 }
 
-test "fx ask ChatGPT route disables Gateway-backed auxiliary providers" {
-    const alloc = std.testing.allocator;
-    var stdout_capture = TestCapture{};
-    defer stdout_capture.deinit(alloc);
-    var stderr_capture = TestCapture{};
-    defer stderr_capture.deinit(alloc);
-    var ctx = AskContext.init(
-        alloc,
-        testConfig(),
-        testPromptRunDeps(&stdout_capture, &stderr_capture, testPresentKeyStartup),
-        "/tmp/workspace",
-    );
-    defer ctx.deinit();
-    ctx.api_key = "chatgpt-secret";
-    ctx.credential_source = .chatgpt_subscription;
-    ctx.provider = .codex;
-    ctx.model = "gpt-5.4";
-
-    const tool_ctx = ctx.toolContext();
-    try std.testing.expect(tool_ctx.web_search_backend == null);
-    try std.testing.expect(!tool_ctx.auto_classifier.enabled());
-    try std.testing.expect(tool_ctx.permission_reviewer_provider == null);
-}
-
 test "fx ask finalization fails every failed turn" {
     const cases = [_]struct {
         outcome: types.TurnPresentationOutcome,
@@ -5201,14 +5177,14 @@ test "parse options preserves model effort and fast overrides" {
 test "parse options accepts a per-run provider and the last one wins" {
     const alloc = std.testing.allocator;
 
-    var spaced = try parseOptionsWithStdin(alloc, &.{ "--provider", "codex", "hello" }, .tty);
+    var spaced = try parseOptionsWithStdin(alloc, &.{ "--provider", "gateway", "hello" }, .tty);
     defer spaced.deinit(alloc);
-    try std.testing.expect(spaced.agent.provider.?.eql(.codex));
+    try std.testing.expect(spaced.agent.provider.?.eql(.gateway));
     try std.testing.expectEqualStrings("hello", spaced.prompt);
 
-    var last = try parseOptionsWithStdin(alloc, &.{ "--provider", "codex", "--provider=grok", "hello" }, .tty);
+    var last = try parseOptionsWithStdin(alloc, &.{ "--provider", "gateway", "--provider=local", "hello" }, .tty);
     defer last.deinit(alloc);
-    try std.testing.expect(last.agent.provider.?.eql(.grok));
+    try std.testing.expect(last.agent.provider.?.eql(model_provider.parse("local").?));
 
     var defaulted = try parseOptionsWithStdin(alloc, &.{"hello"}, .tty);
     defer defaulted.deinit(alloc);

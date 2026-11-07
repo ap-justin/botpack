@@ -675,11 +675,6 @@ fn streamAgentCompletion(
     const shared_pool: ?*http_pool.HttpPool = if (context) |ctx| @ptrCast(@alignCast(ctx)) else null;
     const credential_source = request.credential.credentialSource();
     if (credential_source == .configured) return agent_stream_provider_contract.failResult(error.ConfiguredCredentialCannotAuthorizeGateway);
-    if (credential_source == .chatgpt_subscription or credential_source == .grok_subscription) {
-        return agent_stream_provider_contract.failResult(
-            error.SubscriptionCredentialCannotAuthorizeGateway,
-        );
-    }
     const payload = request.prepared_request_body orelse
         try buildAgentRequest(alloc, request.data());
     defer if (request.prepared_request_body == null) alloc.free(payload);
@@ -785,12 +780,6 @@ fn fetchCredits(
     alloc: Allocator,
     input: gateway_provider.CreditsLookupInput,
 ) output_contracts.CreditsSnapshot {
-    if (input.credential_source == .chatgpt_subscription) {
-        return creditsErrorSnapshot(alloc, "AI Gateway credits are unavailable for a ChatGPT subscription.");
-    }
-    if (input.credential_source == .grok_subscription) {
-        return creditsErrorSnapshot(alloc, "AI Gateway credits are unavailable for a Grok subscription.");
-    }
     var local_cancel = std.atomic.Value(bool).init(false);
     return fetchCreditsWithFetch(
         alloc,
@@ -2101,19 +2090,6 @@ fn stubFetchForbiddenCredits(
     };
 }
 
-test "built-in credits provider rejects ChatGPT credentials before Gateway I/O" {
-    var snapshot = fetchCredits(null, std.testing.allocator, .{
-        .credential = "chatgpt-secret",
-        .credential_source = .chatgpt_subscription,
-        .tenant = null,
-    });
-    defer snapshot.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings(
-        "AI Gateway credits are unavailable for a ChatGPT subscription.",
-        snapshot.err_message.?,
-    );
-}
-
 test "built-in credits provider names the team query only when valid" {
     const cases = [_]struct { team: ?[]const u8, want: []const u8 }{
         .{ .team = null, .want = "/coding-agent/v1/credits" },
@@ -2631,82 +2607,6 @@ fn installLoopbackModelsEnv(alloc: std.mem.Allocator, port: u16) !*ModelsUrlTest
     );
     defer alloc.free(models_url);
     return ModelsUrlTestEnv.install(alloc, models_url);
-}
-
-test "Gateway catalog provider rejects subscription credentials before HTTP" {
-    const alloc = std.testing.allocator;
-    for ([_]credentials.Source{ .chatgpt_subscription, .grok_subscription }) |source| {
-        var fixture = try gateway_client.TestModelCatalogFixture.init();
-        defer fixture.deinit();
-        try fixture.start();
-        try std.testing.expect(fixture.waitForAcceptStart(5000));
-        const env = try installLoopbackModelsEnv(alloc, fixture.port());
-        defer env.deinit();
-
-        var result = try model_catalog_provider.fetch(alloc, .{
-            .access = credentials.catalogAccessForCredentialAndAccount(source, "subscription-token", null, "account"),
-            .endpoint = models_path,
-        });
-        defer if (result == .catalog) freeModelCatalog(alloc, &result.catalog);
-        try std.testing.expect(fixture.capturedHeaderValue("authorization") == null);
-        switch (result) {
-            .failure => |failure| {
-                try std.testing.expectEqual(model_catalog.FailureCategory.authentication, failure.category);
-                try std.testing.expectEqual(std.http.Status.unauthorized, failure.http_status.?);
-            },
-            .catalog => return error.TestUnexpectedResult,
-        }
-    }
-}
-
-test "Gateway catalog ID wrappers reject subscription credentials before HTTP" {
-    const alloc = std.testing.allocator;
-    for ([_]credentials.Source{ .chatgpt_subscription, .grok_subscription }) |source| {
-        var fixture = try gateway_client.TestModelCatalogFixture.init();
-        defer fixture.deinit();
-        try fixture.start();
-        try std.testing.expect(fixture.waitForAcceptStart(5000));
-        const env = try installLoopbackModelsEnv(alloc, fixture.port());
-        defer env.deinit();
-
-        var cancel_flag = std.atomic.Value(bool).init(false);
-        var ids = fetchModelIdsCancellable(
-            alloc,
-            credentials.catalogAccessForCredentialAndAccount(source, "subscription-token", null, "account"),
-            models_path,
-            &cancel_flag,
-        ) catch |err| {
-            try std.testing.expectEqual(error.AuthenticationRejected, err);
-            try std.testing.expect(fixture.capturedHeaderValue("authorization") == null);
-            continue;
-        };
-        defer collections.freeStringList(alloc, &ids);
-        try std.testing.expect(fixture.capturedHeaderValue("authorization") == null);
-        return error.TestUnexpectedResult;
-    }
-}
-
-test "Gateway catalog permits public-only and host-managed access without authentication headers" {
-    const alloc = std.testing.allocator;
-    for ([_]credentials.CatalogAccess{
-        .{ .public_only = .no_credential },
-        .{ .public_only = .chatgpt_subscription },
-        .{ .public_only = .grok_subscription },
-        .host_managed,
-    }) |access| {
-        var fixture = try gateway_client.TestModelCatalogFixture.init();
-        defer fixture.deinit();
-        try fixture.start();
-        try std.testing.expect(fixture.waitForAcceptStart(5000));
-        const env = try installLoopbackModelsEnv(alloc, fixture.port());
-        defer env.deinit();
-
-        var ids = try fetchModelIds(alloc, access, models_path);
-        defer collections.freeStringList(alloc, &ids);
-        try std.testing.expect(ids.items.len > 0);
-        try std.testing.expect(fixture.capturedHeaderValue("authorization") == null);
-        if (fixture.failure()) |err| return err;
-    }
 }
 
 test "model catalog GET includes selected team header" {
@@ -3337,4 +3237,25 @@ test "gateway catalog controls are explicit ordered and bounded" {
     try std.testing.expectEqualStrings("provider/malformed", catalog.items[2].id);
     try std.testing.expectEqual(@as(usize, 0), catalog.items[2].reasoning_efforts.items.len);
     try std.testing.expect(!catalog.items[2].supports_fast_mode);
+}
+
+test "Gateway catalog permits public-only and host-managed access without authentication headers" {
+    const alloc = std.testing.allocator;
+    for ([_]credentials.CatalogAccess{
+        .{ .public_only = .no_credential },
+        .host_managed,
+    }) |access| {
+        var fixture = try gateway_client.TestModelCatalogFixture.init();
+        defer fixture.deinit();
+        try fixture.start();
+        try std.testing.expect(fixture.waitForAcceptStart(5000));
+        const env = try installLoopbackModelsEnv(alloc, fixture.port());
+        defer env.deinit();
+
+        var ids = try fetchModelIds(alloc, access, models_path);
+        defer collections.freeStringList(alloc, &ids);
+        try std.testing.expect(ids.items.len > 0);
+        try std.testing.expect(fixture.capturedHeaderValue("authorization") == null);
+        if (fixture.failure()) |err| return err;
+    }
 }

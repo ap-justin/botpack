@@ -53,8 +53,8 @@ pub const Config = struct {
     /// sets it, without saving it. A client can still switch modes. Null
     /// starts in the saved mode.
     permission_override: ?types.PermissionMode = null,
-    /// `.host_managed` sends requests to every provider but Gateway (Codex,
-    /// Grok and a configured provider) without a credential; the host adds one
+    /// `.host_managed` sends requests to every provider but Gateway (a
+    /// configured provider) without a credential; the host adds one
     /// at its fetch edge. Gateway keeps `auth_mode`.
     provider_auth_mode: credentials.AuthMode = .local,
     /// For `minimal_kernel` runs: a settings-style providers object whose

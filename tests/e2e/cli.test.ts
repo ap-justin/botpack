@@ -34,19 +34,12 @@ import {
 } from "./fake-gateway";
 import { onlySessionId, savedSession, savedText, sessionDir } from "./saved-sessions";
 import {
-  codexBreakdownBody,
-  codexProfileBody,
-  codexUsageBody,
   DAY_MS,
-  grokBillingBody,
-  grokSettingsBody,
   type ReportRow,
   USAGE_NOW_MS,
   usageEnv,
   usageFake,
   utcDate,
-  writeChatGptLogin,
-  writeGrokLogin,
   writeUsageClock,
 } from "./usage-fakes";
 
@@ -365,7 +358,7 @@ describe("cli: help", () => {
       expect(stdout).toContain("Choose the active model provider");
       // `fx setup` is deprecated and hidden; `fx login --api-key` replaces it.
       expect(stdout).not.toContain("Configure a Vercel AI Gateway API key");
-      expect(stdout).toContain("login [vercel|codex|grok] [--api-key]");
+      expect(stdout).toContain("login [vercel] [--api-key]");
       expect(stdout).toContain("Choose a Vercel AI Gateway team");
       expect(stdout).toContain("Show Vercel AI Gateway credits");
       expect(stdout).not.toContain("Sign in to Vercel or a selected provider");
@@ -413,7 +406,7 @@ Options:
   --auto                      Automatically review unresolved permission requests
   --full-access               Disable fx permission checks
   --yolo                      Alias for --full-access
-  --provider <name>           Override the model provider for this request (gateway, codex, grok, or a configured name)
+  --provider <name>           Override the model provider for this request (gateway or a configured name)
   --model <id>                Override the model for this request
   --effort <level>            Override the reasoning effort for this request
   --fast                      Enable Fast mode for this request when the model supports it
@@ -559,8 +552,6 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
     },
     TIMEOUT,
   );
-});
-
 });
 
 describe("cli: version", () => {
@@ -975,7 +966,7 @@ describe("cli: status", () => {
             fast_mode: true,
             fast_mdoe: 1,
             statusLine: { context: true },
-            models: { codex: "gpt-5.5" },
+            models: { gateway: "openai/gpt-5.5" },
             provider_order: ["a", "b"],
             workspaces: { [cwd]: { fast_mode: false } },
           }) + "\n",
@@ -992,7 +983,7 @@ describe("cli: status", () => {
             "file:.fx.json\tmax_agent_steps=7",
             "file:~/.fx/settings.json\tfast_mode=true",
             "file:~/.fx/settings.json\tstatus_line.context=true",
-            "file:~/.fx/settings.json\tmodels.codex=gpt-5.5",
+            "file:~/.fx/settings.json\tmodels.gateway=openai/gpt-5.5",
             'file:~/.fx/settings.json\tprovider_order=["a","b"]',
             `workspace:${cwd}\tfast_mode=false`,
             "",
@@ -1090,7 +1081,7 @@ describe("cli: status", () => {
             "fx config: can't change permission_mode with fx config; use /permissions in a session, or --permission-mode for one run\n",
           ],
           [["config", "set", "fast_mode", "maybe"], "fx config: invalid value for fast_mode: maybe (use true or false)\n"],
-          [["config", "set", "models.codex", "gpt-5.5"], "fx config: can't change models.codex with fx config; use /model in a session\n"],
+          [["config", "set", "models.gateway", "openai/gpt-5.5"], "fx config: can't change models.gateway with fx config; use /model in a session\n"],
         ];
         for (const [args, stderr] of refusals) {
           const result = await runFx(args, { cwd, env });
@@ -1150,14 +1141,10 @@ describe("cli: status", () => {
 
   for (const scenario of [
     { name: "automatic Gateway", provider: "gateway", source: undefined, help: MISSING_AUTH_MESSAGE },
-    { name: "Gateway with a stale Codex preference", provider: "gateway", source: "chatgpt_subscription", help: MISSING_AUTH_MESSAGE },
-    { name: "Gateway with a stale Grok preference", provider: "gateway", source: "grok_subscription", help: MISSING_AUTH_MESSAGE },
     { name: "an exact Gateway login", provider: "gateway", source: "fx_login", help: "fx login is selected but unavailable. Run fx login to reconnect; no other credential was selected." },
     { name: "an exact OIDC token", provider: "gateway", source: "vercel_oidc_token", help: "VERCEL_OIDC_TOKEN is selected but unavailable. Set VERCEL_OIDC_TOKEN before starting fx; no other credential was selected." },
     { name: "an exact environment key", provider: "gateway", source: "ai_gateway_api_key", help: "AI_GATEWAY_API_KEY is selected but unavailable. Set AI_GATEWAY_API_KEY before starting fx; no other credential was selected." },
     { name: "an exact stored key", provider: "gateway", source: "stored_key", help: "A stored API key is selected but unavailable. Start fx and open /provider to choose an available credential; no other credential was selected." },
-    { name: "Codex", provider: "codex", source: undefined, help: "fx needs a Codex subscription login for this model. Run fx login codex." },
-    { name: "Grok", provider: "grok", source: undefined, help: "fx needs a Grok subscription login for this model. Run fx login grok." },
   ]) {
     test(
       `status and doctor respect ${scenario.name} when credentials are missing`,
@@ -2058,89 +2045,6 @@ describe("cli: usage", () => {
     },
     TIMEOUT,
   );
-
-  test(
-    "fx usage with Codex reads the ChatGPT plan's limits and activity",
-    async () => {
-      const fixture = usageFixture("fx-e2e-usage-codex-", {
-        codex: {
-          usage: codexUsageBody(),
-          profile: codexProfileBody(),
-          breakdown: codexBreakdownBody(),
-        },
-      });
-      writeChatGptLogin(fixture.home, "acct_e2e");
-      // Times show in the local zone, fixed here at five and a half hours east of UTC.
-      const env = { ...fixture.env, FX_PROVIDER: "codex", FX_MODEL: "codex-e2e-model", TZ: "IST-5:30" };
-      try {
-        const text = await runFx(["usage", "--period", "today"], { env });
-        expect(text.code).toBe(0);
-        expect(text.stderr).toBe("");
-        expect(text.stdout).toContain("Codex usage from ChatGPT for samdoe, updated 21:00 IST");
-        expect(text.stdout).toContain("Tokens        40000 today, 100000 7d, 100000 month, 9000000 lifetime");
-        expect(text.stdout).toContain("Share by model (today): gpt-e2e-large fast 70.0%, gpt-e2e-small standard 30.0%");
-        expect(text.stdout).toContain("Plan          pro");
-        expect(text.stdout).toContain("Credits       12.40");
-        expect(text.stdout).toContain("- codex (5h window): 42% used, resets 23:00 IST");
-        expect(text.stdout).toContain("- codex (168h window): 18% used");
-        const paths = fixture.fake.requests.map((request) => request.path).sort();
-        expect(paths).toEqual([
-          "/backend-api/wham/profiles/me",
-          "/backend-api/wham/usage",
-          "/backend-api/wham/usage/daily-token-usage-breakdown",
-        ]);
-        for (const request of fixture.fake.requests) {
-          expect(request.chatgptAccount).toBe("acct_e2e");
-          expect(request.authorization?.startsWith("Bearer header.")).toBe(true);
-        }
-        expect(fixture.fake.reportRanges()).toEqual([]);
-
-        const json = await runFx(["usage", "--json"], { env });
-        expect(JSON.parse(json.stdout)).toMatchObject({
-          source: "chatgpt",
-          status: "ready",
-          codex: { plan: "pro" },
-        });
-      } finally {
-        fixture.stop();
-      }
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "fx usage with Grok reads the plan's allowance and credits",
-    async () => {
-      const fixture = usageFixture("fx-e2e-usage-grok-", {
-        grok: { billing: grokBillingBody(), settings: grokSettingsBody() },
-      });
-      writeGrokLogin(fixture.home, "acct_grok_e2e");
-      // Times show in the local zone; five and a half hours east, the reset moves to the next day.
-      const env = { ...fixture.env, FX_PROVIDER: "grok", FX_MODEL: "grok-4.20", TZ: "IST-5:30" };
-      try {
-        const text = await runFx(["usage"], { env });
-        expect(text.code).toBe(0);
-        expect(text.stderr).toBe("");
-        expect(text.stdout).toContain("Grok usage from xAI, updated 21:00 IST");
-        expect(text.stdout).toContain("Plan          SuperGrok Heavy");
-        expect(text.stdout).toContain("Used          63% of the weekly allowance, resets Oct 15, 2026 02:00 IST");
-        expect(text.stdout).toContain("Credits       $12.50");
-        expect(text.stdout).toContain("Pay as you go $3.00 of $100.00 this month");
-        expect(fixture.fake.requests.map((request) => request.path).sort()).toEqual(["/billing", "/settings"]);
-        for (const request of fixture.fake.requests) {
-          expect(request.grokUser).toBe("acct_grok_e2e");
-        }
-        expect(fixture.fake.requests.find((request) => request.path === "/billing")?.query.get("format"))
-          .toBe("credits");
-
-        const json = await runFx(["usage", "--json"], { env });
-        expect(JSON.parse(json.stdout)).toMatchObject({ source: "grok", status: "ready" });
-      } finally {
-        fixture.stop();
-      }
-    },
-    TIMEOUT,
-  );
 });
 
 describe("cli: permissions", () => {
@@ -2711,11 +2615,10 @@ describe("cli: setup", () => {
       expect(noTerminal.code).toBe(1);
       expect(noTerminal.stderr).toBe("fx login: an interactive terminal is required to paste an API key\n");
 
-      const usage = "usage: fx login [vercel|codex|grok] [--api-key]\n";
+      const usage = "usage: fx login [vercel] [--api-key]\n";
       const cases: [string[], string][] = [
-        [["login", "codex", "--api-key"], "fx login: --api-key works only with vercel\n"],
         [["login", "--bogus"], "fx login: unknown flag --bogus\n" + usage],
-        [["login", "vercel", "codex"], usage],
+        [["login", "vercel", "extra"], usage],
       ];
       for (const [args, stderr] of cases) {
         const r = await runFx(args, { env: { ...NO_GATEWAY_AUTH } });
@@ -4029,13 +3932,16 @@ describe("cli: models", () => {
         // the same way, and a failed switch keeps the saved provider.
         const settingsPath = join(home, ".fx", "settings.json");
         mkdirSync(join(home, ".fx"), { recursive: true });
-        writeFileSync(settingsPath, JSON.stringify({ provider: "codex" }));
+        writeFileSync(settingsPath, JSON.stringify({
+          provider: "local",
+          providers: { local: { protocol: "openai-chat-completions", base_url: "http://127.0.0.1:1/v1", auth: { type: "none" } } },
+        }));
         const selection = await runFx(["provider", "gateway"], { env });
         expect(selection.code).not.toBe(0);
         expect(selection.stderr).toBe(
           "fx provider: couldn't connect to AI Gateway to load the target model catalog; check your network connection or firewall\n",
         );
-        expect(JSON.parse(readFileSync(settingsPath, "utf8")).provider).toBe("codex");
+        expect(JSON.parse(readFileSync(settingsPath, "utf8")).provider).toBe("local");
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
         cleanupIsolatedTestHome(home);
@@ -6282,7 +6188,7 @@ describe("cli: completion", () => {
     [["fx", "mcp", ""], "list show add remove login logout approve reject call"],
     [["fx", "mcp", "add", "--g"], "--global"],
     [["fx", "usage", "--period", ""], "today 7d month"],
-    [["fx", "login", ""], "vercel codex grok"],
+    [["fx", "login", ""], "vercel"],
     [["fx", "completion", ""], "bash zsh fish"],
   ];
 

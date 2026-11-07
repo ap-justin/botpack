@@ -160,7 +160,7 @@ test "collect shows each set override as the setting fx uses, and skips ignored 
     var env: std.process.Environ.Map = .init(std.testing.allocator);
     defer env.deinit();
     for ([_][2][]const u8{
-        .{ "FX_PROVIDER", "codex" },
+        .{ "FX_PROVIDER", "gateway" },
         .{ "FX_MODEL", " gpt-test " },
         .{ "FX_MAX_AGENT_STEPS", "12" },
         // Out of range, so fx ignores it.
@@ -176,7 +176,7 @@ test "collect shows each set override as the setting fx uses, and skips ignored 
     const found = try collect(arena.allocator(), .gateway);
     const expected = [_]struct { variable: []const u8, key: []const u8 }{
         .{ .variable = "FX_PROVIDER", .key = "provider" },
-        .{ .variable = "FX_MODEL", .key = "models.codex" },
+        .{ .variable = "FX_MODEL", .key = "models.gateway" },
         .{ .variable = "FX_PERMISSION_MODE", .key = "permission_mode" },
         .{ .variable = "FX_MAX_AGENT_STEPS", .key = "max_agent_steps" },
         .{ .variable = "FX_SOUND", .key = "sound.turn_end" },

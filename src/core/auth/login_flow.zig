@@ -2,8 +2,6 @@ const std = @import("std");
 const testing_allocator = @import("../shared/testing_allocator.zig");
 const builtin = @import("builtin");
 const credentials = @import("credentials.zig");
-const chatgpt_session = @import("chatgpt_session.zig");
-const grok_session = @import("grok_session.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
 const host = @import("../hosts/host.zig");
 const host_target = @import("../hosts/target.zig");
@@ -206,14 +204,10 @@ pub const max_manual_code_bytes: usize = 4096;
 
 pub const SignInCompletion = union(enum) {
     vercel: TeamSelection,
-    chatgpt: chatgpt_session.Session,
-    grok: grok_session.Session,
 
     pub fn deinit(self: *SignInCompletion, alloc: Allocator) void {
         switch (self.*) {
             .vercel => |*selection| selection.deinit(alloc),
-            .chatgpt => |*session| session.deinit(alloc),
-            .grok => |*session| session.deinit(alloc),
         }
         self.* = .{ .vercel = .{} };
     }
@@ -740,7 +734,6 @@ fn completeSignIn(
 fn saveSignIn(_: ?*anyopaque, alloc: Allocator, completion: SignInCompletion) !void {
     const session = switch (completion) {
         .vercel => |selection| selection.session orelse return LoginError.NoSession,
-        .chatgpt, .grok => return error.InvalidSignInCompletion,
     };
     try oauth_session.saveNewSession(alloc, session);
 }

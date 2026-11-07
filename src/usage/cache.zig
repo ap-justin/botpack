@@ -8,8 +8,6 @@
 
 const std = @import("std");
 const report = @import("report.zig");
-const codex = @import("codex.zig");
-const grok = @import("grok.zig");
 const json_decode = @import("../core/shared/json_decode.zig");
 
 const Allocator = std.mem.Allocator;
@@ -56,24 +54,10 @@ pub const Budget = struct {
     value: report.Budget,
 };
 
-/// A ChatGPT plan's limits through Codex, from a fetch that started at `at_ms`.
-pub const Codex = struct {
-    at_ms: i64,
-    value: codex.Usage,
-};
-
-/// A Grok plan's allowance and credits, from a fetch that started at `at_ms`.
-pub const Grok = struct {
-    at_ms: i64,
-    value: grok.Usage,
-};
-
 pub const Entry = struct {
     today: ?Today = null,
     finished: ?Finished = null,
     budget: ?Budget = null,
-    codex: ?Codex = null,
-    grok: ?Grok = null,
 };
 
 /// An entry and the arena that owns its slices.
@@ -101,15 +85,11 @@ pub fn merge(stored: Entry, fetched: Entry, now_ms: i64) Entry {
         .today = notAfter(Today, stored.today, now_ms),
         .finished = finishedBy(stored.finished, now_ms),
         .budget = notAfter(Budget, stored.budget, now_ms),
-        .codex = notAfter(Codex, stored.codex, now_ms),
-        .grok = notAfter(Grok, stored.grok, now_ms),
     };
     return .{
         .today = newer(Today, s.today, fetched.today, todayKey),
         .finished = newer(Finished, s.finished, finishedBy(fetched.finished, now_ms), finishedKey),
         .budget = newer(Budget, s.budget, fetched.budget, budgetKey),
-        .codex = mergeCodex(s.codex, fetched.codex),
-        .grok = mergeGrok(s.grok, fetched.grok),
     };
 }
 
@@ -121,35 +101,6 @@ fn finishedBy(part: ?Finished, now_ms: i64) ?Finished {
 fn notAfter(comptime T: type, part: ?T, now_ms: i64) ?T {
     const p = part orelse return null;
     return if (p.at_ms > now_ms) null else p;
-}
-
-/// The newer billing; a fetch whose settings request failed keeps the
-/// stored plan name.
-fn mergeGrok(stored: ?Grok, fetched: ?Grok) ?Grok {
-    var result = newer(Grok, stored, fetched, grokKey) orelse return null;
-    if (stored) |s| if (result.value.settings == null) {
-        result.value.settings = s.value.settings;
-    };
-    return result;
-}
-
-fn grokKey(g: Grok) i64 {
-    return g.at_ms;
-}
-
-/// The newer limits; a fetch whose activity or breakdown request failed
-/// keeps what is already stored.
-fn mergeCodex(stored: ?Codex, fetched: ?Codex) ?Codex {
-    var result = newer(Codex, stored, fetched, codexKey) orelse return null;
-    if (stored) |s| {
-        if (result.value.profile == null) result.value.profile = s.value.profile;
-        if (result.value.breakdown == null) result.value.breakdown = s.value.breakdown;
-    }
-    return result;
-}
-
-fn codexKey(c: Codex) i64 {
-    return c.at_ms;
 }
 
 fn todayKey(t: Today) i64 {
@@ -176,8 +127,6 @@ const Wire = struct {
     today: ?Today = null,
     finished: ?Finished = null,
     budget: ?Budget = null,
-    codex: ?Codex = null,
-    grok: ?Grok = null,
 };
 
 pub fn encode(alloc: Allocator, identity: Identity, entry: Entry) ![]u8 {
@@ -189,8 +138,6 @@ pub fn encode(alloc: Allocator, identity: Identity, entry: Entry) ![]u8 {
         .today = entry.today,
         .finished = entry.finished,
         .budget = entry.budget,
-        .codex = entry.codex,
-        .grok = entry.grok,
     }, .{}, &out.writer);
     return out.toOwnedSlice();
 }
@@ -206,12 +153,12 @@ pub fn decode(gpa: Allocator, identity: Identity, bytes: []const u8) ?Owned {
     };
     if (wire.schema_version != schema_version or
         !std.mem.eql(u8, wire.identity, &identity) or
-        !validEntry(.{ .today = wire.today, .finished = wire.finished, .budget = wire.budget, .codex = wire.codex, .grok = wire.grok }))
+        !validEntry(.{ .today = wire.today, .finished = wire.finished, .budget = wire.budget }))
     {
         arena.deinit();
         return null;
     }
-    return .{ .arena = arena, .entry = .{ .today = wire.today, .finished = wire.finished, .budget = wire.budget, .codex = wire.codex, .grok = wire.grok } };
+    return .{ .arena = arena, .entry = .{ .today = wire.today, .finished = wire.finished, .budget = wire.budget } };
 }
 
 fn validRows(rows: []const report.ModelRow) bool {
@@ -231,8 +178,6 @@ fn validEntry(entry: Entry) bool {
     if (entry.today) |t| if (!validRows(t.models)) return false;
     if (entry.finished) |f| if (!validRows(f.days_7) or !validRows(f.month)) return false;
     if (entry.budget) |b| if (!validMoney(b.value.limit) or !validMoney(b.value.spent)) return false;
-    if (entry.codex) |c| if (!c.value.valid()) return false;
-    if (entry.grok) |g| if (!g.value.valid()) return false;
     return true;
 }
 
@@ -497,33 +442,11 @@ fn expectSameWire(input: []const u8) !void {
 }
 
 test "decode reads every cache file exactly as std.json does" {
-    const codex_body =
-        \\{"plan_type":"pro",
-        \\ "rate_limit":{"allowed":true,"limit_reached":false,
-        \\  "primary_window":{"used_percent":42,"limit_window_seconds":18000,"reset_after_seconds":7980,"reset_at":1791759980},
-        \\  "secondary_window":{"used_percent":18.5,"limit_window_seconds":604800,"reset_after_seconds":300000,"reset_at":null}},
-        \\ "additional_rate_limits":[{"limit_name":"cloud tasks","metered_feature":"cloud","rate_limit":{"allowed":true,"limit_reached":false,
-        \\  "primary_window":{"used_percent":3,"limit_window_seconds":86400,"reset_after_seconds":100,"reset_at":1791752100}}}],
-        \\ "credits":{"has_credits":true,"unlimited":false,"balance":"12.40"},
-        \\ "spend_control":{"reached":true,"individual_limit":null}}
-    ;
-    const grok_body =
-        \\{"config":{"creditUsagePercent":42.5,
-        \\"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-06-01T00:00:00Z","end":"2026-06-08T00:00:00Z"},
-        \\"onDemandCap":{"val":5000},"onDemandUsed":{"val":300},"prepaidBalance":{"val":1250},
-        \\"productUsage":[{"product":"PRODUCT_GROK_BUILD","usagePercent":61.2},{"product":"PRODUCT_CHAT"}]}}
-    ;
-    var codex_usage = try codex.parse(testing.allocator, codex_body, 1_791_752_000_000);
-    defer codex_usage.deinit();
-    var grok_usage = try grok.parseBilling(testing.allocator, grok_body);
-    defer grok_usage.deinit();
     const id = identityOf(.member, "acct_1", "team_1");
     const bytes = try encode(testing.allocator, id, .{
         .today = .{ .day = 20737, .at_ms = 9, .models = oneRow(1.5) },
         .finished = .{ .day = 20736, .at_ms = 8, .days_7 = oneRow(7), .month = oneRow(30) },
         .budget = .{ .at_ms = 7, .value = .{ .limit = 100, .spent = 2.5, .period = .weekly } },
-        .codex = .{ .at_ms = 6, .value = codex_usage.usage },
-        .grok = .{ .at_ms = 5, .value = grok_usage.usage },
     });
     defer testing.allocator.free(bytes);
     try expectSameWire(bytes);

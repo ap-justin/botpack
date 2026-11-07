@@ -21,8 +21,6 @@ pub const json_only_options = [_]command_specs.OptionDoc{json_option};
 
 const login_providers = [_]command_specs.SubcommandDoc{
     .{ .usage = "vercel", .description = "Vercel AI Gateway (the default)", .options = &login_options },
-    .{ .usage = "codex", .description = "ChatGPT subscription" },
-    .{ .usage = "grok", .description = "Grok subscription" },
 };
 
 pub const login_options = [_]command_specs.OptionDoc{
@@ -159,7 +157,7 @@ pub const mcp_approve_options = [_]command_specs.OptionDoc{
 
 const permission_modes = [_][]const u8{ "ask", "auto", "full-access" };
 /// The built-in providers. A configured connection's name is also accepted.
-const builtin_providers = [_][]const u8{ "gateway", "codex", "grok" };
+const builtin_providers = [_][]const u8{"gateway"};
 
 /// Whether a command takes the gateway provider-order flags.
 const ProviderOrder = enum { with_provider_order, without_provider_order };
@@ -176,7 +174,7 @@ fn agentRunOptions(comptime scope: []const u8, comptime provider_order: Provider
         .{ .flag = "--auto", .description = "Automatically review unresolved permission requests" },
         .{ .flag = "--full-access", .description = "Disable fx permission checks" },
         .{ .flag = "--yolo", .description = "Alias for --full-access" },
-        .{ .flag = "--provider <name>", .description = "Override the model provider for " ++ scope ++ " (gateway, codex, grok, or a configured name)", .values = &builtin_providers },
+        .{ .flag = "--provider <name>", .description = "Override the model provider for " ++ scope ++ " (gateway or a configured name)", .values = &builtin_providers },
         .{ .flag = "--model <id>", .description = "Override the model for " ++ scope },
         .{ .flag = "--effort <level>", .description = "Override the reasoning effort for " ++ scope },
         .{ .flag = "--fast", .description = "Enable Fast mode for " ++ scope ++ " when the model supports it" },
@@ -259,7 +257,7 @@ pub const top_level_specs = [_]TopLevelSpec{
     .{
         .kind = .login,
         .token = "login",
-        .usage = "login [vercel|codex|grok] [--api-key]",
+        .usage = "login [vercel] [--api-key]",
         .summary = "Sign in to Vercel or a selected provider",
         .subcommands = &login_providers,
         .options = &login_options,
@@ -267,7 +265,7 @@ pub const top_level_specs = [_]TopLevelSpec{
     .{
         .kind = .logout,
         .token = "logout",
-        .usage = "logout [vercel|codex|grok]",
+        .usage = "logout [vercel]",
         .summary = "Sign out of Vercel or a selected provider session",
         .subcommands = &login_providers,
     },
@@ -368,7 +366,6 @@ pub const top_level_specs = [_]TopLevelSpec{
         .options = &usage_options,
         .details = &.{
             "With AI Gateway, reads its usage reports: with fx login, your spend on the team and your budget; with an API key, that key's spend.",
-            "With Codex, reads your ChatGPT plan's limits and activity; with Grok, your plan's allowance and credits.",
             "Finished days are cached under ~/.fx and fetched at most once a day.",
         },
     },
@@ -440,8 +437,8 @@ pub const top_level_help_groups = [_]TopLevelHelpGroup{
         .{ .usage = "session recover <id>", .summary = "Copy a recoverable corrupt session" },
     } },
     .{ .entries = &.{
-        .{ .kind = .login, .usage = "login [vercel|codex|grok] [--api-key]", .summary = "Sign in to a model provider" },
-        .{ .kind = .logout, .usage = "logout [vercel|codex|grok]", .summary = "Sign out of a model provider" },
+        .{ .kind = .login, .usage = "login [vercel] [--api-key]", .summary = "Sign in to a model provider" },
+        .{ .kind = .logout, .usage = "logout [vercel]", .summary = "Sign out of a model provider" },
         .{ .kind = .provider, .usage = "provider <name>", .summary = "Choose the active model provider" },
         .{ .kind = .models, .usage = "models" },
     } },
@@ -532,7 +529,7 @@ pub const top_level_flags = [_]TopLevelFlag{
     },
     .{
         .usage = "--provider <name>",
-        .description = "Override the model provider for this request (gateway, codex, grok, or a configured name)",
+        .description = "Override the model provider for this request (gateway or a configured name)",
     },
     .{
         .usage = "--provider-order <a,b,...>",

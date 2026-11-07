@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 import { join } from "node:path";
-import { FX_BIN, REPO_ROOT, providerVersionTestEnv } from "../evals/eval-helpers";
+import { FX_BIN, REPO_ROOT } from "../evals/eval-helpers";
 
 export const FAKE_GATEWAY_MODEL = "openai/gpt-5";
 const AUTH_ENV_KEYS = [
@@ -301,8 +301,7 @@ export type FakeGatewayOptions = {
   classifierDecision?: "clear" | "caution";
   classifierResponses?: FakeGatewayResponse[];
   titleResponses?: FakeGatewayResponse[];
-  // Answers usage GETs (`/v1/report`, `/ai-gateway/usage-report`, ChatGPT's
-  // `/backend-api/wham/...`, Grok's `/billing` and `/settings`); see
+  // Answers usage GETs (`/v1/report`, `/ai-gateway/usage-report`); see
   // usage-fakes.ts. Null falls through to the routes below.
   usage?: (url: URL, request: Request) => Response | null;
   // Response for the /v4/ai/evaluation-model endpoint (TypeSafe Jev through
@@ -327,7 +326,7 @@ export function fakeGatewayTitleDefault() {
 }
 
 // Finish-only Responses-protocol stream for title generation side calls at
-// Codex/Grok fake servers: completes without text deltas and without usable
+// fake servers that speak the Responses protocol: completes without text deltas and without usable
 // title content, leaving the locally derived session title in place.
 export function fakeResponsesTitleDefault() {
   return new Response(

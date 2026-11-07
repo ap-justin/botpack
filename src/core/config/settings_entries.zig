@@ -212,7 +212,7 @@ test "entries follow precedence and flatten nested values" {
     var profile = try parseForTest(
         \\{"fast_mode":true,"maxxing_mode":1,"fast_mdoe":2,"model":"a/b",
         \\ "statusLine":{"context":true,"contxt":false},
-        \\ "models":{"codex":"gpt"},"provider_order":["x","y"],
+        \\ "models":{"gateway":"gpt"},"provider_order":["x","y"],
         \\ "workspaces":{"/w":{"fast_mode":false,"effort":"high"},"/other":{"effort":"low"}}}
     );
     defer profile.deinit();
@@ -229,7 +229,7 @@ test "entries follow precedence and flatten nested values" {
         .{ .key = "fast_mode", .origin = .global },
         .{ .key = "model", .origin = .global },
         .{ .key = "status_line.context", .origin = .global },
-        .{ .key = "models.codex", .origin = .global },
+        .{ .key = "models.gateway", .origin = .global },
         .{ .key = "provider_order", .origin = .global },
         .{ .key = "fast_mode", .origin = .workspace },
         .{ .key = "effort", .origin = .workspace },
@@ -295,7 +295,7 @@ test "lookup keeps the entry fx uses for each key under the name" {
     const alloc = std.testing.allocator;
     var profile = try parseForTest(
         \\{"fast_mode":true,"statusLine":{"context":true,"session":true},
-        \\ "provider":"codex","provider_order":["x"],
+        \\ "provider":"gateway","provider_order":["x"],
         \\ "workspaces":{"/w":{"fast_mode":false,"status_line":{"context":false}}}}
     );
     defer profile.deinit();
@@ -319,7 +319,7 @@ test "lookup keeps the entry fx uses for each key under the name" {
     const provider = try lookup(alloc, entries.items, "provider");
     defer alloc.free(provider);
     try std.testing.expectEqual(@as(usize, 1), provider.len);
-    try std.testing.expectEqualStrings("codex", provider[0].value.string);
+    try std.testing.expectEqualStrings("gateway", provider[0].value.string);
 
     const missing = try lookup(alloc, entries.items, "effort");
     defer alloc.free(missing);
@@ -328,7 +328,7 @@ test "lookup keeps the entry fx uses for each key under the name" {
 
 test "collect frees its keys when it runs out of memory" {
     var profile = try parseForTest(
-        \\{"fast_mode":true,"statusLine":{"context":true},"models":{"codex":"gpt"},
+        \\{"fast_mode":true,"statusLine":{"context":true},"models":{"gateway":"gpt"},
         \\ "workspaces":{"/w":{"effort":"high"}}}
     );
     defer profile.deinit();

@@ -172,7 +172,7 @@ def main():
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("FX_", "OPENAI_", "GROK_", "XAI_", "AI_GATEWAY_", "VERCEL_"))}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("FX_", "OPENAI_", "AI_GATEWAY_", "VERCEL_"))}
     # These would redirect or add startup files outside the isolated HOME.
     for key in ("ZDOTDIR", "BASH_ENV", "ENV"):
         env.pop(key, None)

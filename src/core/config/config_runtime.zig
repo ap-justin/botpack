@@ -325,8 +325,6 @@ pub fn modelEnvOverride() ?[]const u8 {
 }
 
 pub const ModelSelectionError = error{
-    CodexModelNotSelected,
-    GrokModelNotSelected,
     ConfiguredModelNotSelected,
 };
 
@@ -343,8 +341,6 @@ pub fn selectProviderModel(
     const provider = provider_override orelse settings.provider orelse .gateway;
     const model = settings.models.get(provider) orelse switch (provider) {
         .gateway => default_model,
-        .codex => run_model orelse return error.CodexModelNotSelected,
-        .grok => run_model orelse return error.GrokModelNotSelected,
         .configured => run_model orelse return error.ConfiguredModelNotSelected,
     };
     return .{ .provider = provider, .model = model };
@@ -354,7 +350,7 @@ pub fn selectProviderModel(
 /// under "providers". `fx provider` and `fx ask --provider` both print it.
 pub fn unknownProviderMessage(alloc: Allocator, name: []const u8) ![]u8 {
     return alloc.print(
-        "unknown provider {s}; expected gateway, codex, grok, or a name under \"providers\" in {s}",
+        "unknown provider {s}; expected gateway or a name under \"providers\" in {s}",
         .{ name, profile_paths.displayText("~/.fx/settings.json") },
     );
 }
@@ -363,8 +359,6 @@ pub fn unknownProviderMessage(alloc: Allocator, name: []const u8) ![]u8 {
 pub fn modelNotSelectedMessage(err: anyerror) ?[]const u8 {
     const for_this_run = "or set a model for this run with --model or FX_MODEL";
     return switch (err) {
-        error.CodexModelNotSelected => "no Codex model is selected; run `fx provider codex` to choose one, " ++ for_this_run,
-        error.GrokModelNotSelected => "no Grok model is selected; run `fx provider grok` to choose one, " ++ for_this_run,
         error.ConfiguredModelNotSelected => profile_paths.displayText("no model is selected for this connection; save one under \"models\" in ~/.fx/settings.json, " ++ for_this_run),
         else => null,
     };
@@ -1706,18 +1700,6 @@ fn parseProfileOnlyFields(
             return error.InvalidProviderValue;
     }
 
-    if (root.object.get("codex_model")) |model_value| {
-        if (model_value != .string) return error.InvalidCodexModelType;
-        settings_store.validateModel(model_value.string) catch return error.InvalidCodexModelValue;
-        try settings.models.putCopy(alloc, .codex, model_value.string);
-    }
-
-    if (root.object.get("grok_model")) |model_value| {
-        if (model_value != .string) return error.InvalidGrokModelType;
-        settings_store.validateModel(model_value.string) catch return error.InvalidGrokModelValue;
-        try settings.models.putCopy(alloc, .grok, model_value.string);
-    }
-
     if (root.object.get("models")) |models_value| {
         if (models_value != .object) return error.InvalidModelType;
         var iterator = models_value.object.iterator();
@@ -2707,27 +2689,6 @@ test "max_agent_steps absence and explicit values resolve distinctly" {
     defer positive.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 50), positive.max_agent_steps.?);
     try std.testing.expectEqual(@as(usize, 50), agent_steps.resolveMaxAgentSteps(positive.max_agent_steps, 25));
-}
-
-test "provider settings keep independent provider models" {
-    var settings = try parseSettingsJson(
-        std.testing.allocator,
-        "{\"provider\":\"grok\",\"model\":\"gateway/model\",\"codex_model\":\"gpt-5.4-mini\",\"grok_model\":\"grok-4.20-0309-non-reasoning\"}",
-    );
-    defer settings.deinit(std.testing.allocator);
-    try std.testing.expectEqual(model_provider.ProviderId.grok, settings.provider.?);
-    try std.testing.expectEqualStrings("gateway/model", settings.models.get(.gateway).?);
-    try std.testing.expectEqualStrings("gpt-5.4-mini", settings.models.get(.codex).?);
-    try std.testing.expectEqualStrings("grok-4.20-0309-non-reasoning", settings.models.get(.grok).?);
-
-    var current = try parseSettingsJson(
-        std.testing.allocator,
-        "{\"model\":\"legacy/gateway\",\"codex_model\":\"legacy-codex\",\"models\":{\"gateway\":\"current/gateway\",\"codex\":\"current-codex\",\"grok\":\"current-grok\"}}",
-    );
-    defer current.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("current/gateway", current.models.get(.gateway).?);
-    try std.testing.expectEqualStrings("current-codex", current.models.get(.codex).?);
-    try std.testing.expectEqualStrings("current-grok", current.models.get(.grok).?);
 }
 
 test "max_agent_steps explicit zero survives serialization round trip" {
@@ -4747,93 +4708,6 @@ test "auto compaction percent is a profile setting between 10 and 80" {
     try std.testing.expectEqual(@as(?u8, null), project.auto_compact_percent);
 }
 
-test "selectProviderModel chooses only its provider-scoped model" {
-    var gateway_settings = Settings{ .provider = .gateway };
-    defer gateway_settings.deinit(std.testing.allocator);
-    try gateway_settings.models.putCopy(std.testing.allocator, .gateway, "gateway/model");
-    try gateway_settings.models.putCopy(std.testing.allocator, .codex, "gpt-model");
-    const gateway = try selectProviderModel("default/model", &gateway_settings, null, null);
-    try std.testing.expectEqual(model_provider.ProviderId.gateway, gateway.provider);
-    try std.testing.expectEqualStrings("gateway/model", gateway.model);
-
-    var codex_settings = Settings{ .provider = .codex };
-    defer codex_settings.deinit(std.testing.allocator);
-    try codex_settings.models.putCopy(std.testing.allocator, .gateway, "gateway/model");
-    try codex_settings.models.putCopy(std.testing.allocator, .codex, "gpt-model");
-    const codex = try selectProviderModel("default/model", &codex_settings, null, null);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, codex.provider);
-    try std.testing.expectEqualStrings("gpt-model", codex.model);
-
-    const missing_codex = Settings{ .provider = .codex };
-    try std.testing.expectError(
-        error.CodexModelNotSelected,
-        selectProviderModel("default/model", &missing_codex, null, null),
-    );
-
-    var grok_settings = Settings{ .provider = .grok };
-    defer grok_settings.deinit(std.testing.allocator);
-    try grok_settings.models.putCopy(std.testing.allocator, .grok, "grok-model");
-    const grok = try selectProviderModel("default/model", &grok_settings, null, null);
-    try std.testing.expectEqual(model_provider.ProviderId.grok, grok.provider);
-    try std.testing.expectEqualStrings("grok-model", grok.model);
-
-    // A launch --provider override selects that provider and its saved model.
-    try gateway_settings.models.putCopy(std.testing.allocator, .grok, "grok-model");
-    const overridden = try selectProviderModel("default/model", &gateway_settings, .grok, null);
-    try std.testing.expectEqual(model_provider.ProviderId.grok, overridden.provider);
-    try std.testing.expectEqualStrings("grok-model", overridden.model);
-    try std.testing.expectError(
-        error.CodexModelNotSelected,
-        selectProviderModel("default/model", &grok_settings, .codex, null),
-    );
-    const overridden_gateway = try selectProviderModel("default/model", &codex_settings, .gateway, null);
-    try std.testing.expectEqualStrings("gateway/model", overridden_gateway.model);
-}
-
-test "selectProviderModel accepts the run model when the provider has none saved" {
-    // FX_PROVIDER=codex FX_MODEL=... in a profile that never saved a Codex model.
-    const missing_codex = Settings{ .provider = .codex };
-    const env_codex = try selectProviderModel("default/model", &missing_codex, null, "gpt-env");
-    try std.testing.expectEqual(model_provider.ProviderId.codex, env_codex.provider);
-    try std.testing.expectEqualStrings("gpt-env", env_codex.model);
-
-    const missing_grok = Settings{ .provider = .grok };
-    const env_grok = try selectProviderModel("default/model", &missing_grok, null, "grok-env");
-    try std.testing.expectEqualStrings("grok-env", env_grok.model);
-
-    // FX_PROVIDER=local names a custom connection, which has no default either.
-    const missing_local = Settings{ .provider = model_provider.parse("local").? };
-    try std.testing.expectError(error.ConfiguredModelNotSelected, selectProviderModel("default/model", &missing_local, null, null));
-    const env_local = try selectProviderModel("default/model", &missing_local, null, "local-env");
-    try std.testing.expectEqualStrings("local-env", env_local.model);
-
-    // --provider codex with FX_MODEL from a Gateway-only profile.
-    const gateway_only = Settings{ .provider = .gateway };
-    const launched = try selectProviderModel("default/model", &gateway_only, .codex, "gpt-env");
-    try std.testing.expectEqual(model_provider.ProviderId.codex, launched.provider);
-    try std.testing.expectEqualStrings("gpt-env", launched.model);
-
-    // A saved model remains the persisted preference; FX_MODEL applies on top of it later.
-    var saved_codex = Settings{ .provider = .codex };
-    defer saved_codex.deinit(std.testing.allocator);
-    try saved_codex.models.putCopy(std.testing.allocator, .codex, "gpt-saved");
-    const saved = try selectProviderModel("default/model", &saved_codex, null, "gpt-env");
-    try std.testing.expectEqualStrings("gpt-saved", saved.model);
-
-    // Gateway keeps its compiled default as the persisted preference.
-    const gateway = try selectProviderModel("default/model", &gateway_only, null, "gpt-env");
-    try std.testing.expectEqualStrings("default/model", gateway.model);
-}
-
-test "modelNotSelectedMessage names the provider and both ways to recover" {
-    const codex = modelNotSelectedMessage(error.CodexModelNotSelected).?;
-    try std.testing.expect(std.mem.find(u8, codex, "`fx provider codex`") != null);
-    try std.testing.expect(std.mem.find(u8, codex, "--model or FX_MODEL") != null);
-    try std.testing.expect(std.mem.find(u8, modelNotSelectedMessage(error.GrokModelNotSelected).?, "`fx provider grok`") != null);
-    try std.testing.expect(std.mem.find(u8, modelNotSelectedMessage(error.ConfiguredModelNotSelected).?, "\"models\" in ~/.fx/settings.json") != null);
-    try std.testing.expect(modelNotSelectedMessage(error.OutOfMemory) == null);
-}
-
 test "FX_ULTRAFAST overrides the profile and diagnoses malformed values" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4981,4 +4855,28 @@ test "the settings list names every value the settings enums accept" {
     for (std.meta.tags(types.CredentialSource)) |source| {
         if (types.parseCredentialSource(@tagName(source)) != null) try std.testing.expect(listed.has("credential_source", @tagName(source)));
     }
+}
+
+test "selectProviderModel accepts the run model when the provider has none saved" {
+    // FX_PROVIDER=local names a custom connection, which has no default either.
+    const missing_local = Settings{ .provider = model_provider.parse("local").? };
+    try std.testing.expectError(error.ConfiguredModelNotSelected, selectProviderModel("default/model", &missing_local, null, null));
+    const env_local = try selectProviderModel("default/model", &missing_local, null, "local-env");
+    try std.testing.expectEqualStrings("local-env", env_local.model);
+
+    // --provider gateway with FX_MODEL from a Gateway-only profile.
+    const gateway_only = Settings{ .provider = .gateway };
+
+    // A saved model remains the persisted preference; FX_MODEL applies on top of it later.
+
+    // Gateway keeps its compiled default as the persisted preference.
+    const gateway = try selectProviderModel("default/model", &gateway_only, null, "gpt-env");
+    try std.testing.expectEqualStrings("default/model", gateway.model);
+}
+
+test "modelNotSelectedMessage names the provider and both ways to recover" {
+    const configured = modelNotSelectedMessage(error.ConfiguredModelNotSelected).?;
+    try std.testing.expect(std.mem.find(u8, configured, "\"models\" in ~/.fx/settings.json") != null);
+    try std.testing.expect(std.mem.find(u8, configured, "--model or FX_MODEL") != null);
+    try std.testing.expect(modelNotSelectedMessage(error.OutOfMemory) == null);
 }

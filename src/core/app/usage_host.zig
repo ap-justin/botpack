@@ -85,8 +85,6 @@ pub fn missingReason(auth: *const auth_runtime.Runtime) usage.Unavailable {
     const source = auth.credentialSource() orelse return .no_gateway_sign_in;
     return switch (source) {
         .fx_login, .stored_key, .ai_gateway_api_key => .no_gateway_sign_in,
-        // Codex and Grok: the token expired; the next message renews it.
-        .chatgpt_subscription, .grok_subscription => .refresh_needed,
         else => .unsupported_provider,
     };
 }
@@ -121,40 +119,8 @@ fn fromParts(
             .subject = bearer,
             .label = if (source == .ai_gateway_api_key) "API key (AI_GATEWAY_API_KEY)" else "API key (stored)",
         },
-        .chatgpt_subscription => .{
-            .scope = .codex,
-            .bearer = bearer,
-            .team = null,
-            .subject = account orelse bearer,
-            .account_id = account,
-            .label = "codex (ChatGPT)",
-        },
-        .grok_subscription => .{
-            .scope = .grok,
-            .bearer = bearer,
-            .team = null,
-            .subject = account orelse bearer,
-            .account_id = account,
-            .label = "grok (xAI)",
-        },
         else => null,
     };
-}
-
-const chatgpt_origin = "https://chatgpt.com";
-
-/// `https://chatgpt.com`, or a loopback origin set by E2E tests.
-fn chatgptOrigin() []const u8 {
-    const override = io_mod.getenv("FX_TEST_CHATGPT_ORIGIN") orelse return chatgpt_origin;
-    return if (client.isLoopbackHttpUrl(override)) override else chatgpt_origin;
-}
-
-const grok_origin = "https://cli-chat-proxy.grok.com/v1";
-
-/// The Grok CLI proxy, or a loopback origin set by E2E tests.
-fn grokOrigin() []const u8 {
-    const override = io_mod.getenv("FX_TEST_GROK_ORIGIN") orelse return grok_origin;
-    return if (client.isLoopbackHttpUrl(override)) override else grok_origin;
 }
 
 fn vercelApiOrigin() []const u8 {
@@ -182,14 +148,8 @@ fn send(
     const origin = switch (request.service) {
         .gateway => client.gatewayBaseUrl(),
         .vercel_api => vercelApiOrigin(),
-        .chatgpt => chatgptOrigin(),
-        .grok => grokOrigin(),
     };
-    const account: client.UsageAccount = if (request.account_id) |id| switch (request.service) {
-        .chatgpt => .{ .chatgpt = id },
-        .grok => .{ .grok = id },
-        .gateway, .vercel_api => .none,
-    } else .none;
+    const account: client.UsageAccount = .none;
     const url = try alloc.print("{s}{s}", .{ origin, request.path });
     defer alloc.free(url);
     const sent = if (comptime host_target.is_wasm)

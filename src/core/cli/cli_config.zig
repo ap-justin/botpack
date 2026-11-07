@@ -268,7 +268,7 @@ pub fn settable(key: []const u8) bool {
 fn ownerHint(key: []const u8) []const u8 {
     const head = key[0 .. std.mem.findScalar(u8, key, '.') orelse key.len];
     const hints = [_]struct { keys: []const []const u8, hint: []const u8 }{
-        .{ .keys = &.{ "model", "models", "codex_model", "grok_model" }, .hint = "use /model in a session" },
+        .{ .keys = &.{ "model", "models" }, .hint = "use /model in a session" },
         .{ .keys = &.{"provider"}, .hint = "use fx provider <name>" },
         .{ .keys = &.{"permission_mode"}, .hint = "use /permissions in a session, or --permission-mode for one run" },
         .{ .keys = &.{"permission"}, .hint = "use /permissions in a session" },
@@ -455,12 +455,14 @@ pub const resolved_keys = [_][]const u8{
 /// Keys `fx config` shows as the files set them: objects fx checks with its
 /// own rules, model choices, editor hints, and values fx manages itself.
 const files_only_keys = [_][]const u8{
-    "$schema",                    "additional_directories", "codex_model",
-    "context_limits",             "credential_source",      "disabledMcpjsonServers",
-    "enableAllProjectMcpServers", "enabledMcpjsonServers",  "fast_mode_model_bound",
-    "grok_model",                 "model",                  "models",
-    "permission",                 "providers",              "skill_symlink_authorities",
-    "workspaces",                 "yolo_acknowledged",
+    "$schema",                   "additional_directories",
+    "context_limits",            "credential_source",
+    "disabledMcpjsonServers",    "enableAllProjectMcpServers",
+    "enabledMcpjsonServers",     "fast_mode_model_bound",
+    "model",                     "models",
+    "permission",                "providers",
+    "skill_symlink_authorities", "workspaces",
+    "yolo_acknowledged",
 };
 
 /// The value a run uses for `key`, read from a state that
@@ -759,7 +761,7 @@ test "config set explains a bad value or a key it doesn't change" {
         .{ .args = &.{ "set", "max_tool_result_bytes", "12" }, .err = error.InvalidConfigValue, .message = "invalid value for max_tool_result_bytes: 12 (use a whole number of bytes, at least 1024)" },
         .{ .args = &.{ "set", "permission_mode", "full-access" }, .err = error.RefusedConfigSetting, .message = "can't change permission_mode with fx config; use /permissions in a session, or --permission-mode for one run" },
         .{ .args = &.{ "unset", "review_model" }, .err = error.RefusedConfigSetting, .message = "can't change review_model with fx config; edit ~/.fx/settings.json, or set FX_REVIEW_MODEL for one run" },
-        .{ .args = &.{ "set", "models.codex", "gpt" }, .err = error.RefusedConfigSetting, .message = "can't change models.codex with fx config; use /model in a session" },
+        .{ .args = &.{ "set", "models.gateway", "gpt" }, .err = error.RefusedConfigSetting, .message = "can't change models.gateway with fx config; use /model in a session" },
         .{ .args = &.{ "set", "yolo_acknowledged", "true" }, .err = error.RefusedConfigSetting, .message = "can't change yolo_acknowledged with fx config; fx manages it" },
     };
     for (cases) |case| {
@@ -854,7 +856,7 @@ test "load ends with the FX_* overrides fx applies, only without a scope" {
     const io_mod = @import("../shared/io.zig");
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "settings.json", .data = "{\"provider\":\"codex\",\"max_agent_steps\":3}" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "settings.json", .data = "{\"provider\":\"gateway\",\"max_agent_steps\":3}" });
     const dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
     defer alloc.free(dir);
     var paths: config_runtime.Paths = .{
@@ -881,7 +883,7 @@ test "load ends with the FX_* overrides fx applies, only without a scope" {
     try std.testing.expectEqualStrings("FX_MAX_AGENT_STEPS", steps[0].variable.?);
     try std.testing.expectEqual(@as(i64, 9), steps[0].value.integer);
     // The saved provider decides which model FX_MODEL replaces.
-    const models = try settings_entries.lookup(alloc, all.entries.items, "models.codex");
+    const models = try settings_entries.lookup(alloc, all.entries.items, "models.gateway");
     defer alloc.free(models);
     try std.testing.expectEqualStrings("gpt-env", models[0].value.string);
 
@@ -1014,7 +1016,7 @@ test "effective entries show the value in use and the layer that set it" {
         .{ .key = "max_agent_steps", .value = .{ .integer = -3 }, .origin = .global },
         // An older spelling of the value in use.
         .{ .key = "permission_mode", .value = .{ .string = "yolo" }, .origin = .global },
-        .{ .key = "models.codex", .value = .{ .string = "m" }, .origin = .global },
+        .{ .key = "models.gateway", .value = .{ .string = "m" }, .origin = .global },
     };
     const all = try effectiveEntries(arena, &state, .gateway, &set);
     // The keys something sets come first, in order.
