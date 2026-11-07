@@ -41,7 +41,6 @@ const session_store = @import("../session/session_store.zig");
 const session_adapter = @import("../session/session_adapter.zig");
 const skill_contract = @import("../skills/skill_contract.zig");
 const types = @import("../shared/types.zig");
-const update_target = @import("../upgrade/update_target.zig");
 const test_builtin_gateway = if (builtin.is_test)
     @import("../../builtins/gateway.zig")
 else
@@ -86,7 +85,6 @@ pub const Command = union(enum) {
     sessions: []const [:0]const u8,
     credits: []const [:0]const u8,
     usage: []const [:0]const u8,
-    upgrade: []const [:0]const u8,
     workspace: []const [:0]const u8,
     config: []const [:0]const u8,
     completion: []const [:0]const u8,
@@ -179,7 +177,6 @@ const version_usage = "usage: fx --version\n";
 pub const Config = struct {
     version: []const u8 = "",
     revision: []const u8 = "",
-    build_channel: update_target.Channel = .stable,
     auth_mode: credentials.AuthMode = .local,
     command_catalog: CommandCatalog,
     default_model: []const u8,
@@ -263,11 +260,6 @@ fn selectCatalogModel(
     }
     return if (entries.len > 0) entries[0].id else null;
 }
-
-const UpgradeOptions = struct {
-    format: output_contracts.OutputFormat = .text,
-    channel: ?update_target.Channel = null,
-};
 
 const SessionListOptions = struct {
     format: output_contracts.OutputFormat = .text,
@@ -678,7 +670,6 @@ pub fn parse(command_catalog: CommandCatalog, args: []const [:0]const u8) Comman
         },
         'u' => {
             if (command_specs.matchesTopLevel(command_catalog, command, .usage)) return .{ .usage = args[1..] };
-            if (command_specs.matchesTopLevel(command_catalog, command, .upgrade)) return .{ .upgrade = args[1..] };
         },
         'w' => {
             if (command_specs.matchesTopLevel(command_catalog, command, .workspace)) return .{ .workspace = args[1..] };
@@ -1523,7 +1514,6 @@ fn runNonInteractiveWithDeps(
             defer mcp_inspection.deinit(alloc);
 
             var snapshot = statusSnapshotFromStartupWithBuild(startup, .{
-                .channel = cfg.build_channel,
                 .version = cfg.version,
                 .revision = cfg.revision,
             }, mcp_inspection.profile_diagnostic);
@@ -1892,73 +1882,6 @@ fn runNonInteractiveWithDeps(
             try writeFormattedOutput(deps, text, opts.format);
             return if (snapshot.status == .ready) .handled_success else .handled_failure;
         },
-        .upgrade => |rest| {
-            const upgrade_runtime = @import("../upgrade/upgrade_runtime.zig");
-            var rejected_channel: ?[]const u8 = null;
-            const opts = parseUpgradeArgs(rest, &rejected_channel) catch |err| {
-                if (rejected_channel) |value| if (!argsContainJson(rest)) {
-                    const line = try alloc.print("fx upgrade: invalid value for --channel: {f}\n", .{text_utils.terminalSafe(value)});
-                    defer alloc.free(line);
-                    try writeStderr(deps, line);
-                };
-                try writeUsageOrJsonError(alloc, cfg.command_catalog, deps, .upgrade, "upgrade", err, rest);
-                return usage_failure;
-            };
-
-            var startup = deps.load_startup_state_without_credentials(
-                alloc,
-                cfg.default_model,
-                cfg.default_agent_step_limit,
-            ) catch |err| {
-                if (opts.format == .json) {
-                    try writeJsonCommandFailure(alloc, deps, "upgrade", err, "failed to load update settings");
-                } else {
-                    try writeStderr(deps, "fx upgrade: failed to load update settings\n");
-                }
-                return .handled_failure;
-            };
-            defer startup.deinit(alloc);
-            try writeConfigDiagnostics(alloc, deps, startup.config_diagnostics);
-
-            const channel = opts.channel orelse startup.update_channel;
-            if (opts.channel) |selected| {
-                var outcome = config_runtime.setUserPreferences(alloc, .{ .update_channel = selected }) catch |err| {
-                    if (opts.format == .json) {
-                        try writeJsonCommandFailure(alloc, deps, "upgrade", err, "failed to save update channel");
-                    } else {
-                        try writeStderr(deps, "fx upgrade: failed to save update channel\n");
-                    }
-                    return .handled_failure;
-                };
-                defer outcome.deinit(alloc);
-                if (opts.format == .text) {
-                    const line = try channelSavedLine(alloc, selected, outcome);
-                    defer alloc.free(line);
-                    try writeStdout(deps, line);
-                }
-            }
-
-            var result = upgrade_runtime.run(alloc, .{
-                .channel = cfg.build_channel,
-                .version = cfg.version,
-                .revision = cfg.revision,
-            }, channel, switch (opts.format) {
-                .text => .text,
-                .json => .json,
-            });
-            defer result.deinit(alloc);
-            const text = result.snapshot.render(alloc, switch (opts.format) {
-                .text => .text,
-                .json => .json,
-            }) catch {
-                try writeStderr(deps, "fx upgrade: render failed\n");
-                return .handled_failure;
-            };
-            defer alloc.free(text);
-            try writeStdout(deps, text);
-            if (opts.format == .json) try writeStdout(deps, "\n");
-            return if (result.snapshot.status == .failed) .handled_failure else .handled_success;
-        },
         .completion => |rest| {
             const shell = if (rest.len == 1) completion.parseShell(rest[0]) else null;
             if (shell == null) {
@@ -2318,9 +2241,14 @@ fn writeStatusJsonLine(alloc: Allocator, deps: RunDeps, snapshot: output_contrac
     try writeRenderedJsonLine(alloc, deps, buf[0..], .{ .status = snapshot });
 }
 
+/// The version and revision this binary was built from.
+const CurrentBuild = struct {
+    version: []const u8,
+    revision: []const u8,
+};
+
 fn statusSnapshotFromStartup(startup: app_lifecycle.StartupStatus) output_contracts.StatusSnapshot {
     return statusSnapshotFromStartupWithBuild(startup, .{
-        .channel = .stable,
         .version = "",
         .revision = "",
     }, .clear);
@@ -2328,7 +2256,7 @@ fn statusSnapshotFromStartup(startup: app_lifecycle.StartupStatus) output_contra
 
 fn statusSnapshotFromStartupWithBuild(
     startup: app_lifecycle.StartupStatus,
-    build: update_target.CurrentBuild,
+    build: CurrentBuild,
     mcp_config_diagnostic: mcp_contract.ProfileConfigDiagnostic,
 ) output_contracts.StatusSnapshot {
     return .{
@@ -2344,8 +2272,6 @@ fn statusSnapshotFromStartupWithBuild(
         .session_permission_grants = 0,
         .agent_step_limit = startup.agent_step_limit,
         .ultrafast_requested = startup.ultrafast_mode,
-        .update_channel = startup.update_channel.label(),
-        .build_channel = build.channel.label(),
         .build_revision = build.revision,
         .mcp_config_error = switch (mcp_config_diagnostic) {
             .clear, .warning => null,
@@ -2617,7 +2543,6 @@ fn parsedOptions(kind: TopLevelKind) ?[]const command_specs.OptionDoc {
         .sessions => &builtin_commands.sessions_options,
         .login => &builtin_commands.login_options,
         .usage => &builtin_commands.usage_options,
-        .upgrade => &builtin_commands.upgrade_options,
         .workspace => &builtin_commands.workspace_options,
         .config => &builtin_commands.config_parse_options,
         .session => &builtin_commands.session_options,
@@ -3258,7 +3183,6 @@ fn commandFailureMessage(err: anyerror) ?[]const u8 {
         error.InvalidSessionDetailArgs,
         error.InvalidSessionMigrationArgs,
         error.InvalidSessionRecoveryArgs,
-        error.InvalidUpgradeArgs,
         error.InvalidConfigArgs,
         => "invalid arguments",
         error.UnknownConfigSetting => "unknown setting",
@@ -3742,40 +3666,6 @@ fn parseLocalSurfaceArgs(args: []const [:0]const u8) !LocalSurfaceOptions {
     return options;
 }
 
-const UpgradeFlag = enum { channel, json };
-const upgrade_flag_ids = cli_flags.idTable(UpgradeFlag, &builtin_commands.upgrade_options);
-
-/// On a `--channel` value that names no channel, sets `rejected_channel` to it,
-/// borrowed from `args`.
-fn parseUpgradeArgs(args: []const [:0]const u8, rejected_channel: *?[]const u8) !UpgradeOptions {
-    var options = UpgradeOptions{};
-    var parser: cli_flags.Parser = .init(&builtin_commands.upgrade_options, args);
-    while (parser.next() catch return error.InvalidUpgradeArgs) |item| switch (item) {
-        .positional => return error.InvalidUpgradeArgs,
-        .option => |match| switch (upgrade_flag_ids[match.index].?) {
-            .channel => options.channel = update_target.Channel.parse(match.value.?) orelse {
-                rejected_channel.* = match.value.?;
-                return error.InvalidUpgradeArgs;
-            },
-            .json => options.format = .json,
-        },
-    };
-    return options;
-}
-
-/// The line `fx upgrade --channel` prints after saving, so the user knows the
-/// channel persists and where. Caller owns the result.
-fn channelSavedLine(
-    alloc: Allocator,
-    channel: update_target.Channel,
-    outcome: config_runtime.CommitOutcome,
-) ![]u8 {
-    return switch (outcome) {
-        .unchanged => alloc.print("Release channel is already {s}.\n", .{channel.label()}),
-        .committed => alloc.print("Release channel set to {s} in {s}/settings.json.\n", .{ channel.label(), profile_paths.displayRoot() }),
-    };
-}
-
 const SessionListFlag = enum { all, limit, cursor, json };
 const session_list_flag_ids = cli_flags.idTable(SessionListFlag, &builtin_commands.sessions_options);
 
@@ -4074,14 +3964,6 @@ test "parse recognizes every top-level command and preserves unknown commands" {
     }
     switch (parse(command_catalog, &.{ @constCast("usage"), @constCast("--period"), @constCast("24h") })) {
         .usage => |rest| try std.testing.expectEqual(@as(usize, 2), rest.len),
-        else => return error.TestExpectedEqual,
-    }
-    switch (parse(command_catalog, &.{@constCast("upgrade")})) {
-        .upgrade => |rest| try std.testing.expectEqual(@as(usize, 0), rest.len),
-        else => return error.TestExpectedEqual,
-    }
-    switch (parse(command_catalog, &.{ @constCast("update"), @constCast("--channel"), @constCast("dev") })) {
-        .upgrade => |rest| try std.testing.expectEqual(@as(usize, 2), rest.len),
         else => return error.TestExpectedEqual,
     }
     switch (parse(command_catalog, &.{@constCast("wat")})) {
@@ -4483,83 +4365,6 @@ test "parse local surface args accepts only json" {
     try std.testing.expectEqual(output_contracts.OutputFormat.json, opts.format);
 
     try std.testing.expectError(error.InvalidLocalSurfaceArgs, parseLocalSurfaceArgs(&.{@constCast("--wat")}));
-}
-
-test "parse upgrade args accepts a remembered release channel" {
-    var rejected: ?[]const u8 = null;
-    const defaults = try parseUpgradeArgs(&.{}, &rejected);
-    try std.testing.expectEqual(output_contracts.OutputFormat.text, defaults.format);
-    try std.testing.expect(defaults.channel == null);
-
-    const selected = try parseUpgradeArgs(&.{
-        @constCast("--channel"),
-        @constCast("dev"),
-        @constCast("--json"),
-    }, &rejected);
-    try std.testing.expectEqual(output_contracts.OutputFormat.json, selected.format);
-    try std.testing.expectEqual(update_target.Channel.dev, selected.channel.?);
-
-    const stable = try parseUpgradeArgs(&.{@constCast("--channel=stable")}, &rejected);
-    try std.testing.expectEqual(update_target.Channel.stable, stable.channel.?);
-    try std.testing.expect(rejected == null);
-
-    try std.testing.expectError(
-        error.InvalidUpgradeArgs,
-        parseUpgradeArgs(&.{ @constCast("--channel"), @constCast("nightly") }, &rejected),
-    );
-    try std.testing.expectEqualStrings("nightly", rejected.?);
-
-    rejected = null;
-    const last = try parseUpgradeArgs(&.{ "--channel=dev", "--channel", "stable" }, &rejected);
-    try std.testing.expectEqual(update_target.Channel.stable, last.channel.?);
-}
-
-test "upgrade channel saved line says whether the file changed" {
-    const alloc = std.testing.allocator;
-    const set = try channelSavedLine(alloc, .dev, .{ .committed = .{ .scope = .user } });
-    defer alloc.free(set);
-    try std.testing.expectEqualStrings("Release channel set to dev in ~/.fx/settings.json.\n", set);
-
-    const same = try channelSavedLine(alloc, .stable, .unchanged);
-    defer alloc.free(same);
-    try std.testing.expectEqualStrings("Release channel is already stable.\n", same);
-}
-
-test "runIfRequested names an upgrade channel that does not exist" {
-    var capture = CaptureOutput.init(std.testing.allocator);
-    defer capture.deinit();
-
-    const result = try runIfRequestedWithDeps(
-        std.testing.allocator,
-        &.{ @constCast("upgrade"), @constCast("--channel=nightly") },
-        testConfig(),
-        capture.deps(),
-    );
-    try std.testing.expectEqual(usage_failure, result);
-    try std.testing.expectEqualStrings("", capture.stdout.written());
-    try std.testing.expect(std.mem.startsWith(
-        u8,
-        capture.stderr.written(),
-        "fx upgrade: invalid value for --channel: nightly\nusage: fx upgrade",
-    ));
-}
-
-test "runIfRequested reports bad upgrade arguments as json with --json" {
-    var capture = CaptureOutput.init(std.testing.allocator);
-    defer capture.deinit();
-
-    const result = try runIfRequestedWithDeps(
-        std.testing.allocator,
-        &.{ @constCast("upgrade"), @constCast("--json"), @constCast("--channel=nightly") },
-        testConfig(),
-        capture.deps(),
-    );
-    try std.testing.expectEqual(usage_failure, result);
-    try std.testing.expectEqualStrings(
-        "{\"kind\":\"upgrade\",\"error\":\"invalid arguments\",\"code\":\"InvalidUpgradeArgs\"}\n",
-        capture.stdout.written(),
-    );
-    try std.testing.expectEqualStrings("", capture.stderr.written());
 }
 
 test "parse session list args supports bounded canonical pagination" {
@@ -5520,7 +5325,7 @@ test "runIfRequested local json success appends exactly one newline" {
     const result = try runIfRequestedWithDeps(std.testing.allocator, &.{ @constCast("status"), @constCast("--json") }, testConfig(), deps);
     try std.testing.expectEqual(RunResult.handled_success, result);
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"status\",\"model\":\"test-model\",\"model_origin\":\"default\",\"effort\":\"auto\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"auto\",\"workspace\":\"/tmp/fx\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":42,\"ultrafast_requested\":false,\"mcp\":{\"connection_check\":\"not_checked\",\"servers\":[],\"configuration_issues\":[],\"inspection_error\":null}}\n",
+        "{\"kind\":\"status\",\"model\":\"test-model\",\"model_origin\":\"default\",\"effort\":\"auto\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"auto\",\"workspace\":\"/tmp/fx\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":42,\"ultrafast_requested\":false,\"mcp\":{\"connection_check\":\"not_checked\",\"servers\":[],\"configuration_issues\":[],\"inspection_error\":null}}\n",
         capture.stdout.written(),
     );
     try std.testing.expect(!std.mem.endsWith(u8, capture.stdout.written(), "\n\n"));
@@ -5609,7 +5414,7 @@ test "writeRenderedJsonLine falls back to heap and appends exactly one newline" 
     );
 
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"status\",\"model\":\"test-model\",\"model_origin\":\"default\",\"effort\":\"auto\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/fx\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":42,\"ultrafast_requested\":true}\n",
+        "{\"kind\":\"status\",\"model\":\"test-model\",\"model_origin\":\"default\",\"effort\":\"auto\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/fx\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":42,\"ultrafast_requested\":true}\n",
         capture.stdout.written(),
     );
 }

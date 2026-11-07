@@ -285,7 +285,7 @@ Maintainers prepare each release in a pull request that bumps `pub const version
 
 To check release artifacts without publishing anything, run **Actions > Release** on `main` with `validate_only` enabled. The run builds every target, runs the PGSO qualification, and notarizes the macOS binaries. It creates no tag or GitHub Release, uploads nothing to the CDN, and changes no update channel.
 
-After CI passes on `main`, the dev release workflow publishes binaries for that commit. Run `fx upgrade --channel dev` to follow those builds, and `fx upgrade --channel stable` to go back to tagged releases.
+After CI passes on `main`, the dev release workflow publishes binaries for that commit.
 
 ## License
 

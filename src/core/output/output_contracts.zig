@@ -20,8 +20,6 @@ const usage = @import("../../usage/usage.zig");
 const local_time = @import("../shared/local_time.zig");
 const text_utils = @import("../shared/text_utils.zig");
 const types = @import("../shared/types.zig");
-const update_notes = @import("../upgrade/update_notes.zig");
-const update_target = @import("../upgrade/update_target.zig");
 const workspace_access = @import("../workspace/workspace_access.zig");
 const workspace_commands = @import("../workspace/workspace_commands.zig");
 const settings_entries = @import("../config/settings_entries.zig");
@@ -653,8 +651,6 @@ pub const StatusSnapshot = struct {
     effort: ?types.ReasoningEffort = null,
     provider_endpoint: ?[]const u8 = null,
     provider: model_provider.ProviderId = .gateway,
-    update_channel: []const u8 = "stable",
-    build_channel: []const u8 = "stable",
     build_revision: []const u8 = "",
     auth: auth_runtime.StatusSnapshot = .{},
     auth_help: ?[]const u8 = null,
@@ -740,14 +736,9 @@ pub const StatusSnapshot = struct {
             .value = if (self.agent_step_limit == 0) "unlimited" else try alloc.print("{d}", .{self.agent_step_limit}),
         });
         try rows.append(alloc, .{ .label = "Ultrafast", .value = if (self.ultrafast_requested) "requested" else "not requested" });
-        try rows.append(alloc, .{ .label = "Updates", .value = try safeText(alloc, self.update_channel) });
-        try rows.append(alloc, .{
-            .label = "Build",
-            .value = if (self.build_revision.len > 0)
-                try alloc.print("{s} · {s}", .{ try safeText(alloc, self.build_channel), try safeText(alloc, self.build_revision) })
-            else
-                try safeText(alloc, self.build_channel),
-        });
+        if (self.build_revision.len > 0) {
+            try rows.append(alloc, .{ .label = "Build", .value = try safeText(alloc, self.build_revision) });
+        }
         return rows.toOwnedSlice(alloc);
     }
 
@@ -769,8 +760,6 @@ pub const StatusSnapshot = struct {
             try out.writer.print("[status] model_source={s}\n", .{providerDisplayName(&self.provider)});
         }
         if (self.provider_endpoint) |endpoint| try out.writer.print("[status] provider_endpoint={s}\n", .{endpoint});
-        try out.writer.print("[status] update_channel={s}\n", .{self.update_channel});
-        try out.writer.print("[status] build_channel={s}\n", .{self.build_channel});
         if (self.build_revision.len > 0) {
             try out.writer.print("[status] build_revision={s}\n", .{self.build_revision});
         }
@@ -852,10 +841,6 @@ pub const StatusSnapshot = struct {
             try writer.writeAll(",\"provider_endpoint\":");
             try std.json.Stringify.value(endpoint, .{}, writer);
         }
-        try writer.writeAll(",\"update_channel\":");
-        try std.json.Stringify.value(self.update_channel, .{}, writer);
-        try writer.writeAll(",\"build_channel\":");
-        try std.json.Stringify.value(self.build_channel, .{}, writer);
         try writer.writeAll(",\"build_revision\":");
         try std.json.Stringify.value(self.build_revision, .{}, writer);
         if (self.mcp_config_error) |error_name| {
@@ -1946,122 +1931,6 @@ pub const CreditsSnapshot = struct {
     }
 };
 
-pub const UpgradeSnapshot = struct {
-    current: []const u8,
-    latest: []const u8,
-    channel: []const u8 = "stable",
-    current_channel: []const u8 = "stable",
-    current_revision: []const u8 = "",
-    latest_revision: []const u8 = "",
-    status: Status,
-    err_message: ?[]const u8 = null,
-
-    pub const Status = enum {
-        upgraded,
-        up_to_date,
-        failed,
-
-        fn label(self: Status) []const u8 {
-            return switch (self) {
-                .upgraded => "upgraded",
-                .up_to_date => "up_to_date",
-                .failed => "failed",
-            };
-        }
-    };
-
-    pub fn render(self: UpgradeSnapshot, alloc: Allocator, format: OutputFormat) ![]u8 {
-        return switch (format) {
-            .text => self.renderText(alloc),
-            .json => self.renderJson(alloc),
-        };
-    }
-
-    pub fn renderText(self: UpgradeSnapshot, alloc: Allocator) ![]u8 {
-        var out: std.Io.Writer.Allocating = .init(alloc);
-        defer out.deinit();
-
-        if (self.err_message) |msg| {
-            try out.writer.print("error: {s}\n", .{msg});
-            return try out.toOwnedSlice();
-        }
-
-        switch (self.status) {
-            .upgraded => {
-                try out.writer.writeAll("upgraded to ");
-                if (std.mem.eql(u8, self.channel, "dev") and self.latest_revision.len > 0) {
-                    try out.writer.print("dev {s} (", .{shortRevision(self.latest_revision)});
-                    try writeVersionWithPrefix(&out.writer, self.latest);
-                    try out.writer.writeByte(')');
-                } else {
-                    try writeVersionWithPrefix(&out.writer, self.latest);
-                }
-                try out.writer.writeByte('\n');
-                const channel = update_target.Channel.parse(self.channel) orelse .stable;
-                if (update_notes.destination(
-                    channel,
-                    self.latest,
-                    self.current_revision,
-                    self.latest_revision,
-                )) |notes| {
-                    try update_notes.writeLabel(notes.kind, &out.writer);
-                    try out.writer.writeAll(": ");
-                    try notes.writeUrl(&out.writer);
-                    try out.writer.writeByte('\n');
-                }
-            },
-            .up_to_date => {
-                if (std.mem.eql(u8, self.channel, "dev") and self.latest_revision.len > 0) {
-                    try out.writer.print("fx dev {s} is already up to date (", .{shortRevision(self.latest_revision)});
-                } else {
-                    try out.writer.writeAll("fx is already up to date (");
-                }
-                try writeVersionWithPrefix(&out.writer, self.latest);
-                try out.writer.writeAll(")\n");
-            },
-            .failed => try out.writer.writeAll("upgrade failed\n"),
-        }
-
-        return try out.toOwnedSlice();
-    }
-
-    pub fn renderJson(self: UpgradeSnapshot, alloc: Allocator) ![]u8 {
-        var out: std.Io.Writer.Allocating = .init(alloc);
-        defer out.deinit();
-
-        try out.writer.writeAll("{\"kind\":\"upgrade\"");
-
-        if (self.err_message) |msg| {
-            try out.writer.writeAll(",\"error\":");
-            try std.json.Stringify.value(msg, .{}, &out.writer);
-            try out.writer.writeByte('}');
-            return try out.toOwnedSlice();
-        }
-
-        try out.writer.writeAll(",\"current\":");
-        try std.json.Stringify.value(self.current, .{}, &out.writer);
-        try out.writer.writeAll(",\"latest\":");
-        try std.json.Stringify.value(self.latest, .{}, &out.writer);
-        if (!std.mem.eql(u8, self.channel, "stable") or
-            !std.mem.eql(u8, self.current_channel, "stable") or
-            self.latest_revision.len > 0)
-        {
-            try out.writer.writeAll(",\"channel\":");
-            try std.json.Stringify.value(self.channel, .{}, &out.writer);
-            try out.writer.writeAll(",\"current_channel\":");
-            try std.json.Stringify.value(self.current_channel, .{}, &out.writer);
-            try out.writer.writeAll(",\"current_revision\":");
-            try std.json.Stringify.value(self.current_revision, .{}, &out.writer);
-            try out.writer.writeAll(",\"latest_revision\":");
-            try std.json.Stringify.value(self.latest_revision, .{}, &out.writer);
-        }
-        try out.writer.writeAll(",\"status\":");
-        try std.json.Stringify.value(self.status.label(), .{}, &out.writer);
-        try out.writer.writeByte('}');
-        return try out.toOwnedSlice();
-    }
-};
-
 fn shortRevision(revision: []const u8) []const u8 {
     return revision[0..@min(revision.len, 12)];
 }
@@ -2329,14 +2198,14 @@ test "core status snapshot text and json stay stable" {
     const text = try snapshot.renderText(std.testing.allocator);
     defer std.testing.allocator.free(text);
     try std.testing.expectEqualStrings(
-        "[status] model=alpha\n[status] update_channel=stable\n[status] build_channel=stable\n[status] auth=missing\n[status] auth_refreshable=false\n[status] auth_help=fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\n[status] permission_mode=ask\n[status] workspace=/tmp/fx\n[status] history_turns=3\n[status] session_permission_grants=1\n[status] agent_step_limit=24\n[status] ultrafast_requested=false\n",
+        "[status] model=alpha\n[status] auth=missing\n[status] auth_refreshable=false\n[status] auth_help=fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\n[status] permission_mode=ask\n[status] workspace=/tmp/fx\n[status] history_turns=3\n[status] session_permission_grants=1\n[status] agent_step_limit=24\n[status] ultrafast_requested=false\n",
         text,
     );
 
     const json = try snapshot.renderJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"status\",\"model\":\"alpha\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/fx\",\"history_turns\":3,\"session_permission_grants\":1,\"agent_step_limit\":24,\"ultrafast_requested\":false}",
+        "{\"kind\":\"status\",\"model\":\"alpha\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/fx\",\"history_turns\":3,\"session_permission_grants\":1,\"agent_step_limit\":24,\"ultrafast_requested\":false}",
         json,
     );
 }
@@ -2355,14 +2224,14 @@ test "core status snapshot includes selected team when present" {
     const text = try snapshot.renderText(std.testing.allocator);
     defer std.testing.allocator.free(text);
     try std.testing.expectEqualStrings(
-        "[status] model=alpha\n[status] update_channel=stable\n[status] build_channel=stable\n[status] auth=fx login\n[status] auth_refreshable=true\n[status] team=example-team\n[status] permission_mode=ask\n[status] workspace=/tmp/fx\n[status] history_turns=0\n[status] session_permission_grants=0\n[status] agent_step_limit=24\n[status] ultrafast_requested=false\n",
+        "[status] model=alpha\n[status] auth=fx login\n[status] auth_refreshable=true\n[status] team=example-team\n[status] permission_mode=ask\n[status] workspace=/tmp/fx\n[status] history_turns=0\n[status] session_permission_grants=0\n[status] agent_step_limit=24\n[status] ultrafast_requested=false\n",
         text,
     );
 
     const json = try snapshot.renderJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"status\",\"model\":\"alpha\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"fx login\",\"auth_refreshable\":true,\"team\":\"example-team\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/fx\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":24,\"ultrafast_requested\":false}",
+        "{\"kind\":\"status\",\"model\":\"alpha\",\"build_revision\":\"\",\"auth\":\"fx login\",\"auth_refreshable\":true,\"team\":\"example-team\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/fx\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":24,\"ultrafast_requested\":false}",
         json,
     );
 }
@@ -3257,114 +3126,6 @@ test "core credits snapshot renders parsed, raw, and empty fallbacks" {
     const empty_text = try (CreditsSnapshot{}).renderText(std.testing.allocator);
     defer std.testing.allocator.free(empty_text);
     try std.testing.expectEqualStrings("[credits] no data returned by gateway\n", empty_text);
-}
-
-test "core upgrade snapshot renders errors and statuses" {
-    const error_snapshot = UpgradeSnapshot{
-        .current = "0.2.9",
-        .latest = "0.2.10",
-        .status = .failed,
-        .err_message = "download failed",
-    };
-
-    const error_text = try error_snapshot.renderText(std.testing.allocator);
-    defer std.testing.allocator.free(error_text);
-    try std.testing.expectEqualStrings("error: download failed\n", error_text);
-
-    const error_json = try error_snapshot.renderJson(std.testing.allocator);
-    defer std.testing.allocator.free(error_json);
-    try std.testing.expectEqualStrings(
-        "{\"kind\":\"upgrade\",\"error\":\"download failed\"}",
-        error_json,
-    );
-
-    const upgraded_text = try (UpgradeSnapshot{
-        .current = "0.2.9",
-        .latest = "0.2.10",
-        .status = .upgraded,
-    }).renderText(std.testing.allocator);
-    defer std.testing.allocator.free(upgraded_text);
-    try std.testing.expectEqualStrings(
-        "upgraded to v0.2.10\n" ++
-            "notes: https://fx.sh/changelog#v0.2.10\n",
-        upgraded_text,
-    );
-
-    const upgraded_json = try (UpgradeSnapshot{
-        .current = "0.2.9",
-        .latest = "0.2.10",
-        .current_revision = "0123456789ab",
-        .status = .upgraded,
-    }).renderJson(std.testing.allocator);
-    defer std.testing.allocator.free(upgraded_json);
-    try std.testing.expectEqualStrings(
-        "{\"kind\":\"upgrade\",\"current\":\"0.2.9\",\"latest\":\"0.2.10\",\"status\":\"upgraded\"}",
-        upgraded_json,
-    );
-
-    const prefixed_text = try (UpgradeSnapshot{
-        .current = "0.2.9",
-        .latest = "v0.2.10",
-        .status = .upgraded,
-    }).renderText(std.testing.allocator);
-    defer std.testing.allocator.free(prefixed_text);
-    try std.testing.expectEqualStrings(
-        "upgraded to v0.2.10\n" ++
-            "notes: https://fx.sh/changelog#v0.2.10\n",
-        prefixed_text,
-    );
-
-    const up_to_date = UpgradeSnapshot{
-        .current = "0.2.9",
-        .latest = "0.2.10",
-        .status = .up_to_date,
-    };
-
-    const up_to_date_text = try up_to_date.renderText(std.testing.allocator);
-    defer std.testing.allocator.free(up_to_date_text);
-    try std.testing.expectEqualStrings("fx is already up to date (v0.2.10)\n", up_to_date_text);
-
-    const failed_text = try (UpgradeSnapshot{
-        .current = "0.2.9",
-        .latest = "0.2.10",
-        .status = .failed,
-    }).renderText(std.testing.allocator);
-    defer std.testing.allocator.free(failed_text);
-    try std.testing.expectEqualStrings("upgrade failed\n", failed_text);
-
-    const up_to_date_json = try up_to_date.renderJson(std.testing.allocator);
-    defer std.testing.allocator.free(up_to_date_json);
-    try std.testing.expectEqualStrings(
-        "{\"kind\":\"upgrade\",\"current\":\"0.2.9\",\"latest\":\"0.2.10\",\"status\":\"up_to_date\"}",
-        up_to_date_json,
-    );
-}
-
-test "core upgrade snapshot identifies dev revisions" {
-    const snapshot = UpgradeSnapshot{
-        .current = "0.3.66",
-        .latest = "0.3.66",
-        .channel = "dev",
-        .current_channel = "stable",
-        .current_revision = "111111111111",
-        .latest_revision = "abcdef0123456789abcdef0123456789abcdef01",
-        .status = .upgraded,
-    };
-
-    const text = try snapshot.renderText(std.testing.allocator);
-    defer std.testing.allocator.free(text);
-    try std.testing.expectEqualStrings(
-        "upgraded to dev abcdef012345 (v0.3.66)\n" ++
-            "changes: https://github.com/vercel-labs/fx/compare/111111111111...abcdef0123456789abcdef0123456789abcdef01\n",
-        text,
-    );
-
-    const json = try snapshot.renderJson(std.testing.allocator);
-    defer std.testing.allocator.free(json);
-    try std.testing.expectEqualStrings(
-        "{\"kind\":\"upgrade\",\"current\":\"0.3.66\",\"latest\":\"0.3.66\",\"channel\":\"dev\",\"current_channel\":\"stable\",\"current_revision\":\"111111111111\",\"latest_revision\":\"abcdef0123456789abcdef0123456789abcdef01\",\"status\":\"upgraded\"}",
-        json,
-    );
 }
 
 test "workspace snapshot renders source availability and mutation in text and json" {

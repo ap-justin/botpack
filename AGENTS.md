@@ -20,7 +20,7 @@ If you cannot run the binary in your environment, say so explicitly and ask the 
 
 When running fx for verification, **always use the freshly-built binary at** **`./zig-out/bin/fx`** from this checkout. Never run `fx` from `PATH`, never rely on the installed copy at `~/.local/bin/fx`, and never assume an installed copy reflects your change.
 
-* The user may have an older `fx` on their PATH (e.g. installed via `fx upgrade` or the install script). Running that one will not exercise your edits.
+* The user may have an older `fx` on their PATH (e.g. installed with the install script). Running that one will not exercise your edits.
 
 * When a user reports "still not working" after you believe you fixed something, do not assume they are running the wrong binary. Assume your fix is incomplete and investigate further. If you genuinely suspect a PATH mismatch, ask — do not silently copy binaries onto their `PATH`.
 

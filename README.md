@@ -38,7 +38,7 @@ fx is meant to be embedded and extended. Scripts call it with `fx ask`, and edit
 curl -fsSL https://fx.sh/setup.sh | bash
 ```
 
-fx runs on macOS and Linux, on x86_64 and arm64. The installer puts it in `~/.local/bin`. fx checks for updates in the background, and `fx upgrade` installs the latest release right away. [CHANGELOG.md](CHANGELOG.md) lists what changed in each release. You can also [try fx in your browser](https://fx.sh/try) without installing anything.
+fx runs on macOS and Linux, on x86_64 and arm64. The installer puts it in `~/.local/bin`. [CHANGELOG.md](CHANGELOG.md) lists what changed in each release. You can also [try fx in your browser](https://fx.sh/try) without installing anything.
 
 ## Quick start
 

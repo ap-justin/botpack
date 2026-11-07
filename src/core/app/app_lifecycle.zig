@@ -12,7 +12,6 @@ const model_provider = @import("../config/model_provider.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
 const skill_runtime = @import("../skills/skill_runtime.zig");
 const workspace_access = @import("../workspace/workspace_access.zig");
-const update_target = @import("../upgrade/update_target.zig");
 const notification_sound = @import("../notifications/sound.zig");
 const tool_result_limits = @import("../tooling/tool_result_limits.zig");
 const compactor = @import("../compactor/compactor.zig");
@@ -58,8 +57,6 @@ pub const StartupState = struct {
     fast_mode_source: config_runtime.ConfigSource = .compiled_default,
     slash_menu_categories: bool = true,
     collapse_tool_calls: bool = false,
-    auto_upgrade: bool = true,
-    update_channel: update_target.Channel = .stable,
     startup_scrollback: bool = true,
     prompt_history_enabled: bool = true,
     prompt_history_store_allowed: bool = true,
@@ -253,7 +250,6 @@ pub const StartupStatus = struct {
     auth: auth_runtime.StatusSnapshot = .{},
     permission_mode: PermissionMode,
     agent_step_limit: usize,
-    update_channel: update_target.Channel = .stable,
     config_diagnostics: []config_runtime.ConfigDiagnostic = &.{},
 
     pub fn deinit(self: *StartupStatus, alloc: Allocator) void {
@@ -383,7 +379,6 @@ pub fn loadLibfxStartupState(
         .permission_mode = .auto,
         .agent_step_limit = default_agent_step_limit,
         .context_enabled = false,
-        .auto_upgrade = false,
         .prompt_history_enabled = false,
         .prompt_history_store_allowed = false,
     };
@@ -464,7 +459,6 @@ pub fn loadStartupStatusWithAuthMode(
         .auth = auth_status,
         .permission_mode = loadPermissionMode(settings.permission_mode),
         .agent_step_limit = loadAgentStepLimit(default_agent_step_limit, settings.max_agent_steps),
-        .update_channel = settings.update_channel orelse .stable,
         .config_diagnostics = detailed.diagnostics,
     };
     auth_status.owned_team = null;
@@ -688,8 +682,6 @@ pub fn resolveSettings(alloc: Allocator, state: *StartupState, detailed: *const 
     state.ultrafast_mode_source = detailed.sources.ultrafast_mode;
     state.slash_menu_categories = settings.slash_menu_categories orelse true;
     state.collapse_tool_calls = settings.collapse_tool_calls orelse false;
-    state.auto_upgrade = settings.auto_upgrade orelse true;
-    state.update_channel = settings.update_channel orelse .stable;
     state.startup_scrollback = settings.startup_scrollback orelse true;
     state.theme = if (settings.theme) |value| try alloc.dupe(u8, value) else null;
     state.effort = settings.effort orelse .auto;

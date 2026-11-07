@@ -9,10 +9,6 @@
       "job": "setting-override",
       "stability": "stable"
     },
-    "FX_AUTO_UPGRADE": {
-      "job": "setting-override",
-      "stability": "stable"
-    },
     "FX_BENCH": {
       "job": "diagnostics",
       "stability": "internal"
@@ -182,10 +178,6 @@
       "stability": "internal"
     },
     "FX_TEST_TERMINAL_WRITE_DELAY_MS": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_UPGRADE_BASE_URL": {
       "job": "test",
       "stability": "internal"
     },

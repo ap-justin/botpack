@@ -41,11 +41,6 @@ pub const usage_options = [_]command_specs.OptionDoc{
     json_option,
 };
 
-pub const upgrade_options = [_]command_specs.OptionDoc{
-    .{ .flag = "--channel <stable|dev>", .description = "Select and remember the release channel" },
-    json_option,
-};
-
 pub const workspace_options = [_]command_specs.OptionDoc{json_option};
 
 const workspace_subcommands = [_]command_specs.SubcommandDoc{
@@ -366,14 +361,6 @@ pub const top_level_specs = [_]TopLevelSpec{
         },
     },
     .{
-        .kind = .upgrade,
-        .token = "upgrade",
-        .aliases = &.{"update"},
-        .usage = "upgrade [--channel <stable|dev>] [--json]",
-        .summary = "Upgrade 𝒇x on the selected release channel",
-        .options = &upgrade_options,
-    },
-    .{
         .kind = .workspace,
         .token = "workspace",
         .usage = "workspace [list|add PATH|remove PATH|clear] [--json]",
@@ -451,7 +438,6 @@ pub const top_level_help_groups = [_]TopLevelHelpGroup{
         .{ .kind = .permissions, .usage = "permissions" },
         .{ .kind = .workspace, .usage = "workspace" },
         .{ .kind = .config, .usage = "config" },
-        .{ .kind = .upgrade, .usage = "upgrade|update", .summary = "Upgrade fx on the selected release channel" },
         .{ .kind = .acp, .usage = "acp" },
         .{ .kind = .completion, .usage = "completion <shell>" },
         .{ .kind = .help, .usage = "help" },
