@@ -5,14 +5,11 @@ const UpdateChannel = enum { stable, dev };
 const WasmSurface = enum {
     none,
     core,
-    term,
 };
 
 const PgsoArtifact = enum {
     fx,
     file_index,
-    ui_activity,
-    approval_review,
     unit_tests,
 };
 
@@ -32,7 +29,7 @@ pub fn build(b: *std.Build) void {
     const wasm_surface = b.option(
         WasmSurface,
         "wasm-surface",
-        "Build a WASI WebAssembly surface for JavaScript hosts (core or term)",
+        "Build a WASI WebAssembly surface for JavaScript hosts (core)",
     ) orelse .none;
     const napi_surface = b.option(
         NapiSurface,
@@ -222,110 +219,6 @@ pub fn build(b: *std.Build) void {
     const run_bench_step = b.step("run-bench-file-index", "Build and run file_index search benchmark");
     run_bench_step.dependOn(&run_bench.step);
 
-    // --- UI activity progress benchmark ---
-    const ui_activity_bench = b.addExecutable(.{
-        .name = "ui-activity-progress-bench",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("benchmarks/activity_progress.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
-    });
-    ui_activity_bench.root_module.addImport(
-        "benchmark_exports",
-        benchmark_exports_mod,
-    );
-    const install_ui_activity_bench = b.addInstallArtifact(ui_activity_bench, .{});
-    const ui_activity_bench_step = b.step(
-        "bench-ui-activity",
-        "Build the UI activity progress benchmark",
-    );
-    ui_activity_bench_step.dependOn(&install_ui_activity_bench.step);
-
-    const run_ui_activity_bench = b.addRunArtifact(ui_activity_bench);
-    run_ui_activity_bench.step.dependOn(&install_ui_activity_bench.step);
-    const run_ui_activity_bench_step = b.step(
-        "run-bench-ui-activity",
-        "Build and run the UI activity progress benchmark",
-    );
-    run_ui_activity_bench_step.dependOn(&run_ui_activity_bench.step);
-
-    const ui_activity_bench_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("benchmarks/activity_progress.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    ui_activity_bench_tests.root_module.addImport(
-        "benchmark_exports",
-        benchmark_exports_mod,
-    );
-    const run_ui_activity_bench_tests = b.addRunArtifact(ui_activity_bench_tests);
-    test_step.dependOn(&run_ui_activity_bench_tests.step);
-    const test_ui_activity_bench_step = b.step(
-        "test-ui-activity-benchmark",
-        "Run UI activity benchmark policy tests",
-    );
-    test_ui_activity_bench_step.dependOn(&run_ui_activity_bench_tests.step);
-
-    // --- file-diff approval review benchmark ---
-    const approval_review_bench = b.addExecutable(.{
-        .name = "approval-review-bench",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("benchmarks/approval_review.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
-    });
-    approval_review_bench.root_module.addImport(
-        "benchmark_exports",
-        benchmark_exports_mod,
-    );
-    const install_approval_review_bench = b.addInstallArtifact(
-        approval_review_bench,
-        .{},
-    );
-    const approval_review_bench_step = b.step(
-        "bench-approval-review",
-        "Build the file-diff approval review benchmark",
-    );
-    approval_review_bench_step.dependOn(&install_approval_review_bench.step);
-
-    const run_approval_review_bench = b.addRunArtifact(approval_review_bench);
-    run_approval_review_bench.step.dependOn(&install_approval_review_bench.step);
-    run_approval_review_bench.addPassthruArgs();
-    const run_approval_review_bench_step = b.step(
-        "run-bench-approval-review",
-        "Build and run the file-diff approval review benchmark",
-    );
-    run_approval_review_bench_step.dependOn(&run_approval_review_bench.step);
-
-    const approval_review_bench_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("benchmarks/approval_review.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    approval_review_bench_tests.root_module.addImport(
-        "benchmark_exports",
-        benchmark_exports_mod,
-    );
-    const run_approval_review_bench_tests = b.addRunArtifact(
-        approval_review_bench_tests,
-    );
-    test_step.dependOn(&run_approval_review_bench_tests.step);
-    const test_approval_review_bench_step = b.step(
-        "test-approval-review-benchmark",
-        "Run file-diff approval review benchmark qualification tests",
-    );
-    test_approval_review_bench_step.dependOn(
-        &run_approval_review_bench_tests.step,
-    );
-
     const pgso_ir_step = b.step(
         "pgso-ir",
         "Emit selected ReleaseSafe LLVM bitcode for PGO/PGSO qualification",
@@ -334,15 +227,11 @@ pub fn build(b: *std.Build) void {
         const selected: *std.Build.Step.Compile = switch (artifact) {
             .fx => exe,
             .file_index => file_index_bench,
-            .ui_activity => ui_activity_bench,
-            .approval_review => approval_review_bench,
             .unit_tests => pgso_tests,
         };
         const output_name = switch (artifact) {
             .fx => "pgso/fx.bc",
             .file_index => "pgso/file-index.bc",
-            .ui_activity => "pgso/ui-activity.bc",
-            .approval_review => "pgso/approval-review.bc",
             .unit_tests => "pgso/unit-tests.bc",
         };
         const install_ir = b.addInstallFile(
@@ -373,12 +262,10 @@ fn addWasmArtifact(
     });
     const name = switch (surface) {
         .core => "fx-core",
-        .term => "fx-term",
         .none => unreachable,
     };
     const description = switch (surface) {
         .core => "Build the headless fx WebAssembly artifact",
-        .term => "Build the terminal fx WebAssembly artifact",
         .none => unreachable,
     };
 
@@ -392,7 +279,6 @@ fn addWasmArtifact(
 
     const wasm_root = switch (surface) {
         .core => "src/wasm_core_main.zig",
-        .term => "src/wasm_term_main.zig",
         .none => unreachable,
     };
     const wasm_exe = b.addExecutable(.{

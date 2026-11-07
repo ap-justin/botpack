@@ -9,7 +9,7 @@ export interface Emission { intent: string; shape: string }
 export interface TurnSpec { name: string; calls: Emission[] }
 export interface RunContext {
   binary: string;
-  /** The target worktree's tests/e2e/tmux-helpers.ts module. */
+  /** The target worktree's tests/e2e/fake-gateway.ts module. */
   helpers: any;
   /** Parent directory for fixtures; they are kept as evidence. */
   artifacts: string;

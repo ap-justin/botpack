@@ -198,9 +198,6 @@ pub fn buildAgentRequest(
     var provider_options = request.provider_options;
     provider_options.cache_markers = vercel_model_policy.cacheMarkers(request.model);
     provider_options.single_system_message = vercel_model_policy.singleSystemMessage(request.model);
-    if (vercel_model_policy.defaultProviderOrder(request.model, provider_options)) |order| {
-        provider_options.provider_order = order;
-    }
 
     if (request.verified_images) |images| {
         const response_format = request.response_format orelse
@@ -325,24 +322,19 @@ fn buildAgentToolsJson(
         first = false;
         try model_tool_schema.writeBuiltinFunctionSchema(alloc, &out.writer, tool);
     }
-    // The fixed tools and an optional `vision` come first and the selected
-    // ones last, in selection order, so selecting a tool appends to the list
-    // and moves nothing before it. `vision` turning optional mid-session
-    // still shifts the selected tools.
+    for (request.tools.selected_dynamic) |tool| {
+        if (toolNameSelected(request.tools.advertised_names, tool.name)) continue;
+        if (!first) try out.writer.writeByte(',');
+        first = false;
+        try writeDynamicFunctionTool(&out.writer, tool);
+    }
     if (request.vision_mode == .optional and
         !toolNameSelected(request.tools.advertised_names, "vision"))
     {
         const vision = request.tools.registry.lookup("vision") orelse
             return error.VisionToolNotRegistered;
         if (!first) try out.writer.writeByte(',');
-        first = false;
         try model_tool_schema.writeBuiltinFunctionSchema(alloc, &out.writer, vision.model_schema);
-    }
-    for (request.tools.selected_dynamic) |tool| {
-        if (toolNameSelected(request.tools.advertised_names, tool.name)) continue;
-        if (!first) try out.writer.writeByte(',');
-        first = false;
-        try writeDynamicFunctionTool(&out.writer, tool);
     }
     try out.writer.writeByte(']');
     return out.toOwnedSlice();
@@ -597,9 +589,7 @@ test "agent request builder overlays selected dynamic schemas" {
     try std.testing.expect(std.mem.find(u8, body, "\"maxOutputTokens\":64000") != null);
 }
 
-/// A registered `vision` tool whose callbacks are never reached: the request
-/// builder reads only its schema.
-const test_vision_tool = blk: {
+test "required vision request contains only the registered vision schema" {
     const Callbacks = struct {
         fn decode(_: tool_dispatch.DispatchContext, _: []const u8) tool_dispatch.DispatchError!tool_dispatch.DecodeResult {
             return error.InvalidToolArguments;
@@ -617,7 +607,8 @@ const test_vision_tool = blk: {
             return false;
         }
     };
-    break :blk tool_dispatch.Tool{
+    const messages = [_]shared_types.ChatMessage{.{ .role = .user, .content = "inspect image 7" }};
+    const vision_tool = tool_dispatch.Tool{
         .name = "vision",
         .description = "registry-owned vision schema sentinel",
         .model_schema = .{
@@ -630,68 +621,7 @@ const test_vision_tool = blk: {
         .reads_only_fn = Callbacks.readsOnly,
         .irreversible_fn = Callbacks.isIrreversible,
     };
-};
-
-/// Asserts the request's `tools` array parses and names `expected`, in order.
-fn expectAdvertisedToolNames(body: []const u8, expected: []const []const u8) !void {
-    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, body, .{});
-    defer parsed.deinit();
-    const tools = parsed.value.object.get("tools").?.array.items;
-    try std.testing.expectEqual(expected.len, tools.len);
-    for (expected, tools) |want, tool| try std.testing.expectEqualStrings(want, tool.object.get("name").?.string);
-}
-
-test "optional vision sits between the fixed tools and the selected ones" {
-    const messages = [_]shared_types.ChatMessage{.{ .role = .user, .content = "question" }};
-    const registered_tools = [_]tool_dispatch.Tool{test_vision_tool};
-    const read_file_schema = model_tool_schema.FunctionSchema{ .name = "read_file", .description = "Read", .input_schema = .{} };
-    const write_file_schema = model_tool_schema.FunctionSchema{ .name = "write_file", .description = "Write", .input_schema = .{} };
-    var dynamic_schema = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"type\":\"object\",\"properties\":{}}", .{});
-    defer dynamic_schema.deinit();
-    const body = try buildAgentRequest(std.testing.allocator, .{
-        .model = "anthropic/claude",
-        .tools = .{
-            .registry = .{ .tools = registered_tools[0..] },
-            .additional_functions = &.{ read_file_schema, write_file_schema },
-            .selected_dynamic = &.{.{ .name = "mcp_fs_read", .description = "Read", .input_schema = dynamic_schema.value }},
-        },
-        .messages = &messages,
-        .tool_choice = .auto,
-        .vision_mode = .optional,
-        .provider_options = resolveGatewayProviderOptions("anthropic/claude", .auto, false),
-    });
-    defer std.testing.allocator.free(body);
-
-    try expectAdvertisedToolNames(body, &.{ "read_file", "write_file", "vision", "mcp_fs_read" });
-}
-
-test "optional vision with no fixed tools still writes a valid tools array" {
-    const messages = [_]shared_types.ChatMessage{.{ .role = .user, .content = "question" }};
-    const registered_tools = [_]tool_dispatch.Tool{test_vision_tool};
-    var dynamic_schema = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"type\":\"object\",\"properties\":{}}", .{});
-    defer dynamic_schema.deinit();
-    const body = try buildAgentRequest(std.testing.allocator, .{
-        .model = "anthropic/claude",
-        .tools = .{
-            .registry = .{ .tools = registered_tools[0..] },
-            .selected_dynamic = &.{
-                .{ .name = "mcp_fs_read", .description = "Read", .input_schema = dynamic_schema.value },
-                .{ .name = "mcp_fs_list", .description = "List", .input_schema = dynamic_schema.value },
-            },
-        },
-        .messages = &messages,
-        .tool_choice = .auto,
-        .vision_mode = .optional,
-        .provider_options = resolveGatewayProviderOptions("anthropic/claude", .auto, false),
-    });
-    defer std.testing.allocator.free(body);
-
-    try expectAdvertisedToolNames(body, &.{ "vision", "mcp_fs_read", "mcp_fs_list" });
-}
-
-test "required vision request contains only the registered vision schema" {
-    const messages = [_]shared_types.ChatMessage{.{ .role = .user, .content = "inspect image 7" }};
-    const registered_tools = [_]tool_dispatch.Tool{test_vision_tool};
+    const registered_tools = [_]tool_dispatch.Tool{vision_tool};
     const read_file_schema = model_tool_schema.FunctionSchema{
         .name = "read_file",
         .description = "Read",

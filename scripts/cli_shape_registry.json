@@ -21,14 +21,6 @@
       "job": "setting-override",
       "stability": "internal"
     },
-    "FX_DEBUG_RECORD": {
-      "job": "diagnostics",
-      "stability": "stable"
-    },
-    "FX_DEBUG_RECORD_SILENT_BANNER": {
-      "job": "diagnostics",
-      "stability": "stable"
-    },
     "FX_DISABLE_KEYCHAIN": {
       "job": "credentials",
       "stability": "stable"
@@ -48,10 +40,6 @@
     "FX_GATEWAY_CHAT_URL": {
       "job": "internal",
       "stability": "internal"
-    },
-    "FX_HERDR": {
-      "job": "integration",
-      "stability": "stable"
     },
     "FX_HOME": {
       "job": "location",
@@ -97,14 +85,6 @@
       "job": "setting-override",
       "stability": "stable"
     },
-    "FX_RECORD": {
-      "job": "diagnostics",
-      "stability": "stable"
-    },
-    "FX_RECORD_INPUT": {
-      "job": "diagnostics",
-      "stability": "stable"
-    },
     "FX_REVIEW_MODEL": {
       "job": "setting-override",
       "stability": "stable"
@@ -115,10 +95,6 @@
     },
     "FX_SOUND": {
       "job": "setting-override",
-      "stability": "stable"
-    },
-    "FX_SYNC_UPDATES": {
-      "job": "diagnostics",
       "stability": "stable"
     },
     "FX_TEST_ACP_PROMPT_REAP_READY": {
@@ -225,10 +201,6 @@
       "job": "test",
       "stability": "internal"
     },
-    "FX_TEST_INSTANCES": {
-      "job": "test",
-      "stability": "internal"
-    },
     "FX_TEST_OAUTH_ISSUER_URL": {
       "job": "test",
       "stability": "internal"
@@ -321,10 +293,6 @@
       "job": "diagnostics",
       "stability": "stable"
     },
-    "FX_UI_OBSERVE_DIR": {
-      "job": "diagnostics",
-      "stability": "internal"
-    },
     "FX_ULTRAFAST": {
       "job": "setting-override",
       "stability": "stable"
@@ -343,28 +311,19 @@
   },
   "external_env": [
     "AI_GATEWAY_API_KEY",
-    "CMUX_WORKSPACE_ID",
-    "COLORFGBG",
-    "COLORTERM",
     "COLUMNS",
     "COMSPEC",
     "DISPLAY",
     "GIT_CONFIG_GLOBAL",
     "GIT_CONFIG_NOSYSTEM",
     "GIT_CONFIG_SYSTEM",
-    "HERDR_PANE_ID",
-    "HERDR_SOCKET_PATH",
     "HOME",
-    "LANG",
     "NO_COLOR",
     "PATH",
     "SHELL",
     "SSH_CONNECTION",
     "TERM",
-    "TERM_PROGRAM",
     "TMPDIR",
-    "TMUX",
-    "TMUX_PANE",
     "TYPESAFE_API_KEY",
     "TYPESAFE_BASE_URL",
     "USER",
@@ -379,16 +338,6 @@
     "--version": "Detects a version request before any command parser runs.",
     "-v": "Short form of --version.",
     "--json": "Picks the error format when a command's own parser has rejected its arguments.",
-    "--resume": "The fixed resume grammar: --resume takes an optional last or ID operand.",
-    "--continue": "The fixed resume grammar.",
-    "-c": "The fixed resume grammar.",
-    "-r": "The fixed resume grammar: short for --resume, with the same optional operand.",
-    "--resume=": "The fixed resume grammar: --resume with its operand inline.",
-    "--resume-last": "Removed resume spelling, matched only to name its replacement.",
-    "--resume-": "Removed --resume-<id> spellings, matched only to name the replacement.",
-    "--upgrade-relaunch": "The internal word fx upgrade passes when it restarts fx into the new version.",
-    "--id": "Removed fx session resume --id spelling, matched only to name its replacement.",
-    "--golden": "Maps a missing-value failure onto fx replay's own error.",
     "-p": "Other agents' one-shot flag. fx doesn't accept it; it is matched only to point to fx ask.",
     "--print": "Long form of -p, matched only to point to fx ask.",
     "--print=": "Inline form of --print, matched only to point to fx ask.",
@@ -439,9 +388,6 @@
     }
   },
   "exceptions": {
-    "flag_names": {
-      "--resume-": "Prefix of the removed --resume-<id> alias, kept so the removed spelling fails with a hint."
-    },
     "setting_keys": {
       "statusLine": "Older spelling of status_line, still read so existing settings files keep working; fx writes only status_line."
     }

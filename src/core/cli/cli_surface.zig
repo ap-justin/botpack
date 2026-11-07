@@ -7,7 +7,6 @@ const chatgpt_oauth = @import("../auth/chatgpt_oauth.zig");
 const grok_oauth = @import("../auth/grok_oauth.zig");
 const acp_runner = @import("acp_runner.zig");
 const cli_ask = @import("cli_ask.zig");
-const cli_replay = @import("cli_replay.zig");
 const cli_flags = @import("cli_flags.zig");
 const completion = @import("completion.zig");
 const agent_run_flags = @import("agent_run_flags.zig");
@@ -23,8 +22,6 @@ const collections = @import("../shared/collections.zig");
 const config_runtime = @import("../config/config_runtime.zig");
 const credentials = @import("../auth/credentials.zig");
 const model_provider = @import("../config/model_provider.zig");
-const profiles = @import("../profiles/profiles.zig");
-const app_profile_runtime = @import("../app/app_profile_runtime.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
 const doctor_runtime = @import("doctor_runtime.zig");
 const gateway_provider = @import("../gateway/gateway_provider.zig");
@@ -92,58 +89,13 @@ pub const Command = union(enum) {
     teams: []const [:0]const u8,
     session: []const [:0]const u8,
     sessions: []const [:0]const u8,
-    resume_session: ResumeInvocation,
     credits: []const [:0]const u8,
     usage: []const [:0]const u8,
     upgrade: []const [:0]const u8,
-    replay: []const [:0]const u8,
     workspace: []const [:0]const u8,
     config: []const [:0]const u8,
     completion: []const [:0]const u8,
     unknown: []const u8,
-};
-
-const ResumeInvocation = struct {
-    args: []const [:0]const u8,
-    top_level_alias: bool = false,
-    /// Set for `fx resume`, which only the upgrade relaunch may still use: an
-    /// older fx that installs this version restarts it with
-    /// `fx resume <id> --upgrade-relaunch`.
-    legacy_command: bool = false,
-};
-
-/// Prefix of the removed `--resume-<id>` alias, matched only to explain the
-/// replacement.
-const resume_id_alias_prefix = "--resume-";
-pub const upgrade_relaunch_arg = "--upgrade-relaunch";
-
-pub const UpgradeRelaunch = struct {
-    previous_revision: ?[]u8 = null,
-
-    pub fn deinit(self: *UpgradeRelaunch, alloc: Allocator) void {
-        if (self.previous_revision) |revision| alloc.free(revision);
-        self.* = undefined;
-    }
-};
-
-// `-r` is the short form of `--resume`. Given no value, either one opens the
-// session picker; given `last` or an ID, it resumes that session.
-const resume_short_flag = "-r";
-const resume_inline_prefix = "--resume=";
-
-pub const ResumeTarget = union(enum) {
-    remembered,
-    pick,
-    last,
-    id: []u8,
-
-    pub fn deinit(self: *ResumeTarget, alloc: Allocator) void {
-        switch (self.*) {
-            .remembered, .pick, .last => {},
-            .id => |value| alloc.free(value),
-        }
-        self.* = undefined;
-    }
 };
 
 pub const LaunchModifiers = struct {
@@ -160,19 +112,12 @@ pub const LaunchModifiers = struct {
     /// `--permission-mode` and its shortcuts; never saved.
     permission_override: ?types.PermissionMode = null,
 
-    /// `--profile <name>`: the agent profile main runs in. Owned.
-    profile_name: ?[]u8 = null,
-    /// `--instances <n>`: how many fx instances the host opens at startup,
-    /// each with its own session.
-    instances: ?usize = null,
-
     pub fn deinit(self: *LaunchModifiers, alloc: Allocator) void {
         if (self.context_limit_overrides.len > 0) alloc.free(self.context_limit_overrides);
         for (self.additional_directories) |path| alloc.free(path);
         if (self.additional_directories.len > 0) alloc.free(self.additional_directories);
         if (self.model_override) |model| alloc.free(model);
         if (self.provider_order_override) |order| freeProviderOrderOverride(alloc, order);
-        if (self.profile_name) |name| alloc.free(name);
         self.* = .{};
     }
 
@@ -212,20 +157,12 @@ fn parseProviderOrderFlag(alloc: Allocator, raw: []const u8, previous: ?[][]cons
 }
 
 pub const InteractiveLaunch = struct {
-    requested_resume: ?ResumeTarget = null,
-    upgrade_relaunch: ?UpgradeRelaunch = null,
     modifiers: LaunchModifiers = .{},
-    /// Why the session the launch resumes could not be converted from v1
-    /// (D61), for the message the launch exits with. Owned.
-    resume_refusal: ?[]u8 = null,
     /// `fx "<prompt>"`: sent once the session's first frame is on screen.
     /// Owned by the allocator that parsed the launch.
     initial_prompt: ?[]u8 = null,
 
     pub fn deinit(self: *InteractiveLaunch, alloc: Allocator) void {
-        if (self.resume_refusal) |reason| alloc.free(reason);
-        if (self.requested_resume) |*target| target.deinit(alloc);
-        if (self.upgrade_relaunch) |*relaunch| relaunch.deinit(alloc);
         self.modifiers.deinit(alloc);
         if (self.initial_prompt) |prompt| alloc.free(prompt);
         self.* = undefined;
@@ -501,8 +438,6 @@ const LaunchFlag = enum {
     auto,
     full_access,
     yolo,
-    profile,
-    instances,
 };
 
 const launch_flag_ids = cli_flags.idTable(LaunchFlag, &builtin_commands.launch_options);
@@ -537,7 +472,6 @@ fn parseLaunchFlags(alloc: Allocator, args: []const [:0]const u8, comptime mode:
     errdefer {
         if (modifiers.model_override) |model| alloc.free(model);
         if (modifiers.provider_order_override) |order| freeProviderOrderOverride(alloc, order);
-        if (modifiers.profile_name) |name| alloc.free(name);
     }
 
     var prompt: ?[]const u8 = null;
@@ -592,18 +526,6 @@ fn parseLaunchFlags(alloc: Allocator, args: []const [:0]const u8, comptime mode:
             .ask => modifiers.permission_override = .ask,
             .auto => modifiers.permission_override = .auto,
             .full_access, .yolo => modifiers.permission_override = .yolo,
-            .profile => {
-                if (value.len == 0) return error.MissingProfileValue;
-                if (!profiles.validName(value)) return error.InvalidProfileName;
-                const owned = try alloc.dupe(u8, value);
-                if (modifiers.profile_name) |old| alloc.free(old);
-                modifiers.profile_name = owned;
-            },
-            .instances => {
-                const count = std.fmt.parseUnsigned(usize, value, 10) catch return error.InvalidInstancesValue;
-                if (count == 0) return error.InvalidInstancesValue;
-                modifiers.instances = count;
-            },
         }
     }
 
@@ -628,11 +550,6 @@ pub fn commandAfterGlobalLaunchArgs(args: []const [:0]const u8) ?[]const u8 {
 fn launchFlagFailure(args: []const [:0]const u8) ?cli_flags.Failure {
     var parser: cli_flags.Parser = .initPrefix(&builtin_commands.launch_options, args);
     while (parser.next() catch return parser.failure) |_| {}
-    // Flags may also follow a resume word and its target, as in `fx -c --model x`.
-    const rest = args[parser.index..];
-    if (rest.len > 0 and isResumeWord(rest[0])) {
-        return cli_flags.firstFailure(&builtin_commands.launch_options, rest[resumeHeadLen(rest, true)..]);
-    }
     return cli_flags.firstFailure(&builtin_commands.launch_options, args);
 }
 
@@ -640,8 +557,6 @@ fn launchFlagFailure(args: []const [:0]const u8) ?cli_flags.Failure {
 const launch_suggestion_options = builtin_commands.launch_options ++ [_]command_specs.OptionDoc{
     .{ .flag = "--help", .description = "" },
     .{ .flag = "--version", .description = "" },
-    .{ .flag = "--continue", .description = "" },
-    .{ .flag = "--resume", .description = "" },
 };
 
 /// The unknown flag that follows the launch flags in `args`, with the
@@ -726,15 +641,6 @@ pub fn parse(command_catalog: CommandCatalog, args: []const [:0]const u8) Comman
     switch (command[0]) {
         '-', 'h' => {
             if (command_specs.matchesTopLevel(command_catalog, command, .help)) return .help;
-            if (command_specs.matchesTopLevel(command_catalog, command, .@"resume") or
-                std.mem.startsWith(u8, command, resume_inline_prefix) or
-                std.mem.startsWith(u8, command, resume_id_alias_prefix))
-            {
-                return .{ .resume_session = .{
-                    .args = args,
-                    .top_level_alias = true,
-                } };
-            }
         },
         'a' => {
             if (command_specs.matchesTopLevel(command_catalog, command, .ask)) return .{ .ask = args[1..] };
@@ -765,18 +671,11 @@ pub fn parse(command_catalog: CommandCatalog, args: []const [:0]const u8) Comman
             if (command_specs.matchesTopLevel(command_catalog, command, .permissions)) return .{ .permissions = args[1..] };
             if (command_specs.matchesTopLevel(command_catalog, command, .provider)) return .{ .provider = args[1..] };
         },
-        'r' => {
-            if (command_specs.matchesTopLevel(command_catalog, command, .@"resume")) return .{ .resume_session = .{ .args = args[1..], .legacy_command = true } };
-            if (command_specs.matchesTopLevel(command_catalog, command, .replay)) return .{ .replay = args[1..] };
-        },
         's' => {
             if (command_specs.matchesTopLevel(command_catalog, command, .setup)) return .{ .setup = args[1..] };
             if (command_specs.matchesTopLevel(command_catalog, command, .status)) return .{ .status = args[1..] };
             if (command_specs.matchesTopLevel(command_catalog, command, .sessions)) return .{ .sessions = args[1..] };
             if (command_specs.matchesTopLevel(command_catalog, command, .session)) {
-                if (args.len > 1 and std.mem.eql(u8, args[1], "resume")) {
-                    return .{ .resume_session = .{ .args = args[2..] } };
-                }
                 return .{ .session = args[1..] };
             }
             if (command_specs.matchesTopLevel(command_catalog, command, .slack)) return .{ .slack = args[1..] };
@@ -839,80 +738,6 @@ pub fn parseInteractiveLaunch(
         .interactive => return .{ .interactive = .{
             .modifiers = global_args.takeModifiers(),
         } },
-        .resume_session => |invocation| {
-            const resume_args = invocation.args;
-            const has_upgrade_relaunch = !invocation.top_level_alias and
-                resume_args.len >= 2 and
-                std.mem.eql(u8, resume_args[1], upgrade_relaunch_arg);
-            if (has_upgrade_relaunch and resume_args.len > 3) return error.InvalidResumeArgs;
-            if (invocation.legacy_command and !has_upgrade_relaunch) return error.RemovedResumeCommand;
-            var upgrade_relaunch: ?UpgradeRelaunch = null;
-            errdefer if (upgrade_relaunch) |*relaunch| relaunch.deinit(alloc);
-            if (has_upgrade_relaunch) {
-                const previous_revision = if (resume_args.len == 3) revision: {
-                    if (!update_target.isValidRevision(resume_args[2])) return error.InvalidResumeArgs;
-                    break :revision try alloc.dupe(u8, resume_args[2]);
-                } else null;
-                upgrade_relaunch = .{ .previous_revision = previous_revision };
-            }
-            const resume_line = if (has_upgrade_relaunch) resume_args[0..1] else resume_args;
-            const head_len = if (has_upgrade_relaunch) resume_line.len else resumeHeadLen(resume_line, invocation.top_level_alias);
-            var prompt: ?[]const u8 = null;
-            if (resume_line.len > head_len) {
-                // Launch flags may follow the resume word and its target, as in
-                // `fx -c --model x` or `fx session resume last --fast`. They're
-                // read together with the flags before the resume word, so the
-                // last one still wins.
-                const before = args[0 .. args.len - effective_args.len];
-                const after = resume_line[head_len..];
-                const line = try alloc.alloc([:0]const u8, before.len + after.len);
-                defer alloc.free(line);
-                @memcpy(line[0..before.len], before);
-                @memcpy(line[before.len..], after);
-                var launch = parseLaunchFlags(alloc, line, .around_prompt) catch |err| {
-                    // A second word after the target is a malformed resume,
-                    // not an unquoted prompt.
-                    if (err == error.UnquotedPrompt) return error.InvalidResumeArgs;
-                    // A removed resume spelling, such as `--id`, keeps its own
-                    // hint instead of reading as an unknown launch flag.
-                    if (err == error.InvalidFlag) {
-                        if (parseResumeArgs(alloc, resume_line, invocation.top_level_alias)) |parsed_target| {
-                            var unused = parsed_target;
-                            unused.deinit(alloc);
-                        } else |resume_err| if (removedResumeHint(resume_err) != null) return resume_err;
-                    }
-                    return err;
-                };
-                // `fx -c` and `fx -r` take a first prompt; `fx session resume`
-                // doesn't.
-                if (launch.prompt != null and !invocation.top_level_alias) {
-                    launch.deinit(alloc);
-                    return error.InvalidResumeArgs;
-                }
-                prompt = launch.prompt;
-                launch.remaining = &.{};
-                global_args.deinit(alloc);
-                global_args = launch;
-            }
-            if (prompt) |text| {
-                if (std.mem.trim(u8, text, " \t\r\n").len == 0) return error.EmptyLaunchPrompt;
-            }
-            var target = try parseResumeArgs(
-                alloc,
-                resume_line[0..head_len],
-                invocation.top_level_alias,
-            );
-            errdefer target.deinit(alloc);
-            const initial_prompt: ?[]u8 = if (prompt) |text| try alloc.dupe(u8, text) else null;
-            const relaunch = upgrade_relaunch;
-            upgrade_relaunch = null;
-            return .{ .interactive = .{
-                .requested_resume = target,
-                .upgrade_relaunch = relaunch,
-                .modifiers = global_args.takeModifiers(),
-                .initial_prompt = initial_prompt,
-            } };
-        },
         .unknown => |word| switch (classifyLaunchWord(command_catalog, word)) {
             .command_line => {},
             .print_flag => return error.PrintFlagUseAsk,
@@ -942,31 +767,6 @@ pub fn parseInteractiveLaunch(
         .effective_args = effective_args,
         .command = command,
     } };
-}
-
-/// How many leading words of a resume line name what to resume: the resume
-/// word, when `has_resume_word` (`-c`, `-r`, `--resume`), and its target.
-/// `-c`, `--continue`, and `--resume=<id>` carry their target. `-r` and
-/// `--resume` take the next word as theirs unless it's a long flag, because
-/// a session ID can start with a single dash; `fx session resume` does the
-/// same with its first word. Every word after these is a launch flag or, for
-/// the resume flags, the first prompt.
-fn resumeHeadLen(line: []const [:0]const u8, has_resume_word: bool) usize {
-    var len: usize = 0;
-    if (has_resume_word) {
-        if (line.len == 0) return 0;
-        const word = line[0];
-        len = 1;
-        if (!std.mem.eql(u8, word, "--resume") and !std.mem.eql(u8, word, resume_short_flag)) return len;
-    }
-    if (line.len > len and !std.mem.startsWith(u8, line[len], "--")) len += 1;
-    return len;
-}
-
-fn isResumeWord(word: []const u8) bool {
-    return std.mem.eql(u8, word, "-c") or std.mem.eql(u8, word, "--continue") or
-        std.mem.eql(u8, word, "--resume") or std.mem.eql(u8, word, resume_short_flag) or
-        std.mem.startsWith(u8, word, resume_inline_prefix);
 }
 
 const LaunchWord = enum {
@@ -1007,7 +807,6 @@ fn launchWordSuggestion(command_catalog: CommandCatalog, word: []const u8) ?[]co
     // Flag names people type without their dashes.
     const bare_flags = [_]struct { word: []const u8, flag: []const u8 }{
         .{ .word = "version", .flag = "--version" },
-        .{ .word = "continue", .flag = "--continue" },
     };
     for (bare_flags) |entry| {
         if (std.mem.eql(u8, word, entry.word)) return entry.flag;
@@ -1016,8 +815,6 @@ fn launchWordSuggestion(command_catalog: CommandCatalog, word: []const u8) ?[]co
     // taken for a mistyped command.
     var nearest: cli_flags.Nearest = .{ .word = word, .max_edits = if (word.len <= 4) 1 else 2 };
     for (command_catalog.specs) |spec| {
-        // `fx resume` is removed; its typos shouldn't point back to it.
-        if (spec.kind == .@"resume") continue;
         const names = [_][]const []const u8{ &.{spec.token}, spec.aliases };
         for (names) |group| for (group) |name| {
             if (name.len == 0 or name[0] == '-') continue;
@@ -1034,8 +831,6 @@ fn topLevelHelpRequest(command_catalog: CommandCatalog, args: []const [:0]const 
     if (args.len < 2) return null;
     const kind = command_specs.topLevelKindFromToken(command_catalog, args[0]) orelse return null;
     if (kind == .help) return null;
-    // `fx resume` was removed, so its help request gets the removal hint.
-    if (kind == .@"resume" and std.mem.eql(u8, args[0], "resume")) return null;
     for (args[1..]) |arg| {
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) return kind;
     }
@@ -1418,14 +1213,6 @@ fn activateProviderSelectionFallible(
 
 fn runIfRequestedWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Config, deps: RunDeps) !RunResult {
     const parsed_launch = parseInteractiveLaunch(alloc, args, cfg.command_catalog) catch |err| {
-        if (err == error.InvalidResumeArgs) {
-            try writeTopLevelUsage(cfg.command_catalog, deps, .@"resume");
-            return usage_failure;
-        }
-        if (removedResumeHint(err)) |hint| {
-            try writeStderr(deps, hint);
-            return usage_failure;
-        }
         var writer: std.Io.Writer.Allocating = .init(alloc);
         defer writer.deinit();
         switch (err) {
@@ -1452,15 +1239,6 @@ fn runIfRequestedWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Con
     };
     switch (parsed_launch) {
         .interactive => |launch| {
-            if (launch.modifiers.profile_name) |name| {
-                if (try app_profile_runtime.launchFailure(alloc, name)) |message| {
-                    defer alloc.free(message);
-                    try writeStderr(deps, message);
-                    var rejected = launch;
-                    rejected.deinit(alloc);
-                    return .handled_failure;
-                }
-            }
             try writeMcpProfileWarningIfPresent(alloc, cfg, deps);
             return .{ .interactive = launch };
         },
@@ -1493,16 +1271,8 @@ fn runNonInteractiveWithDeps(
         .acp => global_args.modifiers.hasOnlyUltrafastOverride(),
         else => false,
     };
-    if (global_args.modifiers.profile_name != null) {
-        try writeStderr(deps, "fx: --profile applies to interactive sessions\n");
-        return usage_failure;
-    }
     if (global_args.modifiers.hasModelOverrides() and !acp_ultrafast_override) {
         try writeModelModifierUsage(alloc, deps, parsed_command, global_args.modifiers);
-        return usage_failure;
-    }
-    if (global_args.modifiers.instances != null) {
-        try writeStderr(deps, "fx: --instances applies to interactive sessions\n");
         return usage_failure;
     }
 
@@ -1525,7 +1295,7 @@ fn runNonInteractiveWithDeps(
     };
 
     switch (parsed_command) {
-        .interactive, .resume_session => unreachable,
+        .interactive => unreachable,
         .help => {
             try writeTopLevelHelp(alloc, cfg.command_catalog, deps, cfg.version, .stdout);
             return .handled_success;
@@ -2322,10 +2092,6 @@ fn runNonInteractiveWithDeps(
                 .set, .unset => runConfigWrite(alloc, deps, opts),
                 .schema => runConfigSchema(alloc, deps, opts),
             };
-        },
-        .replay => |rest| {
-            const exit_code = try cli_replay.run(alloc, rest);
-            return if (exit_code == 0) .handled_success else .{ .handled_exit = exit_code };
         },
         .unknown => |command| {
             try writeStderr(deps, "fx: unknown subcommand: ");
@@ -3622,7 +3388,6 @@ fn commandFailureMessage(err: anyerror) ?[]const u8 {
         error.InvalidSessionDetailArgs,
         error.InvalidSessionMigrationArgs,
         error.InvalidSessionRecoveryArgs,
-        error.InvalidResumeArgs,
         error.InvalidUpgradeArgs,
         error.InvalidConfigArgs,
         error.InvalidSlackArguments,
@@ -3812,7 +3577,7 @@ fn workflowConfigWithLaunchModifiers(
 
 fn commandSupportsWorkspaceModifiers(command: Command) bool {
     return switch (command) {
-        .interactive, .ask, .acp, .pr, .issue, .resume_session => true,
+        .interactive, .ask, .acp, .pr, .issue => true,
         else => false,
     };
 }
@@ -3820,7 +3585,7 @@ fn commandSupportsWorkspaceModifiers(command: Command) bool {
 fn writeWorkspaceModifierUsage(deps: RunDeps) !void {
     try writeStderr(
         deps,
-        "fx: --add-dir and --no-additional-dirs are only supported for interactive, resume, ask, ACP, PR, and issue launches\n",
+        "fx: --add-dir and --no-additional-dirs are only supported for ask, ACP, PR, and issue launches\n",
     );
 }
 
@@ -3861,9 +3626,6 @@ fn globalLaunchErrorMessage(err: anyerror) ?[]const u8 {
     return switch (err) {
         error.MissingAddDirectoryValue => "--add-dir requires a directory path",
         error.MissingModelValue => "--model requires a model id",
-        error.MissingProfileValue => "--profile requires a profile name",
-        error.InvalidProfileName => "--profile names use lowercase letters, digits, '-', or '_'",
-        error.InvalidInstancesValue => "--instances takes a whole number of at least 1",
         error.InvalidEffortValue => "--effort value is not a valid reasoning effort",
         error.InvalidProviderValue => "--provider accepts gateway, codex, grok, or a configured provider name",
         error.InvalidProviderOrderValue => "--provider-order accepts comma-separated provider slugs (letters, digits, '-')",
@@ -4329,63 +4091,6 @@ fn parseSessionRecoveryArgs(
     };
 }
 
-fn parseResumeArgs(
-    alloc: Allocator,
-    args: []const [:0]const u8,
-    top_level_alias: bool,
-) !ResumeTarget {
-    if (args.len == 0) return .last;
-
-    if (top_level_alias) {
-        const flag = args[0];
-        if (std.mem.startsWith(u8, flag, resume_inline_prefix)) {
-            if (args.len != 1) return error.InvalidResumeArgs;
-            return resumeFlagTarget(alloc, flag[resume_inline_prefix.len..]);
-        }
-        if (std.mem.eql(u8, flag, "--resume") or std.mem.eql(u8, flag, resume_short_flag)) {
-            return switch (args.len) {
-                1 => .pick,
-                2 => resumeFlagTarget(alloc, args[1]),
-                else => error.InvalidResumeArgs,
-            };
-        }
-        if (std.mem.eql(u8, flag, "--resume-last")) return error.RemovedResumeLast;
-        if (std.mem.startsWith(u8, flag, resume_id_alias_prefix)) return error.RemovedResumeIdAlias;
-        if (args.len != 1) return error.InvalidResumeArgs;
-        if (std.mem.eql(u8, flag, "-c") or std.mem.eql(u8, flag, "--continue")) return .remembered;
-        return error.InvalidResumeArgs;
-    }
-
-    if (std.mem.eql(u8, args[0], "--resume")) return error.RemovedResumeLastFlag;
-    if (std.mem.eql(u8, args[0], "--id")) return error.RemovedResumeIdFlag;
-    if (args.len != 1) return error.InvalidResumeArgs;
-
-    const trimmed = std.mem.trim(u8, args[0], " \t\r\n");
-    if (trimmed.len == 0) return error.InvalidResumeArgs;
-    if (std.mem.eql(u8, trimmed, "last")) return .last;
-    return .{ .id = try alloc.dupe(u8, trimmed) };
-}
-
-/// The session a `--resume` or `-r` value names: `last`, or an exact ID.
-fn resumeFlagTarget(alloc: Allocator, value: []const u8) !ResumeTarget {
-    const id = std.mem.trim(u8, value, " \t\r\n");
-    if (id.len == 0) return error.InvalidResumeArgs;
-    if (std.mem.eql(u8, id, "last")) return .last;
-    return .{ .id = try alloc.dupe(u8, id) };
-}
-
-/// The hint for a removed resume spelling, or null for any other error.
-fn removedResumeHint(err: anyerror) ?[]const u8 {
-    return switch (err) {
-        error.RemovedResumeLast => "fx: --resume-last was removed; use fx --resume last\n",
-        error.RemovedResumeIdAlias => "fx: --resume-<id> was removed; use fx --resume <id>\n",
-        error.RemovedResumeCommand => "fx: fx resume was removed; use fx --resume [last|<id>] or fx session resume [last|<id>]\n",
-        error.RemovedResumeIdFlag => "fx session resume: --id was removed; use fx session resume <id>\n",
-        error.RemovedResumeLastFlag => "fx session resume: --resume --last was removed; use fx session resume last\n",
-        else => null,
-    };
-}
-
 const WorkflowFlag = enum { permission_mode, ask, auto, full_access, yolo, provider, model, effort, fast, no_fast, ultrafast, no_ultrafast, provider_order, provider_strict, no_provider_strict, create };
 // `fx issue` documents the same flags as `fx pr`.
 const workflow_flag_ids = cli_flags.idTable(WorkflowFlag, &builtin_commands.pr_options);
@@ -4444,42 +4149,6 @@ fn testCommandCatalog() CommandCatalog {
     return builtin_commands.top_level_registry;
 }
 
-test "launch flags may follow the resume word and its target" {
-    const alloc = std.testing.allocator;
-    const command_catalog = testCommandCatalog();
-    const Case = struct { args: []const [:0]const u8, target: std.meta.Tag(ResumeTarget), model: ?[]const u8 = null, fast: ?bool = null, prompt: ?[]const u8 = null };
-    const cases = [_]Case{
-        .{ .args = &.{ "-c", "--model", "x" }, .target = .remembered, .model = "x" },
-        .{ .args = &.{ "--continue", "--fast" }, .target = .remembered, .fast = true },
-        .{ .args = &.{ "--resume", "last", "--model", "x" }, .target = .last, .model = "x" },
-        .{ .args = &.{ "-r", "--model", "x" }, .target = .pick, .model = "x" },
-        .{ .args = &.{ "-c", "hello world", "--model", "x" }, .target = .remembered, .model = "x", .prompt = "hello world" },
-        .{ .args = &.{ "--model", "y", "-c", "--model", "x" }, .target = .remembered, .model = "x" },
-        .{ .args = &.{ "session", "resume", "last", "--fast" }, .target = .last, .fast = true },
-    };
-    for (cases) |case| {
-        var parsed = try parseInteractiveLaunch(alloc, case.args, command_catalog);
-        switch (parsed) {
-            .interactive => |*launch| {
-                defer launch.deinit(alloc);
-                try std.testing.expectEqual(case.target, std.meta.activeTag(launch.requested_resume.?));
-                if (case.model) |model| try std.testing.expectEqualStrings(model, launch.modifiers.model_override.?);
-                if (case.fast) |fast| try std.testing.expectEqual(fast, launch.modifiers.fast_override.?);
-                if (case.prompt) |prompt| try std.testing.expectEqualStrings(prompt, launch.initial_prompt.?) else try std.testing.expect(launch.initial_prompt == null);
-            },
-            .noninteractive => |*value| {
-                value.deinit(alloc);
-                return error.TestExpectedInteractiveLaunch;
-            },
-        }
-    }
-
-    const bad: []const [:0]const u8 = &.{ "-c", "--bogus" };
-    try std.testing.expectError(error.InvalidFlag, parseInteractiveLaunch(alloc, bad, command_catalog));
-    try std.testing.expectEqualStrings("--bogus", launchFlagFailure(bad).?.unknown.flag);
-    try std.testing.expectError(error.InvalidResumeArgs, parseInteractiveLaunch(alloc, &.{ "session", "resume", "last", "hello" }, command_catalog));
-}
-
 test "parse recognizes every top-level command and preserves unknown commands" {
     const command_catalog = testCommandCatalog();
     try std.testing.expectEqual(Command.interactive, parse(command_catalog, &.{}));
@@ -4533,16 +4202,8 @@ test "parse recognizes every top-level command and preserves unknown commands" {
         .session => |rest| try std.testing.expectEqual(@as(usize, 1), rest.len),
         else => return error.TestExpectedEqual,
     }
-    switch (parse(command_catalog, &.{ @constCast("session"), @constCast("resume"), @constCast("last") })) {
-        .resume_session => |invocation| try std.testing.expectEqual(@as(usize, 1), invocation.args.len),
-        else => return error.TestExpectedEqual,
-    }
     switch (parse(command_catalog, &.{ @constCast("sessions"), @constCast("--json") })) {
         .sessions => |rest| try std.testing.expectEqual(@as(usize, 1), rest.len),
-        else => return error.TestExpectedEqual,
-    }
-    switch (parse(command_catalog, &.{ @constCast("resume"), @constCast("last") })) {
-        .resume_session => |invocation| try std.testing.expectEqual(@as(usize, 1), invocation.args.len),
         else => return error.TestExpectedEqual,
     }
     switch (parse(command_catalog, &.{ @constCast("credits"), @constCast("--json") })) {
@@ -4559,10 +4220,6 @@ test "parse recognizes every top-level command and preserves unknown commands" {
     }
     switch (parse(command_catalog, &.{ @constCast("update"), @constCast("--channel"), @constCast("dev") })) {
         .upgrade => |rest| try std.testing.expectEqual(@as(usize, 2), rest.len),
-        else => return error.TestExpectedEqual,
-    }
-    switch (parse(command_catalog, &.{ @constCast("replay"), @constCast("tape") })) {
-        .replay => |rest| try std.testing.expectEqual(@as(usize, 1), rest.len),
         else => return error.TestExpectedEqual,
     }
     switch (parse(command_catalog, &.{@constCast("wat")})) {
@@ -4647,25 +4304,6 @@ test "global context limits reject missing values and stop at the command" {
     defer parsed.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 0), parsed.modifiers.context_limit_overrides.len);
     try std.testing.expectEqual(@as(usize, 3), parsed.remaining.len);
-}
-
-test "--instances takes a whole number of at least 1" {
-    const invalid = [_][]const [:0]const u8{
-        &.{ @constCast("--instances"), @constCast("0") },
-        &.{@constCast("--instances=0")},
-        &.{ @constCast("--instances"), @constCast("two") },
-        &.{@constCast("--instances=-1")},
-        &.{@constCast("--instances=")},
-    };
-    for (invalid) |args| try std.testing.expectError(error.InvalidInstancesValue, parseGlobalLaunchArgs(std.testing.allocator, args));
-    // A bare `--instances` is the shared parser's missing value.
-    try std.testing.expectError(error.InvalidFlag, parseGlobalLaunchArgs(std.testing.allocator, &.{@constCast("--instances")}));
-    try std.testing.expectEqualStrings("--instances", launchFlagFailure(&.{@constCast("--instances")}).?.missing_value);
-    try std.testing.expectEqualStrings("--instances takes a whole number of at least 1", globalLaunchErrorMessage(error.InvalidInstancesValue).?);
-
-    var parsed = try parseGlobalLaunchArgs(std.testing.allocator, &.{ @constCast("--instances"), @constCast("3") });
-    defer parsed.deinit(std.testing.allocator);
-    try std.testing.expectEqual(@as(?usize, 3), parsed.modifiers.instances);
 }
 
 test "global launch modifiers own repeatable additional directories and suppression" {
@@ -5229,154 +4867,6 @@ test "parse session recovery args accepts exact ids and rejects ambiguity" {
     );
 }
 
-test "parse resume args defaults to last owns ids and rejects invalid input" {
-    const implicit = try parseResumeArgs(std.testing.allocator, &.{}, false);
-    try std.testing.expectEqual(ResumeTarget.last, implicit);
-
-    const explicit = try parseResumeArgs(std.testing.allocator, &.{@constCast("last")}, false);
-    try std.testing.expectEqual(ResumeTarget.last, explicit);
-
-    var target = try parseResumeArgs(std.testing.allocator, &.{@constCast(" session-123 ")}, false);
-    defer target.deinit(std.testing.allocator);
-    switch (target) {
-        .id => |value| try std.testing.expectEqualStrings("session-123", value),
-        else => return error.TestExpectedEqual,
-    }
-
-    try std.testing.expectError(error.InvalidResumeArgs, parseResumeArgs(std.testing.allocator, &.{ @constCast("a"), @constCast("b") }, false));
-    try std.testing.expectError(error.InvalidResumeArgs, parseResumeArgs(std.testing.allocator, &.{@constCast("   ")}, false));
-}
-
-test "removed resume spellings fail with a hint" {
-    const cases = [_]struct { args: []const [:0]const u8, top_level_alias: bool, err: anyerror }{
-        .{ .args = &.{ "--id", "release.2026.06" }, .top_level_alias = false, .err = error.RemovedResumeIdFlag },
-        .{ .args = &.{ "--resume", "--last" }, .top_level_alias = false, .err = error.RemovedResumeLastFlag },
-        .{ .args = &.{"--resume-last"}, .top_level_alias = true, .err = error.RemovedResumeLast },
-        .{ .args = &.{"--resume-session.123"}, .top_level_alias = true, .err = error.RemovedResumeIdAlias },
-    };
-    for (cases) |case| {
-        try std.testing.expectError(case.err, parseResumeArgs(std.testing.allocator, case.args, case.top_level_alias));
-        try std.testing.expect(removedResumeHint(case.err) != null);
-    }
-}
-
-test "parse resume args accepts an operand on the top-level resume flag" {
-    var target = try parseResumeArgs(std.testing.allocator, &.{
-        @constCast("--resume"),
-        @constCast("session-123"),
-    }, true);
-    defer target.deinit(std.testing.allocator);
-
-    switch (target) {
-        .remembered, .pick, .last => return error.TestExpectedExactResumeId,
-        .id => |id| try std.testing.expectEqualStrings("session-123", id),
-    }
-
-    const latest = try parseResumeArgs(std.testing.allocator, &.{
-        @constCast("--resume"),
-        @constCast("last"),
-    }, true);
-    try std.testing.expectEqual(ResumeTarget.last, latest);
-}
-
-test "parseInteractiveLaunch accepts legacy and revision-bearing upgrade relaunches" {
-    const alloc = std.testing.allocator;
-    const command_catalog = testCommandCatalog();
-    const revision = "abcdef0123456789abcdef0123456789abcdef01";
-
-    const cases = [_]struct {
-        args: []const [:0]const u8,
-        expected_revision: ?[]const u8,
-    }{
-        .{
-            .args = &.{ @constCast("resume"), @constCast("session-123"), @constCast("--upgrade-relaunch") },
-            .expected_revision = null,
-        },
-        .{
-            .args = &.{ @constCast("resume"), @constCast("session-123"), @constCast("--upgrade-relaunch"), @constCast(revision) },
-            .expected_revision = revision,
-        },
-    };
-
-    for (cases) |case| {
-        const parsed = try parseInteractiveLaunch(alloc, case.args, command_catalog);
-        switch (parsed) {
-            .interactive => |value| {
-                var launch = value;
-                defer launch.deinit(alloc);
-                const relaunch = launch.upgrade_relaunch orelse return error.TestExpectedUpgradeRelaunch;
-                if (case.expected_revision) |expected| {
-                    try std.testing.expectEqualStrings(expected, relaunch.previous_revision.?);
-                } else try std.testing.expect(relaunch.previous_revision == null);
-            },
-            .noninteractive => |value| {
-                var noninteractive = value;
-                defer noninteractive.deinit(alloc);
-                return error.TestExpectedInteractiveLaunch;
-            },
-        }
-    }
-
-    try std.testing.expectError(
-        error.InvalidResumeArgs,
-        parseInteractiveLaunch(alloc, &.{
-            @constCast("resume"),
-            @constCast("session-123"),
-            @constCast("--upgrade-relaunch"),
-            @constCast("not-a-revision"),
-        }, command_catalog),
-    );
-}
-
-test "parseInteractiveLaunch shares native resume grammar" {
-    const alloc = std.testing.allocator;
-    const command_catalog = testCommandCatalog();
-    const cases = [_]struct {
-        args: []const [:0]const u8,
-        expected_id: ?[]const u8,
-    }{
-        .{ .args = &.{ @constCast("--resume"), @constCast("last") }, .expected_id = null },
-        .{ .args = &.{ @constCast("--resume"), @constCast("session-123") }, .expected_id = "session-123" },
-        .{ .args = &.{@constCast("--resume=session-123")}, .expected_id = "session-123" },
-        .{ .args = &.{ @constCast("-r"), @constCast("last") }, .expected_id = null },
-        .{ .args = &.{ @constCast("-r"), @constCast("session-123") }, .expected_id = "session-123" },
-        .{ .args = &.{ @constCast("session"), @constCast("resume"), @constCast("last") }, .expected_id = null },
-        .{ .args = &.{ @constCast("session"), @constCast("resume"), @constCast("session.v3") }, .expected_id = "session.v3" },
-    };
-    for (cases) |case| {
-        const parsed = try parseInteractiveLaunch(alloc, case.args, command_catalog);
-        switch (parsed) {
-            .interactive => |value| {
-                var launch = value;
-                defer launch.deinit(alloc);
-                const target = launch.requested_resume orelse return error.TestExpectedResumeTarget;
-                if (case.expected_id) |expected_id| switch (target) {
-                    .id => |id| try std.testing.expectEqualStrings(expected_id, id),
-                    .remembered, .pick, .last => return error.TestExpectedExactResumeId,
-                } else try std.testing.expectEqual(ResumeTarget.last, target);
-            },
-            .noninteractive => |value| {
-                var noninteractive = value;
-                defer noninteractive.deinit(alloc);
-                return error.TestExpectedInteractiveLaunch;
-            },
-        }
-    }
-
-    try std.testing.expectError(
-        error.InvalidResumeArgs,
-        parseInteractiveLaunch(
-            alloc,
-            &.{ @constCast("--resume"), @constCast("one"), @constCast("a prompt"), @constCast("three") },
-            command_catalog,
-        ),
-    );
-    try std.testing.expectError(
-        error.InvalidFlag,
-        parseInteractiveLaunch(alloc, &.{@constCast("--add-dir")}, command_catalog),
-    );
-}
-
 test "workflow drafts come only from the completed final response" {
     const alloc = std.testing.allocator;
     const final = "Add greeting constant\n\n## Summary\n\n- Export `greeting` from **greeting.ts**.";
@@ -5525,7 +5015,7 @@ test "workspace launch modifiers still reject unsupported local command help" {
     );
     try std.testing.expectEqual(usage_failure, result);
     try std.testing.expectEqualStrings("", capture.stdout.written());
-    try std.testing.expect(std.mem.find(u8, capture.stderr.written(), "only supported for interactive, resume, ask, ACP, PR, and issue launches") != null);
+    try std.testing.expect(std.mem.find(u8, capture.stderr.written(), "only supported for ask, ACP, PR, and issue launches") != null);
 }
 
 test "global workspace launch option errors use user-facing copy" {
@@ -5927,171 +5417,6 @@ test "runIfRequested invalid json local flags write json error" {
     try std.testing.expect(std.mem.find(u8, capture.stdout.written(), "\"code\":\"InvalidLocalSurfaceArgs\"") != null);
 }
 
-test "runIfRequested resume no args returns last target" {
-    var capture = CaptureOutput.init(std.testing.allocator);
-    defer capture.deinit();
-
-    const result = try runIfRequestedWithDeps(std.testing.allocator, &.{ @constCast("session"), @constCast("resume") }, testConfig(), capture.deps());
-    switch (result) {
-        .interactive => |launch| try std.testing.expectEqual(ResumeTarget.last, launch.requested_resume.?),
-        else => return error.TestExpectedEqual,
-    }
-    try std.testing.expectEqualStrings("", capture.stderr.written());
-}
-
-test "runIfRequested -r and a bare --resume ask which session to resume" {
-    const spellings = [_][]const [:0]const u8{
-        &.{@constCast("-r")},
-        &.{@constCast("--resume")},
-    };
-    for (spellings) |args| {
-        var capture = CaptureOutput.init(std.testing.allocator);
-        defer capture.deinit();
-
-        const result = try runIfRequestedWithDeps(
-            std.testing.allocator,
-            args,
-            testConfig(),
-            capture.deps(),
-        );
-        switch (result) {
-            .interactive => |launch| try std.testing.expectEqual(ResumeTarget.pick, launch.requested_resume.?),
-            else => return error.TestExpectedEqual,
-        }
-        try std.testing.expectEqualStrings("", capture.stdout.written());
-        try std.testing.expectEqualStrings("", capture.stderr.written());
-    }
-
-    var extra_capture = CaptureOutput.init(std.testing.allocator);
-    defer extra_capture.deinit();
-    const extra = try runIfRequestedWithDeps(
-        std.testing.allocator,
-        &.{ @constCast("-r"), @constCast("session.123"), @constCast("a prompt"), @constCast("extra") },
-        testConfig(),
-        extra_capture.deps(),
-    );
-    try std.testing.expectEqual(usage_failure, extra);
-}
-
-test "runIfRequested top-level resume aliases return the existing target" {
-    const aliases = [_][]const [:0]const u8{
-        &.{@constCast("--continue")},
-        &.{@constCast("-c")},
-    };
-    for (aliases) |args| {
-        var capture = CaptureOutput.init(std.testing.allocator);
-        defer capture.deinit();
-
-        const result = try runIfRequestedWithDeps(
-            std.testing.allocator,
-            args,
-            testConfig(),
-            capture.deps(),
-        );
-        switch (result) {
-            .interactive => |launch| {
-                try std.testing.expectEqual(ResumeTarget.remembered, launch.requested_resume.?);
-            },
-            else => return error.TestExpectedEqual,
-        }
-        try std.testing.expectEqualStrings("", capture.stdout.written());
-        try std.testing.expectEqualStrings("", capture.stderr.written());
-    }
-
-    var operand_capture = CaptureOutput.init(std.testing.allocator);
-    defer operand_capture.deinit();
-
-    const operand = try runIfRequestedWithDeps(
-        std.testing.allocator,
-        &.{ @constCast("--resume"), @constCast("session.123") },
-        testConfig(),
-        operand_capture.deps(),
-    );
-    switch (operand) {
-        .interactive => |launch_value| {
-            var launch = launch_value;
-            defer launch.deinit(std.testing.allocator);
-            switch (launch.requested_resume.?) {
-                .id => |id| try std.testing.expectEqualStrings("session.123", id),
-                .remembered, .pick, .last => return error.TestExpectedExactResumeId,
-            }
-        },
-        else => return error.TestExpectedEqual,
-    }
-}
-
-test "runIfRequested removed resume spellings exit with the replacement" {
-    const cases = [_]struct { args: []const [:0]const u8, stderr: []const u8 }{
-        .{ .args = &.{"--resume-session.123"}, .stderr = "fx: --resume-<id> was removed; use fx --resume <id>\n" },
-        .{ .args = &.{"--resume-"}, .stderr = "fx: --resume-<id> was removed; use fx --resume <id>\n" },
-        .{ .args = &.{ "--resume-last", "unexpected" }, .stderr = "fx: --resume-last was removed; use fx --resume last\n" },
-        .{ .args = &.{ "resume", "--resume", "--last" }, .stderr = "fx: fx resume was removed; use fx --resume [last|<id>] or fx session resume [last|<id>]\n" },
-        .{ .args = &.{ "resume", "--resume" }, .stderr = "fx: fx resume was removed; use fx --resume [last|<id>] or fx session resume [last|<id>]\n" },
-    };
-    for (cases) |case| {
-        var capture = CaptureOutput.init(std.testing.allocator);
-        defer capture.deinit();
-
-        const result = try runIfRequestedWithDeps(std.testing.allocator, case.args, testConfig(), capture.deps());
-        try std.testing.expectEqual(usage_failure, result);
-        try std.testing.expectEqualStrings(case.stderr, capture.stderr.written());
-    }
-}
-
-test "runIfRequested rejects malformed resume aliases with canonical usage" {
-    const cases = [_][]const [:0]const u8{
-        &.{ @constCast("--continue"), @constCast("unexpected"), @constCast("extra") },
-        &.{ @constCast("--resume"), @constCast("   ") },
-        &.{ @constCast("session"), @constCast("resume"), @constCast("a"), @constCast("b") },
-    };
-    for (cases) |args| {
-        var capture = CaptureOutput.init(std.testing.allocator);
-        defer capture.deinit();
-
-        const result = try runIfRequestedWithDeps(
-            std.testing.allocator,
-            args,
-            testConfig(),
-            capture.deps(),
-        );
-        try std.testing.expectEqual(usage_failure, result);
-        try std.testing.expectEqualStrings(
-            "usage: fx session resume [last|<id>] | -r, --resume [last|<id>] | --continue | -c\n",
-            capture.stderr.written(),
-        );
-    }
-}
-
-test "runIfRequested resume id returns owned id" {
-    var capture = CaptureOutput.init(std.testing.allocator);
-    defer capture.deinit();
-
-    const result = try runIfRequestedWithDeps(std.testing.allocator, &.{ @constCast("--resume"), @constCast("abc123") }, testConfig(), capture.deps());
-    switch (result) {
-        .interactive => |launch_value| {
-            var launch = launch_value;
-            defer launch.deinit(std.testing.allocator);
-            switch (launch.requested_resume.?) {
-                .id => |value| try std.testing.expectEqualStrings("abc123", value),
-                else => return error.TestExpectedEqual,
-            }
-        },
-        else => return error.TestExpectedEqual,
-    }
-}
-
-test "runIfRequested invalid resume writes usage" {
-    var capture = CaptureOutput.init(std.testing.allocator);
-    defer capture.deinit();
-
-    const result = try runIfRequestedWithDeps(std.testing.allocator, &.{ @constCast("--resume"), @constCast("a"), @constCast("b"), @constCast("c") }, testConfig(), capture.deps());
-    try std.testing.expectEqual(usage_failure, result);
-    try std.testing.expectEqualStrings(
-        "usage: fx session resume [last|<id>] | -r, --resume [last|<id>] | --continue | -c\n",
-        capture.stderr.written(),
-    );
-}
-
 test "runIfRequested takes one argument that isn't a command as the first prompt" {
     const cases = [_]struct {
         args: []const [:0]const u8,
@@ -6118,7 +5443,6 @@ test "runIfRequested takes one argument that isn't a command as the first prompt
         };
         defer launch.deinit(std.testing.allocator);
         try std.testing.expectEqualStrings(case.prompt, launch.initial_prompt.?);
-        try std.testing.expect(launch.requested_resume == null);
         if (case.model) |model| {
             try std.testing.expectEqualStrings(model, launch.modifiers.model_override.?);
         } else {
@@ -6126,57 +5450,6 @@ test "runIfRequested takes one argument that isn't a command as the first prompt
         }
         try std.testing.expectEqualStrings("", capture.stderr.written());
     }
-}
-
-test "runIfRequested takes a first prompt after a resume target" {
-    const cases = [_]struct {
-        args: []const [:0]const u8,
-        target: std.meta.Tag(ResumeTarget),
-        id: ?[]const u8 = null,
-    }{
-        .{ .args = &.{ @constCast("-c"), @constCast("fix it") }, .target = .remembered },
-        .{ .args = &.{ @constCast("--continue"), @constCast("fix it") }, .target = .remembered },
-        .{ .args = &.{ @constCast("-r"), @constCast("last"), @constCast("fix it") }, .target = .last },
-        .{ .args = &.{ @constCast("-r"), @constCast("session.123"), @constCast("fix it") }, .target = .id, .id = "session.123" },
-        .{ .args = &.{ @constCast("--resume"), @constCast("session.123"), @constCast("fix it") }, .target = .id, .id = "session.123" },
-        .{ .args = &.{ @constCast("--resume=last"), @constCast("fix it") }, .target = .last },
-        .{ .args = &.{ @constCast("--model"), @constCast("a"), @constCast("-c"), @constCast("fix it") }, .target = .remembered },
-    };
-    for (cases) |case| {
-        var capture = CaptureOutput.init(std.testing.allocator);
-        defer capture.deinit();
-
-        const result = try runIfRequestedWithDeps(std.testing.allocator, case.args, testConfig(), capture.deps());
-        var launch = switch (result) {
-            .interactive => |value| value,
-            else => return error.TestExpectedInteractiveLaunch,
-        };
-        defer launch.deinit(std.testing.allocator);
-        try std.testing.expectEqualStrings("fix it", launch.initial_prompt.?);
-        const target = launch.requested_resume.?;
-        try std.testing.expectEqual(case.target, std.meta.activeTag(target));
-        if (case.id) |id| try std.testing.expectEqualStrings(id, target.id);
-        try std.testing.expectEqualStrings("", capture.stderr.written());
-    }
-
-    // A second word after the prompt is a usage error. Launch flags may
-    // follow the target or the prompt; another test covers them.
-    const rejected = [_][]const [:0]const u8{
-        &.{ @constCast("-r"), @constCast("a"), @constCast("b"), @constCast("c") },
-        &.{ @constCast("-c"), @constCast("fix it"), @constCast("again") },
-    };
-    for (rejected) |args| {
-        var capture = CaptureOutput.init(std.testing.allocator);
-        defer capture.deinit();
-        const result = try runIfRequestedWithDeps(std.testing.allocator, args, testConfig(), capture.deps());
-        try std.testing.expectEqual(usage_failure, result);
-    }
-
-    var empty_capture = CaptureOutput.init(std.testing.allocator);
-    defer empty_capture.deinit();
-    const empty = try runIfRequestedWithDeps(std.testing.allocator, &.{ @constCast("-c"), @constCast(" ") }, testConfig(), empty_capture.deps());
-    try std.testing.expectEqual(usage_failure, empty);
-    try std.testing.expectEqualStrings("fx: the prompt is empty\n", empty_capture.stderr.written());
 }
 
 test "runIfRequested explains a first argument that is neither a command nor a prompt" {

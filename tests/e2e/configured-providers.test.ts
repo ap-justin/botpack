@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { FX_BIN, runFx } from "../evals/eval-helpers";
 import { completion, toolCompletion, createConfiguredProviderFixture as fixture } from "./fixtures/chat-completions";
-import { reviewedActionEvidence } from "./tmux-helpers";
+import { reviewedActionEvidence } from "./fake-gateway";
 
 async function withReasoning(response: Response, ...deltas: Record<string, unknown>[]) {
   const prefix = deltas.map(delta => `data: ${JSON.stringify({ choices: [{ index: 0, delta }] })}\n\n`).join("");

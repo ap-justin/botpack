@@ -31,7 +31,7 @@ import {
   fakeGatewayFinalText,
   fakeGatewaySse,
   startFakeGateway,
-} from "./tmux-helpers";
+} from "./fake-gateway";
 import { onlySessionId, savedSession, savedText, sessionDir } from "./saved-sessions";
 import {
   codexBreakdownBody,
@@ -357,7 +357,7 @@ describe("cli: help", () => {
         `𝒇x v${sourceVersion()}\nFast, native coding agent for the terminal.\n`,
       );
       expect(stdout.match(/𝒇x/g) ?? []).toHaveLength(1);
-      expect(stdout).toContain("fx starts an interactive session by default.");
+      expect(stdout).toContain("fx is a command-line coding agent.");
       expect(stdout).toContain("Commands:\n");
       expect(stdout).toContain("Run one noninteractive request");
       expect(stdout).toContain("Sign in to a model provider");
@@ -374,20 +374,15 @@ describe("cli: help", () => {
       expect(stdout).toContain("--context-limit <spec>");
       expect(stdout).toContain("Set name=bytes|off; repeatable");
       expect(stdout).toContain("--add-dir <path>");
-      expect(stdout).toContain("-c, --continue");
-      expect(stdout).toContain("-r, --resume [last|<id>]");
-      expect(stdout).toContain("Pick a saved session, or resume");
-      expect(stdout).not.toContain("-c, -r, --continue");
-      expect(stdout).toContain('fx [flags] "<prompt>"');
+      expect(stdout).not.toContain("--continue");
       expect(stdout).not.toContain("--resume-last");
       expect(stdout).not.toContain("--resume-<id>");
-      expect(stdout).toContain("session resume [last|id]");
+      expect(stdout).not.toContain("session resume");
       expect(stdout).toContain("-v, --version");
       expect(stdout).toContain("Print the fx version and exit");
       expect(stdout).not.toContain("Must appear before the command");
       expect(stdout).toContain("Examples:\n");
       expect(stdout).toContain("https://fx.sh/docs");
-      expect(stdout).toContain("run `/feedback` inside fx");
       expect(stdout).toContain(
         "Run `fx <command> --help` for command-specific usage and options.",
       );
@@ -436,12 +431,12 @@ Options:
   --timeout <seconds>         Time limit for each shell command the agent runs
   --config <key=value>        Override a setting for this request, with the keys fx config set takes; repeatable
   --no-save                   Do not save the session; incompatible with --resume
-  --no-color                  Render TTY output without colors or hyperlinks; NO_COLOR or TERM=dumb also turns color off
+  --no-color                  Print the full-access warning on stderr without color; NO_COLOR or TERM=dumb also turns color off
   --resume <last|<id>>        Continue the last session or a session by id
   --                          Treat every following argument as prompt text
 
 The prompt may be passed as arguments or piped on stdin when no prompt args are given.
-TTY stdout uses the Minimal transcript presentation; redirected stdout emits raw assistant Markdown.
+Assistant output is raw Markdown on stdout.
 Operational progress and diagnostics are written to stderr. JSON \`output\` keeps accumulated assistant Markdown; \`final_output\` contains only the completed final response, or an empty string when absent.
 JSON usage sums reported main-agent input_tokens and output_tokens, including with --no-save; unreported counts are null. cache_read_tokens and cache_write_tokens appear only when the provider reports them. Nested usage and dollar spend are excluded.
 --system replaces only the built-in base prompt for this request; tool, skill, project, and runtime context still apply.
@@ -459,18 +454,15 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
   );
 
   test(
-    "fx session help documents inspect resume and recover",
+    "fx session help documents inspect and recover",
     async () => {
-      for (const args of [
-        ["session", "--help"],
-        ["session", "resume", "--help"],
-      ]) {
+      for (const args of [["session", "--help"]]) {
         const r = await runFx(args);
         expect(r.code).toBe(0);
         expect(r.stderr).toBe("");
-        expect(r.stdout).toContain("Inspect, resume, or recover saved sessions");
+        expect(r.stdout).toContain("Inspect or recover saved sessions");
         expect(r.stdout).toContain("session <last|id>|--id <id>");
-        expect(r.stdout).toContain("session resume [last|<id>]");
+        expect(r.stdout).not.toContain("session resume");
         expect(r.stdout).toContain("session recover <id>|--id <id>");
         // Sessions convert on open; there is nothing to migrate by hand.
         expect(r.stdout).not.toContain("migrate");
@@ -495,20 +487,6 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
         expect(r.stdout).toContain("--no-ultrafast");
         expect(r.stdout).toContain("--log-file <path>");
       }
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "fx replay help describes golden output",
-    async () => {
-      const r = await runFx(["replay", "--help"]);
-      expect(r.code).toBe(0);
-      expect(r.stderr).toBe("");
-      expect(r.stdout).toContain("--golden <path>");
-      expect(r.stdout).toContain("Write the final rendered grid to a file");
-      expect(r.stdout).toContain("Developer tool for reproducing terminal rendering bugs");
-      expect(r.stdout).not.toContain("Compare output against a golden file");
     },
     TIMEOUT,
   );
@@ -583,24 +561,6 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
   );
 });
 
-describe("cli: launch flags", () => {
-  test("--instances says it applies only to interactive sessions", async () => {
-    for (const args of [["--instances", "2", "ask", "hi"], ["--instances=1", "ask", "hi"]]) {
-      const result = await runFx(args);
-      expect(result.code).toBe(2);
-      expect(result.stderr).toBe("fx: --instances applies to interactive sessions\n");
-      expect(result.stdout).toBe("");
-    }
-  });
-
-  test("--profile says it applies only to interactive sessions", async () => {
-    for (const args of [["--profile", "reviewer", "ask", "hi"], ["--profile=reviewer", "status"]]) {
-      const result = await runFx(args);
-      expect(result.code).toBe(2);
-      expect(result.stderr).toBe("fx: --profile applies to interactive sessions\n");
-      expect(result.stdout).toBe("");
-    }
-  });
 });
 
 describe("cli: version", () => {
@@ -3797,7 +3757,7 @@ describe("cli: removed task and background commands", () => {
       // A word that isn't close to a command is a first prompt for a session.
       const background = await runFx(["background"], { env: NO_GATEWAY_AUTH });
       expect(background.code).toBe(1);
-      expect(background.stderr).toContain("fx requires an interactive terminal (TTY).");
+      expect(background.stderr).toContain("fx: this build has no interactive terminal UI; use fx ask or fx acp");
     },
     TIMEOUT,
   );
@@ -4502,36 +4462,6 @@ describe("cli: credits", () => {
   );
 });
 
-describe("cli: replay failures", () => {
-  test(
-    "fx replay --json preserves structured failures for missing and malformed tapes",
-    async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-replay-json-errors-"));
-      try {
-        const missing = await runFx(["replay", join(root, "missing.fxtape"), "--json"]);
-        expect(missing.code).toBe(1);
-        expect(missing.stderr).toBe("");
-        expect(JSON.parse(missing.stdout.trim())).toMatchObject({
-          kind: "replay",
-          code: "FileNotFound",
-        });
-
-        const malformedPath = join(root, "malformed.fxtape");
-        writeFileSync(malformedPath, "not a tape");
-        const malformed = await runFx(["replay", malformedPath, "--json"]);
-        expect(malformed.code).toBe(1);
-        expect(malformed.stderr).toBe("");
-        expect(JSON.parse(malformed.stdout.trim())).toMatchObject({
-          kind: "replay",
-        });
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
-    },
-    TIMEOUT,
-  );
-});
-
 describe("cli: ask input validation", () => {
   test(
     "fx ask rejects invalid UTF-8 stdin before Gateway or session effects",
@@ -4691,11 +4621,6 @@ describe("cli: interactive startup", () => {
     async () => {
       const cases = [
         [],
-        ["--resume", "last"],
-        ["--resume"],
-        ["-r", "last"],
-        ["session", "resume", "last"],
-        ["session", "resume", "session.v3"],
         ["fix the login bug"],
         ["fix the login bug", "--model", "x"],
       ];
@@ -4706,7 +4631,7 @@ describe("cli: interactive startup", () => {
           const r = await runFx(args, { env: { HOME: home } });
           expect(r.code).toBe(1);
           expect(r.stdout).toBe("");
-          expect(r.stderr).toBe("fx requires an interactive terminal (TTY).\n");
+          expect(r.stderr).toBe("fx: this build has no interactive terminal UI; use fx ask or fx acp\n");
           expect(readdirSync(home)).toEqual([]);
         } finally {
           rmSync(home, { recursive: true, force: true });
@@ -4749,32 +4674,6 @@ describe("cli: interactive startup", () => {
     TIMEOUT,
   );
 
-  test(
-    "removed resume spellings exit two and name the replacement",
-    async () => {
-      const cases: [string[], string][] = [
-        [["--resume-last"], "fx: --resume-last was removed; use fx --resume last\n"],
-        [["--resume-session.v3"], "fx: --resume-<id> was removed; use fx --resume <id>\n"],
-        [["resume", "last"], "fx: fx resume was removed; use fx --resume [last|<id>] or fx session resume [last|<id>]\n"],
-        [["session", "resume", "--id", "session.v3"], "fx session resume: --id was removed; use fx session resume <id>\n"],
-        [["session", "resume", "--resume", "--last"], "fx session resume: --resume --last was removed; use fx session resume last\n"],
-      ];
-
-      for (const [args, stderr] of cases) {
-        const home = realpathSync(mkdtempSync(join(tmpdir(), "fx-e2e-removed-resume-")));
-        try {
-          const r = await runFx(args, { env: { HOME: home } });
-          expect(r.code).toBe(2);
-          expect(r.stdout).toBe("");
-          expect(r.stderr).toBe(stderr);
-          expect(readdirSync(home)).toEqual([]);
-        } finally {
-          rmSync(home, { recursive: true, force: true });
-        }
-      }
-    },
-    TIMEOUT,
-  );
 });
 
 describe("cli: pr", () => {
@@ -5830,7 +5729,7 @@ describe("cli: workspace access", () => {
         { env: enabled },
       );
       expect(duplicate.code).toBe(1);
-      expect(duplicate.stderr).toBe("fx requires an interactive terminal (TTY).\n");
+      expect(duplicate.stderr).toBe("fx: this build has no interactive terminal UI; use fx ask or fx acp\n");
 
       const badMode = await runFx(["--permission-mode", "never"], { env: enabled });
       expect(badMode.code).toBe(2);
@@ -6385,7 +6284,6 @@ describe("cli: completion", () => {
     [["fx", "usage", "--period", ""], "today 7d month"],
     [["fx", "login", ""], "vercel codex grok"],
     [["fx", "completion", ""], "bash zsh fish"],
-    [["fx", "-r", ""], "last"],
   ];
 
   async function writeScript(shell: string, dir: string): Promise<string> {

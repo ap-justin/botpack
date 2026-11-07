@@ -187,7 +187,7 @@ type Helpers = {
 };
 
 export async function loadHelpers(worktree: string): Promise<Helpers> {
-  return (await import(join(worktree, "tests", "e2e", "tmux-helpers.ts"))) as Helpers;
+  return (await import(join(worktree, "tests", "e2e", "fake-gateway.ts"))) as Helpers;
 }
 
 // Process overrides that would mask what the profile and ACP decide.

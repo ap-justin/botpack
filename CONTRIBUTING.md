@@ -67,7 +67,7 @@ The `fx-cli-shape` skill in `.fx/skills/fx-cli-shape/` has the full rules, the n
 
 ## Test your change
 
-Run the tests that cover your change, build fx, and then use `./zig-out/bin/fx` to exercise the change yourself. Tests don't always start the full runtime, attach a terminal, or spawn background threads, so a passing suite can still miss a startup crash or a rendering regression. Confirm that fx didn't abort, that stderr is clean, and that the behavior matches what you'll describe in the pull request.
+Run the tests that cover your change, build fx, and then use `./zig-out/bin/fx` to exercise the change yourself. Tests don't always start the full runtime, attach a terminal, or spawn background threads, so a passing suite can still miss a startup crash. Confirm that fx didn't abort, that stderr is clean, and that the behavior matches what you'll describe in the pull request.
 
 ```bash
 zig fmt src/
@@ -78,7 +78,7 @@ bun install
 bun test cli.test.ts
 ```
 
-Zig unit tests sit in `test` blocks inside the source file they cover, and `zig build test` runs all of them. CI checks formatting with `zig fmt --check src/`. The end-to-end tests run the binary at `zig-out/bin/fx`, so build before you run them. Run only the end-to-end files that cover your change, because CI runs the whole suite on every push. The `tui-*` files drive fx inside tmux.
+Zig unit tests sit in `test` blocks inside the source file they cover, and `zig build test` runs all of them. CI checks formatting with `zig fmt --check src/`. The end-to-end tests run the binary at `zig-out/bin/fx`, so build before you run them. Run only the end-to-end files that cover your change, because CI runs the whole suite on every push.
 
 ### Add an end-to-end test file
 
@@ -92,23 +92,6 @@ Every root `tests/e2e/*.test.ts` file needs an entry in the first three files be
 | `tests/e2e/macos-platform-tests.json` | Needed only when the file branches on `process.platform` or `platform()` being `darwin` or `linux` |
 
 The corpus drives the macOS arm64 PGSO build, which profiles fx on the training files, optimizes the code they exercise for speed, and compiles the functions they show to be cold for size. Classify a file as training when it covers common or performance-sensitive behavior. Use verification-only for correctness, recovery, security, or rare behavior that the build must pass without treating it as hot. Use an intentional exclusion only for coverage that is nondeterministic, needs the network or credentials, involves sound, or tests the harness itself, and record the reason. A test added to an existing file inherits that file's classification, and removing a file means removing its entries.
-
-### Reproduce a rendering bug
-
-fx prints into your terminal's scrollback instead of taking over the screen, so many rendering bugs appear only at certain sizes or after a resize. Reproduce a bug at the lowest layer that catches it:
-
-1. A Zig unit test in `src/ui/resize_tests.zig` drives the transcript renderer against an in-process virtual terminal, with no TTY or signals. These tests are the fastest and run in `zig build test`.
-2. A tmux test in `tests/e2e/tui-resize.test.ts` covers bugs that need a real terminal and a real `SIGWINCH`. `tests/e2e/tmux-helpers.ts` provides `resizeWindow`, `capturePaneGrid`, and `capturePaneEscapes`.
-3. A recorded tape captures a session someone has already seen go wrong. Run fx with `FX_RECORD=/tmp/bug.fxtape`, or with `FX_DEBUG_RECORD=1` to write a private tape under `~/.fx/recordings/`, then replay it without a terminal:
-
-   ```bash
-   ./zig-out/bin/fx replay /tmp/bug.fxtape
-   ./zig-out/bin/fx replay /tmp/bug.fxtape --golden /tmp/bug.txt
-   ```
-
-   `--golden` writes the final screen to a file that you can check in as the expected result.
-
-When a tmux test or a tape exposes a bug, reproduce it as a Zig unit test before you fix it, so the fix lands with its regression test.
 
 ### Fuzz a parser
 
@@ -145,11 +128,7 @@ The `Startup Latency` check fails a pull request when any benchmarked command ta
 ./benchmarks/startup.sh --quick
 ```
 
-The script builds a ReleaseSafe binary and needs hyperfine. On macOS, process and dynamic-loader overhead alone can exceed 2 ms, so compare local numbers between builds instead of against the budget. To measure an interactive launch up to its first frame, `benchmarks/first_frame.py` runs several binaries under the same machine load. In this example, `/tmp/fx-before` is a build of `main`:
-
-```bash
-python3 benchmarks/first_frame.py --binary /tmp/fx-before --binary ./zig-out/bin/fx
-```
+The script builds a ReleaseSafe binary and needs hyperfine. On macOS, process and dynamic-loader overhead alone can exceed 2 ms, so compare local numbers between builds instead of against the budget.
 
 ### Check a TLA+ model
 
@@ -216,7 +195,7 @@ These five checks must pass before a pull request merges:
 | `Build & Test` | Formatting, the PGSO corpus, the public-surface, compactor-boundary, and indexer-boundary checks, the ReleaseSafe unit tests, and the SDK package jobs, including the libfx durable-session model check when the change needs it |
 | `E2E (deterministic)` | Every end-to-end file, split across four weighted shards, plus the MCP conformance baseline |
 | `Shellcheck` | `bash -n` and `shellcheck` on the scripts listed in the job, such as `benchmarks/startup.sh` and `scripts/detect-macos-need.sh` |
-| `Startup Latency` | The benchmarked CLI commands on a ReleaseSafe build, each held to 2 ms, plus the interactive performance test in `tests/e2e/tui-performance.test.ts` |
+| `Startup Latency` | The benchmarked CLI commands on a ReleaseSafe build, each held to 2 ms |
 | `macOS arm64` | The macOS checks when the change needs them, and otherwise a pass without starting a macOS runner |
 
 CI retries a failed end-to-end file once. A file that passes only on the retry gets a warning annotation, and you should investigate it as a possible race.
@@ -245,13 +224,7 @@ The `TLA+ MCP models and drivers` job takes about 20 minutes and runs its checks
 - The models in `tests/tla/mcp/` or `tests/tla/mcp_host/`, or their drivers in `tests/tla/drivers/mcp/`, `tests/tla/drivers/mcp_host/`, or `tests/tla/drivers/lib/`
 - The `tests/e2e/fixtures/mcp-*` servers, or the helpers those drivers load: `tests/e2e/tmux-helpers.ts`, `tests/evals/eval-helpers.ts`, and `tests/e2e/render-lab/tape.ts`
 
-The `TLA+ transcript window model` job takes about 4 minutes and runs its checks when the change touches:
-
-- `src/ui/transcript/transcript_window*`
-- The model in `tests/tla/transcript_window/` or its drivers in `tests/tla/drivers/transcript_window/`
-- The driver code those drivers share: `tests/tla/drivers/lib/` and `tests/tla/drivers/graph.mjs`
-
-All three run when the change touches `build.zig`, `build.zig.zon`, or `.github/workflows/ci.yml`, and on every push to `main`. When the detector can't read the change, `Build & Test` fails instead of passing.
+Both run when the change touches `build.zig`, `build.zig.zon`, or `.github/workflows/ci.yml`, and on every push to `main`. When the detector can't read the change, `Build & Test` fails instead of passing.
 
 Other workflows and benchmark jobs also report on pull requests, such as the `Examples` workflow when `examples/` changes and the `Shell command overhead` benchmark. Only the five checks above are required to merge, but look into any check that fails. Two of the others need more explanation:
 

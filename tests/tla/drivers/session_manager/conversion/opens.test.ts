@@ -8,7 +8,7 @@ import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   compareContinuations, convertAll, crashAtRename, fakeGatewayFinalText, familyReplies, observer, openVia, plainReplies,
-  rememberInV1, requireAccepted, scenario, VIAS, waitUntil, type Fixture,
+  requireAccepted, scenario, VIAS, waitUntil, type Fixture,
 } from "./driver";
 
 // --- scenarios --------------------------------------------------------------
@@ -40,11 +40,6 @@ for (const via of VIAS) {
     const id = (await f.v1Ask(["CONV_FIRST"])).session_id;
     const o = observer(f, id);
     await o.observe("create");
-    if (via === "continue") {
-      // -c opens the session v1 remembers, which only the v1 app records.
-      await rememberInV1(f, id);
-      await o.observe("write");
-    }
     const snapshot = join(f.root, "snapshot");
     cpSync(f.home, snapshot, { recursive: true });
     await o.observe("list");

@@ -47,8 +47,6 @@ fn writeOneLine(w: *std.Io.Writer, json: []const u8) !void {
 
 pub const ErrorCode = struct {
     pub const request_frame_too_large: i64 = -32000;
-    /// ACP `AUTH_REQUIRED`: the agent needs the client to authenticate first.
-    pub const auth_required: i64 = -32000;
     pub const parse_error: i64 = -32700;
     pub const invalid_request: i64 = -32600;
     pub const method_not_found: i64 = -32601;
@@ -83,8 +81,6 @@ pub const RpcError = struct {
         model: []const u8,
         capability: []const u8,
     } = null,
-    /// A complete JSON value written as the error's `data`. Wins over `data`.
-    data_json: ?[]const u8 = null,
 };
 
 pub fn parseMessage(alloc: Allocator, line: []const u8) !Message {
@@ -199,10 +195,7 @@ pub const Writer = struct {
                     try w.print("{d}", .{response.err.code});
                     try w.writeAll(",\"message\":");
                     try writeJsonStr(response.err.message, w);
-                    if (response.err.data_json) |data_json| {
-                        try w.writeAll(",\"data\":");
-                        try w.writeAll(data_json);
-                    } else if (response.err.data) |data| {
+                    if (response.err.data) |data| {
                         try w.writeAll(",\"data\":{\"code\":");
                         try writeJsonStr(data.code, w);
                         try w.writeAll(",\"model\":");
@@ -612,19 +605,6 @@ test "Writer Frame formats protocol lines" {
         } }).write(&out.writer);
         try std.testing.expectEqualStrings(
             "{\"jsonrpc\":\"2.0\",\"id\":7,\"error\":{\"code\":-32602,\"message\":\"Unsupported fast mode\",\"data\":{\"code\":\"LIBFX_MODEL_UNSUPPORTED_FAST\",\"model\":\"provider/quoted\\\"model\",\"capability\":\"fast\"}}}\n",
-            out.writer.buffered(),
-        );
-    }
-
-    {
-        var out: std.Io.Writer.Allocating = .init(alloc);
-        defer out.deinit();
-        try (Writer.Frame{ .error_response = .{
-            .id = .{ .integer = 2 },
-            .err = .{ .code = ErrorCode.auth_required, .message = "Authentication required", .data_json = "{\"authMethods\":[]}" },
-        } }).write(&out.writer);
-        try std.testing.expectEqualStrings(
-            "{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32000,\"message\":\"Authentication required\",\"data\":{\"authMethods\":[]}}}\n",
             out.writer.buffered(),
         );
     }

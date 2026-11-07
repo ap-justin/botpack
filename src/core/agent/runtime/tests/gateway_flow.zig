@@ -36,7 +36,6 @@ const Allocator = std.mem.Allocator;
 const HistoryTurn = types.HistoryTurn;
 const PermissionGrant = types.PermissionGrant;
 const ToolCall = types.ToolCall;
-const SelectedTool = @import("../../../tooling/tool_mcp_runtime.zig").SelectedTool;
 const QueuedPrompt = worker_runtime.QueuedPrompt;
 
 const FakeCompletion = test_support.FakeCompletion;
@@ -2980,7 +2979,7 @@ test "processQueuedPrompt omits Fast without catalog support" {
     try std.testing.expectEqual(@as(usize, 1), gateway.request_bodies.items.len);
     try expectBodyContains(&gateway, 0, "\"reasoning\":\"high\"");
     try expectRootFieldAbsent(&gateway, 0, "fast");
-    try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"caching\":\"auto\",\"order\":[\"anthropic\"]}}");
+    try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"caching\":\"auto\"}}");
     try expectBodyNotContains(&gateway, 0, "\"maxOutputTokens\"");
 }
 
@@ -4648,7 +4647,7 @@ test "processQueuedPrompt filters stale controls against each queued model" {
 
         try expectBodyContains(&gateway, 0, "\"reasoning\":\"xhigh\"");
         try expectRootFieldAbsent(&gateway, 0, "fast");
-        try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\",\"caching\":\"auto\",\"order\":[\"anthropic\"]}}");
+        try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\",\"caching\":\"auto\"}}");
     }
 
     {
@@ -4667,7 +4666,7 @@ test "processQueuedPrompt filters stale controls against each queued model" {
 
         try expectBodyNotContains(&gateway, 0, "\"reasoning\"");
         try expectRootFieldAbsent(&gateway, 0, "fast");
-        try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"caching\":\"auto\",\"order\":[\"anthropic\"]}}");
+        try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"caching\":\"auto\"}}");
     }
 }
 
@@ -4710,7 +4709,7 @@ test "processQueuedPrompt filters captured Fast by model capability" {
 
         try std.testing.expectEqual(@as(usize, 1), gateway.request_bodies.items.len);
         try expectRootFieldAbsent(&gateway, 0, "fast");
-        try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\",\"caching\":\"auto\",\"order\":[\"anthropic\"]}}");
+        try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\",\"caching\":\"auto\"}}");
     }
 }
 
@@ -4778,7 +4777,7 @@ test "processQueuedPrompt provider payload follows queued model sync boundaries"
         try std.testing.expectEqual(@as(usize, 1), gateway.request_bodies.items.len);
         try expectBodyContains(&gateway, 0, "\"reasoning\":\"high\"");
         try expectRootFieldAbsent(&gateway, 0, "fast");
-        try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\",\"caching\":\"auto\",\"order\":[\"anthropic\"]}}");
+        try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\",\"caching\":\"auto\"}}");
     }
 }
 
@@ -6702,17 +6701,17 @@ test "processQueuedPrompt drops provider option fast after three provider errors
     // for `no_fast`, and the resend goes out at standard speed.
     try std.testing.expectEqual(@as(usize, 4), gateway.request_models.items.len);
     for (0..3) |index| {
-        try expectBodyContains(&gateway, index, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\",\"caching\":\"auto\",\"order\":[\"anthropic\"]}}");
+        try expectBodyContains(&gateway, index, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\",\"caching\":\"auto\"}}");
     }
     try expectRootFieldAbsent(&gateway, 0, "fast");
-    try expectBodyContains(&gateway, 3, "\"providerOptions\":{\"gateway\":{\"caching\":\"auto\",\"order\":[\"anthropic\"]}}");
+    try expectBodyContains(&gateway, 3, "\"providerOptions\":{\"gateway\":{\"caching\":\"auto\"}}");
     try expectAnyModuleStatus(&hooks, .retrying, "Gateway error · retrying without Fast · attempt 4");
     try expectRecovered(&hooks, 4);
     try std.testing.expectEqual(types.TurnPresentationOutcome.completed, hooks.finalized_outcome.?);
 }
 
-const fast_body = "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\",\"caching\":\"auto\",\"order\":[\"anthropic\"]}}";
-const standard_body = "\"providerOptions\":{\"gateway\":{\"caching\":\"auto\",\"order\":[\"anthropic\"]}}";
+const fast_body = "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\",\"caching\":\"auto\"}}";
+const standard_body = "\"providerOptions\":{\"gateway\":{\"caching\":\"auto\"}}";
 
 /// Runs `completions` with Fast on for a model that supports it.
 fn runFastPrompt(gateway: *FakeGateway, hooks: *FakeAgentRuntimeDeps) !void {
@@ -6848,7 +6847,7 @@ test "processQueuedPrompt keeps provider option fast after one HTTP failure" {
     // One 503 is not a reason to give up Fast.
     try std.testing.expectEqual(@as(usize, 2), gateway.request_models.items.len);
     for (0..2) |index| {
-        try expectBodyContains(&gateway, index, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\",\"caching\":\"auto\",\"order\":[\"anthropic\"]}}");
+        try expectBodyContains(&gateway, index, "\"providerOptions\":{\"gateway\":{\"speed\":\"fast\",\"caching\":\"auto\"}}");
     }
     try expectModuleStatus(&hooks, 0, .waiting, "Gateway error · next try in ");
     try expectRecovered(&hooks, 2);
@@ -9864,540 +9863,4 @@ test "400 and 422 still end after one request" {
         try std.testing.expectEqual(@as(usize, 1), gateway.request_models.items.len);
         try std.testing.expectEqual(types.TurnPresentationOutcome.failed, hooks.finalized_outcome.?);
     }
-}
-
-const echo_tool_schema = "{\"type\":\"function\",\"name\":\"mcp_fixture_echo\",\"description\":\"Echo\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}";
-const echo_binding: types.McpToolBinding = .{
-    .runtime_generation = 1,
-    .connection_generation = 1,
-    .catalog_generation = 1,
-    .auth_generation = 1,
-};
-const echo_tool: SelectedTool = .{ .name = "mcp_fixture_echo", .schema_json = echo_tool_schema, .mcp_binding = echo_binding };
-
-/// The request's `prompt` entries up to and including the last one that
-/// carries an Anthropic cache marker, as JSON.
-fn promptThroughLastBreakpoint(alloc: Allocator, body: []const u8) ![]u8 {
-    var parsed = try std.json.parseFromSlice(std.json.Value, alloc, body, .{});
-    defer parsed.deinit();
-    const prompt = parsed.value.object.get("prompt").?.array.items;
-    var end: usize = 0;
-    for (prompt, 0..) |entry, index| {
-        const options = entry.object.get("providerOptions") orelse continue;
-        if (options.object.get("anthropic") != null) end = index + 1;
-    }
-    try std.testing.expect(end > 0);
-    var through = std.json.Array.init(alloc);
-    defer through.deinit();
-    try through.appendSlice(prompt[0..end]);
-    return std.json.Stringify.valueAlloc(alloc, std.json.Value{ .array = through }, .{});
-}
-
-fn toolNames(alloc: Allocator, body: []const u8) ![][]const u8 {
-    var parsed = try std.json.parseFromSlice(std.json.Value, alloc, body, .{});
-    defer parsed.deinit();
-    var names: std.ArrayList([]const u8) = .empty;
-    for (parsed.value.object.get("tools").?.array.items) |tool| {
-        try names.append(alloc, try alloc.dupe(u8, tool.object.get("name").?.string));
-    }
-    return names.toOwnedSlice(alloc);
-}
-
-fn freeToolNames(alloc: Allocator, names: [][]const u8) void {
-    for (names) |name| alloc.free(name);
-    alloc.free(names);
-}
-
-/// The request's `tools` array as JSON: names, descriptions and schemas, the
-/// bytes the provider caches.
-fn toolsJson(alloc: Allocator, body: []const u8) ![]u8 {
-    var parsed = try std.json.parseFromSlice(std.json.Value, alloc, body, .{});
-    defer parsed.deinit();
-    return std.json.Stringify.valueAlloc(alloc, parsed.value.object.get("tools").?, .{});
-}
-
-/// Asserts `later`'s prompt repeats every entry of `earlier`'s, unchanged and
-/// in order, and adds at least one after them.
-fn expectPromptExtends(alloc: Allocator, earlier: []const u8, later: []const u8) !void {
-    var earlier_parsed = try std.json.parseFromSlice(std.json.Value, alloc, earlier, .{});
-    defer earlier_parsed.deinit();
-    var later_parsed = try std.json.parseFromSlice(std.json.Value, alloc, later, .{});
-    defer later_parsed.deinit();
-    const before = earlier_parsed.value.object.get("prompt").?.array.items;
-    const after = later_parsed.value.object.get("prompt").?.array.items;
-    try std.testing.expect(after.len > before.len);
-    for (before, after[0..before.len]) |want, got| {
-        const want_json = try std.json.Stringify.valueAlloc(alloc, want, .{});
-        defer alloc.free(want_json);
-        const got_json = try std.json.Stringify.valueAlloc(alloc, got, .{});
-        defer alloc.free(got_json);
-        try std.testing.expectEqualStrings(want_json, got_json);
-    }
-}
-
-test "an Anthropic request sticks to Anthropic until the user routes" {
-    const alloc = std.testing.allocator;
-    {
-        const completions = [_]FakeCompletion{.{ .content = "Done" }};
-        var gateway = FakeGateway.init(alloc, &completions);
-        defer gateway.deinit();
-        var hooks = FakeAgentRuntimeDeps.init(alloc);
-        defer hooks.deinit();
-        var fixture = PromptFixture{};
-        try runFakePrompt(&gateway, &hooks, fixture.config(), fixture.job());
-        try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"caching\":\"auto\",\"order\":[\"anthropic\"]}}");
-    }
-    {
-        const completions = [_]FakeCompletion{.{ .content = "Done" }};
-        var gateway = FakeGateway.init(alloc, &completions);
-        defer gateway.deinit();
-        var hooks = FakeAgentRuntimeDeps.init(alloc);
-        defer hooks.deinit();
-        var fixture = PromptFixture{};
-        var config = fixture.config();
-        const user_order = [_][]const u8{ "bedrock", "anthropic" };
-        config.provider_order = &user_order;
-        try runFakePrompt(&gateway, &hooks, config, fixture.job());
-        try expectBodyContains(&gateway, 0, "\"gateway\":{\"caching\":\"auto\",\"order\":[\"bedrock\",\"anthropic\"]}");
-        try expectBodyNotContains(&gateway, 0, "\"order\":[\"anthropic\"]");
-    }
-}
-
-test "strict routing on an Anthropic model sends the user's providers and no default order" {
-    const alloc = std.testing.allocator;
-    {
-        const completions = [_]FakeCompletion{.{ .content = "Done" }};
-        var gateway = FakeGateway.init(alloc, &completions);
-        defer gateway.deinit();
-        var hooks = FakeAgentRuntimeDeps.init(alloc);
-        defer hooks.deinit();
-        var fixture = PromptFixture{};
-        var config = fixture.config();
-        const user_order = [_][]const u8{ "bedrock", "vertex" };
-        config.provider_order = &user_order;
-        config.provider_strict = true;
-        try runFakePrompt(&gateway, &hooks, config, fixture.job());
-        try expectBodyContains(&gateway, 0, "\"gateway\":{\"caching\":\"auto\",\"only\":[\"bedrock\",\"vertex\"]}");
-        try expectBodyNotContains(&gateway, 0, "\"order\":[");
-    }
-    {
-        // Strict with no providers named restricts nothing, so the default
-        // Anthropic preference must not turn into a hard `only` filter.
-        const completions = [_]FakeCompletion{.{ .content = "Done" }};
-        var gateway = FakeGateway.init(alloc, &completions);
-        defer gateway.deinit();
-        var hooks = FakeAgentRuntimeDeps.init(alloc);
-        defer hooks.deinit();
-        var fixture = PromptFixture{};
-        var config = fixture.config();
-        config.provider_strict = true;
-        try runFakePrompt(&gateway, &hooks, config, fixture.job());
-        try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"caching\":\"auto\"}}");
-        try expectBodyNotContains(&gateway, 0, "\"only\":[");
-        try expectBodyNotContains(&gateway, 0, "\"order\":[");
-    }
-}
-
-test "a cached request to a non-Anthropic model leaves routing to the gateway" {
-    const alloc = std.testing.allocator;
-    const completions = [_]FakeCompletion{.{ .content = "Done" }};
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer hooks.deinit();
-    var fixture = PromptFixture{};
-    var job = fixture.job();
-    job.model = @constCast("openai/gpt-5.6-sol");
-    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
-    try std.testing.expectEqualStrings("openai/gpt-5.6-sol", gateway.request_models.items[0]);
-    try expectBodyContains(&gateway, 0, "\"gateway\":{\"caching\":\"auto\"}");
-    try expectBodyNotContains(&gateway, 0, "\"order\":[");
-}
-
-test "an uncached Anthropic request leaves routing to the gateway" {
-    const alloc = std.testing.allocator;
-    const completions = [_]FakeCompletion{.{ .content = "Done" }};
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer hooks.deinit();
-    var fixture = PromptFixture{};
-    var config = fixture.config();
-    config.provider_capabilities.gateway_prompt_caching = false;
-    try runFakePrompt(&gateway, &hooks, config, fixture.job());
-    try expectBodyNotContains(&gateway, 0, "\"caching\":\"auto\"");
-    try expectBodyNotContains(&gateway, 0, "\"order\":[");
-}
-
-test "selecting a tool mid-turn leaves the cached prompt prefix byte-identical" {
-    const alloc = std.testing.allocator;
-    const select_calls = [_]ToolCall{toolCall("select", "mcp_select_tool", "{\"name\":\"mcp_fixture_echo\"}")};
-    const completions = [_]FakeCompletion{
-        .{ .tool_calls = &select_calls },
-        .{ .content = "Final" },
-    };
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer hooks.deinit();
-    hooks.permission_decisions = &.{.once};
-    hooks.resolvable_mcp_tools = &.{echo_tool};
-    hooks.exec_plans = &.{.{ .result = .{
-        .model_output = "selected",
-        .selected_dynamic_tools = &.{.{ .name = "mcp_fixture_echo", .schema_json = echo_tool_schema, .mcp_binding = echo_binding }},
-    } }};
-    var fixture = PromptFixture{};
-    var job = fixture.job();
-    job.permission_mode = .auto;
-    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
-
-    try std.testing.expectEqual(@as(usize, 2), gateway.request_bodies.items.len);
-    const before = try promptThroughLastBreakpoint(alloc, gateway.request_bodies.items[0]);
-    defer alloc.free(before);
-    const after = try promptThroughLastBreakpoint(alloc, gateway.request_bodies.items[1]);
-    defer alloc.free(after);
-    try std.testing.expectEqualStrings(before, after);
-    try expectPromptExtends(alloc, gateway.request_bodies.items[0], gateway.request_bodies.items[1]);
-
-    // The selected tool is appended; no earlier tool moves or changes a byte.
-    const names_before = try toolNames(alloc, gateway.request_bodies.items[0]);
-    defer freeToolNames(alloc, names_before);
-    const names_after = try toolNames(alloc, gateway.request_bodies.items[1]);
-    defer freeToolNames(alloc, names_after);
-    try std.testing.expectEqual(names_before.len + 1, names_after.len);
-    try std.testing.expectEqualStrings("mcp_fixture_echo", names_after[names_after.len - 1]);
-    const tools_before = try toolsJson(alloc, gateway.request_bodies.items[0]);
-    defer alloc.free(tools_before);
-    const tools_after = try toolsJson(alloc, gateway.request_bodies.items[1]);
-    defer alloc.free(tools_after);
-    const before_open = tools_before[0 .. tools_before.len - 1];
-    try std.testing.expectEqualStrings(before_open, tools_after[0..before_open.len]);
-    // With no fixed tools the list was `[]`, so the selected tool follows the bracket directly.
-    const separator: u8 = if (names_before.len == 0) '{' else ',';
-    try std.testing.expectEqual(separator, tools_after[before_open.len]);
-}
-
-test "two turns of one session share the prompt prefix and the tool list" {
-    const alloc = std.testing.allocator;
-    const select_calls = [_]ToolCall{toolCall("select", "mcp_select_tool", "{\"name\":\"mcp_fixture_echo\"}")};
-    const dynamic_calls = [_]ToolCall{toolCall("dynamic", "mcp_fixture_echo", "{}")};
-    const completions = [_]FakeCompletion{
-        .{ .tool_calls = &select_calls },
-        .{ .tool_calls = &dynamic_calls },
-        .{ .content = "First answer" },
-    };
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer hooks.deinit();
-    hooks.permission_decisions = &.{ .once, .once };
-    hooks.resolvable_mcp_tools = &.{echo_tool};
-    hooks.exec_plans = &.{
-        .{ .result = .{
-            .model_output = "selected",
-            .selected_dynamic_tools = &.{.{ .name = "mcp_fixture_echo", .schema_json = echo_tool_schema, .mcp_binding = echo_binding }},
-        } },
-        .{ .result = .{ .model_output = "called" } },
-    };
-    var fixture = PromptFixture{};
-    var job = fixture.job();
-    job.permission_mode = .auto;
-    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
-    try std.testing.expectEqual(@as(usize, 3), gateway.request_bodies.items.len);
-
-    const second_completions = [_]FakeCompletion{.{ .content = "Second answer" }};
-    var second_gateway = FakeGateway.init(alloc, &second_completions);
-    defer second_gateway.deinit();
-    var second_hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer second_hooks.deinit();
-    second_hooks.resolvable_mcp_tools = hooks.resolvable_mcp_tools;
-    var second_fixture = PromptFixture{};
-    var second_job = second_fixture.job();
-    second_job.prompt = @constCast("follow up");
-    second_job.history = hooks.history_turns.items;
-    try runFakePrompt(&second_gateway, &second_hooks, second_fixture.config(), second_job);
-
-    const first_prefix = try promptThroughLastBreakpoint(alloc, gateway.request_bodies.items[0]);
-    defer alloc.free(first_prefix);
-    const second_prefix = try promptThroughLastBreakpoint(alloc, second_gateway.request_bodies.items[0]);
-    defer alloc.free(second_prefix);
-    try std.testing.expectEqualStrings(first_prefix, second_prefix);
-    // The old turn's history, up to its last request, is replayed unchanged.
-    try expectPromptExtends(alloc, gateway.request_bodies.items[2], second_gateway.request_bodies.items[0]);
-
-    // The new turn starts with the list the last request of the old one ended
-    // on, byte for byte.
-    const last_of_first = try toolsJson(alloc, gateway.request_bodies.items[2]);
-    defer alloc.free(last_of_first);
-    const start_of_second = try toolsJson(alloc, second_gateway.request_bodies.items[0]);
-    defer alloc.free(start_of_second);
-    try std.testing.expectEqualStrings(last_of_first, start_of_second);
-    const names = try toolNames(alloc, second_gateway.request_bodies.items[0]);
-    defer freeToolNames(alloc, names);
-    try std.testing.expectEqualStrings("mcp_fixture_echo", names[names.len - 1]);
-}
-
-fn fixtureTool(comptime name: []const u8) SelectedTool {
-    return .{
-        .name = name,
-        .schema_json = "{\"type\":\"function\",\"name\":\"" ++ name ++ "\",\"description\":\"Fixture\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}",
-        .mcp_binding = echo_binding,
-    };
-}
-
-fn selectCall(comptime id: []const u8, comptime name: []const u8) ToolCall {
-    return toolCall(id, "mcp_select_tool", "{\"name\":\"" ++ name ++ "\"}");
-}
-
-const alpha_tool = fixtureTool("mcp_fixture_alpha");
-const beta_tool = fixtureTool("mcp_fixture_beta");
-const gamma_tool = fixtureTool("mcp_fixture_gamma");
-const down_one_tool = fixtureTool("mcp_down_one");
-const down_two_tool = fixtureTool("mcp_down_two");
-
-/// One more tool than a turn restores.
-const many_mcp: struct {
-    tools: [33]SelectedTool,
-    calls: [33]ToolCall,
-    names: [33][]const u8,
-} = blk: {
-    @setEvalBranchQuota(100_000);
-    const count = 33;
-    var tools: [count]SelectedTool = undefined;
-    var calls: [count]ToolCall = undefined;
-    var names: [count][]const u8 = undefined;
-    for (0..count) |index| {
-        const name = std.fmt.comptimePrint("mcp_fixture_t{d:0>2}", .{index});
-        tools[index] = fixtureTool(name);
-        calls[index] = toolCall(name, name, "{}");
-        names[index] = name;
-    }
-    const final_tools = tools;
-    const final_calls = calls;
-    const final_names = names;
-    break :blk .{ .tools = final_tools, .calls = final_calls, .names = final_names };
-};
-
-/// Runs the next turn of the session whose saved history is `history`.
-fn runFollowUpTurn(gateway: *FakeGateway, hooks: *FakeAgentRuntimeDeps, history: []HistoryTurn) !void {
-    var fixture = PromptFixture{};
-    var job = fixture.job();
-    job.prompt = @constCast("follow up");
-    job.history = history;
-    try runFakePrompt(gateway, hooks, fixture.config(), job);
-}
-
-/// Asserts `body` advertises `fixed_body`'s tools followed by `added`, in order.
-fn expectToolsAfterFixed(alloc: Allocator, fixed_body: []const u8, body: []const u8, added: []const []const u8) !void {
-    const fixed = try toolNames(alloc, fixed_body);
-    defer freeToolNames(alloc, fixed);
-    const names = try toolNames(alloc, body);
-    defer freeToolNames(alloc, names);
-    try std.testing.expectEqual(fixed.len + added.len, names.len);
-    for (fixed, names[0..fixed.len]) |want, got| try std.testing.expectEqualStrings(want, got);
-    for (added, names[fixed.len..]) |want, got| try std.testing.expectEqualStrings(want, got);
-}
-
-fn expectLookups(hooks: *const FakeAgentRuntimeDeps, expected: []const []const u8) !void {
-    try std.testing.expectEqual(expected.len, hooks.mcp_lookups.items.len);
-    for (expected, hooks.mcp_lookups.items) |want, got| try std.testing.expectEqualStrings(want, got);
-}
-
-test "two selections in one turn append in selection order" {
-    const alloc = std.testing.allocator;
-    const select_alpha = [_]ToolCall{selectCall("select-alpha", "mcp_fixture_alpha")};
-    const select_beta = [_]ToolCall{selectCall("select-beta", "mcp_fixture_beta")};
-    const completions = [_]FakeCompletion{
-        .{ .tool_calls = &select_alpha },
-        .{ .tool_calls = &select_beta },
-        .{ .content = "Final" },
-    };
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer hooks.deinit();
-    hooks.resolvable_mcp_tools = &.{ alpha_tool, beta_tool };
-    hooks.exec_plans = &.{
-        .{ .result = .{ .model_output = "selected", .selected_dynamic_tools = &.{alpha_tool} } },
-        .{ .result = .{ .model_output = "selected", .selected_dynamic_tools = &.{beta_tool} } },
-    };
-    var fixture = PromptFixture{};
-    var job = fixture.job();
-    job.permission_mode = .auto;
-    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
-
-    try std.testing.expectEqual(@as(usize, 3), gateway.request_bodies.items.len);
-    const fixed = gateway.request_bodies.items[0];
-    try expectToolsAfterFixed(alloc, fixed, gateway.request_bodies.items[1], &.{"mcp_fixture_alpha"});
-    try expectToolsAfterFixed(alloc, fixed, gateway.request_bodies.items[2], &.{ "mcp_fixture_alpha", "mcp_fixture_beta" });
-}
-
-test "the next turn starts with every tool the last selected, called or not, in selection order" {
-    const alloc = std.testing.allocator;
-    const select_alpha = [_]ToolCall{selectCall("select-alpha", "mcp_fixture_alpha")};
-    const select_beta = [_]ToolCall{selectCall("select-beta", "mcp_fixture_beta")};
-    const call_beta = [_]ToolCall{toolCall("call-beta", "mcp_fixture_beta", "{}")};
-    const completions = [_]FakeCompletion{
-        .{ .tool_calls = &select_alpha },
-        .{ .tool_calls = &select_beta },
-        .{ .tool_calls = &call_beta },
-        .{ .content = "First answer" },
-    };
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer hooks.deinit();
-    hooks.resolvable_mcp_tools = &.{ alpha_tool, beta_tool };
-    hooks.exec_plans = &.{
-        .{ .result = .{ .model_output = "selected", .selected_dynamic_tools = &.{alpha_tool} } },
-        .{ .result = .{ .model_output = "selected", .selected_dynamic_tools = &.{beta_tool} } },
-        .{ .result = .{ .model_output = "called" } },
-    };
-    var fixture = PromptFixture{};
-    var job = fixture.job();
-    job.permission_mode = .auto;
-    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
-    try std.testing.expectEqual(@as(usize, 4), gateway.request_bodies.items.len);
-
-    const second_completions = [_]FakeCompletion{.{ .content = "Second answer" }};
-    var second_gateway = FakeGateway.init(alloc, &second_completions);
-    defer second_gateway.deinit();
-    var second_hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer second_hooks.deinit();
-    second_hooks.resolvable_mcp_tools = hooks.resolvable_mcp_tools;
-    try runFollowUpTurn(&second_gateway, &second_hooks, hooks.history_turns.items);
-
-    const fixed = gateway.request_bodies.items[0];
-    const ended_with: []const []const u8 = &.{ "mcp_fixture_alpha", "mcp_fixture_beta" };
-    try expectToolsAfterFixed(alloc, fixed, gateway.request_bodies.items[3], ended_with);
-    try expectToolsAfterFixed(alloc, fixed, second_gateway.request_bodies.items[0], ended_with);
-}
-
-test "the next turn restores directly called tools in first-call order" {
-    const alloc = std.testing.allocator;
-    const call_beta = [_]ToolCall{toolCall("call-beta", "mcp_fixture_beta", "{}")};
-    const call_alpha = [_]ToolCall{toolCall("call-alpha", "mcp_fixture_alpha", "{}")};
-    const call_beta_again = [_]ToolCall{toolCall("call-beta-again", "mcp_fixture_beta", "{}")};
-    const completions = [_]FakeCompletion{
-        .{ .tool_calls = &call_beta },
-        .{ .tool_calls = &call_alpha },
-        .{ .tool_calls = &call_beta_again },
-        .{ .content = "First answer" },
-    };
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer hooks.deinit();
-    hooks.resolvable_mcp_tools = &.{ alpha_tool, beta_tool };
-    var fixture = PromptFixture{};
-    var job = fixture.job();
-    job.permission_mode = .auto;
-    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
-
-    const second_completions = [_]FakeCompletion{.{ .content = "Second answer" }};
-    var second_gateway = FakeGateway.init(alloc, &second_completions);
-    defer second_gateway.deinit();
-    var second_hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer second_hooks.deinit();
-    second_hooks.resolvable_mcp_tools = hooks.resolvable_mcp_tools;
-    try runFollowUpTurn(&second_gateway, &second_hooks, hooks.history_turns.items);
-
-    try expectToolsAfterFixed(alloc, gateway.request_bodies.items[0], second_gateway.request_bodies.items[0], &.{ "mcp_fixture_beta", "mcp_fixture_alpha" });
-    try expectLookups(&second_hooks, &.{ "mcp_fixture_beta", "mcp_fixture_alpha" });
-}
-
-test "a turn restores at most 32 tools, the first the conversation used" {
-    const alloc = std.testing.allocator;
-    const completions = [_]FakeCompletion{
-        .{ .tool_calls = &many_mcp.calls },
-        .{ .content = "First answer" },
-    };
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer hooks.deinit();
-    hooks.resolvable_mcp_tools = &many_mcp.tools;
-    var fixture = PromptFixture{};
-    var job = fixture.job();
-    job.permission_mode = .auto;
-    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
-
-    const second_completions = [_]FakeCompletion{.{ .content = "Second answer" }};
-    var second_gateway = FakeGateway.init(alloc, &second_completions);
-    defer second_gateway.deinit();
-    var second_hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer second_hooks.deinit();
-    second_hooks.resolvable_mcp_tools = hooks.resolvable_mcp_tools;
-    try runFollowUpTurn(&second_gateway, &second_hooks, hooks.history_turns.items);
-
-    try expectToolsAfterFixed(alloc, gateway.request_bodies.items[0], second_gateway.request_bodies.items[0], many_mcp.names[0..32]);
-    try expectLookups(&second_hooks, many_mcp.names[0..32]);
-}
-
-test "a tool that no longer resolves is left out of the restored list" {
-    const alloc = std.testing.allocator;
-    const calls = [_]ToolCall{
-        toolCall("call-alpha", "mcp_fixture_alpha", "{}"),
-        toolCall("call-beta", "mcp_fixture_beta", "{}"),
-        toolCall("call-gamma", "mcp_fixture_gamma", "{}"),
-    };
-    const completions = [_]FakeCompletion{
-        .{ .tool_calls = &calls },
-        .{ .content = "First answer" },
-    };
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer hooks.deinit();
-    hooks.resolvable_mcp_tools = &.{ alpha_tool, beta_tool, gamma_tool };
-    var fixture = PromptFixture{};
-    var job = fixture.job();
-    job.permission_mode = .auto;
-    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
-
-    const second_completions = [_]FakeCompletion{.{ .content = "Second answer" }};
-    var second_gateway = FakeGateway.init(alloc, &second_completions);
-    defer second_gateway.deinit();
-    var second_hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer second_hooks.deinit();
-    second_hooks.resolvable_mcp_tools = &.{ alpha_tool, gamma_tool };
-    try runFollowUpTurn(&second_gateway, &second_hooks, hooks.history_turns.items);
-
-    try expectToolsAfterFixed(alloc, gateway.request_bodies.items[0], second_gateway.request_bodies.items[0], &.{ "mcp_fixture_alpha", "mcp_fixture_gamma" });
-    try expectLookups(&second_hooks, &.{ "mcp_fixture_alpha", "mcp_fixture_beta", "mcp_fixture_gamma" });
-}
-
-test "a server with no tool list is asked once per restore and the turn still runs" {
-    const alloc = std.testing.allocator;
-    const calls = [_]ToolCall{
-        toolCall("call-down-one", "mcp_down_one", "{}"),
-        toolCall("call-alpha", "mcp_fixture_alpha", "{}"),
-        toolCall("call-down-two", "mcp_down_two", "{}"),
-    };
-    const completions = [_]FakeCompletion{
-        .{ .tool_calls = &calls },
-        .{ .content = "First answer" },
-    };
-    var gateway = FakeGateway.init(alloc, &completions);
-    defer gateway.deinit();
-    var hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer hooks.deinit();
-    hooks.resolvable_mcp_tools = &.{ down_one_tool, alpha_tool, down_two_tool };
-    var fixture = PromptFixture{};
-    var job = fixture.job();
-    job.permission_mode = .auto;
-    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
-
-    const second_completions = [_]FakeCompletion{.{ .content = "Second answer" }};
-    var second_gateway = FakeGateway.init(alloc, &second_completions);
-    defer second_gateway.deinit();
-    var second_hooks = FakeAgentRuntimeDeps.init(alloc);
-    defer second_hooks.deinit();
-    second_hooks.resolvable_mcp_tools = hooks.resolvable_mcp_tools;
-    second_hooks.unavailable_mcp_servers = &.{"down"};
-    try runFollowUpTurn(&second_gateway, &second_hooks, hooks.history_turns.items);
-
-    try expectLookups(&second_hooks, &.{ "mcp_down_one", "mcp_fixture_alpha" });
-    try expectToolsAfterFixed(alloc, gateway.request_bodies.items[0], second_gateway.request_bodies.items[0], &.{"mcp_fixture_alpha"});
-    try std.testing.expectEqual(types.TurnPresentationOutcome.completed, second_hooks.finalized_outcome.?);
 }

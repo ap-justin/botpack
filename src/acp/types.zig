@@ -3,8 +3,6 @@ const build_options = @import("build_options");
 const jsonrpc = @import("jsonrpc.zig");
 const core_types = @import("../core/shared/types.zig");
 const io_mod = @import("../core/shared/io.zig");
-const credentials = @import("../core/auth/credentials.zig");
-const model_provider = @import("../core/config/model_provider.zig");
 
 const Allocator = std.mem.Allocator;
 const writeJsonStr = jsonrpc.writeJsonStr;
@@ -279,111 +277,7 @@ pub const AgentCapabilities = struct {
     mcp_sse: bool = true,
 };
 
-/// The `agent` auth method, always advertised: the person runs the login its
-/// text names, then the client calls `authenticate` and fx re-reads the
-/// credentials. The registry's auth check never sends `auth.terminal`, so this
-/// is the entry that keeps `authMethods` non-empty.
-pub const agent_auth_method_id = "fx-login";
-/// The Terminal Auth method, advertised only to a client that sent
-/// `clientCapabilities.auth.terminal: true`. One id for every provider's
-/// terminal login: clients already send this one.
-pub const terminal_auth_method_id = "fx-login-api-key";
-
-/// Whether `authenticate` accepts `method_id`. The terminal id is accepted
-/// too, though ACP v1 clients must not send it, so older clients keep working.
-pub fn isAuthMethodId(method_id: []const u8) bool {
-    return std.mem.eql(u8, method_id, agent_auth_method_id) or
-        std.mem.eql(u8, method_id, terminal_auth_method_id);
-}
-
-/// The fx login that yields a credential for the selected provider.
-pub const AuthLogin = enum {
-    vercel,
-    codex,
-    grok,
-
-    pub fn forProvider(provider: model_provider.ProviderId) AuthLogin {
-        return switch (provider) {
-            .gateway, .configured => .vercel,
-            .codex => .codex,
-            .grok => .grok,
-        };
-    }
-
-    /// The missing-credential help text, also the `AUTH_REQUIRED` message.
-    pub fn instruction(self: AuthLogin) []const u8 {
-        return switch (self) {
-            .vercel => credentials.missing_credential_message,
-            .codex => credentials.missing_chatgpt_credential_message,
-            .grok => credentials.missing_grok_credential_message,
-        };
-    }
-
-    /// The `fx` arguments a terminal client appends to run this login; each
-    /// is a login `cli_surface.zig:parseLoginArgs` accepts.
-    fn terminalArgs(self: AuthLogin) []const []const u8 {
-        return switch (self) {
-            .vercel => &.{ "login", "vercel", "--api-key" },
-            .codex => &.{ "login", "codex" },
-            .grok => &.{ "login", "grok" },
-        };
-    }
-
-    fn terminalName(self: AuthLogin) []const u8 {
-        return switch (self) {
-            .vercel => "Sign in with an AI Gateway API key",
-            .codex => "Sign in with a Codex subscription",
-            .grok => "Sign in with a Grok subscription",
-        };
-    }
-
-    fn terminalDescription(self: AuthLogin) []const u8 {
-        return switch (self) {
-            .vercel => "Paste a Vercel AI Gateway API key in a terminal. fx saves it for later sessions.",
-            .codex, .grok => self.instruction(),
-        };
-    }
-};
-
-/// What one connection is offered: the login for its provider, and the
-/// terminal method when the client can run one.
-pub const AuthOffer = struct {
-    login: AuthLogin = .vercel,
-    client_terminal_auth: bool = false,
-};
-
-/// The `authMethods` array. `initialize` and `AUTH_REQUIRED` both write it, so
-/// a connection sees one list.
-pub fn writeAuthMethods(w: *std.Io.Writer, offer: AuthOffer) !void {
-    const instruction = offer.login.instruction();
-    try w.writeAll("[{\"id\":\"" ++ agent_auth_method_id ++ "\",\"name\":");
-    try writeJsonStr(instruction, w);
-    try w.writeAll(",\"description\":");
-    try writeJsonStr(instruction, w);
-    try w.writeByte('}');
-    if (offer.client_terminal_auth) {
-        try w.writeAll(",{\"id\":\"" ++ terminal_auth_method_id ++ "\",\"name\":");
-        try writeJsonStr(offer.login.terminalName(), w);
-        try w.writeAll(",\"description\":");
-        try writeJsonStr(offer.login.terminalDescription(), w);
-        try w.writeAll(",\"type\":\"terminal\",\"args\":[");
-        for (offer.login.terminalArgs(), 0..) |arg, i| {
-            if (i > 0) try w.writeByte(',');
-            try writeJsonStr(arg, w);
-        }
-        try w.writeAll("]}");
-    }
-    try w.writeByte(']');
-}
-
-/// The `data` of an `AUTH_REQUIRED` error.
-pub fn writeAuthRequiredData(w: *std.Io.Writer, offer: AuthOffer) !void {
-    try w.writeAll("{\"authMethods\":");
-    try writeAuthMethods(w, offer);
-    try w.writeByte('}');
-}
-
-pub fn writeInitializeResponse(w: *std.Io.Writer, capabilities: AgentCapabilities, auth: AuthOffer) !void {
+pub fn writeInitializeResponse(w: *std.Io.Writer, capabilities: AgentCapabilities) !void {
     const mcp_servers = if (capabilities.mcp_servers) "true" else "false";
     try w.writeAll("{\"protocolVersion\":");
     try w.print("{d}", .{protocol_version});
@@ -401,9 +295,8 @@ pub fn writeInitializeResponse(w: *std.Io.Writer, capabilities: AgentCapabilitie
     try w.print(",\"_meta\":{{\"fx\":{{\"steering\":{s}}}}}", .{if (capabilities.steering) "true" else "false"});
     try w.writeAll("},\"agentInfo\":{\"name\":\"fx\",\"title\":\"fx\",\"version\":");
     try writeJsonStr(build_options.app_version, w);
-    try w.writeAll("},\"authMethods\":");
-    try writeAuthMethods(w, auth);
-    try w.writeByte('}');
+    try w.writeAll("},");
+    try w.writeAll("\"authMethods\":[]}");
 }
 
 pub fn writePromptResponse(w: *std.Io.Writer, reason: StopReason) !void {
@@ -632,7 +525,7 @@ test "writeInitializeResponse contains required fields" {
     const alloc = std.testing.allocator;
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
-    try writeInitializeResponse(&out.writer, .{ .image_prompts = true, .steering = true, .system_prompt = true, .mcp_over_acp = true }, .{});
+    try writeInitializeResponse(&out.writer, .{ .image_prompts = true, .steering = true, .system_prompt = true, .mcp_over_acp = true });
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, out.writer.buffered(), .{});
     defer parsed.deinit();
 
@@ -662,7 +555,7 @@ test "writeInitializeResponse withholds MCP transports a host rejects" {
     const alloc = std.testing.allocator;
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
-    try writeInitializeResponse(&out.writer, .{ .image_prompts = false, .mcp_servers = false }, .{});
+    try writeInitializeResponse(&out.writer, .{ .image_prompts = false, .mcp_servers = false });
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, out.writer.buffered(), .{});
     defer parsed.deinit();
     const mcp_capabilities = parsed.value.object.get("agentCapabilities").?.object.get("mcpCapabilities").?.object;
@@ -734,108 +627,4 @@ test "model recovery info update wraps the shared report and is clearable" {
     out.writer.end = 0;
     try writeModelRecoveryInfoUpdate(&out.writer, null);
     try std.testing.expect(std.mem.find(u8, out.writer.buffered(), "\"modelResponseRecovery\":null") != null);
-}
-
-fn initializeAuthMethodsAlloc(alloc: Allocator, offer: AuthOffer) !std.json.Parsed(std.json.Value) {
-    var out: std.Io.Writer.Allocating = .init(alloc);
-    defer out.deinit();
-    try writeInitializeResponse(&out.writer, .{ .image_prompts = false }, offer);
-    // alloc_always: the parsed strings outlive `out`.
-    return std.json.parseFromSlice(std.json.Value, alloc, out.written(), .{ .allocate = .alloc_always });
-}
-
-test "initialize offers only the agent auth method without auth.terminal" {
-    const alloc = std.testing.allocator;
-    const vercel_help = "fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.";
-    var out: std.Io.Writer.Allocating = .init(alloc);
-    defer out.deinit();
-    try writeAuthMethods(&out.writer, .{});
-    try std.testing.expectEqualStrings(
-        "[{\"id\":\"fx-login\",\"name\":\"" ++ vercel_help ++ "\",\"description\":\"" ++ vercel_help ++ "\"}]",
-        out.written(),
-    );
-
-    const parsed = try initializeAuthMethodsAlloc(alloc, .{});
-    defer parsed.deinit();
-    const methods = parsed.value.object.get("authMethods").?.array.items;
-    try std.testing.expectEqual(@as(usize, 1), methods.len);
-    try std.testing.expectEqualStrings("fx-login", methods[0].object.get("id").?.string);
-    try std.testing.expect(methods[0].object.get("type") == null);
-}
-
-test "initialize adds the terminal auth method only with auth.terminal" {
-    const alloc = std.testing.allocator;
-    const parsed = try initializeAuthMethodsAlloc(alloc, .{ .client_terminal_auth = true });
-    defer parsed.deinit();
-    const methods = parsed.value.object.get("authMethods").?.array.items;
-    try std.testing.expectEqual(@as(usize, 2), methods.len);
-    try std.testing.expectEqualStrings("fx-login", methods[0].object.get("id").?.string);
-    try std.testing.expect(methods[0].object.get("type") == null);
-    const terminal = methods[1].object;
-    try std.testing.expectEqualStrings("fx-login-api-key", terminal.get("id").?.string);
-    try std.testing.expectEqualStrings("terminal", terminal.get("type").?.string);
-    const args = terminal.get("args").?.array.items;
-    try std.testing.expectEqual(@as(usize, 3), args.len);
-    try std.testing.expectEqualStrings("login", args[0].string);
-    try std.testing.expectEqualStrings("vercel", args[1].string);
-    try std.testing.expectEqualStrings("--api-key", args[2].string);
-}
-
-test "auth methods follow the provider's login" {
-    const alloc = std.testing.allocator;
-    const cases = [_]struct { login: AuthLogin, help: []const u8, provider_arg: []const u8 }{
-        .{ .login = .codex, .help = "fx needs a Codex subscription login for this model. Run fx login codex.", .provider_arg = "codex" },
-        .{ .login = .grok, .help = "fx needs a Grok subscription login for this model. Run fx login grok.", .provider_arg = "grok" },
-    };
-    for (cases) |case| {
-        const parsed = try initializeAuthMethodsAlloc(alloc, .{ .login = case.login, .client_terminal_auth = true });
-        defer parsed.deinit();
-        const methods = parsed.value.object.get("authMethods").?.array.items;
-        try std.testing.expectEqual(@as(usize, 2), methods.len);
-        try std.testing.expectEqualStrings(case.help, methods[0].object.get("name").?.string);
-        try std.testing.expectEqualStrings(case.help, methods[0].object.get("description").?.string);
-        const args = methods[1].object.get("args").?.array.items;
-        try std.testing.expectEqual(@as(usize, 2), args.len);
-        try std.testing.expectEqualStrings("login", args[0].string);
-        try std.testing.expectEqualStrings(case.provider_arg, args[1].string);
-        try std.testing.expectEqualStrings(case.help, case.login.instruction());
-    }
-    try std.testing.expectEqual(AuthLogin.vercel, AuthLogin.forProvider(.gateway));
-    try std.testing.expectEqual(AuthLogin.codex, AuthLogin.forProvider(.codex));
-    try std.testing.expectEqual(AuthLogin.grok, AuthLogin.forProvider(.grok));
-}
-
-test "AUTH_REQUIRED data carries the same auth methods" {
-    const alloc = std.testing.allocator;
-    const offers = [_]AuthOffer{
-        .{},
-        .{ .client_terminal_auth = true },
-        .{ .login = .codex, .client_terminal_auth = true },
-        .{ .login = .grok },
-    };
-    for (offers) |offer| {
-        var data: std.Io.Writer.Allocating = .init(alloc);
-        defer data.deinit();
-        try writeAuthRequiredData(&data.writer, offer);
-        const parsed_data = try std.json.parseFromSlice(std.json.Value, alloc, data.written(), .{});
-        defer parsed_data.deinit();
-        const from_error = parsed_data.value.object.get("authMethods").?.array.items;
-
-        const parsed_init = try initializeAuthMethodsAlloc(alloc, offer);
-        defer parsed_init.deinit();
-        const from_initialize = parsed_init.value.object.get("authMethods").?.array.items;
-
-        try std.testing.expectEqual(from_initialize.len, from_error.len);
-        for (from_initialize, from_error) |a, b| {
-            try std.testing.expectEqualStrings(a.object.get("id").?.string, b.object.get("id").?.string);
-            try std.testing.expectEqualStrings(a.object.get("name").?.string, b.object.get("name").?.string);
-        }
-    }
-}
-
-test "authenticate accepts the agent and terminal method ids only" {
-    try std.testing.expect(isAuthMethodId("fx-login"));
-    try std.testing.expect(isAuthMethodId("fx-login-api-key"));
-    try std.testing.expect(!isAuthMethodId("fx-login-codex"));
-    try std.testing.expect(!isAuthMethodId(""));
 }

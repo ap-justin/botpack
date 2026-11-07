@@ -19,7 +19,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync,
 import { dirname, join } from "node:path";
 import { shellQuote } from "../../tla/drivers/lib/context";
 import {
-  Acp, FAKE_GATEWAY_MODEL, fakeGatewayFinalText, fakeGatewaySse, fakeGatewayToolCall, familyReplies, fixture, plainReplies, rememberInV1, TmuxSession,
+  Acp, FAKE_GATEWAY_MODEL, fakeGatewayFinalText, fakeGatewaySse, fakeGatewayToolCall, familyReplies, fixture, plainReplies,
   v1Writer, waitUntil, type Fixture,
 } from "../../tla/drivers/session_manager/conversion/driver";
 import { KINDS as CARRIED } from "../../tla/drivers/session_manager/conversion/recipes";
@@ -59,26 +59,6 @@ const KINDS: Record<string, Kind | { models: object[]; make: Kind }> = {
     plainReplies(f);
     for (const n of [1, 2, 3]) await f.v1Ask([`CONV_FIRST ${n}`]);
     return sessionIds(f);
-  },
-  // A finished turn, then one the user cancels while its reply streams.
-  cancelled: async f => {
-    plainReplies(f);
-    const id = (await f.v1Ask(["CONV_FIRST"])).session_id;
-    f.setRespond(body => (body.includes("CONV_MORE") ? stalledReply() : fakeGatewayFinalText("CONV_FIRST_ANSWER")));
-    const app = await TmuxSession.create({ cmd: `${shellQuote(v1Writer())} --resume ${shellQuote(id)}`, cwd: f.workspace, env: f.env(false), width: 120, height: 40 });
-    f.apps.add(app);
-    try {
-      await app.waitForComposer(15_000);
-      await app.sendText("CONV_MORE");
-      await app.waitForText("Generating", 15_000);
-      await app.sendKeys("Escape");
-      await app.waitForComposer(15_000);
-      await app.sendText("/quit");
-      await app.waitForSessionEnd(10_000);
-    } finally { await app.kill().catch(() => {}); f.apps.delete(app); }
-    const events = readFileSync(join(f.v1Root, id, "events.jsonl"), "utf8");
-    assert(events.includes("CONV_MORE") && events.includes("cancelled"), "v1 logged no cancelled turn");
-    return [id];
   },
   // A root whose two turns each delegate to another child.
   family: async f => {
@@ -126,15 +106,6 @@ const KINDS: Record<string, Kind | { models: object[]; make: Kind }> = {
       return [id];
     },
   },
-  // Two roots: the app last opened the first, which -c resumes, and the
-  // second was saved after that, so it is the newest.
-  remembered: async f => {
-    plainReplies(f);
-    const first = (await f.v1Ask(["CONV_FIRST remembered"])).session_id;
-    await rememberInV1(f, first);
-    const newest = (await f.v1Ask(["CONV_FIRST newest"])).session_id;
-    return [first, newest];
-  },
   // An ACP session that was never prompted.
   empty: async f => {
     const client = await Acp.start(f, false);
@@ -145,7 +116,7 @@ const KINDS: Record<string, Kind | { models: object[]; make: Kind }> = {
     await waitUntil(() => sessionIds(f).length === 1, 5_000);
     return sessionIds(f);
   },
-  ...Object.fromEntries(["rules", "acp", "terminal"].map(kind => [kind, async (f: Fixture) => [(await CARRIED[kind].make(f)).id]])),
+  ...Object.fromEntries(["acp", "terminal"].map(kind => [kind, async (f: Fixture) => [(await CARRIED[kind].make(f)).id]])),
   // As the driver's `unfinished`: an open turn with its unfinished reply in
   // recovery.json, since compacting inside a turn logs the turn so far. A
   // small window lets a short reply compact.

@@ -18,7 +18,7 @@ import {
   fakeGatewayFinalText,
   fakeResponsesTitleDefault,
   startFakeGateway,
-} from "./tmux-helpers";
+} from "./fake-gateway";
 import { savedSessionIds } from "./saved-sessions";
 
 const TIMEOUT = 30_000;

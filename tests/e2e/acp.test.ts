@@ -35,7 +35,6 @@ import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText as finalText,
   heldFakeGatewayFinalText,
-  hasEmptyComposer,
   fakeGatewayPermissionDecision,
   fakeGatewaySerializedToolCall,
   fakeGatewaySse,
@@ -46,9 +45,7 @@ import {
   fakeResponsesTitleDefault,
   TITLE_GENERATION_MARKER,
   terminalFixtureShell,
-  TmuxSession,
-  tmuxAvailable,
-} from "./tmux-helpers";
+} from "./fake-gateway";
 import {
   MODERN_HTTP_TOOL_RESULT,
   MODERN_MCP_VERSION,
@@ -1544,356 +1541,6 @@ describe("acp: model-independent", () => {
         expect(gateway.requests[0]!.headers.get("x-vercel-ai-gateway-team")).toBeNull();
         expect(existsSync(join(root.home, ".fx", "auth.json"))).toBe(false);
         expect(client.stderr).toBe("");
-      } finally {
-        await client?.close();
-        gateway.stop();
-        rmSync(root.root, { recursive: true, force: true });
-      }
-    },
-    TIMEOUT,
-  );
-
-  const noCredentialEnv = (root: ReturnType<typeof createIsolatedRoot>, gateway: ReturnType<typeof startFakeGateway>) => ({
-    ...fakeGatewayEnv(root, gateway),
-    AI_GATEWAY_API_KEY: undefined,
-    VERCEL_OIDC_TOKEN: undefined,
-    FX_DISABLE_KEYCHAIN: "1",
-  });
-
-  test(
-    "ACP initialize without a credential advertises only the agent auth method",
-    async () => {
-      const root = createIsolatedRoot("fx-acp-auth-methods-agent-");
-      const gateway = startFakeGateway([finalText("unused")]);
-      try {
-        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
-        const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-        expect(initialized.error).toBeUndefined();
-        const methods = initialized.result.authMethods;
-        expect(methods).toHaveLength(1);
-        expect(methods[0].id).toBe("fx-login");
-        expect(methods[0].type).toBeUndefined();
-        expect(methods[0].name).toContain("fx login vercel --api-key");
-        expect(methods[0].description).toBe(methods[0].name);
-      } finally {
-        await client?.close();
-        gateway.stop();
-        rmSync(root.root, { recursive: true, force: true });
-      }
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "ACP initialize adds the terminal auth method for a client that sends auth.terminal",
-    async () => {
-      const root = createIsolatedRoot("fx-acp-auth-methods-terminal-");
-      const gateway = startFakeGateway([finalText("unused")]);
-      try {
-        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
-        const initialized = await client.request(
-          "initialize",
-          { protocolVersion: 1, clientCapabilities: { auth: { terminal: true } } },
-          1,
-        ) as any;
-        expect(initialized.error).toBeUndefined();
-        const methods = initialized.result.authMethods;
-        expect(methods).toHaveLength(2);
-        expect(methods[0].id).toBe("fx-login");
-        expect(methods[0].type).toBeUndefined();
-        expect(methods[1].id).toBe("fx-login-api-key");
-        expect(methods[1].type).toBe("terminal");
-        expect(methods[1].args).toEqual(["login", "vercel", "--api-key"]);
-      } finally {
-        await client?.close();
-        gateway.stop();
-        rmSync(root.root, { recursive: true, force: true });
-      }
-    },
-    TIMEOUT,
-  );
-
-  for (const method of ["session/new", "session/load", "session/resume"]) {
-    test(
-      `ACP ${method} without a credential answers AUTH_REQUIRED with the initialize auth methods`,
-      async () => {
-        const root = createIsolatedRoot("fx-acp-auth-required-");
-        const gateway = startFakeGateway([finalText("unused")]);
-        try {
-          client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
-          const initialized = await client.request(
-            "initialize",
-            { protocolVersion: 1, clientCapabilities: { auth: { terminal: true } } },
-            1,
-          ) as any;
-          const methods = initialized.result.authMethods;
-          expect(methods).toHaveLength(2);
-
-          const params = method === "session/new"
-            ? { cwd: root.workspace, mcpServers: [] }
-            : { sessionId: "sess_missing", cwd: root.workspace, mcpServers: [] };
-          const rejected = await client.request(method, params, 2) as any;
-          expect(rejected.error.code).toBe(-32000);
-          expect(rejected.error.data.authMethods).toEqual(methods);
-        } finally {
-          await client?.close();
-          gateway.stop();
-          rmSync(root.root, { recursive: true, force: true });
-        }
-      },
-      TIMEOUT,
-    );
-  }
-
-  test(
-    "ACP makes no gateway model request while no credential exists",
-    async () => {
-      const root = createIsolatedRoot("fx-acp-auth-no-model-requests-");
-      const gateway = startFakeGateway([finalText("unused")]);
-      try {
-        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
-        const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-        expect(initialized.error).toBeUndefined();
-        expect(gateway.modelRequests).toHaveLength(0);
-
-        const rejected = await client.request("session/new", { mcpServers: [] }, 2) as any;
-        expect(rejected.error.code).toBe(-32000);
-        expect(gateway.modelRequests).toHaveLength(0);
-      } finally {
-        await client?.close();
-        gateway.stop();
-        rmSync(root.root, { recursive: true, force: true });
-      }
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "ACP authenticate succeeds and session/new loads the model catalog once a login is saved",
-    async () => {
-      const root = createIsolatedRoot("fx-acp-auth-recovery-");
-      const gateway = startFakeGateway([finalText("unused")]);
-      try {
-        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
-        const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-        const methodId = initialized.result.authMethods[0].id;
-
-        const stillPending = await client.request("authenticate", { methodId }, 2) as any;
-        expect(stillPending.error.code).toBe(-32000);
-        expect(stillPending.error.data.authMethods).toEqual(initialized.result.authMethods);
-
-        writeSeededFxAuth(root.home, "team_123");
-
-        const authenticated = await client.request("authenticate", { methodId }, 3) as any;
-        expect(authenticated.error).toBeUndefined();
-        expect(authenticated.result).toEqual({});
-
-        const created = await client.request("session/new", { mcpServers: [] }, 4) as any;
-        expect(created.error).toBeUndefined();
-        expect(typeof created.result.sessionId).toBe("string");
-        expect(created.result.configOptions.find((option: any) => option.id === "model")).toBeDefined();
-        expect(gateway.modelRequests).toHaveLength(1);
-      } finally {
-        await client?.close();
-        gateway.stop();
-        rmSync(root.root, { recursive: true, force: true });
-      }
-    },
-    TIMEOUT,
-  );
-
-  const heldOverrides = [
-    { flag: ["--effort", "high"], code: "LIBFX_MODEL_UNSUPPORTED_EFFORT" },
-    { flag: ["--fast"], code: "LIBFX_MODEL_UNSUPPORTED_FAST" },
-    { flag: ["--ultrafast"], code: "LIBFX_MODEL_UNSUPPORTED_ULTRAFAST" },
-  ];
-
-  for (const { flag } of heldOverrides) {
-    test(
-      `fx acp ${flag.join(" ")} initializes without a credential and loads no model catalog`,
-      async () => {
-        const root = createIsolatedRoot("fx-acp-held-override-init-");
-        const gateway = startFakeGateway([finalText("unused")]);
-        try {
-          client = await AcpClient.create({
-            cwd: root.workspace,
-            env: noCredentialEnv(root, gateway),
-            args: ["acp", ...flag],
-          });
-          const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-          expect(initialized.error).toBeUndefined();
-          expect(initialized.result.authMethods).toHaveLength(1);
-          expect(gateway.modelRequests).toHaveLength(0);
-        } finally {
-          await client?.close();
-          gateway.stop();
-          rmSync(root.root, { recursive: true, force: true });
-        }
-      },
-      TIMEOUT,
-    );
-  }
-
-  for (const { flag, code } of heldOverrides) {
-    test(
-      `fx acp ${flag.join(" ")} is rejected on the first session/new after login when the model lacks it`,
-      async () => {
-        const root = createIsolatedRoot("fx-acp-held-override-reject-");
-        const gateway = startFakeGateway([finalText("unused")], {
-          models: [{ id: FAKE_GATEWAY_MODEL, type: "language", tags: ["tool-use"], context_window: 128_000 }],
-        });
-        try {
-          client = await AcpClient.create({
-            cwd: root.workspace,
-            env: noCredentialEnv(root, gateway),
-            args: ["acp", ...flag],
-          });
-          const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-          expect(initialized.error).toBeUndefined();
-
-          writeSeededFxAuth(root.home, "team_123");
-
-          const rejected = await client.request("session/new", { mcpServers: [] }, 2) as any;
-          expect(rejected.result).toBeUndefined();
-          expect(rejected.error.code).toBe(-32602);
-          expect(rejected.error.data.code).toBe(code);
-          expect(gateway.modelRequests).toHaveLength(1);
-
-          // The override stays held, so the next session call fails the same way.
-          const again = await client.request("session/new", { mcpServers: [] }, 3) as any;
-          expect(again.error.code).toBe(-32602);
-          expect(again.error.data.code).toBe(code);
-        } finally {
-          await client?.close();
-          gateway.stop();
-          rmSync(root.root, { recursive: true, force: true });
-        }
-      },
-      TIMEOUT,
-    );
-  }
-
-  test(
-    "fx acp --effort high creates a session after login when the model supports it",
-    async () => {
-      const root = createIsolatedRoot("fx-acp-held-override-accept-");
-      const gateway = startFakeGateway([finalText("unused")], {
-        models: [{
-          id: FAKE_GATEWAY_MODEL,
-          type: "language",
-          tags: ["tool-use"],
-          context_window: 128_000,
-          reasoning_options: [{ type: "effort", values: ["low", "high"] }],
-        }],
-      });
-      try {
-        client = await AcpClient.create({
-          cwd: root.workspace,
-          env: noCredentialEnv(root, gateway),
-          args: ["acp", "--effort", "high"],
-        });
-        await client.request("initialize", { protocolVersion: 1 }, 1);
-
-        writeSeededFxAuth(root.home, "team_123");
-
-        const created = await client.request("session/new", { mcpServers: [] }, 2) as any;
-        expect(created.error).toBeUndefined();
-        const effort = created.result.configOptions.find((option: any) => option.id === "effort");
-        expect(effort.currentValue).toBe("high");
-      } finally {
-        await client?.close();
-        gateway.stop();
-        rmSync(root.root, { recursive: true, force: true });
-      }
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "ACP authenticate returns {} when a credential exists from the start",
-    async () => {
-      const root = createIsolatedRoot("fx-acp-auth-present-");
-      const gateway = startFakeGateway([finalText("unused")]);
-      try {
-        client = await AcpClient.create({
-          cwd: root.workspace,
-          env: { ...fakeGatewayEnv(root, gateway), AI_GATEWAY_API_KEY: "dummy" },
-        });
-        const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-        const authenticated = await client.request(
-          "authenticate",
-          { methodId: initialized.result.authMethods[0].id },
-          2,
-        ) as any;
-        expect(authenticated.error).toBeUndefined();
-        expect(authenticated.result).toEqual({});
-      } finally {
-        await client?.close();
-        gateway.stop();
-        rmSync(root.root, { recursive: true, force: true });
-      }
-    },
-    TIMEOUT,
-  );
-
-  for (const methodId of ["fx-login", "fx-login-api-key"]) {
-    test(
-      `ACP authenticate accepts the ${methodId} method id and stays AUTH_REQUIRED without a credential`,
-      async () => {
-        const root = createIsolatedRoot("fx-acp-auth-method-ids-");
-        const gateway = startFakeGateway([finalText("unused")]);
-        try {
-          client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
-          await client.request("initialize", { protocolVersion: 1 }, 1);
-          const retry = await client.request("authenticate", { methodId }, 2) as any;
-          expect(retry.error.code).toBe(-32000);
-        } finally {
-          await client?.close();
-          gateway.stop();
-          rmSync(root.root, { recursive: true, force: true });
-        }
-      },
-      TIMEOUT,
-    );
-  }
-
-  test(
-    "ACP authenticate rejects an unknown, missing or non-string methodId with invalid params",
-    async () => {
-      const root = createIsolatedRoot("fx-acp-auth-bad-method-");
-      const gateway = startFakeGateway([finalText("unused")]);
-      try {
-        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
-        await client.request("initialize", { protocolVersion: 1 }, 1);
-        const badParams: unknown[] = [{ methodId: "nope" }, {}, { methodId: 7 }, { methodId: null }];
-        let id = 2;
-        for (const params of badParams) {
-          const rejected = await client.request("authenticate", params, id++) as any;
-          expect(rejected.error.code).toBe(-32602);
-        }
-      } finally {
-        await client?.close();
-        gateway.stop();
-        rmSync(root.root, { recursive: true, force: true });
-      }
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "ACP initialize fails when a saved login cannot be loaded",
-    async () => {
-      const root = createIsolatedRoot("fx-acp-auth-unreadable-");
-      const gateway = startFakeGateway([finalText("unused")]);
-      try {
-        const fxDir = join(root.home, ".fx");
-        mkdirSync(fxDir, { recursive: true, mode: 0o700 });
-        writeFileSync(join(fxDir, "auth.json"), "not-json", { mode: 0o600 });
-        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
-        const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-        expect(initialized.error).toBeDefined();
-        expect(initialized.error.code).not.toBe(-32000);
-        expect(initialized.error.data?.authMethods).toBeUndefined();
       } finally {
         await client?.close();
         gateway.stop();
@@ -8392,7 +8039,7 @@ describe("acp: model-independent", () => {
   );
 
   test(
-    "missing API key returns AUTH_REQUIRED on session/new",
+    "missing API key returns JSON-RPC error on initialize",
     async () => {
       const root = createIsolatedRoot("fx-acp-missing-auth-");
       try {
@@ -8405,10 +8052,8 @@ describe("acp: model-independent", () => {
             FX_DISABLE_KEYCHAIN: "1",
           },
         });
-        const init = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-        expect(init.error).toBeUndefined();
-        const resp = await client.request("session/new", { mcpServers: [] }, 2) as any;
-        expect(resp.error.code).toBe(-32000);
+        const resp = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+        expect(resp.error).toBeDefined();
         expect(resp.error.message).toContain("fx login");
         expect(resp.error.message).toContain("fx login vercel --api-key");
         expect(resp.error.message).not.toContain("fx setup");
@@ -10467,15 +10112,15 @@ describe("acp: model catalog authentication", () => {
       expectedAuthorization: `Bearer ${SEEDED_GATEWAY_TOKEN}`,
       expectedTeamId: "team_123",
       expectPrivate: true,
-      expectAuthRequired: false,
+      expectInitializeFailure: false,
     },
     {
-      name: "answers AUTH_REQUIRED for a seeded login without a selected team",
+      name: "rejects seeded login without a selected team",
       teamId: undefined,
       expectedAuthorization: null,
       expectedTeamId: null,
       expectPrivate: false,
-      expectAuthRequired: true,
+      expectInitializeFailure: true,
     },
   ]) {
     test(
@@ -10508,13 +10153,9 @@ describe("acp: model catalog authentication", () => {
             },
           });
           const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-          if (scenario.expectAuthRequired) {
-            expect(initialized.error).toBeUndefined();
-            const rejected = await client.request("session/new", {}, 2) as any;
-            expect(rejected.error.code).toBe(-32000);
-            expect(rejected.error.message).toContain("fx login");
-            const retry = await client.request("authenticate", { methodId: initialized.result.authMethods[0].id }, 3) as any;
-            expect(retry.error.code).toBe(-32000);
+          if (scenario.expectInitializeFailure) {
+            expect(initialized.error).toBeDefined();
+            expect(initialized.error.message).toContain("fx login");
             expect(gateway.modelRequests).toHaveLength(0);
             return;
           }
@@ -11192,98 +10833,6 @@ describe.skipIf(!HAS_API_KEY)("acp: model-backed protocol", () => {
     TIMEOUT,
   );
 });
-
-test.skipIf(!tmuxAvailable())(
-  "ACP load replays canonical messages after compaction without exposing the handoff",
-  async () => {
-    const root = createIsolatedRoot("fx-acp-compacted-history-");
-    const gateway = startFakeGateway([
-      fakeShellRun("saved-history-effect", "printf 'ACP_SAVED_TOOL_OUTPUT\\n' >> replay-effects.txt; printf 'ACP_SAVED_TOOL_OUTPUT\\n'"),
-      finalText("ACP_EARLIER_VISIBLE_RESPONSE"),
-      finalText("ACP_MIDDLE_VISIBLE_RESPONSE"),
-      finalText("ACP_LATEST_VISIBLE_RESPONSE"),
-      finalText("ACP_INTERNAL_HANDOFF: continue the task."),
-    ]);
-    let tui: TmuxSession | null = null;
-    let localClient: AcpClient | null = null;
-    try {
-      tui = await TmuxSession.create({ cwd: root.workspace, env: fakeGatewayEnv(root, gateway) });
-      await tui.waitForComposer(TIMEOUT);
-      for (const [prompt, answer] of [
-        ["Earlier ACP request", "ACP_EARLIER_VISIBLE_RESPONSE"],
-        ["Middle ACP request", "ACP_MIDDLE_VISIBLE_RESPONSE"],
-        ["Latest ACP request", "ACP_LATEST_VISIBLE_RESPONSE"],
-      ]) {
-        await tui.sendText(prompt!);
-        await tui.waitForText(answer!, TIMEOUT);
-        await tui.waitForComposer(TIMEOUT);
-      }
-      const ids = savedSessionIds(root.home);
-      expect(ids).toHaveLength(1);
-      const eventsPath = join(sessionDir(root.home, ids[0]!), "log.jsonl");
-      const checkpointFrames = () => readFileSync(eventsPath, "utf8").trim().split("\n")
-        .map((line) => JSON.parse(line)).filter((line) => line.kind === "compacted");
-      const beforeCompaction = readFileSync(eventsPath);
-      expect(checkpointFrames()).toHaveLength(0);
-      await tui.sendText("/compact");
-      // Success is silent: the committed checkpoint, not a transcript notice,
-      // establishes that compaction finished before testing ACP replay.
-      await waitForCondition("persisted compaction checkpoint", () => checkpointFrames().length === 1, TIMEOUT);
-      await tui.waitForPane((pane) => hasEmptyComposer(pane) && !/Compacting|Thinking|Preparing compaction/.test(pane), TIMEOUT);
-      expect(checkpointFrames()).toHaveLength(1);
-      expect(savedText(root.home, ids[0]!)).toContain("ACP_INTERNAL_HANDOFF");
-      expect(readFileSync(eventsPath).subarray(0, beforeCompaction.length)).toEqual(beforeCompaction);
-      const inline = await tui.captureFullScrollbackEscapes();
-      expect(inline).toContain("ACP_EARLIER_VISIBLE_RESPONSE");
-      expect(inline).toContain("ACP_MIDDLE_VISIBLE_RESPONSE");
-      expect(inline).toContain("ACP_LATEST_VISIBLE_RESPONSE");
-      expect(inline).not.toMatch(/Context compacted|Compacting|ACP_INTERNAL_HANDOFF/);
-      await tui.sendText("/quit");
-      expect(await tui.waitForSessionEnd(TIMEOUT)).toBe(true);
-      await tui.kill();
-      tui = null;
-      const savedEvents = readFileSync(eventsPath);
-      expect(readFileSync(join(root.workspace, "replay-effects.txt"), "utf8")).toBe("ACP_SAVED_TOOL_OUTPUT\n");
-      expect(gateway.requests).toHaveLength(5);
-      localClient = await AcpClient.create({ cwd: root.workspace, env: fakeGatewayEnv(root, gateway) });
-      await localClient.request("initialize", { protocolVersion: 1 }, 70);
-      for (const requestId of [71, 72]) {
-        localClient.send({ jsonrpc: "2.0", id: requestId, method: "session/load", params: { sessionId: ids[0], mcpServers: [] } });
-        const updates: unknown[] = [];
-        while (true) {
-          const message = await localClient.readLine() as any;
-          if (message.id === requestId) {
-            expect(message.error).toBeUndefined();
-            break;
-          }
-          updates.push(message);
-        }
-        const visible = JSON.stringify(updates);
-        const info = (updates as any[]).find((message) =>
-          message.params?.update?.sessionUpdate === "session_info_update"
-        );
-        expect(info?.params.update.title).toBe("Earlier ACP request");
-        expect(visible).toContain("ACP_EARLIER_VISIBLE_RESPONSE");
-        expect(visible).toContain("ACP_MIDDLE_VISIBLE_RESPONSE");
-        expect(visible).toContain("ACP_LATEST_VISIBLE_RESPONSE");
-        expect(visible).toContain("ACP_SAVED_TOOL_OUTPUT");
-        expect(visible).not.toContain("ACP_INTERNAL_HANDOFF");
-        expect(visible.indexOf("ACP_EARLIER_VISIBLE_RESPONSE")).toBeLessThan(visible.indexOf("ACP_MIDDLE_VISIBLE_RESPONSE"));
-        expect(visible.indexOf("ACP_MIDDLE_VISIBLE_RESPONSE")).toBeLessThan(visible.indexOf("ACP_LATEST_VISIBLE_RESPONSE"));
-        expect(readFileSync(eventsPath)).toEqual(savedEvents);
-        expect(readFileSync(join(root.workspace, "replay-effects.txt"), "utf8")).toBe("ACP_SAVED_TOOL_OUTPUT\n");
-        expect(gateway.requests).toHaveLength(5);
-        expect(localClient.stderr).toBe("");
-      }
-    } finally {
-      await tui?.kill();
-      await localClient?.close();
-      gateway.stop();
-      rmSync(root.root, { recursive: true, force: true });
-    }
-  },
-  TIMEOUT * 2,
-);
 
 // Claude cache warming (src/core/agent/runtime/cache_warmer.zig) in an ACP
 // session: the session's runtime owns the warmer, so a new session closes

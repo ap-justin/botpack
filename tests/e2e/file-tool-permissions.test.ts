@@ -16,7 +16,7 @@ import {
   fakeGatewayToolCall,
   startFakeGateway,
   type FakeGatewayResponse,
-} from "./tmux-helpers";
+} from "./fake-gateway";
 
 const TIMEOUT = 120_000;
 const CONFIGURED_SANDBOX = process.platform === "darwin" ? "os" : "none";

@@ -92,7 +92,7 @@ The only fakes are effect handlers at the edge of a shell:
 | The catalog reply | `tests/tla/drivers/image_route/code-to-spec.ts`, `spec-to-code.ts` | The result of the core's `resolve_capabilities` effect, and the capabilities a turn starts with, given as a catalog view the harness turns into support with the real `supportFromCatalog` |
 | Recording `send`, `fail`, and `notify` | `tests/tla/drivers/image_route/harness.zig` | Sending the request, failing the turn, and printing the notice. The harness prints the effects instead of running them |
 | A crash | `Harness.crash` in `tests/tla/drivers/image_route/lib.ts` | A process dying. The driver kills the harness process with `SIGKILL` and starts a new one |
-| The fake gateway | `startFakeGateway` (`tests/e2e/tmux-helpers.ts`) in `tests/e2e/file-tool-paths.test.ts` | The catalog and the model, for the built `fx` binary |
+| The fake gateway | `startFakeGateway` (`tests/e2e/fake-gateway.ts`) in `tests/e2e/file-tool-paths.test.ts` | The catalog and the model, for the built `fx` binary |
 | `mockGateway` | `sdk/tests/test-agent-images.mjs:79-101` | The catalog and the model, for libfx |
 
 The drivers call the real `src/core/images/image_route.zig` through the harness. They never reimplement it.

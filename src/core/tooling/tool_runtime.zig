@@ -1390,17 +1390,8 @@ pub fn snapshotMcpDefinition(ctx: Context, arena: Allocator, name: []const u8, k
 /// without selecting it. Returns null for unknown, denied, inaccessible, or
 /// oversized definitions. The result is allocated in `arena`.
 pub fn resolveUnselectedMcpTool(ctx: Context, arena: Allocator, name: []const u8) !?tool_mcp_runtime.SelectedTool {
-    return switch (try lookupUnselectedMcpTool(ctx, arena, name)) {
-        .resolved => |tool| tool,
-        .missing, .server_unavailable => null,
-    };
-}
-
-/// `resolveUnselectedMcpTool`, saying why a name did not resolve: a server
-/// that yielded no tool list is named, so a caller can skip its other names.
-pub fn lookupUnselectedMcpTool(ctx: Context, arena: Allocator, name: []const u8) !tool_mcp_runtime.UnselectedLookup {
-    const runtime_context = ctx.mcp_ctx orelse return .missing;
-    const schema_fn = ctx.mcp_tool_schema orelse return .missing;
+    const runtime_context = ctx.mcp_ctx orelse return null;
+    const schema_fn = ctx.mcp_tool_schema orelse return null;
     const projection = (schema_fn(
         runtime_context,
         arena,
@@ -1411,15 +1402,15 @@ pub fn lookupUnselectedMcpTool(ctx: Context, arena: Allocator, name: []const u8)
         runtimeCancelFlag(ctx),
     ) catch |err| switch (err) {
         error.OutOfMemory, error.Cancelled => return err,
-        else => return .missing,
-    }) orelse return .missing;
+        else => return null,
+    }) orelse return null;
     return switch (projection) {
-        .selected => |payload| .{ .resolved = .{
+        .selected => |payload| .{
             .name = name,
             .schema_json = payload.model_output,
             .mcp_binding = payload.mcp_binding,
-        } },
-        .rejected => |payload| if (payload.unavailable_server) |server| .{ .server_unavailable = server } else .missing,
+        },
+        .rejected => null,
     };
 }
 

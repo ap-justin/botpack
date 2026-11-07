@@ -7,7 +7,7 @@ import {
   fakeGatewayFinalText,
   fakeShellRun,
   startFakeGateway,
-} from "./tmux-helpers";
+} from "./fake-gateway";
 
 const TIMEOUT = 30_000;
 const MODEL = "openai/gpt-5";

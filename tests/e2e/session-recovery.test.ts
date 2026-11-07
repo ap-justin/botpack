@@ -16,15 +16,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FX_BIN, runFx } from "../evals/eval-helpers";
+import { runFx } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText,
   fakeGatewayToolCall,
   startFakeGateway,
-  TmuxSession,
-  tmuxAvailable,
-} from "./tmux-helpers";
+} from "./fake-gateway";
 import { copyV1Fixture, savedSession, savedSessionIds, savedText, savedToolResults, sessionDir, storeRoot, withoutConversionNotice } from "./saved-sessions";
 
 const TIMEOUT = 30_000;
@@ -72,23 +70,6 @@ function gatewayEnv(
     FX_MODEL: FAKE_GATEWAY_MODEL,
     FX_AUTO_UPGRADE: "0",
   };
-}
-
-async function createSavedSession(
-  fixture: ReturnType<typeof createFixture>,
-  gateway: ReturnType<typeof startFakeGateway>,
-): Promise<string> {
-  const created = await runFx(
-    ["ask", "--json", "--auto", "Create the first saved turn."],
-    {
-      cwd: fixture.workspace,
-      env: gatewayEnv(fixture, gateway),
-      timeoutMs: TIMEOUT,
-    },
-  );
-  expect(created.code).toBe(0);
-  expect(created.stderr).toBe("");
-  return JSON.parse(created.stdout).session_id;
 }
 
 async function continueSession(
@@ -383,84 +364,6 @@ function expectLegacyRequest(request: { body: string; headers: Headers }) {
 }
 
 describe("session recovery", () => {
-  test.skipIf(!tmuxAvailable())("a legacy session with saved usage resumes through latest and exact session flows", async () => {
-    const fixture = createFixture("fx-session-legacy-cache-");
-    const gateway = startFakeGateway([
-      fakeGatewayFinalText("HEALTHY_LATEST_USAGE"),
-      fakeGatewayFinalText("LEGACY_USAGE_CONTINUED"),
-    ], LEGACY_GATEWAY_OPTIONS);
-    let tui: TmuxSession | undefined;
-    try {
-      const legacy = createLegacySession(fixture, 4);
-      const eventPath = join(legacy.source, "events.jsonl");
-      const records = readFileSync(eventPath, "utf8").trimEnd().split("\n").map(JSON.parse);
-      records.push({
-        schema_version: 1, log_generation: records[0].log_generation,
-        seq: 4, event_id: "04".repeat(16), timestamp_ms: 40, kind: "usage_checkpointed",
-        payload: { usage: {
-          billing: "complete", api_duration_complete: true, wall_duration_complete: true,
-          code_complete: true, next_sequence: 2, settled_through_sequence: 1,
-          api_duration_ms: 10, wall_duration_ms: 20, total_cost: 1,
-          input_tokens: 1, output_tokens: 3, cache_read_tokens: 2, cache_write_tokens: 0,
-          billable_web_search_calls: 0, lines_added: 0, lines_removed: 0,
-          models: [{ model: "test/model", first_sequence: 1, total_cost: 1,
-            input_tokens: 1, output_tokens: 3, cache_read_tokens: 2, cache_write_tokens: 0,
-            billable_web_search_calls: 0 }], pending: [],
-        } },
-      });
-      const events = records.map(record => JSON.stringify(record) + "\n").join("");
-      writeFileSync(eventPath, events, { mode: 0o600 });
-      const metadataPath = join(legacy.source, "session.json");
-      const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
-      writeFileSync(metadataPath, JSON.stringify({ ...metadata, updated_at_ms: 40,
-        last_event_seq: 4, event_log_bytes: Buffer.byteLength(events) }), { mode: 0o600 });
-      const watermark = JSON.parse(readFileSync(legacy.watermarkPath, "utf8"));
-      writeFileSync(legacy.watermarkPath, JSON.stringify({ ...watermark, through_seq: 4,
-        through_event_id: records.at(-1).event_id, through_event_log_bytes: Buffer.byteLength(events) }), { mode: 0o600 });
-      const oldHashes = savedFileHashes(legacy.source);
-      const healthyId = await createSavedSession(fixture, gateway);
-      const env = { ...legacyGatewayEnv(fixture, gateway), FX_SOUND: "0", FX_TEST_SKIP_ONBOARDING: "1" };
-      const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-      async function resume(args: string[], marker: string, label: string) {
-        const stderrPath = join(fixture.root, `${label}.stderr`);
-        tui = await TmuxSession.create({
-          cmd: [FX_BIN, ...args].map(quote).join(" "), cwd: fixture.workspace,
-          isolated: true, remainOnExit: true, width: 110, height: 40, stderrPath,
-          env: { ...env, FX_RECORD: join(fixture.root, `${label}.fxtape`) },
-        });
-        await tui.waitForPane(pane => tui!.paneStatus().dead || pane.includes(marker), TIMEOUT);
-        expect(readFileSync(stderrPath, "utf8")).toBe("");
-        expect(tui.paneStatus().dead).toBe(false);
-        await tui.waitForStableComposer(TIMEOUT);
-        expect(await tui.captureFullScrollback()).toContain(marker);
-        await tui.sendText("/quit");
-        await tui.waitForPane(() => tui!.paneStatus().dead, TIMEOUT);
-        expect(tui.paneStatus().status).toBe(0);
-        expect(readFileSync(stderrPath, "utf8")).toBe("");
-        await tui.kill(); tui = undefined;
-      }
-      await resume(["--resume", "last"], "HEALTHY_LATEST_USAGE", "latest");
-      expect(savedFileHashes(legacy.source)).toEqual(oldHashes);
-      expect(gateway.requests).toHaveLength(1);
-      expect(existsSync(sessionDir(fixture.home, healthyId))).toBe(true);
-
-      await resume(["--resume", legacy.id], LEGACY_ANSWER, "legacy");
-      await expectLegacyConverted(fixture.home, legacy.id);
-      expect(gateway.requests).toHaveLength(1);
-      const continued = await continueSession(fixture, gateway, legacy.id);
-      expect(continued.code).toBe(0);
-      expect(continued.stderr).toBe("");
-      expect(JSON.parse(continued.stdout).session_id).toBe(legacy.id);
-      expect(continued.stdout).toContain("LEGACY_USAGE_CONTINUED");
-      await expectLegacyConverted(fixture.home, legacy.id);
-      expect(gateway.requests).toHaveLength(2);
-      expectLegacyRequest(gateway.requests[1]!);
-    } finally {
-      await tui?.kill();
-      gateway.stop();
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
-  }, TIMEOUT * 3);
 
   test("recover leaves a whole session alone and copies one whose saved rules can't be read without them", async () => {
     const fixture = createFixture("fx-session-current-healthy-");
@@ -761,197 +664,12 @@ describe("session recovery", () => {
     }, TIMEOUT);
   }
 
-  test.skipIf(!tmuxAvailable())("resume picker discovers a checkpoint from an unfinished first turn", async () => {
-    const fixture = createFixture("fx-session-first-checkpoint-");
-    const gateway = startFakeGateway([fakeGatewayFinalText("CHECKPOINT_TURN_RECOVERED")]);
-    let tui: TmuxSession | null = null;
-    try {
-      const [sessionId] = copyV1Fixture(fixture.home, "plain", 1, fixture.workspace) as [string];
-      const eventsPath = join(fixture.home, ".fx", "sessions", sessionId, "events.jsonl");
-      const checkpoint = [
-        { user: { text: "unfinished first request", images: [], work_id: null } },
-        { context_checkpoint: { covers_through_seq: 1, summary: "<context_handoff>FIRST_CHECKPOINT_FACT</context_handoff>" } },
-      ].map((event, index) => JSON.stringify({
-        schema_version: 1, seq: index + 1, timestamp_ms: Date.now(), event,
-      })).join("\n") + "\n";
-      writeFileSync(eventsPath, checkpoint, { mode: 0o600 });
-      const listed = await runFx(["sessions", "--json"], {
-        cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
-      });
-      expect(listed.code).toBe(0);
-      expect(JSON.parse(listed.stdout).sessions.map((entry: { id: string }) => entry.id))
-        .toContain(sessionId);
-      expect(JSON.parse(listed.stdout).sessions[0].history_len).toBe(0);
-      expect(JSON.parse(listed.stdout).sessions[0]).not.toHaveProperty("has_checkpoint");
-      expect(readFileSync(eventsPath, "utf8")).toBe(checkpoint);
-
-      const stderrPath = join(fixture.root, "tui.stderr");
-      tui = await TmuxSession.create({ cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), stderrPath });
-      await tui.waitForComposer(TIMEOUT);
-      await tui.sendText("/resume");
-      await tui.waitForText("CONV_FIRST", TIMEOUT);
-      // Listing it converts nothing.
-      expect(readFileSync(eventsPath, "utf8")).toBe(checkpoint);
-      await tui.sendKeys("Enter");
-      await tui.waitForText("unfinished first request", TIMEOUT);
-      await tui.waitForComposer(TIMEOUT);
-      await tui.sendText("Continue after checkpoint.");
-      await tui.waitForPane(() => existsSync(join(sessionDir(fixture.home, sessionId), "log.jsonl")) &&
-        savedText(fixture.home, sessionId).includes("CHECKPOINT_TURN_RECOVERED"), TIMEOUT);
-      await tui.sendText("/quit");
-      expect(await tui.waitForSessionEnd(TIMEOUT)).toBe(true);
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-      expect(gateway.requests).toHaveLength(1);
-      expect(gateway.requests[0]!.body).toContain("FIRST_CHECKPOINT_FACT");
-    } finally {
-      await tui?.kill();
-      gateway.stop();
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
-  }, TIMEOUT);
-
-  test.skipIf(!tmuxAvailable())("latest resume ignores unrelated history and unfinished migration", async () => {
-    const fixture = createFixture("fx-continue-isolated-discovery-");
-    const gateway = startFakeGateway([fakeGatewayFinalText("CONTINUE_DISCOVERY_OK")]);
-    let tui: TmuxSession | null = null;
-    try {
-      const [id] = copyV1Fixture(fixture.home, "plain", 1, fixture.workspace) as [string];
-      const sessions = join(fixture.home, ".fx", "sessions");
-      const unpublished = join(sessions, "unpublished");
-      mkdirSync(unpublished, { mode: 0o700 });
-      writeFileSync(join(unpublished, "session.lock"), "", { mode: 0o600 });
-      const metadata = JSON.parse(readFileSync(join(sessions, id, "session.json"), "utf8"));
-      const foreign = join(sessions, "foreign-history");
-      mkdirSync(foreign, { mode: 0o700 });
-      writeFileSync(join(foreign, "session.json"), JSON.stringify({
-        ...metadata, id: "foreign-history", workspace_root: "/another-workspace",
-      }), { mode: 0o600 });
-      writeFileSync(join(foreign, "events.jsonl"), "UNRELATED_UNREADABLE_HISTORY\n", { mode: 0o600 });
-      const fenced = join(sessions, "foreign-fenced");
-      mkdirSync(fenced, { mode: 0o700 });
-      writeFileSync(join(fenced, "session.json"), JSON.stringify({
-        schema_version: 1, id: "foreign-fenced", created_at_ms: 1,
-        updated_at_ms: Date.now(), workspace_root: "/another-workspace",
-        conversation_language: "en", history_len: 0, history: [],
-      }), { mode: 0o600 });
-      writeFileSync(join(fenced, "authority.pending.json"), "pending", { mode: 0o600 });
-      const foreignBefore = savedFileHashes(foreign);
-      const fencedBefore = savedFileHashes(fenced);
-      const stderrPath = join(fixture.root, "continue.stderr");
-      tui = await TmuxSession.create({
-        cmd: `${JSON.stringify(FX_BIN)} --resume last`,
-        cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), stderrPath,
-      });
-      await tui.waitForComposer(TIMEOUT);
-      await tui.waitForText("CONV_FIRST_ANSWER", TIMEOUT);
-      await tui.sendText("Continue the same conversation.");
-      await tui.waitForText("CONTINUE_DISCOVERY_OK", TIMEOUT);
-      await tui.waitForComposer(TIMEOUT);
-      await tui.sendText("/quit");
-      expect(await tui.waitForSessionEnd(TIMEOUT)).toBe(true);
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-      expect(gateway.requests).toHaveLength(1);
-      expect(gateway.requests[0]!.body).toContain("CONV_FIRST_ANSWER");
-      expect(savedText(fixture.home, id)).toContain("CONTINUE_DISCOVERY_OK");
-      expect(savedFileHashes(foreign)).toEqual(foreignBefore);
-      expect(savedFileHashes(fenced)).toEqual(fencedBefore);
-    } finally {
-      await tui?.kill();
-      gateway.stop();
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
-  }, TIMEOUT);
-
 
   for (const { version, entry } of [
     { version: 2, entry: "-r" },
     { version: 3, entry: "/resume" },
     { version: 4, entry: "--resume id" },
   ] as const) {
-    test.skipIf(!tmuxAvailable())(`legacy v${version} checkpoint resumes through ${entry} and survives close/reopen`, async () => {
-      const fixture = createFixture("fx-legacy-resume-flow-");
-      const legacy = createLegacySession(fixture, version);
-      const gateway = startFakeGateway([
-        fakeGatewayFinalText("LEGACY_CONTINUE_SAVED"),
-        fakeGatewayFinalText("LEGACY_EXACT_REOPEN_SAVED"),
-      ], LEGACY_GATEWAY_OPTIONS);
-      let tui: TmuxSession | null = null;
-      try {
-        const before = savedFileHashes(legacy.source);
-        const inspected = await runFx(["session", "--id", legacy.id, "--json"], {
-          cwd: fixture.workspace, env: legacyGatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
-        });
-        expect(inspected.code).toBe(0);
-        expect(inspected.stderr).toBe("");
-        expect(inspected.stdout).toContain(LEGACY_ANSWER);
-        expect(savedFileHashes(legacy.source)).toEqual(before);
-        expect(gateway.requests).toHaveLength(0);
-
-        const sessionsRoot = join(fixture.home, ".fx", "sessions");
-        expect(readdirSync(sessionsRoot)).toEqual([legacy.id]);
-        // The new store's sessions: none until the legacy one converts, then
-        // only it, as no blank session is ever kept.
-        const savedSessions = () => existsSync(storeRoot(fixture.home)) ? savedSessionIds(fixture.home) : [];
-        const initialArgs = entry === "/resume" ? [] : entry === "-r" ? ["-r"] : ["--resume", legacy.id];
-        for (const [index, args] of [initialArgs, ["-c"], ["--resume", legacy.id]].entries()) {
-          const stderrPath = join(fixture.root, `legacy-${index}.stderr`);
-          tui = await TmuxSession.create({
-            cmd: [FX_BIN, ...args].map((arg) => JSON.stringify(arg)).join(" "),
-            cwd: fixture.workspace, env: legacyGatewayEnv(fixture, gateway), stderrPath,
-          });
-          if (index === 0 && entry !== "--resume id") {
-            if (entry === "/resume") {
-              await tui.waitForComposer(TIMEOUT);
-              // A fresh session saves nothing before its first turn.
-              expect(savedSessions()).toEqual([]);
-              await tui.sendText("/resume");
-            }
-            await tui.waitForText(LEGACY_TITLE, TIMEOUT);
-            expect(savedFileHashes(legacy.source)).toEqual(before);
-            expect(gateway.requests).toHaveLength(0);
-            await tui.sendKeys("Enter");
-          }
-          await tui.waitForText(LEGACY_PARTIAL, TIMEOUT);
-          await tui.waitForComposer(TIMEOUT);
-          // The opened session converted, and the untouched startup one was
-          // never saved.
-          expect(savedSessions()).toEqual([legacy.id]);
-          const scrollback = await tui.captureFullScrollbackEscapes();
-          expect(scrollback).toContain(LEGACY_ANSWER);
-          expect(scrollback.split(LEGACY_PARTIAL)).toHaveLength(2);
-          await expectLegacyConverted(fixture.home, legacy.id);
-          expect(gateway.requests).toHaveLength(Math.max(0, index - 1));
-          expect(gateway.classifierRequests).toHaveLength(0);
-
-          // First close without a prompt; reopening must not resurrect recovery work.
-          if (index > 0) {
-            const reply = index === 1 ? "LEGACY_CONTINUE_SAVED" : "LEGACY_EXACT_REOPEN_SAVED";
-            await tui.sendText(`Continue the migrated conversation after reopen ${index}.`);
-            await tui.waitForText(reply, TIMEOUT);
-            await tui.waitForComposer(TIMEOUT);
-            await tui.waitForPane(() => existsSync(join(sessionDir(fixture.home, legacy.id), "log.jsonl")) && savedText(fixture.home, legacy.id).includes(reply), TIMEOUT);
-            expect(gateway.requests).toHaveLength(index);
-            expectLegacyRequest(gateway.requests[index - 1]!);
-            await expectLegacyConverted(fixture.home, legacy.id);
-          }
-          await tui.sendText("/quit");
-          expect(await tui.waitForSessionEnd(TIMEOUT)).toBe(true);
-          expect(readFileSync(stderrPath, "utf8")).toBe("");
-          expect(gateway.requests).toHaveLength(index);
-          expect(gateway.classifierRequests).toHaveLength(0);
-          expect(savedSessions()).toEqual([legacy.id]);
-          await tui.kill();
-          tui = null;
-        }
-        expect(readFileSync(join(fixture.root, "legacy.trace.log"), "utf8"))
-          .not.toContain("[tool] event=execution_start ");
-        expect(savedSessions()).toEqual([legacy.id]);
-      } finally {
-        await tui?.kill();
-        gateway.stop();
-        rmSync(fixture.root, { recursive: true, force: true });
-      }
-    }, TIMEOUT * 3);
   }
 
   test("legacy ask resume fails closed at a bad watermark then preserves archived evidence on retry", async () => {

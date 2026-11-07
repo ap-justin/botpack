@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runFx } from "../evals/eval-helpers";
-import { fakeGatewayFinalText, TmuxSession } from "./tmux-helpers";
+import { fakeGatewayFinalText } from "./fake-gateway";
 
 const TIMEOUT = 30_000;
 
@@ -293,48 +293,6 @@ describe("host-managed authentication", () => {
         expect(asked.stderr).toContain("Retrying with a higher limit.");
         expect(asked.stdout).toContain("GROK_HOST_MANAGED_OK");
       }
-    }
-  }, TIMEOUT * 2);
-
-  test("interactive host-managed session streams through the same authority", async () => {
-    const childEnv = env();
-    const selected = await runFx(["provider", "gateway"], {
-      cwd: workspace,
-      env: childEnv,
-      timeoutMs: TIMEOUT,
-    });
-    expect(selected.code).toBe(0);
-
-    const stderrPath = join(root, "tui.stderr");
-    const tracePath = join(root, "tui.trace");
-    const before = requests.length;
-    const session = await TmuxSession.create({
-      cwd: workspace,
-      env: {
-        ...childEnv,
-        FX_TRACE_LOG: tracePath,
-        FX_TRACE_SCOPES: "auth,session,worker,gateway",
-      },
-      stderrPath,
-      isolated: true,
-    });
-    try {
-      await session.waitForComposer(TIMEOUT);
-      await session.sendText("Reply once.");
-      const pane = await session.waitForText("GATEWAY_HOST_MANAGED_OK", TIMEOUT);
-      expect(pane).toContain("GATEWAY_HOST_MANAGED_OK");
-    } catch (error) {
-      const trace = existsSync(tracePath) ? readFileSync(tracePath, "utf8") : "<no trace>";
-      throw new Error(`${String(error)}\ntrace:\n${trace}`);
-    } finally {
-      await session.kill();
-    }
-
-    expect(readFileSync(stderrPath, "utf8")).toBe("");
-    expect(requests.length).toBeGreaterThan(before);
-    for (const request of requests.slice(before)) {
-      expect(request.headers.get("authorization"), request.path).toBeNull();
-      expect(request.headers.get("x-vercel-ai-gateway-team"), request.path).toBeNull();
     }
   }, TIMEOUT * 2);
 });
