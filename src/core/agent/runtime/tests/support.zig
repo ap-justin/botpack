@@ -464,6 +464,8 @@ pub const FakeAgentRuntimeDeps = struct {
     recorded_usages: std.ArrayList(types.Usage) = .empty,
     validation_mcp_runtime_generation: ?u64 = null,
     validation_mcp_tool_name: ?[]const u8 = null,
+    /// The live MCP tool a model call may name without selecting it first.
+    resolvable_mcp_tool: ?@import("../../../tooling/tool_mcp_runtime.zig").SelectedTool = null,
     execute_mutex: std.Io.Mutex = .init,
     log: std.ArrayList([]u8) = .empty,
     texts: std.ArrayList([]u8) = .empty,
@@ -764,6 +766,8 @@ pub const FakeAgentRuntimeDeps = struct {
             .append_runtime_context = appendRuntimeContext,
             .append_static_context = appendStaticContext,
             .validate_tool_call = validateToolCall,
+            .snapshot_mcp_definition = if (self.resolvable_mcp_tool != null) snapshotMcpDefinition else null,
+            .resolve_unselected_mcp_tool = if (self.resolvable_mcp_tool != null) resolveUnselectedMcpTool else null,
             .check_tool_availability = checkToolAvailability,
             .request_tool_permission = requestPermission,
             .resolve_tool_action_display_target = resolveToolActionDisplayTarget,
@@ -856,6 +860,16 @@ pub const FakeAgentRuntimeDeps = struct {
                 cancel_flag.store(true, .seq_cst);
             }
         }
+    }
+
+    fn snapshotMcpDefinition(_: *anyopaque, _: Allocator, _: []const u8, _: types.McpToolBinding) anyerror!@import("../../../tooling/tool_mcp_runtime.zig").DefinitionSnapshot {
+        return .current;
+    }
+
+    fn resolveUnselectedMcpTool(raw: *anyopaque, _: Allocator, name: []const u8) anyerror!?@import("../../../tooling/tool_mcp_runtime.zig").SelectedTool {
+        const self: *FakeAgentRuntimeDeps = @ptrCast(@alignCast(raw));
+        const tool = self.resolvable_mcp_tool orelse return null;
+        return if (std.mem.eql(u8, tool.name, name)) tool else null;
     }
 
     fn snapshotRootPermissionMode(raw: *anyopaque) PermissionMode {

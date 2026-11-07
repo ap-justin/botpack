@@ -2613,6 +2613,45 @@ fn advertiseUnselectedMcpCalls(
     }
 }
 
+/// The most MCP tools a turn re-advertises from the conversation so far.
+const max_restored_mcp_tools: usize = 32;
+
+/// Advertises, at the start of a turn, the live MCP tools the conversation
+/// already called, in the order it first called them. The tool list is part of
+/// the prefix a provider caches, so a list that starts each turn without the
+/// tools the last turn loaded rewrites the whole conversation's cache entry.
+/// Names that no longer resolve are left out.
+fn restoreCalledMcpTools(
+    deps: *const AgentRuntimeDeps,
+    arena: Allocator,
+    history: []const ChatMessage,
+    selected: *std.ArrayList(agent_stream_provider.DynamicFunctionTool),
+) !void {
+    const resolve = deps.resolve_unselected_mcp_tool orelse return;
+    var restored: usize = 0;
+    var tried: std.ArrayList([]const u8) = .empty;
+    for (history) |message| {
+        for (message.tool_calls) |call| {
+            if (restored >= max_restored_mcp_tools) return;
+            if (deps.tool_registry.lookup(call.name) != null) continue;
+            if (containsString(tried.items, call.name)) continue;
+            try tried.append(arena, call.name);
+            const already = for (selected.items) |item| {
+                if (std.mem.eql(u8, item.name, call.name)) break true;
+            } else false;
+            if (already) continue;
+            const resolved = resolve(deps.ctx, arena, call.name) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => continue,
+            };
+            const definition = resolved orelse continue;
+            if (!std.mem.eql(u8, definition.name, call.name) or definition.mcp_binding == null) continue;
+            try runtime_gateway_step.recordSelectedDynamicTool(arena, selected, definition);
+            restored += 1;
+        }
+    }
+}
+
 fn containsString(items: []const []const u8, item: []const u8) bool {
     for (items) |candidate| {
         if (std.mem.eql(u8, candidate, item)) return true;
@@ -7203,6 +7242,7 @@ fn processQueuedPromptLoop(
     for (config.initial_dynamic_tools) |tool| {
         selected_dynamic_tools.appendAssumeCapacity(tool);
     }
+    try restoreCalledMcpTools(deps, arena, history_messages.items, &selected_dynamic_tools);
     const current_user_effective = current_user_message;
     const initial_pending_image_ids = try arena.alloc(usize, job.images.len);
     for (job.images, 0..) |attachment, index| initial_pending_image_ids[index] = attachment.id;
