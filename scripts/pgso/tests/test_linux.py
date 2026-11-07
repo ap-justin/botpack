@@ -293,7 +293,7 @@ class LinuxPlatformTests(unittest.TestCase):
         toolchain.libllvm = self.root / "libLLVM.so"
         self.paths.profile_use_bitcode.parent.mkdir(parents=True, exist_ok=True)
         self.paths.profile_use_bitcode.write_bytes(b"private functions")
-        benchmark = PipelinePaths.create(self.root / "bench", selector="ui_activity")
+        benchmark = PipelinePaths.create(self.root / "bench", selector="file_index")
         calls = []
 
         def run(argv, **_):
@@ -362,13 +362,13 @@ class LinuxPlatformTests(unittest.TestCase):
 
     def test_only_fx_objects_get_function_sections(self) -> None:
         self.assertEqual(("-function-sections",), linux.candidate_object_flags(self.paths))
-        benchmark = PipelinePaths.create(self.root / "bench", selector="ui_activity")
+        benchmark = PipelinePaths.create(self.root / "bench", selector="file_index")
         self.assertEqual((), linux.candidate_object_flags(benchmark))
 
     def test_only_x86_64_asks_for_the_cold_code_machine_outliner(self) -> None:
         # AArch64 runs the machine outliner by default; x86_64 has to ask.
         outliner = "-enable-machine-outliner=conservative-pgo"
-        benchmark = PipelinePaths.create(self.root / "bench", selector="ui_activity")
+        benchmark = PipelinePaths.create(self.root / "bench", selector="file_index")
         self.assertEqual(
             (outliner, "-function-sections"), linux.X86_64.candidate_object_flags(self.paths)
         )

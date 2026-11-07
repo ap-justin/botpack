@@ -16,22 +16,15 @@
 # src/core/mcp_host/, src/core/mcp/, those models, their drivers in
 # tests/tla/drivers/mcp/, tests/tla/drivers/mcp_host/, and
 # tests/tla/drivers/lib/, the MCP fixtures in tests/e2e/fixtures/, or the
-# helpers the drivers load: tests/e2e/tmux-helpers.ts,
+# helpers the drivers load: tests/e2e/fake-gateway.ts,
 # tests/evals/eval-helpers.ts, and tests/e2e/render-lab/tape.ts.
 #
-# transcript_window: the TLA+ transcript window job model-checks
-# tests/tla/transcript_window/ and drives the window's core along the model
-# both ways. A pull request runs it only when it touches
-# src/ui/transcript/transcript_window*, that model, its drivers in
-# tests/tla/drivers/transcript_window/, or the driver code they share:
-# tests/tla/drivers/lib/ and tests/tla/drivers/graph.mjs.
-#
-# All three run when the change touches build.zig, build.zig.zon,
+# Both run when the change touches build.zig, build.zig.zon,
 # .github/workflows/ci.yml, or this script. A change to shared code the checks
 # also run, such as the agent loop, is checked by the run on main. Set
 # CI_NEED_REQUESTED to a reason to force every check.
 #
-# Writes libfx, mcp, and transcript_window, each true or false, to
+# Writes libfx and mcp, each true or false, to
 # $GITHUB_OUTPUT and the reasons to $GITHUB_STEP_SUMMARY when those files are
 # set. Exits non-zero when either revision cannot be read, so the checks fail
 # instead of passing without having looked at the change.
@@ -47,10 +40,8 @@ head="$2"
 
 libfx=false
 mcp=false
-transcript_window=false
 libfx_reasons=()
 mcp_reasons=()
-transcript_window_reasons=()
 
 require_libfx() {
   libfx=true
@@ -62,15 +53,9 @@ require_mcp() {
   mcp_reasons+=("$1")
 }
 
-require_transcript_window() {
-  transcript_window=true
-  transcript_window_reasons+=("$1")
-}
-
 require_all() {
   require_libfx "$1"
   require_mcp "$1"
-  require_transcript_window "$1"
 }
 
 for revision in "$base" "$head"; do
@@ -105,13 +90,9 @@ while IFS= read -r path; do
     tests/tla/drivers/mcp/* | tests/tla/drivers/mcp_host/*)
       require_mcp "$path: MCP driver changed" ;;
     tests/tla/drivers/lib/*)
-      require_mcp "$path: shared driver code changed"
-      require_transcript_window "$path: shared driver code changed" ;;
-    tests/tla/drivers/transcript_window/*)
-      require_transcript_window "$path: transcript window driver changed" ;;
+      require_mcp "$path: shared driver code changed" ;;
     tests/tla/drivers/graph.mjs)
-      require_libfx "$path: shared driver code changed"
-      require_transcript_window "$path: shared driver code changed" ;;
+      require_libfx "$path: shared driver code changed" ;;
     tests/tla/drivers/*.mjs)
       # The other drivers' folders hold other models' code.
       if [[ "${path#tests/tla/drivers/}" != */* ]]; then
@@ -125,11 +106,7 @@ while IFS= read -r path; do
       require_mcp "$path: MCP code changed" ;;
     tests/tla/mcp/* | tests/tla/mcp_host/*)
       require_mcp "$path: MCP model changed" ;;
-    src/ui/transcript/transcript_window*)
-      require_transcript_window "$path: transcript window code changed" ;;
-    tests/tla/transcript_window/*)
-      require_transcript_window "$path: transcript window model changed" ;;
-    tests/e2e/fixtures/mcp-* | tests/e2e/tmux-helpers.ts | tests/evals/eval-helpers.ts | tests/e2e/render-lab/tape.ts)
+    tests/e2e/fixtures/mcp-* | tests/e2e/fake-gateway.ts | tests/evals/eval-helpers.ts | tests/e2e/render-lab/tape.ts)
       require_mcp "$path: a file the MCP drivers load changed" ;;
   esac
 done <<<"$changed_files"
@@ -161,12 +138,10 @@ report() {
 # 3.2, which macOS ships.
 report libfx "$libfx" ${libfx_reasons[@]+"${libfx_reasons[@]}"}
 report MCP "$mcp" ${mcp_reasons[@]+"${mcp_reasons[@]}"}
-report "transcript window" "$transcript_window" ${transcript_window_reasons[@]+"${transcript_window_reasons[@]}"}
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   {
     printf 'libfx=%s\n' "$libfx"
     printf 'mcp=%s\n' "$mcp"
-    printf 'transcript_window=%s\n' "$transcript_window"
   } >>"$GITHUB_OUTPUT"
 fi

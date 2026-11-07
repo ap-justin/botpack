@@ -1,13 +1,5 @@
 #!/bin/sh
-# Model-check ShellSession, the session the interactive app has open and what
-# `/status` and the exit line say about it (D90), and require each config's
-# expected verdict.
-#
-# holds.cfg must pass. Each witness-*.cfg must be violated, which shows the
-# state it names is reachable, so the properties are not vacuous there. Each
-# mutant-*.cfg plants one bug that its property must catch. simulate.cfg runs
-# random behaviors with more ids and turns; SIM_RUNS sets how many (default
-# 20000).
+# Model-check TurnStream and require each config's expected verdict.
 #
 # TurnStream models how an agent turn streams into the session log and
 # commits, and how each tool result keeps the time it was made.
@@ -19,8 +11,8 @@
 # stream-witness-*.cfg must be violated. stream-simulate*.cfg run random
 # behaviors with more calls and rebuilds.
 #
-# Run the real binary along the models and have TLC check every run:
-#   bun test ../drivers/session/
+# Run the real binary along the model and have TLC check every run:
+#   bun test ../drivers/session/stream.test.ts
 #
 # Needs Java 11+ and tla2tools.jar, as ../README.md describes.
 set -eu
@@ -31,21 +23,6 @@ cd "$(dirname "$0")"
 
 sim="-simulate num=${SIM_RUNS:-20000} -depth 40 -seed 1"
 tlc_verdicts "$@" <<EOF
-ShellSession holds -
-ShellSession witness-saved-empty-status NoSavedEmptyStatus
-ShellSession witness-unsaved-status NoUnsavedStatus
-ShellSession witness-storeless-status NoStorelessStatus
-ShellSession witness-empty-exit-line NoEmptyExitLine
-ShellSession witness-resume-after-crash NoResumeAfterCrash
-ShellSession mutant-saved-by-turns StatusUnsavedIsAbsent
-ShellSession mutant-saved-on-open StatusSavedIsOnDisk
-ShellSession mutant-exit-by-turns ExitAgreesWithStatus
-ShellSession mutant-status-launch-id StatusNamesOpenSession
-ShellSession mutant-keep-pristine DiscardedNeverSaved
-ShellSession mutant-reuse-id NewIdsAreFresh
-ShellSession mutant-fork-held ForkOnDisk
-ShellSession mutant-drop-on-switch SavedStaysSaved
-ShellSession simulate simulate $sim
 TurnStream stream-holds -
 TurnStream stream-before-safe -
 TurnStream stream-before-reparses NoReparseOfStamped

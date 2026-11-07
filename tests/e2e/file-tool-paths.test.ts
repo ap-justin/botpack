@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { EVAL_MODEL, HAS_API_KEY, runFx } from "../evals/eval-helpers";
 import { pngPixelSize, solidPng } from "./fixtures/image-encoding";
 import { sessionDir } from "./saved-sessions";
-import { confirmationReplay, fakeGatewayHeldDecision, fakeGatewayTitleDefault, TITLE_GENERATION_MARKER } from "./tmux-helpers";
+import { confirmationReplay, fakeGatewayHeldDecision, fakeGatewayTitleDefault, TITLE_GENERATION_MARKER } from "./fake-gateway";
 
 const TIMEOUT = 20_000;
 const MODEL = "openai/gpt-5";

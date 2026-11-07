@@ -35,7 +35,6 @@ import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText as finalText,
   heldFakeGatewayFinalText,
-  hasEmptyComposer,
   fakeGatewayPermissionDecision,
   fakeGatewaySerializedToolCall,
   fakeGatewaySse,
@@ -46,9 +45,7 @@ import {
   fakeResponsesTitleDefault,
   TITLE_GENERATION_MARKER,
   terminalFixtureShell,
-  TmuxSession,
-  tmuxAvailable,
-} from "./tmux-helpers";
+} from "./fake-gateway";
 import {
   MODERN_HTTP_TOOL_RESULT,
   MODERN_MCP_VERSION,
@@ -10836,98 +10833,6 @@ describe.skipIf(!HAS_API_KEY)("acp: model-backed protocol", () => {
     TIMEOUT,
   );
 });
-
-test.skipIf(!tmuxAvailable())(
-  "ACP load replays canonical messages after compaction without exposing the handoff",
-  async () => {
-    const root = createIsolatedRoot("fx-acp-compacted-history-");
-    const gateway = startFakeGateway([
-      fakeShellRun("saved-history-effect", "printf 'ACP_SAVED_TOOL_OUTPUT\\n' >> replay-effects.txt; printf 'ACP_SAVED_TOOL_OUTPUT\\n'"),
-      finalText("ACP_EARLIER_VISIBLE_RESPONSE"),
-      finalText("ACP_MIDDLE_VISIBLE_RESPONSE"),
-      finalText("ACP_LATEST_VISIBLE_RESPONSE"),
-      finalText("ACP_INTERNAL_HANDOFF: continue the task."),
-    ]);
-    let tui: TmuxSession | null = null;
-    let localClient: AcpClient | null = null;
-    try {
-      tui = await TmuxSession.create({ cwd: root.workspace, env: fakeGatewayEnv(root, gateway) });
-      await tui.waitForComposer(TIMEOUT);
-      for (const [prompt, answer] of [
-        ["Earlier ACP request", "ACP_EARLIER_VISIBLE_RESPONSE"],
-        ["Middle ACP request", "ACP_MIDDLE_VISIBLE_RESPONSE"],
-        ["Latest ACP request", "ACP_LATEST_VISIBLE_RESPONSE"],
-      ]) {
-        await tui.sendText(prompt!);
-        await tui.waitForText(answer!, TIMEOUT);
-        await tui.waitForComposer(TIMEOUT);
-      }
-      const ids = savedSessionIds(root.home);
-      expect(ids).toHaveLength(1);
-      const eventsPath = join(sessionDir(root.home, ids[0]!), "log.jsonl");
-      const checkpointFrames = () => readFileSync(eventsPath, "utf8").trim().split("\n")
-        .map((line) => JSON.parse(line)).filter((line) => line.kind === "compacted");
-      const beforeCompaction = readFileSync(eventsPath);
-      expect(checkpointFrames()).toHaveLength(0);
-      await tui.sendText("/compact");
-      // Success is silent: the committed checkpoint, not a transcript notice,
-      // establishes that compaction finished before testing ACP replay.
-      await waitForCondition("persisted compaction checkpoint", () => checkpointFrames().length === 1, TIMEOUT);
-      await tui.waitForPane((pane) => hasEmptyComposer(pane) && !/Compacting|Thinking|Preparing compaction/.test(pane), TIMEOUT);
-      expect(checkpointFrames()).toHaveLength(1);
-      expect(savedText(root.home, ids[0]!)).toContain("ACP_INTERNAL_HANDOFF");
-      expect(readFileSync(eventsPath).subarray(0, beforeCompaction.length)).toEqual(beforeCompaction);
-      const inline = await tui.captureFullScrollbackEscapes();
-      expect(inline).toContain("ACP_EARLIER_VISIBLE_RESPONSE");
-      expect(inline).toContain("ACP_MIDDLE_VISIBLE_RESPONSE");
-      expect(inline).toContain("ACP_LATEST_VISIBLE_RESPONSE");
-      expect(inline).not.toMatch(/Context compacted|Compacting|ACP_INTERNAL_HANDOFF/);
-      await tui.sendText("/quit");
-      expect(await tui.waitForSessionEnd(TIMEOUT)).toBe(true);
-      await tui.kill();
-      tui = null;
-      const savedEvents = readFileSync(eventsPath);
-      expect(readFileSync(join(root.workspace, "replay-effects.txt"), "utf8")).toBe("ACP_SAVED_TOOL_OUTPUT\n");
-      expect(gateway.requests).toHaveLength(5);
-      localClient = await AcpClient.create({ cwd: root.workspace, env: fakeGatewayEnv(root, gateway) });
-      await localClient.request("initialize", { protocolVersion: 1 }, 70);
-      for (const requestId of [71, 72]) {
-        localClient.send({ jsonrpc: "2.0", id: requestId, method: "session/load", params: { sessionId: ids[0], mcpServers: [] } });
-        const updates: unknown[] = [];
-        while (true) {
-          const message = await localClient.readLine() as any;
-          if (message.id === requestId) {
-            expect(message.error).toBeUndefined();
-            break;
-          }
-          updates.push(message);
-        }
-        const visible = JSON.stringify(updates);
-        const info = (updates as any[]).find((message) =>
-          message.params?.update?.sessionUpdate === "session_info_update"
-        );
-        expect(info?.params.update.title).toBe("Earlier ACP request");
-        expect(visible).toContain("ACP_EARLIER_VISIBLE_RESPONSE");
-        expect(visible).toContain("ACP_MIDDLE_VISIBLE_RESPONSE");
-        expect(visible).toContain("ACP_LATEST_VISIBLE_RESPONSE");
-        expect(visible).toContain("ACP_SAVED_TOOL_OUTPUT");
-        expect(visible).not.toContain("ACP_INTERNAL_HANDOFF");
-        expect(visible.indexOf("ACP_EARLIER_VISIBLE_RESPONSE")).toBeLessThan(visible.indexOf("ACP_MIDDLE_VISIBLE_RESPONSE"));
-        expect(visible.indexOf("ACP_MIDDLE_VISIBLE_RESPONSE")).toBeLessThan(visible.indexOf("ACP_LATEST_VISIBLE_RESPONSE"));
-        expect(readFileSync(eventsPath)).toEqual(savedEvents);
-        expect(readFileSync(join(root.workspace, "replay-effects.txt"), "utf8")).toBe("ACP_SAVED_TOOL_OUTPUT\n");
-        expect(gateway.requests).toHaveLength(5);
-        expect(localClient.stderr).toBe("");
-      }
-    } finally {
-      await tui?.kill();
-      await localClient?.close();
-      gateway.stop();
-      rmSync(root.root, { recursive: true, force: true });
-    }
-  },
-  TIMEOUT * 2,
-);
 
 // Claude cache warming (src/core/agent/runtime/cache_warmer.zig) in an ACP
 // session: the session's runtime owns the warmer, so a new session closes

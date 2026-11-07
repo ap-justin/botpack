@@ -54,7 +54,7 @@ export interface Capture {
 
 export interface RunContext {
   binary: string;
-  /** The target worktree's tests/e2e/tmux-helpers.ts module. */
+  /** The target worktree's tests/e2e/fake-gateway.ts module. */
   helpers: any;
   /** Folder for fixtures and logs; kept as evidence. */
   artifacts: string;

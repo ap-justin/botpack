@@ -7,10 +7,9 @@ import { expect } from "bun:test";
 import assert from "node:assert/strict";
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { binary, shellQuote } from "../../lib/context";
 import {
   askAnswer, compareContinuations, convertAll, crashAtRename, fakeGatewayFinalText, fakeGatewaySse, fakeGatewayToolCall, familyReplies,
-  makePrivate, MAX_BLOB_BYTES, observer, olderRelease, openVia, plainReplies, requireAccepted, scenario, TmuxSession, waitUntil, type Fixture,
+  makePrivate, MAX_BLOB_BYTES, observer, olderRelease, openVia, plainReplies, requireAccepted, scenario, waitUntil, type Fixture,
 } from "./driver";
 
 // --- older v1 formats ----------------------------------------------------------
@@ -240,7 +239,7 @@ scenario("a schema 3 session whose prompt is not UTF-8 is shown, refused with th
   const shown = await f.fx(true, ["session", NOT_UTF8, "--json"]);
   expect(shown.code).toBe(0);
   expect(JSON.parse(shown.stdout).history).toEqual(JSON.parse(v1Shown.stdout).history);
-  for (const via of ["ask", "acp", "app"] as const) {
+  for (const via of ["ask", "acp"] as const) {
     await o.observe("open", await openVia(f, NOT_UTF8, via));
     expect(f.said).toMatch(/events\.jsonl turn 1 has a prompt that is not valid UTF-8/);
   }
@@ -250,27 +249,13 @@ scenario("a schema 3 session whose prompt is not UTF-8 is shown, refused with th
 
 // --- --resume last ----------------------------------------------------------------
 
-// The session `--resume last` opened, by its id: fx ask's own JSON, or which
-// session's first prompt the app shows as resumed.
-async function resumeLast(f: Fixture, host: "ask" | "app", ids: { v1: string; v2: string }): Promise<string | null> {
-  if (host === "ask") {
-    const run = await f.fx(true, ["ask", "--json", "--auto", "--resume", "last", "CONV_NEXT"]);
-    return run.code === 0 ? JSON.parse(run.stdout).session_id : null;
-  }
-  const app = await TmuxSession.create({ cmd: `${shellQuote(binary)} --resume last`, cwd: f.workspace, env: f.env(true), width: 120, height: 40 });
-  f.apps.add(app);
-  try {
-    if (!(await waitUntil(async () => (await app.captureFullScrollback()).includes("session resumed"), 15_000))) return null;
-    const screen = await app.captureFullScrollback();
-    await app.sendText("CONV_NEXT");
-    assert(await waitUntil(async () => (await app.captureFullScrollback()).includes("CONV_NEXT_ANSWER"), 15_000), "the resumed app never answered");
-    await app.sendText("/quit");
-    await app.waitForSessionEnd(10_000);
-    return screen.includes("CONV_V2_FIRST") ? ids.v2 : screen.includes("CONV_FIRST") ? ids.v1 : null;
-  } finally { await app.kill().catch(() => {}); f.apps.delete(app); }
+// The session `--resume last` opened, by its id, from fx ask's own JSON.
+async function resumeLast(f: Fixture): Promise<string | null> {
+  const run = await f.fx(true, ["ask", "--json", "--auto", "--resume", "last", "CONV_NEXT"]);
+  return run.code === 0 ? JSON.parse(run.stdout).session_id : null;
 }
 
-for (const host of ["ask", "app"] as const) {
+for (const host of ["ask"] as const) {
   for (const newer of ["v1", "v2"] as const) {
     scenario(`--resume last in ${host} opens the newer session, here the ${newer} one`, async f => {
       plainReplies(f);
@@ -288,7 +273,7 @@ for (const host of ["ask", "app"] as const) {
         await f.v1Ask(["--resume-id", v1, "CONV_MORE"]);
         await o.observe("write");
       }
-      const opened = await resumeLast(f, host, { v1, v2 });
+      const opened = await resumeLast(f);
       expect(opened, `--resume last opened ${opened}, not the newer ${newer} session`).toBe(newer === "v1" ? v1 : v2);
       if (newer === "v1") {
         await o.observe("open", "opened");
@@ -430,14 +415,14 @@ scenario("a damaged session's error names the file and the reason in fx ask, ACP
   await o.damage(id);
   await o.observe("damage");
   const said: Record<string, string> = {};
-  for (const via of ["ask", "acp", "app"] as const) {
+  for (const via of ["ask", "acp"] as const) {
     await o.observe("open", await openVia(f, id, via));
     said[via] = f.said;
   }
   writeFileSync(join(f.root, "damaged-errors.json"), JSON.stringify(said, null, 2));
   const named = (text: string) => ({ file: /session\.json \S/.test(text), code: text.includes("InvalidSessionFormat") });
   const all = { file: true, code: true };
-  expect(Object.fromEntries(Object.entries(said).map(([via, text]) => [via, named(text)]))).toEqual({ ask: all, acp: all, app: all });
+  expect(Object.fromEntries(Object.entries(said).map(([via, text]) => [via, named(text)]))).toEqual({ ask: all, acp: all });
   await requireAccepted(o, "damaged-errors");
 });
 
@@ -446,14 +431,13 @@ scenario("a damaged session's error names the file and the reason in fx ask, ACP
 const NOTICE = "Converting this session from the previous session format";
 
 // What the host showed of the notice: fx ask's stderr, ACP agent text
-// updates, or the app's screen.
-function notices(f: Fixture, via: "ask" | "acp" | "app") {
+// updates.
+function notices(f: Fixture, via: "ask" | "acp") {
   if (via === "ask") return f.runs.at(-1)!.stderr;
-  if (via === "app") return f.said;
   return JSON.stringify(JSON.parse(f.said).updates.filter((u: any) => u.sessionUpdate === "agent_message_chunk"));
 }
 
-for (const via of ["ask", "acp", "app"] as const) {
+for (const via of ["ask", "acp"] as const) {
   scenario(`a conversion held 400 ms at its publish shows the slow notice in ${via}`, async f => {
     plainReplies(f);
     const id = (await f.v1Ask(["CONV_FIRST"])).session_id;

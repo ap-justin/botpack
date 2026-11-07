@@ -11,10 +11,6 @@ pub const TopLevelExample = command_specs.TopLevelExample;
 pub const TopLevelResource = command_specs.TopLevelResource;
 pub const TopLevelRegistry = command_specs.TopLevelRegistry;
 pub const HelpStyle = command_specs.HelpStyle;
-pub const SlashKind = command_specs.SlashKind;
-pub const SlashPresentationCategory = command_specs.SlashPresentationCategory;
-pub const SlashSpec = command_specs.SlashSpec;
-pub const SlashRegistry = command_specs.SlashRegistry;
 
 const json_option = command_specs.OptionDoc{ .flag = "--json", .description = "Emit machine-readable JSON instead of text" };
 
@@ -85,7 +81,6 @@ const config_options = [_]command_specs.OptionDoc{
 
 const session_subcommands = [_]command_specs.SubcommandDoc{
     .{ .usage = "last", .description = "Inspect the current workspace session" },
-    .{ .usage = "resume [last|<id>]", .description = "Resume the latest workspace session or a session by id" },
     .{ .usage = "recover <id>", .description = "Copy a recoverable corrupt session into a new session" },
 };
 
@@ -106,13 +101,6 @@ pub const pr_options = agentRunOptions("this request", .with_provider_order) ++ 
 
 const issue_options = agentRunOptions("this request", .with_provider_order) ++ [_]command_specs.OptionDoc{
     .{ .flag = "--create", .description = "Publish the drafted issue via the GitHub CLI" },
-};
-
-pub const replay_options = [_]command_specs.OptionDoc{
-    .{ .flag = "--frames", .description = "Render each captured frame" },
-    .{ .flag = "--golden <path>", .description = "Write the final rendered grid to a file" },
-    .{ .flag = "--frames-dir <path>", .description = "Write rendered frames to a directory" },
-    json_option,
 };
 
 /// `fx mcp list` options; `fx mcp --help` shows them in its usage line.
@@ -215,7 +203,7 @@ pub const ask_options = agentRunOptions("this request", .with_provider_order) ++
     .{ .flag = "--timeout <seconds>", .description = "Time limit for each shell command the agent runs" },
     .{ .flag = "--config <key=value>", .description = "Override a setting for this request, with the keys fx config set takes; repeatable" },
     .{ .flag = "--no-save", .description = "Do not save the session; incompatible with --resume" },
-    .{ .flag = "--no-color", .description = "Render TTY output without colors or hyperlinks; NO_COLOR or TERM=dumb also turns color off" },
+    .{ .flag = "--no-color", .description = "Print the full-access warning on stderr without color; NO_COLOR or TERM=dumb also turns color off" },
     .{ .flag = "--resume <last|<id>>", .description = "Continue the last session or a session by id" },
     .{ .flag = "--resume-id <id>", .description = "Continue a session by exact id", .replacement = "use --resume <id>" },
     .{ .flag = "--", .description = "Treat every following argument as prompt text" },
@@ -237,7 +225,7 @@ pub const top_level_specs = [_]TopLevelSpec{
         .options = &ask_options,
         .details = &.{
             "The prompt may be passed as arguments or piped on stdin when no prompt args are given.",
-            "TTY stdout uses the Minimal transcript presentation; redirected stdout emits raw assistant Markdown.",
+            "Assistant output is raw Markdown on stdout.",
             "Operational progress and diagnostics are written to stderr. JSON `output` keeps accumulated assistant Markdown; `final_output` contains only the completed final response, or an empty string when absent.",
             "JSON usage sums reported main-agent input_tokens and output_tokens, including with --no-save; unreported counts are null. cache_read_tokens and cache_write_tokens appear only when the provider reports them. Nested usage and dollar spend are excluded.",
             "--system replaces only the built-in base prompt for this request; tool, skill, project, and runtime context still apply.",
@@ -311,8 +299,7 @@ pub const top_level_specs = [_]TopLevelSpec{
             "  auto         Apply rules, then review unresolved sensitive tool calls (default)",
             "  full-access  Disable fx permission checks",
             "",
-            "Change the mode from the interactive shell with `/permissions [ask|auto|full-access|reset]`,",
-            "and manage persistent allow rules with `/allowlist`.",
+            "Set the mode for one request with --permission-mode, or with --ask, --auto, or --full-access.",
         },
     },
     .{
@@ -320,7 +307,7 @@ pub const top_level_specs = [_]TopLevelSpec{
         .token = "mcp",
         .usage = "mcp <command> ...",
         // `fx mcp -h` is the verbs' own help (`mcp_host/verbs.zig` writeUsage).
-        .summary = "Manage MCP servers without opening the interactive shell",
+        .summary = "Manage MCP servers",
         .subcommands = &mcp_subcommands,
     },
     .{
@@ -352,8 +339,8 @@ pub const top_level_specs = [_]TopLevelSpec{
     .{
         .kind = .session,
         .token = "session",
-        .usage = "session <last|id>|--id <id> [--json] | session resume [last|<id>] | session recover <id>|--id <id> [--json]",
-        .summary = "Inspect, resume, or recover saved sessions",
+        .usage = "session <last|id>|--id <id> [--json] | session recover <id>|--id <id> [--json]",
+        .summary = "Inspect or recover saved sessions",
         .subcommands = &session_subcommands,
         .options = &session_options,
     },
@@ -364,20 +351,6 @@ pub const top_level_specs = [_]TopLevelSpec{
         .summary = "List saved sessions for the current workspace",
         .subcommands = &.{.{ .usage = "convert", .description = "Convert every session saved in the previous format", .options = &sessions_convert_options }},
         .options = &sessions_options,
-    },
-    .{
-        .kind = .@"resume",
-        .token = "resume",
-        .aliases = &.{ "--resume", "--continue", "-c", "-r" },
-        .help_title = "--resume",
-        .hidden_from_top_level_help = true,
-        .usage = "session resume [last|<id>] | -r, --resume [last|<id>] | --continue | -c",
-        .summary = "Continue a saved interactive session",
-        .options = &.{
-            .{ .flag = "-r", .description = "Short for --resume; with no value, choose a session from a picker" },
-            .{ .flag = "last", .description = "Resume the most recent session" },
-            .{ .flag = "<id>", .description = "Resume a session by id" },
-        },
     },
     .{
         .kind = .credits,
@@ -406,17 +379,6 @@ pub const top_level_specs = [_]TopLevelSpec{
         .usage = "upgrade [--channel <stable|dev>] [--json]",
         .summary = "Upgrade 𝒇x on the selected release channel",
         .options = &upgrade_options,
-    },
-    .{
-        .kind = .replay,
-        .token = "replay",
-        .usage = "replay <tape> [--frames] [--json] [--golden <path>] [--frames-dir <path>]",
-        .summary = "Replay a recorded terminal session",
-        .hidden_from_top_level_help = true,
-        .options = &replay_options,
-        .details = &.{
-            "Developer tool for reproducing terminal rendering bugs from FX_RECORD and FX_DEBUG_RECORD tapes. It is not listed in `fx help`.",
-        },
     },
     .{
         .kind = .workspace,
@@ -475,7 +437,6 @@ pub const top_level_help_groups = [_]TopLevelHelpGroup{
     .{ .entries = &.{
         .{ .kind = .sessions, .usage = "sessions" },
         .{ .kind = .session, .usage = "session <last|id>" },
-        .{ .usage = "session resume [last|id]", .summary = "Resume the latest workspace session or a session by id" },
         .{ .usage = "session recover <id>", .summary = "Copy a recoverable corrupt session" },
     } },
     .{ .entries = &.{
@@ -514,7 +475,7 @@ pub const launch_wide_options = [_]command_specs.OptionDoc{
     .{ .flag = "--no-additional-dirs", .description = "" },
 };
 
-/// The flags `fx` reads before a command or an interactive launch, in the
+/// The flags `fx` reads before a command, in the
 /// form the shared flag parser reads. `top_level_flags` documents them in
 /// `fx --help`, and a test checks that the two lists match. The usage line
 /// after a launch-flag mistake is built from this list.
@@ -534,8 +495,6 @@ pub const launch_options = launch_wide_options ++ [_]command_specs.OptionDoc{
     .{ .flag = "--auto", .description = "" },
     .{ .flag = "--full-access", .description = "" },
     .{ .flag = "--yolo", .description = "" },
-    .{ .flag = "--profile <name>", .description = "" },
-    .{ .flag = "--instances <n>", .description = "" },
 };
 
 /// `usage: fx [--context-limit <spec>] ... <command>`, from `launch_options`,
@@ -573,55 +532,39 @@ pub const top_level_flags = [_]TopLevelFlag{
     },
     .{
         .usage = "--provider <name>",
-        .description = "Override the model provider for an interactive session (gateway, codex, grok, or a configured name)",
+        .description = "Override the model provider for this request (gateway, codex, grok, or a configured name)",
     },
     .{
         .usage = "--provider-order <a,b,...>",
-        .description = "Prefer these gateway providers in order for an interactive session",
+        .description = "Prefer these gateway providers in order for this request",
     },
     .{
         .usage = "--provider-strict, --no-provider-strict",
-        .description = "Restrict an interactive session to the providers in --provider-order, or clear the restriction",
+        .description = "Restrict this request to the providers in --provider-order, or clear the restriction",
     },
     .{
         .usage = "--model <id>",
-        .description = "Override the model for an interactive session",
+        .description = "Override the model for this request",
     },
     .{
         .usage = "--effort <level>",
-        .description = "Override the reasoning effort for an interactive session",
-    },
-    .{
-        .usage = "--profile <name>",
-        .description = "Run an interactive session in an agent profile from ~/.fx/agents or the repository's .fx/agents",
-    },
-    .{
-        .usage = "--instances <n>",
-        .description = "Start n fx instances in one interactive session, each with its own conversation; Down on an empty composer, Ctrl+X, or /agents lists them to switch",
+        .description = "Override the reasoning effort for this request",
     },
     .{
         .usage = "--fast, --no-fast",
-        .description = "Turn Fast mode on or off for an interactive session",
+        .description = "Turn Fast mode on or off for this request",
     },
     .{
         .usage = "--ultrafast, --no-ultrafast",
-        .description = "Request Ultrafast mode on or off for an interactive session",
+        .description = "Request Ultrafast mode on or off for this request",
     },
     .{
         .usage = "--permission-mode <mode>",
-        .description = "Set the permission mode for an interactive session: ask, auto, or full-access",
+        .description = "Set the permission mode for this request: ask, auto, or full-access",
     },
     .{
         .usage = "--ask, --auto, --full-access",
         .description = "Shortcuts for each permission mode; --yolo means --full-access",
-    },
-    .{
-        .usage = "-c, --continue",
-        .description = "Resume the remembered workspace session",
-    },
-    .{
-        .usage = "-r, --resume [last|<id>]",
-        .description = "Pick a saved session, or resume the latest or an exact ID",
     },
     .{
         .usage = "-h, --help",
@@ -634,27 +577,22 @@ pub const top_level_flags = [_]TopLevelFlag{
 };
 
 pub const top_level_examples = [_]TopLevelExample{
-    .{ .command = "fx", .description = "Start a fresh interactive session" },
-    .{ .command = "fx \"Fix the failing login test\"", .description = "Start a session with a first prompt" },
     .{ .command = "fx ask \"Explain the changes in this repository\"", .description = "Run one request and exit" },
-    .{ .command = "fx session resume last", .description = "Continue the latest session for this workspace" },
     .{ .command = "fx status --json", .description = "Inspect the current configuration as JSON" },
 };
 
 pub const top_level_notes = [_][]const u8{
     "Run `fx <command> --help` for command-specific usage and options.",
-    "Run `/help` inside an interactive session for slash commands.",
 };
 
 pub const top_level_resources = [_]TopLevelResource{
     .{ .label = "Learn more about fx:", .value = "https://fx.sh/docs", .link = true },
-    .{ .label = "Report a problem:", .value = "run `/feedback` inside fx" },
 };
 
 pub const top_level_registry = TopLevelRegistry{
     .specs = top_level_specs[0..],
     .description = "Fast, native coding agent for the terminal.",
-    .interactive_hint = "fx starts an interactive session by default. Use `fx ask` to run one noninteractive request.",
+    .interactive_hint = "fx is a command-line coding agent. Use `fx ask` to run one request, or `fx acp` to serve an editor over the Agent Client Protocol.",
     .help_groups = top_level_help_groups[0..],
     .flags = top_level_flags[0..],
     .examples = top_level_examples[0..],
@@ -686,98 +624,6 @@ pub fn topLevelUsage(kind: TopLevelKind) []const u8 {
     return command_specs.topLevelUsage(top_level_registry, kind);
 }
 
-pub const slash_specs = [_]SlashSpec{
-    .{ .kind = .help, .command = "/help", .help_entry = "/help", .completion_description = "show available slash commands", .presentation_category = .general, .show_in_welcome = true },
-    .{ .kind = .clear_screen, .command = "/clear", .help_entry = "/clear", .completion_description = "start a fresh conversation while keeping managed processes", .presentation_category = .general, .show_in_welcome = true },
-    .{ .kind = .new_session, .command = "/new", .help_entry = "/new", .completion_description = "start a fresh session", .presentation_category = .session, .show_in_welcome = true },
-    .{ .kind = .reset_session, .command = "/reset", .help_entry = "/reset", .completion_description = "reset the current session context", .presentation_category = .session },
-    .{ .kind = .resume_session, .command = "/resume", .help_entry = "/resume", .completion_description = "resume a saved session", .presentation_category = .session },
-
-    .{ .kind = .launch_instance, .command = "/launch", .help_entry = "/launch [profile]", .completion_description = "start another fx instance on this host", .presentation_category = .session, .has_args = true, .accepts_payload = true },
-    .{ .kind = .close_instance, .command = "/close", .help_entry = "/close", .completion_description = "close the fx instance on screen", .presentation_category = .session },
-    .{ .kind = .show_agents, .command = "/agents", .help_entry = "/agents", .completion_description = "list the open agents and switch to one", .presentation_category = .session },
-    .{ .kind = .rename_session, .command = "/rename", .help_entry = "/rename <title>", .completion_description = "rename the current session", .presentation_category = .session, .has_args = true, .requires_args = true, .accepts_payload = true },
-    .{ .kind = .fork_session, .command = "/fork", .help_entry = "/fork", .completion_description = "fork the session before a prompt", .presentation_category = .session },
-    .{ .kind = .login, .command = "/login", .help_entry = "/login", .completion_description = "choose the model provider and how it signs in", .presentation_category = .account, .has_args = true },
-    .{ .kind = .logout, .command = "/logout", .help_entry = "/logout [vercel|codex|grok]", .completion_description = "sign out of a provider session", .presentation_category = .account, .has_args = true, .accepts_payload = true },
-    .{ .kind = .provider, .command = "/provider", .aliases = &.{"/setup"}, .show_aliases_in_completion = false, .help_entry = "/provider", .completion_description = "choose the model provider and how it signs in", .presentation_category = .account, .has_args = true },
-    .{ .kind = .stats, .command = "/stats", .help_entry = "/stats", .completion_description = "show terminal rendering counters", .presentation_category = .account },
-    .{ .kind = .usage, .command = "/usage", .aliases = &.{}, .help_entry = "/usage", .completion_description = "show your provider's usage and spend", .presentation_category = .account },
-    .{ .kind = .status, .command = "/status", .help_entry = "/status", .completion_description = "show runtime configuration and the session ID", .presentation_category = .general, .show_in_welcome = true },
-    .{ .kind = .image, .command = "/image", .aliases = &.{"/img"}, .help_entry = "/image <path> (/img)", .completion_description = "attach an image by path", .presentation_category = .media, .has_args = true, .requires_args = true, .accepts_payload = true },
-    .{ .kind = .images, .command = "/images", .help_entry = "/images [clear]", .completion_description = "manage pending image attachments", .presentation_category = .media, .has_args = true, .accepts_payload = true },
-    .{ .kind = .model, .command = "/model", .help_entry = "/model <id-or-query>", .completion_description = "choose what model and reasoning effort to use", .presentation_category = .model, .has_args = true, .accepts_payload = true },
-    .{ .kind = .effort, .command = "/effort", .help_entry = "/effort [level]", .completion_description = "choose the reasoning effort for the current model", .presentation_category = .model, .has_args = true, .accepts_payload = true },
-    .{ .kind = .permissions, .command = "/permissions", .help_entry = "/permissions [ask|auto|full-access|reset]", .completion_description = "choose what fx is allowed to do", .presentation_category = .security, .show_in_welcome = true, .has_args = true, .accepts_payload = true },
-    .{ .kind = .allowlist, .command = "/allowlist", .help_entry = "/allowlist [view [effective|workspace|global]|[workspace|global] add|remove|reset ...]", .completion_description = "manage trusted commands, tools, and URLs", .presentation_category = .security, .show_in_welcome = true, .has_args = true, .accepts_payload = true },
-    .{ .kind = .undo, .command = "/undo", .help_entry = "/undo", .completion_description = "undo the latest tracked file operation", .presentation_category = .session },
-    .{ .kind = .mcp, .command = "/mcp", .help_entry = "/mcp [list|show|add|remove|login|logout|approve|reject]", .completion_description = "manage MCP servers and their logins", .presentation_category = .extensions, .has_args = true, .accepts_payload = true },
-    .{ .kind = .skills, .command = "/skills", .help_entry = "/skills [list|add|install|show|create|remove|path] [name|url|path] ($ opens skill search)", .completion_description = "browse and manage skills", .presentation_category = .extensions, .has_args = true, .accepts_payload = true },
-    .{ .kind = .copy, .command = "/copy", .help_entry = "/copy", .completion_description = "copy the last assistant response", .presentation_category = .session },
-    .{ .kind = .feedback, .command = "/feedback", .help_entry = "/feedback", .completion_description = "open the fx feedback form", .presentation_category = .product, .show_in_welcome = true },
-    .{ .kind = .trace, .command = "/trace", .help_entry = "/trace", .completion_description = "copy a private diagnostic trace", .presentation_category = .product },
-    .{ .kind = .compact, .command = "/compact", .help_entry = "/compact", .completion_description = "summarize context into a fresh window", .presentation_category = .session },
-    .{ .kind = .settings, .command = "/settings", .help_entry = "/settings [startup-scrollback [on|off]]", .completion_description = "browse and update settings", .presentation_category = .appearance, .has_args = true, .accepts_payload = true },
-    .{ .kind = .credits, .command = "/credits", .aliases = &.{"/balance"}, .help_entry = "/credits (/balance)", .completion_description = "show gateway credits balance", .presentation_category = .account, .requires_prompt_credential = true },
-    .{ .kind = .paste, .command = "/paste", .help_entry = "/paste", .completion_description = "attach an image from the clipboard when supported", .presentation_category = .media },
-    .{ .kind = .fast, .command = "/fast", .help_entry = "/fast [on|off]", .completion_description = "toggle Fast mode when supported", .presentation_category = .model, .has_args = true, .accepts_payload = true },
-    .{ .kind = .ultrafast, .command = "/ultrafast", .help_entry = "/ultrafast [on|off|status]", .completion_description = "request Ultrafast mode when supported", .presentation_category = .model, .has_args = true, .accepts_payload = true },
-    .{ .kind = .statusline, .command = "/statusline", .help_entry = "/statusline [context|session|workspace]", .completion_description = "toggle status line segments", .presentation_category = .appearance, .has_args = true, .accepts_payload = true },
-    .{ .kind = .notifications, .command = "/sound", .help_entry = "/sound [on|off|max]", .completion_description = "toggle sounds and terminal bells", .presentation_category = .appearance, .has_args = true, .accepts_payload = true },
-    .{ .kind = .workspace, .command = "/workspace", .help_entry = "/workspace [list|add PATH|remove PATH|clear]", .completion_description = "manage additional workspace directories", .presentation_category = .workspace, .show_in_welcome = true, .has_args = true, .accepts_payload = true },
-    .{ .kind = .shell, .command = "/shell", .help_entry = "/shell reload", .completion_description = "reload shell startup files for commands", .presentation_category = .workspace, .has_args = true, .requires_args = true, .accepts_payload = true },
-    .{ .kind = .version, .command = "/version", .help_entry = "/version", .completion_description = "show the fx version", .presentation_category = .general },
-    .{ .kind = .quit, .command = "/quit", .aliases = &.{"/exit"}, .help_entry = "/quit", .completion_description = "exit the interactive shell", .presentation_category = .general, .show_in_welcome = true },
-};
-
-pub const slash_registry = SlashRegistry{ .commands = slash_specs[0..] };
-
-pub fn matchesSlashExact(cmd: []const u8, kind: SlashKind) bool {
-    return command_specs.matchesSlashExact(slash_registry, cmd, kind);
-}
-
-pub fn isExactSlashCommand(cmd: []const u8) bool {
-    return slash_registry.matchExact(cmd) != null;
-}
-
-pub fn matchedSlashPrefix(cmd: []const u8, kind: SlashKind) ?[]const u8 {
-    return command_specs.matchedSlashPrefix(slash_registry, cmd, kind);
-}
-
-pub fn renderSlashHelp(alloc: Allocator) ![]u8 {
-    return command_specs.renderSlashHelp(alloc, slash_registry);
-}
-
-pub fn firstSlashCompletion(prefix: []const u8) ?[]const u8 {
-    return command_specs.firstSlashCompletion(slash_registry, prefix);
-}
-
-pub fn slashCompletionCount(prefix: []const u8) usize {
-    return command_specs.slashCompletionCount(slash_registry, prefix);
-}
-
-pub fn nthSlashCompletion(prefix: []const u8, n: usize) ?[]const u8 {
-    return command_specs.nthSlashCompletion(slash_registry, prefix, n);
-}
-
-pub fn nthSlashCompletionLabel(prefix: []const u8, n: usize) ?[]const u8 {
-    return command_specs.nthSlashCompletionLabel(slash_registry, prefix, n);
-}
-
-pub fn nthSlashCompletionDescription(prefix: []const u8, n: usize) ?[]const u8 {
-    return command_specs.nthSlashCompletionDescription(slash_registry, prefix, n);
-}
-
-pub fn nthSlashCompletionCategory(prefix: []const u8, n: usize) ?SlashPresentationCategory {
-    return command_specs.nthSlashCompletionCategory(slash_registry, prefix, n);
-}
-
-pub fn slashCompletionHasArgs(command: []const u8) bool {
-    return command_specs.slashCompletionHasArgs(slash_registry, command);
-}
-
-pub const argCompletionAnchor = command_specs.argCompletionAnchor;
-
 test "fx config help names settings by their current keys" {
     const settings_keys = @import("../core/config/settings_keys.zig");
     const spec = for (top_level_specs) |spec| {
@@ -800,109 +646,6 @@ test "fx config help names settings by their current keys" {
     try std.testing.expect(checked > 0);
 }
 
-test "built-in slash commands register exact active order" {
-    const expected_commands = [_][]const u8{
-        "/help",
-        "/clear",
-        "/new",
-        "/reset",
-        "/resume",
-        "/launch",
-        "/close",
-        "/agents",
-        "/rename",
-        "/fork",
-        "/login",
-        "/logout",
-        "/provider",
-        "/stats",
-        "/usage",
-        "/status",
-        "/image",
-        "/images",
-        "/model",
-        "/effort",
-        "/permissions",
-        "/allowlist",
-        "/undo",
-        "/mcp",
-        "/skills",
-        "/copy",
-        "/feedback",
-        "/trace",
-        "/compact",
-        "/settings",
-        "/credits",
-        "/paste",
-        "/fast",
-        "/ultrafast",
-        "/statusline",
-        "/sound",
-        "/workspace",
-        "/shell",
-        "/version",
-        "/quit",
-    };
-
-    try std.testing.expectEqual(expected_commands.len, slash_specs.len);
-    for (expected_commands, slash_specs) |expected, spec| {
-        try std.testing.expectEqualStrings(expected, spec.command);
-    }
-}
-
-test "built-in slash registry resolves primary commands and aliases" {
-    const image = slash_registry.lookup("/img") orelse return error.TestExpectedEqual;
-    try std.testing.expectEqual(SlashKind.image, image.kind);
-
-    const usage = slash_registry.lookup("/usage") orelse return error.TestExpectedEqual;
-    try std.testing.expectEqual(SlashKind.usage, usage.kind);
-
-    const quit = slash_registry.matchExact("/exit\t") orelse return error.TestExpectedEqual;
-    try std.testing.expectEqual(SlashKind.quit, quit.command.kind);
-    try std.testing.expectEqualStrings("/exit", quit.token);
-
-    const model = command_specs.matchedSlashPrefix(slash_registry, "/model\tmodel-id", .model) orelse return error.TestExpectedEqual;
-    try std.testing.expectEqualStrings("/model", model);
-
-    const credits = slash_registry.lookup("/credits") orelse return error.TestExpectedEqual;
-    try std.testing.expect(credits.requires_prompt_credential);
-
-    const model_command = slash_registry.lookup("/model") orelse return error.TestExpectedEqual;
-    try std.testing.expect(!model_command.requires_prompt_credential);
-    try std.testing.expect(slash_registry.lookup("/models") == null);
-
-    try std.testing.expect(command_specs.matchedSlashPrefix(slash_registry, "/model\nmodel-id", .model) == null);
-}
-
-test "retired appearance slash commands are not registered" {
-    try std.testing.expect(!isExactSlashCommand("/appearance"));
-    try std.testing.expect(!isExactSlashCommand("/input"));
-    try std.testing.expect(!isExactSlashCommand("/maxxing\t"));
-    try std.testing.expect(!isExactSlashCommand("/input lines"));
-    try std.testing.expect(!isExactSlashCommand("/unknown"));
-}
-
-test "built-in paste completion describes clipboard image attachment" {
-    const completion = nthSlashCompletion("/pas", 0) orelse return error.TestExpectedEqual;
-    try std.testing.expectEqualStrings("/paste", completion);
-
-    const description = nthSlashCompletionDescription("/pas", 0) orelse return error.TestExpectedEqual;
-    try std.testing.expectEqualStrings("attach an image from the clipboard when supported", description);
-}
-
-test "built-in statusline help and completion include workspace" {
-    const help = try renderSlashHelp(std.testing.allocator);
-    defer std.testing.allocator.free(help);
-    try std.testing.expect(
-        std.mem.find(u8, help, "/statusline [context|session|workspace]") != null,
-    );
-
-    try std.testing.expectEqualStrings(
-        "/statusline workspace",
-        nthSlashCompletion("/statusline w", 0).?,
-    );
-}
-
 test "every launch flag appears in fx --help" {
     const cli_flags = @import("../core/cli/cli_flags.zig");
     outer: for (launch_options) |doc| {
@@ -919,12 +662,12 @@ test "every launch flag appears in fx --help" {
         return error.TestExpectedEqual;
     }
     // And the other way: help shows no launch flag the parser doesn't read,
-    // apart from the resume words, help, and version, which fx reads first.
+    // apart from help and version, which fx reads first.
     for (top_level_flags) |flag| {
         var parts = std.mem.splitSequence(u8, flag.usage, ", ");
         part: while (parts.next()) |part| {
             const name = part[0 .. std.mem.findScalar(u8, part, ' ') orelse part.len];
-            for ([_][]const u8{ "-c", "--continue", "-r", "--resume", "-h", "--help", "-v", "--version" }) |early| {
+            for ([_][]const u8{ "-h", "--help", "-v", "--version" }) |early| {
                 if (std.mem.eql(u8, name, early)) continue :part;
             }
             for (launch_options) |doc| {

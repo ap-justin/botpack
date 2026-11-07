@@ -4,7 +4,7 @@ Instructions for AI coding agents working with this codebase.
 
 ## Declaring Work Ready
 
-Do not say the work is "ready", "done", "good to go", "complete", or similar until you have personally run the binary and exercised the change on its happy path. A passing test suite is necessary, not sufficient — tests in this repo do not always construct the full runtime, attach a TTY, or spawn background threads, so they will not catch startup crashes, render regressions, or thread-lifetime bugs.
+Do not say the work is "ready", "done", "good to go", "complete", or similar until you have personally run the binary and exercised the change on its happy path. A passing test suite is necessary, not sufficient — tests in this repo do not always construct the full runtime, attach a TTY, or spawn background threads, so they will not catch startup crashes or thread-lifetime bugs.
 
 Before reporting the work as ready:
 
@@ -74,15 +74,13 @@ Key rules:
 
 * `src/core/recovery/` decides how one model request recovers: when to retry, how long to wait, when to try another way, what the status line says, and what to save so the request survives a closed window or a crash. fx reports events to `step` and carries out the plan it returns. The module performs no I/O, reads no clock, and never allocates. Outside code imports only its front door, `recovery.zig`, and the module imports only the standard library. `tests/tla/recovery/Recovery.tla` models it, and `scripts/check-recovery-boundary.sh` enforces the boundary in CI.
 
-* `src/core/agents/` owns `Agent`, one conversation's own state: its session, worker, stream, prompts, submission, title, totals, attachments, diffs, and undo stack. `App.main_agent` holds the main conversation's. Outside code imports only its front door, `agents.zig`, and the folder never imports `src/ui/`, the terminal runtime, or `main.zig`, nor a file that imports `src/ui/` or `main.zig` itself, because the app that shows an agent owns the screen. Generic helpers probe these fields with `agents.hasAgentField`, not `@hasField`, and test apps nest them under `main_agent` the same way. `scripts/check-agents-boundary.sh` enforces the imports in CI.
+* `src/core/agents/` owns `Agent`, one conversation's own state: its session, worker, stream, prompts, submission, title, totals, attachments, diffs, and undo stack. `App.main_agent` holds the main conversation's. Outside code imports only its front door, `agents.zig`, and the folder never imports the terminal runtime or `main.zig`, nor a file that imports `main.zig` itself, because the app that hosts an agent owns those. Generic helpers probe these fields with `agents.hasAgentField`, not `@hasField`, and test apps nest them under `main_agent` the same way. `scripts/check-agents-boundary.sh` enforces the imports in CI.
 
 * `src/core/shell_command/safe_git.zig` runs git for the `fx pr` and `fx issue` snapshot and for the agent's direct read-only `git status`, `git diff`, and `git log` when the command does not use the user's own shell environment. It turns off every program a repository's own config can name and refuses to run when git would use a different repository than the one fx read. In `auto` mode a git command it refuses is returned to the agent without running. Commands that run in a shell use git with the repository's full config: git in the shell tool's default `user` environment, and the routine commands `auto` mode runs without review, such as `git status` with other flags, `git fetch`, or `npm test`.
 
 * `src/mcp/` is the MCP engine. Its files import only `std` and each other, and the host passes in `std.Io` and every other service through `src/mcp/host.zig`. fx connects to it through `src/core/mcp_host/`. `src/core/mcp/` holds the MCP types, config parsing, schema checks, search, and tool naming that the host, the tools, ACP, and the UI share.
 
 * `src/tools/` owns built-in tool implementations. Generic tool contracts and dispatch live in `src/core/tooling/`. Default tool specs are centralized in `src/core/tooling/tool_specs.zig` or `src/builtins/tools.zig`, not in individual tool files.
-
-* `src/ui/` owns terminal rendering, event loop, input, transcript. It must not own product state.
 
 * `src/gateway/` owns provider transport. It must not absorb product-state logic.
 
@@ -269,7 +267,7 @@ fx does not use declarations that Zig 0.17 deprecates. They still compile, so ch
 
 Two test suites live under `tests/`, both using Bun. `tests/AGENTS.md` says where each kind of test belongs, how to wire a new E2E file into CI, and how code comments cite tests and specs.
 
-Set `FX_SOUND=0` when you run either suite locally, for example `cd tests/e2e && FX_SOUND=0 bun test cli.test.ts`. On macOS, sound playback during a test run can overload the machine and crash it. The variable doesn't cover `notifications.test.ts`, which clears it, or the "TUI user-profile output preserves compact scrollback across slash commands" test in `tui-command-permissions.test.ts`, which sends `/sound on`. Leave those to CI. On Linux, fx rings the terminal bell instead of playing a sound, so they run safely there. The full `bun test` run below includes both, and `bun test tui-*.test.ts` includes the `/sound on` test, so on macOS pass test files by name.
+Set `FX_SOUND=0` when you run either suite locally, for example `cd tests/e2e && FX_SOUND=0 bun test cli.test.ts`. On macOS, sound playback during a test run can overload the machine and crash it.
 
 ### `tests/evals/` — LLM Evals
 
@@ -282,16 +280,13 @@ cd tests/evals && bun run eval:matrix               # cross-model matrix run
 
 ### `tests/e2e/` — End-to-End Tests
 
-Deterministic runtime tests (CLI commands, ACP protocol, TUI via tmux). No API key needed for most.
+Deterministic runtime tests (CLI commands and ACP protocol). No API key needed for most.
 
 ```bash
 cd tests/e2e && bun install && bun test              # run all e2e tests
 cd tests/e2e && bun test cli.test.ts                 # just CLI tests
 cd tests/e2e && bun test acp.test.ts                 # just ACP tests
-cd tests/e2e && bun test tui-*.test.ts               # just TUI tests (requires tmux)
 ```
-
-TUI tests use tmux to drive the interactive terminal. They require `tmux` to be installed.
 
 ## TLA+ Models
 
@@ -339,8 +334,6 @@ The durable-session model check in the `SDK (Bun + N-API/WASM)` job takes about 
 
 The `TLA+ MCP models and drivers` job takes about 20 minutes, so a pull request runs its model checks and drivers only when the same detector finds a change to `src/mcp/`, `src/core/mcp_host/`, `src/core/mcp/`, the models in `tests/tla/mcp/` and `tests/tla/mcp_host/`, their drivers in `tests/tla/drivers/mcp/`, `tests/tla/drivers/mcp_host/`, and `tests/tla/drivers/lib/`, the `tests/e2e/fixtures/mcp-*` servers, the helpers those drivers load (`tests/e2e/tmux-helpers.ts`, `tests/evals/eval-helpers.ts`, and `tests/e2e/render-lab/tape.ts`), `build.zig`, `build.zig.zon`, or `.github/workflows/ci.yml`. Every push to `main` runs them, and the same `gh workflow run ci.yml --ref <branch>` runs them for any other change.
 
-The `TLA+ transcript window model` job takes about 4 minutes, so a pull request runs it only when the same detector finds a change to `src/ui/transcript/transcript_window*`, the model in `tests/tla/transcript_window/`, its drivers in `tests/tla/drivers/transcript_window/`, the driver code they share (`tests/tla/drivers/lib/` and `tests/tla/drivers/graph.mjs`), `build.zig`, `build.zig.zon`, or `.github/workflows/ci.yml`. It runs `tests/tla/transcript_window/check.sh --ci`, which leaves out the planted bugs and the run of a built fx along the model; run `tests/tla/transcript_window/check.sh` without `--ci` before you change the window.
-
 The `fx mcp call` model check, `.github/workflows/tla-mcp-call.yml`, runs `tests/tla/mcp_call/check.sh`: TLC on the bridge model, the core's tests, both drivers against the real core, and every planted bug. Every push to `main` runs it. A pull request runs it only with the `ci:tla-mcp-call` label, and `gh workflow run tla-mcp-call.yml --ref <branch>` runs it on any branch. Like `ci:macos`, the label needs triage access.
 
 The macOS arm64 PGSO workflow runs on a pull request only when the PGSO pipeline changes: `scripts/pgso/` other than `corpus.json`, the `setup-pgso` action, or `.github/workflows/pgso-macos-arm64.yml`. To qualify any other change, run `gh workflow run pgso-macos-arm64.yml --ref <branch>`. The stable release always runs it.
@@ -351,49 +344,6 @@ Live model evals and the live ACP suite need credentials and are not determinist
 
 A CI result is valid only when it belongs to the exact current commit and `Build & Test`, `E2E (deterministic)`, `Shellcheck`, `Startup Latency`, and `macOS arm64` all succeed. Do not mark the draft PR ready or request review from a stale, partial, queued, cancelled, skipped, or failed run. If CI fails, make the smallest repair, rerun the focused local proof, push the new commit to the same draft PR, and wait for CI on the new exact commit. After CI passes, run the final ship gate and mark the PR ready only when it reports `SHIP` for that exact commit.
 
-## Reproducing Render Bugs
-
-fx's rendering is inline by default and deliberately emits a small ANSI subset. Three owner classes are the narrow exceptions, and each takes the alternate buffer exclusively through `AlternateScreenOwner` in `src/ui/shell_runtime.zig`: interactive file-approval review, the full-transcript screen, and catalog menus. Only one class may own the buffer at a time, and each must leave it and restore the main grid, composer, cursor, paste, mouse, focus, and keyboard modes when it closes. Transcript rendering, question prompts, command-output expansion, and subagent delegation remain inline. Three tools exist for reproducing and regression-proofing render bugs:
-
-### tmux (live TTY repros)
-
-Best for resize and SIGWINCH interactions. The helper in `tests/e2e/tmux-helpers.ts` exposes `resizeWindow(cols, rows)`, `capturePaneGrid()`, and `capturePaneEscapes()`. See `tests/e2e/tui-resize.test.ts` for the canonical resize matrix.
-
-```bash
-cd tests/e2e && bun test tui-resize.test.ts
-```
-
-### Debug terminal recording and replay
-
-Set `FX_DEBUG_RECORD=1` to create an automatic private tape under
-`~/.fx/recordings/`. Set `FX_DEBUG_RECORD_SILENT_BANNER=1` as well when the
-developer-only recording notice must stay out of the inline transcript during
-a screen share. The notice remains available in the Ctrl+O full transcript.
-Use `FX_RECORD=<path>` when a test or investigation needs an exact destination.
-Recording dumps every byte fx writes and every resize into a framed binary tape.
-Replay the tape through the built-in virtual terminal:
-
-```bash
-FX_DEBUG_RECORD=1 ./zig-out/bin/fx
-FX_RECORD=/tmp/bug.fxtape ./zig-out/bin/fx
-./zig-out/bin/fx replay /tmp/bug.fxtape
-./zig-out/bin/fx replay /tmp/bug.fxtape --frames
-./zig-out/bin/fx replay /tmp/bug.fxtape --json
-./zig-out/bin/fx replay /tmp/bug.fxtape --golden out.txt
-```
-
-The tape is deterministic — any reviewer can replay it without a TTY, and a golden file can be checked in as a regression test.
-
-### Shared terminal engine (sub-second unit tests)
-
-`src/core/terminal/engine.zig` is the shared bounded text-terminal engine for hosted terminal sessions, recovery, replay, and deterministic rendering tests. `src/ui/resize_tests.zig` drives `TranscriptRuntime` against it in process so resize behavior can be exercised with no fd or timing dependence.
-
-```bash
-zig build test                      # runs every VT and resize test
-```
-
-When a tmux or tape-based scenario exposes a bug, reproduce it as a Zig unit test in `resize_tests.zig` (or a new sibling) before fixing. The test lands the fix as a regression.
-
 ## Benchmarks
 
 Startup latency benchmarks live in `benchmarks/` and run in CI via `.github/workflows/bench.yml`.
@@ -403,13 +353,11 @@ Startup latency benchmarks live in `benchmarks/` and run in CI via `.github/work
 ./benchmarks/startup.sh --quick    # quick run (20 iterations)
 ```
 
-The `Startup Latency` job builds a ReleaseSafe binary, measures six CLI paths with hyperfine, and enforces per-command latency budgets. The same job runs `tests/e2e/tui-performance.test.ts` as the interactive terminal performance gate. A PR that exceeds either fails the check.
+The `Startup Latency` job builds a ReleaseSafe binary, measures six CLI paths with hyperfine, and enforces per-command latency budgets. A PR that exceeds a budget fails the check.
 
 The long-turn memory and libfx runtime benchmarks run only on request. Start them with `gh workflow run bench.yml --ref <branch> -f long_turn_memory=true` or `-f libfx_runtime=true`.
 
 The startup benchmark uses `FX_BENCH=1`, an environment variable that runs through arg parsing and CLI dispatch, then exits before TTY initialization. This lives in `src/core/app/app_entry_runtime.zig`.
-
-To measure the interactive launch up to the first frame, use `benchmarks/first_frame.py`. It drives fx on a pseudo-terminal and interleaves several `--binary` arguments for before-and-after comparisons.
 
 The budget is 2ms of raw wall-clock time for every command on the Linux CI runner, which is the authoritative product budget. Local macOS runs report raw means only, because process and dynamic-loader overhead there can exceed 2ms independently of fx. The process baseline is diagnostic only and is never subtracted.
 

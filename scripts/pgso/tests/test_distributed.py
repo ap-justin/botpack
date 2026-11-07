@@ -260,10 +260,6 @@ class WorkflowContractTests(unittest.TestCase):
 
         self.assertIn("profiles/merged.profdata", candidate_job)
         self.assertIn("heavy/file_index/candidate/file-index-bench", candidate_job)
-        self.assertIn(
-            "heavy/approval_review/candidate/approval-review-bench",
-            candidate_job,
-        )
         self.assertNotIn('          llvm: "true"', heavy_job)
         self.assertNotIn("--llvm-bin", heavy_job)
 
@@ -302,14 +298,7 @@ class ShardPlanningTests(unittest.TestCase):
             {
                 "include": [
                     {"name": name}
-                    for name in (
-                        "file-index-100k",
-                        "ui-activity",
-                        "approval-transcript",
-                        "approval-diff",
-                        "approval-combined",
-                        "approval-payload",
-                    )
+                    for name in ("file-index-100k",)
                 ]
             },
             run_plan("heavy", missing_corpus, 20),

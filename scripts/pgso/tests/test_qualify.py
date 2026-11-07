@@ -18,6 +18,7 @@ from scripts.pgso.qualify import (
     BENCHMARK_PLANS,
     STARTUP_COMMANDS,
     BenchmarkPair,
+    BenchmarkPlan,
     EvidenceRecorder,
     _read_hyperfine_samples,
     build_benchmark_pair,
@@ -33,8 +34,18 @@ from scripts.pgso.qualify import (
     relink_profile_linked_benchmarks,
     select_benchmark_plans,
     select_startup_commands,
+    Workload,
 )
 from scripts.pgso.runner import CommandResult
+
+MICROBENCHMARK_PLAN = BenchmarkPlan(
+    selector="microbenchmark",
+    profile_module="microbenchmark-bench",
+    function_prefixes=("microbenchmark.",),
+    training_argvs=((),),
+    workloads=(Workload("microbenchmark", ()),),
+    microbenchmark=True,
+)
 
 
 class PgsoQualificationTests(unittest.TestCase):
@@ -101,7 +112,7 @@ class PgsoQualificationTests(unittest.TestCase):
         self.assertEqual(50.0, percentile(samples, 0.50))
         self.assertEqual(95.0, percentile(samples, 0.95))
 
-    def test_production_plans_cover_five_startup_and_six_heavy_workloads(self) -> None:
+    def test_production_plans_cover_five_startup_and_one_heavy_workload(self) -> None:
         self.assertEqual(5, len(STARTUP_COMMANDS))
         workload_names = tuple(
             workload.name
@@ -109,26 +120,15 @@ class PgsoQualificationTests(unittest.TestCase):
             for workload in plan.workloads
         )
         self.assertEqual(
-            (
-                "file-index-100k",
-                "ui-activity",
-                "approval-transcript",
-                "approval-diff",
-                "approval-combined",
-                "approval-payload",
-            ),
+            ("file-index-100k",),
             workload_names,
         )
         self.assertEqual(
-            ("file_index", "ui_activity", "approval_review"),
+            ("file_index",),
             tuple(plan.selector for plan in BENCHMARK_PLANS),
         )
         self.assertEqual(
-            (
-                "file-index-bench",
-                "ui-activity-progress-bench",
-                "approval-review-bench",
-            ),
+            ("file-index-bench",),
             tuple(plan.profile_module for plan in BENCHMARK_PLANS),
         )
         self.assertTrue(all(plan.function_prefixes for plan in BENCHMARK_PLANS))
@@ -143,15 +143,15 @@ class PgsoQualificationTests(unittest.TestCase):
             select_startup_commands(("missing",))
 
     def test_heavy_selection_keeps_only_the_assigned_workload(self) -> None:
-        selected = select_benchmark_plans(("approval-diff",))
+        selected = select_benchmark_plans(("file-index-100k",))
 
         self.assertEqual(1, len(selected))
-        self.assertEqual("approval_review", selected[0].selector)
-        self.assertEqual(("approval-diff",), tuple(item.name for item in selected[0].workloads))
+        self.assertEqual("file_index", selected[0].selector)
+        self.assertEqual(("file-index-100k",), tuple(item.name for item in selected[0].workloads))
 
     def test_heavy_selection_rejects_duplicate_assignments(self) -> None:
         with self.assertRaisesRegex(PgsoError, "duplicate heavy workload"):
-            select_benchmark_plans(("ui-activity", "ui-activity"))
+            select_benchmark_plans(("file-index-100k", "file-index-100k"))
 
     def test_comparison_requires_fifty_samples_per_artifact(self) -> None:
         with self.assertRaisesRegex(PgsoError, "at least 50"):
@@ -672,7 +672,8 @@ class PgsoQualificationTests(unittest.TestCase):
         self.assertEqual(str(candidate), calls[1][0])
         self.assertTrue(results[0].passed)
 
-    def test_ui_activity_measurement_uses_alternating_hyperfine_rounds(self) -> None:
+    @mock.patch("scripts.pgso.qualify.BENCHMARK_PLANS", (MICROBENCHMARK_PLAN,))
+    def test_microbenchmark_measurement_uses_alternating_hyperfine_rounds(self) -> None:
         control = self.root / "heavy" / "control"
         candidate = self.root / "heavy" / "candidate"
         hyperfine = self.root / "tools" / "hyperfine"
@@ -680,7 +681,7 @@ class PgsoQualificationTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"executable")
         pair = BenchmarkPair(
-            selector="ui_activity",
+            selector="microbenchmark",
             control_binary=control,
             candidate_binary=candidate,
             bitcode_sha256="b" * 64,
@@ -729,8 +730,8 @@ class PgsoQualificationTests(unittest.TestCase):
                 output_dir=self.root / "measurements",
                 samples=50,
                 timeout_s=10,
-                workload_names=("ui-activity",),
-                prebuilt_pairs={"ui_activity": pair},
+                workload_names=("microbenchmark",),
+                prebuilt_pairs={"microbenchmark": pair},
                 hyperfine_binary=hyperfine,
             )
 
@@ -837,6 +838,7 @@ class PgsoQualificationTests(unittest.TestCase):
         self.assertEqual(50, result.candidate_failures)
         self.assertEqual(100, len(calls))
 
+    @mock.patch("scripts.pgso.qualify.BENCHMARK_PLANS", (MICROBENCHMARK_PLAN,))
     def test_microbenchmark_regression_that_repeats_fails_after_one_retry(self) -> None:
         hyperfine = self.root / "tools" / "hyperfine"
         hyperfine.parent.mkdir(parents=True, exist_ok=True)
@@ -867,23 +869,24 @@ class PgsoQualificationTests(unittest.TestCase):
             return CommandResult(command, 0, "", "", 1.0)
 
         result, _ = self.measure_one_heavy_workload(
-            fake_run, "ui-activity", "ui_activity", hyperfine
+            fake_run, "microbenchmark", "microbenchmark", hyperfine
         )
 
-        retry_logs = self.root / "measurements" / "logs" / "ui-activity" / "retry" / "logs"
+        retry_logs = self.root / "measurements" / "logs" / "microbenchmark" / "retry" / "logs"
         self.assertFalse(result.passed)
         self.assertFalse(result.first_attempt.passed)
         self.assertEqual(100, len(exports))
         self.assertEqual(50, sum(path.parent == retry_logs for path in exports))
 
-    def test_ui_activity_measurement_requires_hyperfine(self) -> None:
+    @mock.patch("scripts.pgso.qualify.BENCHMARK_PLANS", (MICROBENCHMARK_PLAN,))
+    def test_microbenchmark_measurement_requires_hyperfine(self) -> None:
         control = self.root / "heavy" / "control"
         candidate = self.root / "heavy" / "candidate"
         for path in (control, candidate):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"executable")
         pair = BenchmarkPair(
-            selector="ui_activity",
+            selector="microbenchmark",
             control_binary=control,
             candidate_binary=candidate,
             bitcode_sha256="b" * 64,
@@ -892,7 +895,7 @@ class PgsoQualificationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             PgsoError,
-            "microbenchmark measurement requires Hyperfine: ui_activity",
+            "microbenchmark measurement requires Hyperfine: microbenchmark",
         ):
             measure_heavy_workloads(
                 toolchain=None,
@@ -900,8 +903,8 @@ class PgsoQualificationTests(unittest.TestCase):
                 output_dir=self.root / "measurements",
                 samples=50,
                 timeout_s=10,
-                workload_names=("ui-activity",),
-                prebuilt_pairs={"ui_activity": pair},
+                workload_names=("microbenchmark",),
+                prebuilt_pairs={"microbenchmark": pair},
             )
 
     def build_fake_external_control(
@@ -933,7 +936,7 @@ class PgsoQualificationTests(unittest.TestCase):
             platform=platform,
             tools=types.SimpleNamespace(**{name: fake(name) for name in tool_names}),
         )
-        paths = PipelinePaths.create(self.root / "run", selector="ui_activity")
+        paths = PipelinePaths.create(self.root / "run", selector="file_index")
 
         binary = build_external_o2_control(toolchain, paths)
 

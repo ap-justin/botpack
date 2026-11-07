@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
-  chmodSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -20,13 +18,10 @@ import {
   fakeGatewayFinalText,
   fakeGatewayToolCall,
   startFakeGateway,
-  TmuxSession,
-  tmuxAvailable,
-} from "./tmux-helpers";
+} from "./fake-gateway";
 
 const MODEL = "openai/gpt-5";
 const TOOL_NAME = "mcp_fixture_echo";
-const REPO_ROOT = realpathSync(join(import.meta.dirname, "..", ".."));
 const VERSIONS: LegacyStreamableVersion[] = [
   "2025-11-25",
   "2025-06-18",
@@ -36,19 +31,15 @@ const VERSIONS: LegacyStreamableVersion[] = [
 let cleanupRoot: string | null = null;
 let streamable: ReturnType<typeof startLegacyStreamableHttpFixture> | null = null;
 let gateway: ReturnType<typeof startFakeGateway> | null = null;
-let tui: TmuxSession | null = null;
 
 afterEach(async () => {
-  const activeTui = tui;
   const activeGateway = gateway;
   const activeStreamable = streamable;
   const activeCleanupRoot = cleanupRoot;
-  tui = null;
   gateway = null;
   streamable = null;
   cleanupRoot = null;
 
-  if (activeTui) await activeTui.kill();
   activeGateway?.stop();
   activeStreamable?.stop();
   if (activeCleanupRoot) {
@@ -446,132 +437,6 @@ describe("version-scoped legacy MCP remote transports", () => {
     );
   }, 30_000);
 
-  test.skipIf(!tmuxAvailable())(
-    "Streamable HTTP 2025-11-25 tools retries only after the matching URL completion",
-    async () => {
-      let targetRequests = 0;
-      const target = Bun.serve({
-        port: 0,
-        fetch() {
-          targetRequests += 1;
-          return new Response("browser-only target");
-        },
-      });
-      try {
-        const targetUrl = `http://127.0.0.1:${target.port}/authorize?state=legacy-http`;
-        streamable = startLegacyStreamableHttpFixture("2025-11-25", {
-          mode: "url_required_error",
-          elicitationUrl: targetUrl,
-          urlRequiredOperation: "tools",
-        });
-        const root = createRoot("url-required-tools", "http", streamable.url);
-        const fakeBin = join(root.root, "fake-bin");
-        const openLog = join(root.root, "open.log");
-        mkdirSync(fakeBin);
-        for (const name of ["open", "xdg-open"]) {
-          const openPath = join(fakeBin, name);
-          writeFileSync(
-            openPath,
-            "#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$FX_E2E_OPEN_LOG\"\nexit 0\n",
-          );
-          chmodSync(openPath, 0o755);
-        }
-        gateway = startFakeGateway([
-          fakeGatewayToolCall("select_mcp", "mcp_select_tool", { name: TOOL_NAME }),
-          fakeGatewayToolCall("call_mcp", TOOL_NAME, { text: "hello" }),
-          fakeGatewayFinalText("Legacy HTTP tools URL-required complete."),
-        ], {
-          models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
-        });
-        const binary = join(REPO_ROOT, "zig-out", "bin", "fx");
-        tui = await TmuxSession.create({
-          isolated: true,
-          cwd: root.workspace,
-          width: 110,
-          height: 34,
-          cmd: `${JSON.stringify(binary)} ask --auto --no-save ${JSON.stringify("Call the legacy HTTP URL-required fixture.")}`,
-          remainOnExit: true,
-          env: {
-            ...fixtureEnv(root, gateway),
-            PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
-            FX_E2E_OPEN_LOG: openLog,
-          },
-        });
-
-        await tui.waitForText(`Complete URL: ${targetUrl}`, 20_000);
-        await tui.sendText("1");
-        await tui.waitForText("I completed it / Retry", 20_000);
-        const method = "tools/call";
-        const operationCalls = () => streamable!.requests.filter(
-          (entry) => entry.message?.method === method,
-        );
-        expect(operationCalls()).toHaveLength(1);
-        const malformed = [
-          {
-            method: "notifications/elicitation/complete",
-            params: { elicitationId: "legacy-url-required-1" },
-          },
-          {
-            jsonrpc: "1.0",
-            method: "notifications/elicitation/complete",
-            params: { elicitationId: "legacy-url-required-1" },
-          },
-          {
-            jsonrpc: 2,
-            method: "notifications/elicitation/complete",
-            params: { elicitationId: "legacy-url-required-1" },
-          },
-          {
-            jsonrpc: "2.0",
-            method: "notifications/elicitation/completed",
-            params: { elicitationId: "legacy-url-required-1" },
-          },
-          {
-            jsonrpc: "2.0",
-            method: "notifications/elicitation/complete",
-            params: [],
-          },
-          {
-            jsonrpc: "2.0",
-            method: "notifications/elicitation/complete",
-            params: { elicitationId: false },
-          },
-          {
-            jsonrpc: "2.0",
-            method: "notifications/elicitation/complete",
-            params: { elicitationId: "" },
-          },
-          {
-            jsonrpc: "2.0",
-            method: "notifications/elicitation/complete",
-            params: { elicitationId: "x".repeat(257) },
-          },
-        ];
-        for (const notification of malformed) {
-          streamable.sendUrlCompletionFrame(notification);
-        }
-        streamable.sendUrlCompletion("wrong-url-id");
-        await Bun.sleep(100);
-        expect(operationCalls()).toHaveLength(1);
-        streamable.sendUrlCompletion("legacy-url-required-1");
-        streamable.sendUrlCompletion("legacy-url-required-1");
-        await tui.waitForText("Legacy HTTP tools URL-required complete.", 20_000);
-        expect(readFileSync(openLog, "utf8").trim()).toBe(targetUrl);
-        expect(targetRequests).toBe(0);
-        const calls = streamable.requests.filter(
-          (entry) => entry.message?.method === method,
-        );
-        expect(calls).toHaveLength(2);
-        expect(calls[1]?.message?.id).not.toBe(calls[0]?.message?.id);
-        expect(calls[1]?.message?.params?.inputResponses).toBeUndefined();
-        expect(calls[1]?.message?.params?.requestState).toBeUndefined();
-      } finally {
-        target.stop(true);
-      }
-    },
-    30_000,
-  );
-
   test("Streamable HTTP 2025-06-18 does not interpret the 2025-11 URL-required error", async () => {
     streamable = startLegacyStreamableHttpFixture("2025-06-18", {
       mode: "url_required_error",
@@ -732,131 +597,6 @@ describe("version-scoped legacy MCP remote transports", () => {
       "MCP server 'fixture' needs a login. Ask the user to run fx mcp login fixture in a terminal, then try again.",
     );
   }, 30_000);
-
-  for (const version of VERSIONS) {
-    test.skipIf(!tmuxAvailable())(
-      `TUI cancellation sends ${version} cancellation headers and quits without a session DELETE`,
-      async () => {
-        streamable = startLegacyStreamableHttpFixture(version, {
-          mode: "stall_call",
-        });
-        const root = createRoot(
-          `cancel-http-${version}`,
-          "http",
-          streamable.url,
-          30_000,
-        );
-        gateway = startToolGateway("Cancelled legacy HTTP complete.");
-        tui = await TmuxSession.create({
-          isolated: true,
-          cwd: root.workspace,
-          width: 100,
-          height: 30,
-          env: fixtureEnv(root, gateway),
-        });
-
-        await tui.waitForComposer(15_000);
-        await tui.sendText("Call the stalled legacy HTTP fixture.");
-        const callDeadline = Date.now() + 15_000;
-        while (
-          !streamable.requests.some(
-            (entry) => entry.message?.method === "tools/call",
-          ) &&
-          Date.now() < callDeadline
-        ) {
-          await Bun.sleep(25);
-        }
-        expect(
-          streamable.requests.some(
-            (entry) => entry.message?.method === "tools/call",
-          ),
-        ).toBe(true);
-
-        await tui.sendInterruptEscapePair(10_000);
-        await tui.waitForText(`Cancelled ${TOOL_NAME}`, 10_000);
-        const cancelDeadline = Date.now() + 5_000;
-        while (
-          (streamable.cancellationNotifications === 0 ||
-            streamable.cancelledCalls === 0) &&
-          Date.now() < cancelDeadline
-        ) {
-          await Bun.sleep(25);
-        }
-        const cancellation = streamable.requests.find(
-          (entry) => entry.message?.method === "notifications/cancelled",
-        )!;
-        expect(cancellation.headers["mcp-session-id"]).toBe(
-          `session-${version}`,
-        );
-        // Every later request names the agreed version, 2025-03-26 too.
-        expect(cancellation.headers["mcp-protocol-version"]).toBe(version);
-        expect(streamable.cancellationNotifications).toBe(1);
-        expect(streamable.cancelledCalls).toBe(1);
-
-        await tui.waitForComposer(10_000);
-        await tui.sendText("/quit");
-        await tui.waitForSessionEnd(10_000);
-        tui = null;
-        // Exit leaves the session for the server to expire rather than
-        // holding the prompt for a DELETE round trip.
-        expect(streamable.deleteCalls).toBe(0);
-      },
-      40_000,
-    );
-  }
-
-  test.skipIf(!tmuxAvailable())(
-    "/mcp remove ends a 2025 session with a DELETE, and fx keeps running",
-    async () => {
-      // The removal reloads fx's MCP host, which closes the old host's
-      // servers; a 2025 session waits there for its DELETE.
-      const version = "2025-06-18";
-      streamable = startLegacyStreamableHttpFixture(version);
-      const root = createRoot("remove-http", "http", streamable.url);
-      gateway = startFakeGateway([]);
-      tui = await TmuxSession.create({
-        isolated: true,
-        cwd: root.workspace,
-        width: 100,
-        height: 30,
-        env: { ...fixtureEnv(root, gateway) },
-      });
-
-      await tui.waitForComposer(15_000);
-      const listDeadline = Date.now() + 15_000;
-      while (
-        !streamable.requests.some(
-          (entry) => entry.message?.method === "tools/list",
-        ) &&
-        Date.now() < listDeadline
-      ) {
-        await Bun.sleep(25);
-      }
-      expect(
-        streamable.requests.some(
-          (entry) => entry.message?.method === "tools/list",
-        ),
-      ).toBe(true);
-
-      await tui.sendText("/mcp remove fixture");
-      await tui.waitForText("Removed fixture from ~/.fx/mcp.json.", 10_000);
-      const deleteDeadline = Date.now() + 10_000;
-      while (streamable.deleteCalls === 0 && Date.now() < deleteDeadline) {
-        await Bun.sleep(25);
-      }
-      expect(streamable.deleteCalls).toBe(1);
-      const deleted = streamable.requests.find(
-        (entry) => entry.httpMethod === "DELETE",
-      )!;
-      expect(deleted.headers["mcp-session-id"]).toBe(`session-${version}`);
-
-      // fx is still running: the next command answers.
-      await tui.waitForComposer(10_000);
-      await tui.sendText("/mcp list");
-      await tui.waitForText("No MCP servers configured.", 10_000);
-    },
-    40_000,
-  );
 
   // The server's own 5 s startup timeout ends the wait.
   test(

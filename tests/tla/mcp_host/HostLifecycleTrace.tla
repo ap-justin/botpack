@@ -1,6 +1,6 @@
 ---- MODULE HostLifecycleTrace ----
 \* Trace wrapper for HostLifecycle.tla. trace.ts generates TraceObs from
-\* what the harness saw of a real fx shell (tests/tla/drivers/mcp_host/):
+\* records of a host and its fixture servers (tests/tla/drivers/mcp_host/models.test.ts):
 \*   spawn {server}    the fixture server started (its pid log)
 \*   ready {server}    it answered tools/list
 \*   stop {server}     it exited at stdin's end

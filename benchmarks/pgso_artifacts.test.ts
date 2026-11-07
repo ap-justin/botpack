@@ -3,7 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
-import { FAKE_GATEWAY_MODEL, fakeGatewayFinalText, fakeGatewaySse, startFakeGateway } from "../tests/e2e/tmux-helpers";
+import { FAKE_GATEWAY_MODEL, fakeGatewayFinalText, fakeGatewaySse, startFakeGateway } from "../tests/e2e/fake-gateway";
 
 type CommandResult = { pid: number | null; code: number | null; stdout: string; stderr: string; elapsedMs: number; failure: string | null };
 type CommandOptions = { cwd: string; env: Record<string, string>; timeoutMs?: number; captureLimit?: number };

@@ -7,7 +7,6 @@
 //   4. the edge table agrees with the model, and a doctored one does not;
 //   5. the oracle agrees with TLC on the edge table, random cases, and
 //      random listings, and every planted oracle bug is caught;
-//   6. the built binary's Models and skills menus against the model;
 //   7. the engine: the edge table, random cases against the oracle and TLC,
 //      random listings built by its `Ranking` and `Filter` against the
 //      oracle and TLC, the laws on its own answers, the stress budgets, and
@@ -17,12 +16,10 @@
 //
 // Settings: FX_FUZZY_SEED (default 20261028), FX_FUZZY_RANDOM (random cases,
 // default 1500), FX_FUZZY_DIFFERENTIAL (engine against oracle, default
-// 20000), FX_BIN (the binary), FX_TLA_OUT (where the report goes).
+// 20000), FX_TLA_OUT (where the report goes).
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { binary } from "../lib/context.ts";
 import { REPO_ROOT, outDir, writeJson } from "../lib/tlc.ts";
-import { binaryStage } from "./binary.ts";
 import { edgeCases, randomCases } from "./cases.ts";
 import { buildHarness, codeMutations, edgeThroughEngine, lawsOnEngine, listingsThroughEngine, randomThroughEngine, stress } from "./engine.ts";
 import { MODEL_DIR, PINNED_TLC_VERSION, SPEC_DIR, checkTlc, configInfo, engineExists, pinnedToolchain, specFiles } from "./lib.ts";
@@ -47,15 +44,11 @@ function stage(name: string, ok: boolean, summary: string) {
 // through what its listing needs, `Ranking` for ranked surfaces (R10) and
 // `Filter` for filtered ones (R11), and none may keep a matcher it replaced.
 const CALLERS = [
-  { file: "src/core/app/model_cache_runtime.zig", uses: ["fuzzy_match.Ranking("], gone: ["fn matchModelQuery(", "fn containsAlphanumericRun(", "fn containsWordStartSubsequence(", "ranked_model_matches"] },
-  { file: "src/core/session/session_commands.zig", uses: ["fuzzy_match.Ranking("], gone: ["fuzzyModelScore(id, query)"] },
   { file: "src/core/slash_commands/command_specs.zig", uses: ["fuzzy_match.Ranking(", "fuzzy_match.Filter("], gone: ["fn completionCommandMatchRank(", "fn bestCompletionCommandMatch(", "fn containsIgnoreCase(", "fn helpCatalogSpecMatches(", "fn runtimeArgMatches("] },
   { file: "src/core/skills/skill_runtime.zig", uses: ["fuzzy_match.Ranking("], gone: ["fn skillMatchRank(", "fn asciiContainsIgnoreCase("] },
   { file: "src/core/session/session_catalog.zig", uses: ["fuzzy_match.Filter("], gone: ["containsIgnoreCase(displayTitle(summary)", "fn pickerLists(", "fn sessionMatchesQuery("] },
   { file: "src/core/mcp_host/menu.zig", uses: ["fuzzy_match.Filter("], gone: ["pub fn matches(name: []const u8, filter: []const u8) bool", "std.ascii.findIgnoreCase(name, filter)", "fn serverMatches(", "fn toolMatches("] },
-  { file: "src/core/config/settings_catalog.zig", uses: ["fuzzy_match.Filter("], gone: ["fn tokenMatches(", "std.ascii.findIgnoreCase(spec.label", "fn matchesQuery("] },
   { file: "src/core/input/picker_state.zig", uses: ["fuzzy_match.Filter("], gone: ["text_utils.containsIgnoreCase(option", "text_utils.containsIgnoreCase(labels[i]", "fn labelMatches("] },
-  { file: "src/core/app/input_completion_runtime.zig", uses: ["fuzzy_match.Filter("], gone: ["text_utils.containsIgnoreCase(effort.displayLabel()"] },
   { file: "src/core/auth/auth_runtime.zig", uses: ["fuzzy_match.Filter("], gone: ["text_utils.containsIgnoreCase(team.name", "fn teamMatchesQuery("] },
 ];
 
@@ -105,17 +98,6 @@ try {
   for (const bug of oracleBugs) if (!bug.caught) console.log(`  MISSED ${bug.id}: ${bug.detail}`);
   stage("oracle", real.handMismatches.length === 0 && real.tlcMismatches === 0 && real.listingMismatches === 0 && oracleBugs.every((b) => b.caught),
     `${edge.length + random.length} cases and ${real.listings} listings agree with TLC; ${oracleBugs.filter((b) => b.caught).length} of ${oracleBugs.length} planted bugs caught, ${elapsed(at)}`);
-
-  // 6.
-  at = performance.now();
-  if (!existsSync(binary)) {
-    stage("binary", false, `missing ${binary}; run zig build first or set FX_BIN`);
-  } else {
-    const run = await binaryStage(join(out, "binary"));
-    report.binary = run;
-    for (const bad of run.bad) console.log(`  ${bad.surface} ${JSON.stringify(bad.query)}: shows ${bad.shown.join(", ") || "nothing"}; the model lists ${bad.model.join(", ") || "nothing"}`);
-    stage("binary", run.ok, `${run.observations} menu states of ${binary} list exactly what the model lists, ${elapsed(at)}`);
-  }
 
   // 7.
   if (!engineExists()) {

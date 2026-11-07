@@ -11,10 +11,8 @@ Pick the lowest layer that proves the behavior, and extend the closest existing 
 | What you are proving | Where it goes |
 | --- | --- |
 | A parser, policy, reducer, formatter, or state transition | An inline `test` block in the owning `src/` file |
-| Terminal cells, wrapping, cursor, scroll, or resize | `src/ui/resize_tests.zig` or a VT test in the owning UI file |
-| CLI, ACP, or TUI behavior of the built binary | A root `tests/e2e/*.test.ts` file; terminal flows use `tui-*.test.ts` |
+| CLI or ACP behavior of the built binary | A root `tests/e2e/*.test.ts` file |
 | fx against the official MCP client conformance suite | `tests/e2e/conformance/`, an isolated npm project |
-| Evidence tooling for terminal rendering bugs | `tests/e2e/render-lab/` |
 | Task quality or tool choice with real models | `tests/evals/` |
 | Saved inputs for a fuzz test | `tests/fuzz/corpus/<target>/`, with the target listed in `tests/fuzz/targets.json` |
 | A protocol or crash-safety design, checked with TLC | A folder under `tests/tla/` named after the module it models |
@@ -27,10 +25,9 @@ Pick the lowest layer that proves the behavior, and extend the closest existing 
 tests/
 ├── e2e/                   deterministic runtime tests, run on every pull request
 │   ├── *.test.ts          one file per feature area, all at this level
-│   ├── *.ts               shared helpers, such as tmux-helpers.ts and tui-render-assertions.ts
+│   ├── *.ts               shared helpers, such as fake-gateway.ts
 │   ├── fixtures/          fake servers, MCP servers, and recorded captures
-│   ├── conformance/       MCP conformance package, run with npm
-│   └── render-lab/        rendering evidence tool
+│   └── conformance/       MCP conformance package, run with npm
 ├── evals/                 model-backed evals, run only on request
 ├── fixtures/
 │   └── v1-sessions/       sessions the v0.0.14 release saved, which the converter's tests copy;
@@ -54,10 +51,8 @@ Only files that end in `.test.ts` at the root of `tests/e2e/` are E2E tests. CI 
 
 - Build first with `zig build`. Tests run `zig-out/bin/fx` through `FX_BIN` from `tests/evals/eval-helpers.ts`, never an installed `fx`.
 - Give every test its own profile with `createIsolatedTestHome()` and remove it with `cleanupIsolatedTestHome()`. A test must never read or write the developer's `~/.fx`.
-- Keep the network local. Point fx at a fake model server with `startFakeGateway()` or `startDynamicFakeGateway()` from `tmux-helpers.ts`, or the builders in `fixtures/chat-completions.ts`. `TmuxSession` clears credentials and the `FX_TEST_*` overrides from the inherited environment.
-- Wait for state the user can see: `TmuxSession.waitForText()`, `waitForStableGrid()`, `waitForComposer()`, or `waitForSessionEnd()`. A fixed sleep can pace input, but it does not prove the state you assert next.
-- Skip, do not fail, a terminal test when tmux is missing: `test.skipIf(!tmuxAvailable())`.
-- A new test must not play sound. `TmuxSession` and the fixtures set `FX_SOUND=0`; set it yourself when you spawn fx another way. Sound playback is covered only by `notifications.test.ts` and the `/sound on` test in `tui-command-permissions.test.ts`, so keep sound coverage there. The repository `AGENTS.md` explains how to run them locally.
+- Keep the network local. Point fx at a fake model server with `startFakeGateway()` or `startDynamicFakeGateway()` from `fake-gateway.ts`, or the builders in `fixtures/chat-completions.ts`.
+- A new test must not play sound. Set `FX_SOUND=0` when you spawn fx.
 - Fixtures are public. Use `/Users/example/` for home paths and never commit credentials. `scripts/check-public-surface.sh` rejects personal paths, real team IDs, and internal or personal project slugs.
 
 ## Wire an E2E file into CI

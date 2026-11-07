@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { fakeGatewayFinalText, fakeGatewayToolCall, startFakeGateway } from "../tests/e2e/tmux-helpers";
+import { fakeGatewayFinalText, fakeGatewayToolCall, startFakeGateway } from "../tests/e2e/fake-gateway";
 
 test("signed macOS variants preserve the image flow and native resource accounting", async () => {
   const root = process.env.FX_SIGNED_COMPARE_DIR;
