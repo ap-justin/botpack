@@ -3080,7 +3080,7 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
         }
     }
 
-    // The model catalog needs a credential; it loads after authentication.
+    // The model catalog needs a credential, so initialize skips it while auth is pending.
     if (!state.cfg.minimal_kernel and !state.auth_pending) {
         const startup_catalog = catalogProviderFor(state, state.provider) orelse
             return state.writer.writeError(alloc, msg.id, .{
