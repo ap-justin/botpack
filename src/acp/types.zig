@@ -647,7 +647,7 @@ test "initialize response lists the terminal auth method" {
     const alloc = std.testing.allocator;
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
-    try writeInitializeResponse(&out.writer, .{});
+    try writeInitializeResponse(&out.writer, .{ .image_prompts = false });
     const parsed = try std.json.parseFromSlice(std.json.Value, alloc, out.writer.buffered(), .{});
     defer parsed.deinit();
     const methods = parsed.value.object.get("authMethods").?.array.items;

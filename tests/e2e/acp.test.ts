@@ -1554,6 +1554,71 @@ describe("acp: model-independent", () => {
   );
 
   test(
+    "ACP initialize succeeds without a credential and session/new answers AUTH_REQUIRED",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-auth-required-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: {
+            ...fakeGatewayEnv(root, gateway),
+            AI_GATEWAY_API_KEY: undefined,
+            VERCEL_OIDC_TOKEN: undefined,
+          },
+        });
+        const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+        expect(initialized.error).toBeUndefined();
+        const methods = initialized.result.authMethods;
+        expect(methods).toHaveLength(1);
+        expect(methods[0].type).toBe("terminal");
+        expect(methods[0].args).toEqual(["login", "vercel", "--api-key"]);
+
+        const created = await client.request("session/new", { mcpServers: [] }, 2) as any;
+        expect(created.error.code).toBe(-32000);
+        expect(created.error.data.authMethods).toEqual(methods);
+
+        const wrong = await client.request("authenticate", { methodId: "nope" }, 3) as any;
+        expect(wrong.error.code).toBe(-32602);
+        const retry = await client.request("authenticate", { methodId: methods[0].id }, 4) as any;
+        expect(retry.error.code).toBe(-32000);
+        expect(retry.error.data.authMethods).toEqual(methods);
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP session/new proceeds when a credential is present",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-auth-present-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: { ...fakeGatewayEnv(root, gateway), AI_GATEWAY_API_KEY: "dummy" },
+        });
+        const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+        const methodId = initialized.result.authMethods[0].id;
+        const created = await client.request("session/new", { mcpServers: [] }, 2) as any;
+        expect(created.error).toBeUndefined();
+        expect(typeof created.result.sessionId).toBe("string");
+        const authed = await client.request("authenticate", { methodId }, 3) as any;
+        expect(authed.error).toBeUndefined();
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "ACP session adopts a generated title from the first prompt",
     async () => {
       const root = createIsolatedRoot("fx-acp-session-title-");
@@ -8042,7 +8107,7 @@ describe("acp: model-independent", () => {
   );
 
   test(
-    "missing API key returns JSON-RPC error on initialize",
+    "missing API key returns AUTH_REQUIRED on session/new",
     async () => {
       const root = createIsolatedRoot("fx-acp-missing-auth-");
       try {
@@ -8055,8 +8120,10 @@ describe("acp: model-independent", () => {
             FX_DISABLE_KEYCHAIN: "1",
           },
         });
-        const resp = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-        expect(resp.error).toBeDefined();
+        const init = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+        expect(init.error).toBeUndefined();
+        const resp = await client.request("session/new", { mcpServers: [] }, 2) as any;
+        expect(resp.error.code).toBe(-32000);
         expect(resp.error.message).toContain("fx login");
         expect(resp.error.message).toContain("fx login vercel --api-key");
         expect(resp.error.message).not.toContain("fx setup");
@@ -10157,8 +10224,10 @@ describe("acp: model catalog authentication", () => {
           });
           const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
           if (scenario.expectInitializeFailure) {
-            expect(initialized.error).toBeDefined();
-            expect(initialized.error.message).toContain("fx login");
+            expect(initialized.error).toBeUndefined();
+            const rejected = await client.request("session/new", {}, 2) as any;
+            expect(rejected.error.code).toBe(-32000);
+            expect(rejected.error.message).toContain("fx login");
             expect(gateway.modelRequests).toHaveLength(0);
             return;
           }

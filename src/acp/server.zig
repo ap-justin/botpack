@@ -1587,7 +1587,12 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
 fn writeAuthRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId) !void {
     return state.writer.writeError(alloc, id, .{
         .code = ErrorCode.auth_required,
-        .message = "Authentication required",
+        .message = if (state.provider == .codex)
+            credentials.missing_chatgpt_credential_message
+        else if (state.provider == .grok)
+            credentials.missing_grok_credential_message
+        else
+            credentials.missing_credential_message,
         .data_json = acp_types.auth_required_data_json,
     });
 }
