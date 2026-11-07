@@ -1368,8 +1368,7 @@ pub const ModelCallOutcome = enum { completed, failed, cancelled };
 /// to the model. A turn's records sit at a tool step boundary, as context
 /// notes do: the calls made for step `after_tool_step_count`, which a
 /// replay places with that step: failed attempts before its text, the call
-/// that wrote it after (`tests/tla/full_detail/FullDetailOrder.tla`
-/// ReplayMatchesSaved). Strings come from the provider and are checked
+/// that wrote it after. Strings come from the provider and are checked
 /// before they are saved or shown (`validModelCallText`).
 pub const ModelCallRecord = struct {
     /// When the call settled, in Unix milliseconds.

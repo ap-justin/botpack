@@ -48,7 +48,6 @@ const CALLERS = [
   { file: "src/core/skills/skill_runtime.zig", uses: ["fuzzy_match.Ranking("], gone: ["fn skillMatchRank(", "fn asciiContainsIgnoreCase("] },
   { file: "src/core/session/session_catalog.zig", uses: ["fuzzy_match.Filter("], gone: ["containsIgnoreCase(displayTitle(summary)", "fn pickerLists(", "fn sessionMatchesQuery("] },
   { file: "src/core/mcp_host/menu.zig", uses: ["fuzzy_match.Filter("], gone: ["pub fn matches(name: []const u8, filter: []const u8) bool", "std.ascii.findIgnoreCase(name, filter)", "fn serverMatches(", "fn toolMatches("] },
-  { file: "src/core/input/picker_state.zig", uses: ["fuzzy_match.Filter("], gone: ["text_utils.containsIgnoreCase(option", "text_utils.containsIgnoreCase(labels[i]", "fn labelMatches("] },
   { file: "src/core/auth/auth_runtime.zig", uses: ["fuzzy_match.Filter("], gone: ["text_utils.containsIgnoreCase(team.name", "fn teamMatchesQuery("] },
 ];
 

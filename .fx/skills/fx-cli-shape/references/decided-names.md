@@ -46,7 +46,6 @@ Names the maintainers already settled. Reuse them; don't add another spelling. "
 | Experiments | `experimental.<name>`; none today |
 | Home | `FX_HOME` (default `~/.fx`) |
 | Test hooks | `FX_TEST_*` |
-| Release channel | `update_channel`; `fx upgrade --channel <name>` saves it, the way a setter command does |
 | Save a default model | `/model` in a session saves it to the profile. `fx config set` refuses the model keys and points there |
 | User aliases | `alias.<name>` (planned); there is no `/alias` command until then |
 
@@ -54,7 +53,7 @@ Names the maintainers already settled. Reuse them; don't add another spelling. "
 
 | Concept | Name |
 |---|---|
-| Sign in, including pasting an AI Gateway key | `fx login [vercel\|codex\|grok]` |
+| Sign in, including pasting an AI Gateway key | `fx login [vercel]` |
 | Paste an AI Gateway API key | `fx login vercel --api-key`; in a session, `/login` offers sign-in or an API key. `fx setup` and `/setup` warn, stop working in fx 0.0.18, and are hidden from help |
 | Choose the active provider | `fx provider <name>`, `/provider` |
 

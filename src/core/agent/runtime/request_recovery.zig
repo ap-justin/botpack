@@ -21,7 +21,7 @@
 //! write before that send (`sendRecord`), so a turn's first write carries it;
 //! a completed response clears it in the write that saves the response
 //! (`responseRecord`); any other save is written at once. A launch reads the
-//! newest one to resume the request (`tests/tla/recovery/Resume.tla`). Every
+//! newest one to resume the request. Every
 //! request that keeps a record registers for `closeActive`, which SIGHUP and
 //! SIGTERM call from the closer thread, and a terminal that hangs up calls
 //! from the main thread. One fx process runs main, its subagents and other
@@ -175,8 +175,7 @@ pub const RequestRecovery = struct {
 
     /// The record for the write that saves a response: a complete response
     /// clears it there, before its pieces reach the turn, so a death after
-    /// that is not a death with a send in flight
-    /// (`tests/tla/recovery/Resume.tla` NoFalseCrashQuestion).
+    /// that is not a death with a send in flight.
     pub fn responseRecord(self: *RequestRecovery, complete: bool) types.RecoveryRecordWrite {
         const io = io_mod.getIo();
         self.mutex.lockUncancelable(io);
@@ -197,8 +196,7 @@ pub const RequestRecovery = struct {
 
     /// SIGHUP, SIGTERM, or a terminal that hangs up: delivers `closing` to
     /// every registered request and writes the clean record each returns, so
-    /// the next launch resumes them without counting a death
-    /// (`tests/tla/recovery/Resume.tla` NoFalseCrashQuestion). Main, its
+    /// the next launch resumes them without counting a death. Main, its
     /// subagents and other instances can each have a request in flight.
     /// Waits at most `close_wait_ms` for each lock. Returns how many records
     /// were written.

@@ -4022,8 +4022,7 @@ fn persistFinalReplyCheckpoint(
 
 /// A checkpoint `persistFinalReplyCheckpoint` saved holds the reply its turn
 /// was ending with. Recovery delivers it as the turn's reply instead of
-/// asking the model again (`tests/tla/durable/Resumption.tla`
-/// `SavedAnswerNotRequested`).
+/// asking the model again.
 fn deliversSavedResponse(checkpoint: session_codec.RecoveryCheckpoint) bool {
     return checkpoint.action == .delivering_response and
         checkpoint.tool_state == .none and
@@ -7287,8 +7286,7 @@ fn processQueuedPromptLoop(
         if (try request_recovery.start(route_fast_mode, resumed) == null) {
             // The module asks before resending a resumed request. The turn
             // reaches the log now, with the question's record, so Esc ends
-            // it and a relaunch asks again
-            // (`tests/tla/recovery/Resume.tla` CancelNeverResumes).
+            // it and a relaunch asks again.
             try persistRecoveryCheckpoint(
                 deps,
                 finalization,

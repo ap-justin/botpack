@@ -46,7 +46,7 @@ pub const TurnProgress = struct {
     /// leaves what fx already showed (D51).
     running_assistant: ?[]const u8 = null,
     /// The recovery module's record for the send this write goes before,
-    /// saved in the same write (`tests/tla/recovery/Resume.tla`).
+    /// saved in the same write.
     recovery_record: types.RecoveryRecordWrite = .keep,
 };
 
