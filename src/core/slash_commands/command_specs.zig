@@ -16,7 +16,6 @@ pub const TopLevelKind = enum {
     status,
     permissions,
     mcp,
-    slack,
     models,
     provider,
     doctor,
@@ -61,7 +60,7 @@ pub const SubcommandDoc = struct {
     /// key, which completion offers.
     usage: []const u8,
     description: []const u8,
-    /// Words that may follow this one, such as `install` after `slack`.
+    /// Words that may follow this one, such as `add` after `mcp`.
     subcommands: []const SubcommandDoc = &.{},
     /// The flags this word takes. Completion offers these, not the
     /// command's, after the word.
@@ -816,25 +815,3 @@ test "top-level help lines fit representative terminal widths" {
         try expectAllLinesFit(text, width);
     }
 }
-
-pub const slack_options = [_]OptionDoc{.{ .flag = "--json", .description = "Emit installation metadata without credentials" }};
-
-pub const slack_install_spec: TopLevelSpec = .{
-    .kind = .slack,
-    .token = "slack",
-    .usage = "slack <install|status|refresh> [--json]",
-    .summary = "Install and manage the workspace Slack bot locally",
-    .subcommands = &.{
-        .{ .usage = "install", .description = "Authorize the bot through fx.sh and save its credentials", .options = &slack_options },
-        .{ .usage = "status", .description = "Show the local installation", .options = &slack_options },
-        .{ .usage = "refresh", .description = "Renew the bot's tokens without the browser", .options = &slack_options },
-    },
-    .options = &slack_options,
-    .details = &.{
-        "install opens Slack authorization through fx.sh and saves the bot credentials on this computer.",
-        "status shows local installation metadata; refresh renews tokens without browser authorization.",
-        "This is a workspace bot installer. Employee MCP login remains fx mcp login NAME.",
-        "Credentials are saved in ~/.fx/slack/installation.json with owner-only permissions.",
-        "Refresh runs only when requested; no background service is installed.",
-    },
-};

@@ -83,7 +83,6 @@
     {"name": "e2e-permission-errors", "argv": ["bun", "test", "--max-concurrency", "1", "./permission-errors.test.ts"], "test_file": "permission-errors.test.ts"}
   ],
   "verification_scenarios": [
-    {"name": "verify-slack-install", "argv": ["bun", "test", "--max-concurrency", "1", "./slack-install.test.ts"], "test_file": "slack-install.test.ts", "requires_tmux": false},
     {"name": "verify-auto-mode-reliability", "argv": ["bun", "test", "--max-concurrency", "1", "./auto-mode-reliability.test.ts"], "test_file": "auto-mode-reliability.test.ts"},
     {"name": "verify-sessions", "argv": ["bun", "test", "--max-concurrency", "1", "./sessions.test.ts"], "test_file": "sessions.test.ts"},
     {"name": "verify-review-model-override", "argv": ["bun", "test", "--max-concurrency", "1", "./review-model-override.test.ts"], "test_file": "review-model-override.test.ts", "requires_tmux": false},

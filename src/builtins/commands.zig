@@ -93,13 +93,9 @@ pub const acp_options = agentRunOptions("sessions this server starts", .without_
 
 pub const acp_usage = "acp " ++ agent_run_usage_base ++ " [--log-file <path>]";
 
-pub const pr_options = agentRunOptions("this request", .with_provider_order) ++ [_]command_specs.OptionDoc{
-    .{ .flag = "--create", .description = "Publish the drafted pull request via the GitHub CLI" },
-};
+pub const pr_options = agentRunOptions("this request", .with_provider_order);
 
-const issue_options = agentRunOptions("this request", .with_provider_order) ++ [_]command_specs.OptionDoc{
-    .{ .flag = "--create", .description = "Publish the drafted issue via the GitHub CLI" },
-};
+const issue_options = agentRunOptions("this request", .with_provider_order);
 
 /// `fx mcp list` options; `fx mcp --help` shows them in its usage line.
 const mcp_subcommands = [_]command_specs.SubcommandDoc{
@@ -240,18 +236,18 @@ pub const top_level_specs = [_]TopLevelSpec{
     .{
         .kind = .pr,
         .token = "pr",
-        .usage = "pr " ++ agent_run_usage ++ " [--create] [--] [context]",
-        .summary = "Draft or publish a pull request",
+        .usage = "pr " ++ agent_run_usage ++ " [--] [context]",
+        .summary = "Draft a pull request",
         .options = &pr_options,
         .details = &.{
-            "Must run inside a git repository. Without --create, the drafted PR is printed only.",
+            "Must run inside a git repository. The drafted PR is printed only.",
         },
     },
     .{
         .kind = .issue,
         .token = "issue",
-        .usage = "issue " ++ agent_run_usage ++ " [--create] [--] [context]",
-        .summary = "Draft or publish a GitHub issue",
+        .usage = "issue " ++ agent_run_usage ++ " [--] [context]",
+        .summary = "Draft a GitHub issue",
         .options = &issue_options,
     },
     .{
@@ -417,7 +413,6 @@ pub const top_level_specs = [_]TopLevelSpec{
             "schema prints a JSON Schema that editors use to complete and check ~/.fx/settings.json, and --project prints the one for .fx.json. A file whose \"$schema\" names https://fx.sh/schemas/settings.json or https://fx.sh/schemas/fx.json gets the same check.",
         },
     },
-    command_specs.slack_install_spec,
 };
 
 pub const top_level_help_default_width = command_specs.top_level_help_default_width;
@@ -453,7 +448,6 @@ pub const top_level_help_groups = [_]TopLevelHelpGroup{
         .{ .kind = .status, .usage = "status" },
         .{ .kind = .doctor, .usage = "doctor" },
         .{ .kind = .mcp, .usage = "mcp <command> ..." },
-        .{ .kind = .slack, .usage = "slack <install|status|refresh>" },
         .{ .kind = .permissions, .usage = "permissions" },
         .{ .kind = .workspace, .usage = "workspace" },
         .{ .kind = .config, .usage = "config" },
