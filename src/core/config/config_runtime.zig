@@ -4814,8 +4814,6 @@ test "selectProviderModel accepts the run model when the provider has none saved
     // --provider gateway with FX_MODEL from a Gateway-only profile.
     const gateway_only = Settings{ .provider = .gateway };
 
-    // A saved model remains the persisted preference; FX_MODEL applies on top of it later.
-
     // Gateway keeps its compiled default as the persisted preference.
     const gateway = try selectProviderModel("default/model", &gateway_only, null, "gpt-env");
     try std.testing.expectEqualStrings("default/model", gateway.model);

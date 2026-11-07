@@ -452,10 +452,10 @@ pub const launch_wide_options = [_]command_specs.OptionDoc{
     .{ .flag = "--no-additional-dirs", .description = "" },
 };
 
-/// The flags `fx` reads before a command, in the
-/// form the shared flag parser reads. `top_level_flags` documents them in
-/// `fx --help`, and a test checks that the two lists match. The usage line
-/// after a launch-flag mistake is built from this list.
+/// The flags `fx` reads before a command, in the form the shared flag parser
+/// reads. `top_level_flags` documents them in `fx --help`, and a test checks
+/// that the two lists match. The usage line after a launch-flag mistake is
+/// built from this list.
 pub const launch_options = launch_wide_options ++ [_]command_specs.OptionDoc{
     .{ .flag = "--provider <name>", .description = "", .values = &builtin_providers },
     .{ .flag = "--provider-order <a,b,...>", .description = "" },

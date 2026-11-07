@@ -21,11 +21,11 @@
 //! write before that send (`sendRecord`), so a turn's first write carries it;
 //! a completed response clears it in the write that saves the response
 //! (`responseRecord`); any other save is written at once. A launch reads the
-//! newest one to resume the request. Every
-//! request that keeps a record registers for `closeActive`, which SIGHUP and
-//! SIGTERM call from the closer thread, and a terminal that hangs up calls
-//! from the main thread. One fx process runs main, its subagents and other
-//! instances, and each can have a request in flight.
+//! newest one to resume the request. Every request that keeps a record
+//! registers for `closeActive`, which SIGHUP and SIGTERM call from the closer
+//! thread, and a terminal that hangs up calls from the main thread. One fx
+//! process runs main, its subagents and other instances, and each can have a
+//! request in flight.
 //!
 //! The module retries every transient failure for as long as it lasts, and fx
 //! adds no limit of its own: only Esc ends a request whose failures keep
