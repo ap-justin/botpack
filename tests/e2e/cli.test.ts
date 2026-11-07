@@ -1479,41 +1479,7 @@ describe("cli: status", () => {
       expect(json).toHaveProperty("permission_mode");
       expect(json).toHaveProperty("history_turns");
       expect(json).toHaveProperty("agent_step_limit");
-      expect(json.update_channel).toBe("stable");
-      expect(json.build_channel).toBe("stable");
       expect(json.build_revision).toMatch(/^[0-9a-f]{12}$/);
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "fx status reports a persisted dev update channel",
-    async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-update-channel-"));
-      try {
-        const home = join(root, "home");
-        const workspace = join(root, "workspace");
-        mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
-        mkdirSync(workspace);
-        writeFileSync(
-          join(home, ".fx", "settings.json"),
-          '{"update_channel":"dev"}\n',
-          { mode: 0o600 },
-        );
-
-        const result = await runFx(["status", "--json"], {
-          cwd: realpathSync(workspace),
-          env: { ...NO_GATEWAY_AUTH, HOME: home },
-        });
-        expect(result.code).toBe(0);
-        expect(JSON.parse(result.stdout.trim())).toMatchObject({
-          kind: "status",
-          update_channel: "dev",
-          build_channel: "stable",
-        });
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
     },
     TIMEOUT,
   );
@@ -1558,17 +1524,6 @@ describe("cli: status", () => {
   );
 
   test(
-    "fx upgrade help documents release channels",
-    async () => {
-      const result = await runFx(["upgrade", "--help"]);
-      expect(result.code).toBe(0);
-      expect(result.stdout).toContain("--channel <stable|dev>");
-      expect(result.stdout).toContain("Select and remember the release channel");
-    },
-    TIMEOUT,
-  );
-
-  test(
     "fx mcp list reports bad arguments as JSON when --json is given",
     async () => {
       const home = mkdtempSync(join(tmpdir(), "fx-mcp-list-json-"));
@@ -1591,28 +1546,6 @@ describe("cli: status", () => {
         expect(text.code).toBe(2);
         expect(text.stdout).toBe("");
         expect(text.stderr).toStartWith("fx mcp list: unknown flag --bogus\nusage: fx mcp list");
-      } finally {
-        rmSync(home, { recursive: true, force: true });
-      }
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "fx upgrade names a channel that does not exist and saves nothing",
-    async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-upgrade-channel-"));
-      try {
-        for (const args of [["upgrade", "--channel=nightly"], ["upgrade", "--channel", "nightly"]]) {
-          const result = await runFx(args, { env: { HOME: home } });
-          expect(result.code).toBe(2);
-          expect(result.stdout).toBe("");
-          expect(result.stderr).toStartWith("fx upgrade: invalid value for --channel: nightly\nusage: fx upgrade");
-        }
-        const json = await runFx(["upgrade", "--json", "--channel=nightly"], { env: { HOME: home } });
-        expect(json.code).toBe(2);
-        expect(JSON.parse(json.stdout)).toEqual({ kind: "upgrade", error: "invalid arguments", code: "InvalidUpgradeArgs" });
-        expect(existsSync(join(home, ".fx", "settings.json"))).toBe(false);
       } finally {
         rmSync(home, { recursive: true, force: true });
       }

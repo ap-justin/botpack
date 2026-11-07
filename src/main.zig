@@ -28,15 +28,12 @@ const host_target = @import("core/hosts/target.zig");
 const native_host = @import("core/hosts/native.zig");
 const cli_surface = @import("core/cli/cli_surface.zig");
 const command_runner = @import("core/execution/command_runner.zig");
-const update_target = @import("core/upgrade/update_target.zig");
 const shell_process_provider = @import("tools/shell/process_provider.zig");
 const process_provider = @import("core/execution/process_provider.zig");
 const terminal_native_session = @import("core/terminal/native_session.zig");
 const builtin_tools = @import("builtins/tools.zig");
 const url_opener = @import("core/hosts/url_opener.zig");
 
-const compiled_update_channel = update_target.Channel.parse(build_options.update_channel) orelse
-    @compileError("invalid compiled update channel");
 const Allocator = std.mem.Allocator;
 const RawEnviron = io_mod.RawEnviron;
 const default_max_agent_steps: usize = agent_steps.default_max_agent_steps;
@@ -444,8 +441,6 @@ fn needsEarlyThreadedIo(args: []const [:0]const u8) bool {
         std.mem.eql(u8, command, "teams") or
         std.mem.eql(u8, command, "provider") or
         std.mem.eql(u8, command, "setup") or
-        std.mem.eql(u8, command, "upgrade") or
-        std.mem.eql(u8, command, "update") or
         // Resolve a stored credential, which reads the platform key store out of process.
         std.mem.eql(u8, command, "status") or
         std.mem.eql(u8, command, "doctor") or
@@ -454,19 +449,6 @@ fn needsEarlyThreadedIo(args: []const [:0]const u8) bool {
         std.mem.eql(u8, command, "balance") or
         // Reads AI Gateway usage reports over HTTP with a deadline.
         std.mem.eql(u8, command, "usage");
-}
-
-test "auth and upgrade commands use early threaded io without full entry config" {
-    const args = &.{@as([:0]const u8, "upgrade")};
-    try std.testing.expect(!needsFullEntryConfig(args));
-    try std.testing.expect(needsEarlyThreadedIo(args));
-    try std.testing.expect(needsEarlyThreadedIo(&.{@as([:0]const u8, "update")}));
-    try std.testing.expect(needsEarlyThreadedIo(&.{@as([:0]const u8, "login")}));
-    try std.testing.expect(needsEarlyThreadedIo(&.{@as([:0]const u8, "logout")}));
-    try std.testing.expect(needsEarlyThreadedIo(&.{@as([:0]const u8, "teams")}));
-    try std.testing.expect(needsEarlyThreadedIo(&.{@as([:0]const u8, "provider")}));
-    try std.testing.expect(needsEarlyThreadedIo(&.{@as([:0]const u8, "usage")}));
-    try std.testing.expect(needsEarlyThreadedIo(&.{@as([:0]const u8, "setup")}));
 }
 
 test "every alias of an early threaded io command uses early threaded io" {
@@ -677,7 +659,6 @@ fn fullEntryConfig(auth_mode: credentials.AuthMode) app_entry_runtime.Config {
     return .{
         .version = version,
         .revision = build_options.git_commit,
-        .build_channel = compiled_update_channel,
         .auth_mode = auth_mode,
         .command_catalog = builtin_commands.top_level_registry,
         .default_model = builtin_gateway.default_model,
@@ -714,7 +695,6 @@ fn localEntryConfig(auth_mode: credentials.AuthMode) app_entry_runtime.Config {
     return .{
         .version = version,
         .revision = build_options.git_commit,
-        .build_channel = compiled_update_channel,
         .auth_mode = auth_mode,
         .command_catalog = builtin_commands.top_level_registry,
         .default_model = builtin_gateway.default_model,
@@ -751,7 +731,6 @@ fn emptyEntryConfig(auth_mode: credentials.AuthMode) app_entry_runtime.Config {
     return .{
         .version = version,
         .revision = build_options.git_commit,
-        .build_channel = compiled_update_channel,
         .auth_mode = auth_mode,
         .command_catalog = builtin_commands.top_level_registry,
         .default_model = "",
@@ -846,7 +825,6 @@ test {
     _ = @import("core/app/session_persistence.zig");
     _ = @import("core/agent/assistant_presentation.zig");
     _ = @import("core/agent/presentation/inline_render.zig");
-    _ = @import("core/upgrade/auto_upgrade.zig");
     _ = @import("core/cli/cli_ask.zig");
     _ = @import("core/cli/cli_surface.zig");
     _ = @import("core/workspace/change_tracker.zig");
@@ -972,8 +950,6 @@ test {
     _ = @import("tools/session/read_tool_result.zig");
     _ = @import("tools/skills/install_skill.zig");
     _ = @import("tools/skills/skill.zig");
-    _ = @import("core/upgrade/upgrade_helpers.zig");
-    _ = @import("core/upgrade/upgrade_runtime.zig");
     _ = @import("core/shared/types.zig");
     _ = @import("core/agent/worker_runtime.zig");
     _ = @import("gateway/client.zig");

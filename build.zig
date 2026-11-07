@@ -24,6 +24,7 @@ pub fn build(b: *std.Build) void {
 
     const git_commit = readGitCommit(b);
     const app_version = readAppVersion(b);
+    // fx no longer reads this; release tooling still passes it.
     const update_channel = b.option(UpdateChannel, "update-channel", "Build update channel (stable or dev)") orelse .stable;
 
     const build_options = b.addOptions();

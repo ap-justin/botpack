@@ -11,7 +11,6 @@ const project_config = @import("../mcp/project_config.zig");
 const model_provider = @import("model_provider.zig");
 const workspace_access = @import("../workspace/workspace_access.zig");
 const sort_utils = @import("../shared/sort_utils.zig");
-const update_target = @import("../upgrade/update_target.zig");
 const settings_keys = @import("settings_keys.zig");
 const theme_mod = @import("../shared/theme.zig");
 
@@ -108,7 +107,6 @@ pub const UserSettingsPatch = struct {
     ultrafast_mode: ?bool = null,
     slash_menu_categories: ?bool = null,
     collapse_tool_calls: ?bool = null,
-    update_channel: ?update_target.Channel = null,
     startup_scrollback: ?bool = null,
     prompt_history_enabled: ?bool = null,
     statusline_item: ?StatuslineItemPatch = null,
@@ -118,7 +116,6 @@ pub const UserSettingsPatch = struct {
     notification_max: ?bool = null,
     /// `light`, `dark`, or a theme file name under ~/.fx/themes.
     theme: ?[]const u8 = null,
-    auto_upgrade: ?bool = null,
     max_agent_steps: ?u32 = null,
     max_tool_result_bytes: ?u32 = null,
     auto_compact_percent: ?u8 = null,
@@ -142,7 +139,6 @@ pub const UserSettingsPatch = struct {
             self.ultrafast_mode == null and
             self.slash_menu_categories == null and
             self.collapse_tool_calls == null and
-            self.update_channel == null and
             self.startup_scrollback == null and
             self.prompt_history_enabled == null and
             self.statusline_item == null and
@@ -151,7 +147,6 @@ pub const UserSettingsPatch = struct {
             self.notification_attention_required == null and
             self.notification_max == null and
             self.theme == null and
-            self.auto_upgrade == null and
             self.max_agent_steps == null and
             self.max_tool_result_bytes == null and
             self.auto_compact_percent == null and
@@ -246,7 +241,6 @@ const UserPreferenceField = enum(u4) {
     ultrafast_mode,
     slash_menu_categories,
     collapse_tool_calls,
-    update_channel,
     startup_scrollback,
     prompt_history_enabled,
     statusline_context,
@@ -266,7 +260,6 @@ const UserPreferenceField = enum(u4) {
             .ultrafast_mode => "settings.json.preference-migration.ultrafast_mode.json",
             .slash_menu_categories => "settings.json.preference-migration.slash_menu_categories.json",
             .collapse_tool_calls => "settings.json.preference-migration.collapse_tool_calls.json",
-            .update_channel => "settings.json.preference-migration.update_channel.json",
             .startup_scrollback => "settings.json.preference-migration.startup_scrollback.json",
             .prompt_history_enabled => "settings.json.preference-migration.prompt_history_enabled.json",
             .statusline_context => "settings.json.preference-migration.statusline_context.json",
@@ -284,7 +277,6 @@ const user_preference_fields = [_]UserPreferenceField{
     .ultrafast_mode,
     .slash_menu_categories,
     .collapse_tool_calls,
-    .update_channel,
     .startup_scrollback,
     .prompt_history_enabled,
     .statusline_context,
@@ -1059,7 +1051,6 @@ test "plain preference patches write their keys and report no change when equal"
     var root = try std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(), "{\"theme\":\"dark\"}", .{});
     const patch: UserSettingsPatch = .{
         .theme = "dark",
-        .auto_upgrade = false,
         .max_agent_steps = 40,
         .max_tool_result_bytes = 4096,
         .auto_compact_percent = 70,
@@ -1070,7 +1061,6 @@ test "plain preference patches write their keys and report no change when equal"
     const first = try applyUserPatchToRoot(arena.allocator(), &root, patch);
     try std.testing.expect(first.changed);
     try std.testing.expect(!root.object.get("cache_warming").?.bool);
-    try std.testing.expectEqual(false, root.object.get("auto_upgrade").?.bool);
     try std.testing.expectEqual(@as(i64, 40), root.object.get("max_agent_steps").?.integer);
     try std.testing.expectEqual(@as(i64, 4096), root.object.get("max_tool_result_bytes").?.integer);
     try std.testing.expectEqual(@as(i64, 70), root.object.get("auto_compact_percent").?.integer);
@@ -1240,7 +1230,6 @@ fn applyUserPatchToRoot(
     }
     if (patch.slash_menu_categories) |value| application.changed = try putBool(arena, &root.object, "slash_menu_categories", value) or application.changed;
     if (patch.collapse_tool_calls) |value| application.changed = try putBool(arena, &root.object, "collapse_tool_calls", value) or application.changed;
-    if (patch.update_channel) |value| application.changed = try putString(arena, &root.object, "update_channel", value.label()) or application.changed;
     if (patch.startup_scrollback) |value| application.changed = try putBool(arena, &root.object, "startup_scrollback", value) or application.changed;
     if (patch.session_titles) |value| application.changed = try putBool(arena, &root.object, "session_titles", value) or application.changed;
 
@@ -1276,7 +1265,6 @@ fn applyUserPatchToRoot(
         }
     }
     if (patch.theme) |value| application.changed = try putString(arena, &root.object, "theme", value) or application.changed;
-    if (patch.auto_upgrade) |value| application.changed = try putBool(arena, &root.object, "auto_upgrade", value) or application.changed;
     if (patch.max_agent_steps) |value| application.changed = try putInteger(arena, &root.object, "max_agent_steps", value) or application.changed;
     if (patch.max_tool_result_bytes) |value| application.changed = try putInteger(arena, &root.object, "max_tool_result_bytes", value) or application.changed;
     if (patch.auto_compact_percent) |value| application.changed = try putInteger(arena, &root.object, "auto_compact_percent", value) or application.changed;
@@ -1385,13 +1373,6 @@ fn cleanupLegacyWorkspacePreferences(
         );
         removeLegacyLeaf(
             &entry.value_ptr.object,
-            "update_channel",
-            .update_channel,
-            patch.update_channel != null,
-            application,
-        );
-        removeLegacyLeaf(
-            &entry.value_ptr.object,
             "startup_scrollback",
             .startup_scrollback,
             patch.startup_scrollback != null,
@@ -1455,10 +1436,9 @@ fn cleanupLegacyWorkspacePreferences(
 
 /// The settings paths a patch from `fx config set` or `unset` writes that the
 /// `/settings` cleanup above doesn't already cover.
-fn configWrittenPaths(patch: UserSettingsPatch) [9]?[]const u8 {
+fn configWrittenPaths(patch: UserSettingsPatch) [8]?[]const u8 {
     return .{
         if (patch.theme != null) "theme" else null,
-        if (patch.auto_upgrade != null) "auto_upgrade" else null,
         if (patch.max_agent_steps != null) "max_agent_steps" else null,
         if (patch.max_tool_result_bytes != null) "max_tool_result_bytes" else null,
         if (patch.auto_compact_percent != null) "auto_compact_percent" else null,
@@ -2221,14 +2201,9 @@ fn validateKnownSettingsObject(
             }
         }
     }
-    inline for (&.{ "context", "fast_mode", "ultrafast_mode", "auto_upgrade", "slash_menu_categories", "startup_scrollback", "yolo_acknowledged", "provider_strict" }) |key| {
+    inline for (&.{ "context", "fast_mode", "ultrafast_mode", "slash_menu_categories", "startup_scrollback", "yolo_acknowledged", "provider_strict" }) |key| {
         if (object.get(key)) |value| {
             if (value != .bool) return error.InvalidSettingsFormat;
-        }
-    }
-    if (object.get("update_channel")) |value| {
-        if (value != .string or update_target.Channel.parse(value.string) == null) {
-            return error.InvalidSettingsFormat;
         }
     }
     if (object.get("effort")) |value| {
@@ -2462,7 +2437,6 @@ test "user patch writes user preferences at top level" {
         .effort = types.ReasoningEffort.literal("high"),
         .fast_mode = true,
         .slash_menu_categories = false,
-        .update_channel = .dev,
         .startup_scrollback = false,
         .prompt_history_enabled = false,
         .statusline_item = .{ .item = .context, .enabled = true },
@@ -2483,7 +2457,6 @@ test "user patch writes user preferences at top level" {
     try std.testing.expect(std.mem.find(u8, bytes, "\"effort\":\"high\"") != null);
     try std.testing.expect(std.mem.find(u8, bytes, "\"fast_mode\":true") != null);
     try std.testing.expect(std.mem.find(u8, bytes, "\"slash_menu_categories\":false") != null);
-    try std.testing.expect(std.mem.find(u8, bytes, "\"update_channel\":\"dev\"") != null);
     try std.testing.expect(std.mem.find(u8, bytes, "\"startup_scrollback\":false") != null);
     try std.testing.expect(std.mem.find(u8, bytes, "\"prompt_history\":{\"enabled\":false}") != null);
     try std.testing.expect(std.mem.find(u8, bytes, "\"status_line\":{\"context\":true}") != null);
@@ -2791,40 +2764,6 @@ test "fx config set and unset remove the workspace copy they would lose to" {
     try std.testing.expect(parsed.value.object.get("effort") == null);
     // Nothing is left in the workspace entry, so it goes.
     if (parsed.value.object.get("workspaces")) |workspaces| try std.testing.expect(workspaces.object.get("/workspace") == null);
-}
-
-test "update channel patch removes legacy workspace copies" {
-    const alloc = std.testing.allocator;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
-    try writeStoreFixture(
-        tmp.dir,
-        "home/.fx/settings.json",
-        "{\"update_channel\":\"stable\",\"workspaces\":{\"/workspace\":{\"update_channel\":\"dev\",\"sandbox\":\"none\"}}}\n",
-    );
-
-    const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
-    defer alloc.free(home);
-    var store = try Store.initFromHome(alloc, home, .writable);
-    defer store.deinit(alloc);
-
-    var outcome = try store.applyUserPatch(alloc, .{ .update_channel = .dev });
-    defer outcome.deinit(alloc);
-    try std.testing.expect(outcome == .committed);
-    try std.testing.expectEqual(@as(usize, 1), outcome.committed.cleanup.fields_removed);
-    try std.testing.expectEqual(@as(usize, 1), outcome.committed.cleanup.workspaces_changed);
-    try std.testing.expectEqual(@as(usize, 1), outcome.committed.cleanup.recovery_paths.len);
-
-    const bytes = try store.readPrimaryForTest(alloc);
-    defer alloc.free(bytes);
-    try std.testing.expect(std.mem.find(u8, bytes, "\"update_channel\":\"dev\"") != null);
-    try std.testing.expect(std.mem.find(u8, bytes, "\"sandbox\":\"none\"") != null);
-
-    var parsed = try std.json.parseFromSlice(std.json.Value, alloc, bytes, .{});
-    defer parsed.deinit();
-    const workspace = parsed.value.object.get("workspaces").?.object.get("/workspace").?.object;
-    try std.testing.expect(workspace.get("update_channel") == null);
 }
 
 test "slash menu category patch removes legacy workspace copies" {

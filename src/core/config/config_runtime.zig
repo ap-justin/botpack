@@ -13,7 +13,6 @@ const project_config = @import("../mcp/project_config.zig");
 const model_provider = @import("model_provider.zig");
 const model_preferences = @import("model_preferences.zig");
 const configured_provider = @import("configured_provider.zig");
-const update_target = @import("../upgrade/update_target.zig");
 pub const context_limits = @import("context_limits.zig");
 
 const Allocator = std.mem.Allocator;
@@ -63,8 +62,6 @@ pub const Settings = struct {
     provider_strict: ?bool = null,
     slash_menu_categories: ?bool = null,
     collapse_tool_calls: ?bool = null,
-    auto_upgrade: ?bool = null,
-    update_channel: ?update_target.Channel = null,
     theme: ?[]const u8 = null,
     startup_scrollback: ?bool = null,
     prompt_history_enabled: ?bool = null,
@@ -942,9 +939,7 @@ fn mergeDetailedSettingsLayer(
             .user_workspace => .user_workspace,
             else => .compiled_default,
         });
-        if (source == .user_workspace) {
-            incoming.update_channel = null;
-        }
+        if (source == .user_workspace) {}
         updateConfigSources(state.sources, incoming, source);
         if (incoming.has_permission_rules) {
             switch (permission_source) {
@@ -1353,7 +1348,6 @@ fn mergeWorkspaceOverridesFromValue(target: *Settings, alloc: Allocator, root_va
 
     var override_settings = try parseSettingsValueForLayer(alloc, override_val, .profile_workspace, true, false);
     defer override_settings.deinit(alloc);
-    override_settings.update_channel = null;
     override_settings.context_limits.retag(.user_workspace);
     try mergeSettings(target, &override_settings, alloc);
 }
@@ -1797,19 +1791,6 @@ fn parseProfileOnlyFields(
         settings.cache_warming = value.bool;
     }
 
-    if (root.object.get("auto_upgrade")) |auto_upgrade_value| {
-        const value = auto_upgrade_value;
-        if (value != .bool) return error.InvalidAutoUpgradeType;
-        settings.auto_upgrade = value.bool;
-    }
-
-    if (root.object.get("update_channel")) |update_channel_value| {
-        const value = update_channel_value;
-        if (value != .string) return error.InvalidUpdateChannelType;
-        settings.update_channel = update_target.Channel.parse(value.string) orelse
-            return error.InvalidUpdateChannelValue;
-    }
-
     if (root.object.get("theme")) |theme_value| {
         const value = theme_value;
         if (value != .string) return error.InvalidThemeType;
@@ -2032,8 +2013,6 @@ fn mergeSettings(target: *Settings, incoming: *Settings, alloc: Allocator) !void
     if (incoming.collapse_tool_calls) |value| target.collapse_tool_calls = value;
     if (incoming.session_titles) |value| target.session_titles = value;
     if (incoming.cache_warming) |value| target.cache_warming = value;
-    if (incoming.auto_upgrade) |value| target.auto_upgrade = value;
-    if (incoming.update_channel) |value| target.update_channel = value;
     if (incoming.theme) |value| {
         if (target.theme) |old| alloc.free(old);
         target.theme = value;
@@ -3785,8 +3764,6 @@ test "project profile-only settings are ignored and diagnosed by key" {
     try std.testing.expectEqual(false, result.settings.statusline_context.?);
     try std.testing.expectEqual(types.ToolChoice.none, result.settings.first_call_tool_choice.?);
     try std.testing.expectEqualStrings("profile/review", result.settings.review_model.?);
-    try std.testing.expectEqual(false, result.settings.auto_upgrade.?);
-    try std.testing.expectEqual(update_target.Channel.dev, result.settings.update_channel.?);
     try std.testing.expectEqual(false, result.settings.fast_mode.?);
     try std.testing.expectEqual(false, result.settings.slash_menu_categories.?);
     try std.testing.expectEqual(types.ReasoningEffort.literal("high"), result.settings.effort.?);
@@ -3794,7 +3771,7 @@ test "project profile-only settings are ignored and diagnosed by key" {
     try std.testing.expectEqual(@as(usize, 1), result.settings.permission_rules.rules.len);
     try expectPermissionRule(result.settings.permission_rules.rules[0], "bash", "profile *", .allow);
 
-    try std.testing.expectEqual(@as(usize, 14), result.diagnostics.len);
+    try std.testing.expectEqual(@as(usize, 12), result.diagnostics.len);
     inline for (&.{
         "model",
         "permission_mode",
@@ -3804,8 +3781,6 @@ test "project profile-only settings are ignored and diagnosed by key" {
         "skill_match_fuzzy",
         "first_call_tool_choice",
         "review_model",
-        "auto_upgrade",
-        "update_channel",
         "fast_mode",
         "slash_menu_categories",
         "effort",
@@ -4503,31 +4478,6 @@ test "invalid user settings report newest valid manual recovery backup" {
     try std.testing.expect(result.settings.models.get(.gateway) == null);
 }
 
-test "update channel resolves only from the global user profile" {
-    const alloc = std.testing.allocator;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
-    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
-
-    const home_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
-    defer alloc.free(home_root);
-    const workspace_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
-    defer alloc.free(workspace_root);
-    const user_settings = try alloc.print(
-        "{{\"update_channel\":\"dev\",\"workspaces\":{{\"{s}\":{{\"update_channel\":\"stable\"}}}}}}",
-        .{workspace_root},
-    );
-    defer alloc.free(user_settings);
-
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", user_settings);
-    try writeFixtureFile(tmp.dir, "workspace/.fx.json", "{\"update_channel\":\"stable\"}");
-
-    var settings = try loadMergedSettingsFromHome(alloc, home_root, workspace_root);
-    defer settings.deinit(alloc);
-    try std.testing.expectEqual(update_target.Channel.dev, settings.update_channel.?);
-}
-
 test "all currently parsed read-only settings survive detailed loading" {
     var parsed = try parseSettingsJson(
         std.testing.allocator,
@@ -4541,8 +4491,6 @@ test "all currently parsed read-only settings survive detailed loading" {
     try std.testing.expectEqual(@as(usize, 65536), parsed.max_tool_result_bytes.?);
     try std.testing.expectEqual(types.ToolChoice.none, parsed.first_call_tool_choice.?);
     try std.testing.expectEqual(false, parsed.context.?);
-    try std.testing.expectEqual(false, parsed.auto_upgrade.?);
-    try std.testing.expectEqual(update_target.Channel.dev, parsed.update_channel.?);
 }
 
 test "additional directories load only from the current profile workspace" {
@@ -4848,7 +4796,6 @@ test "the settings list names every value the settings enums accept" {
         }
     };
     for (std.meta.tags(types.PermissionMode)) |mode| try std.testing.expect(listed.has("permission_mode", mode.label()));
-    for (std.meta.tags(update_target.Channel)) |channel| try std.testing.expect(listed.has("update_channel", channel.label()));
     for (std.meta.tags(types.ToolChoice)) |choice| {
         if (types.ToolChoice.parse(@tagName(choice)) != null) try std.testing.expect(listed.has("first_call_tool_choice", @tagName(choice)));
     }

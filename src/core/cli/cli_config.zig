@@ -17,7 +17,6 @@ const settings_store = @import("../config/settings_store.zig");
 const text_utils = @import("../shared/text_utils.zig");
 const theme = @import("../shared/theme.zig");
 const types = @import("../shared/types.zig");
-const update_target = @import("../upgrade/update_target.zig");
 const compactor = @import("../compactor/compactor.zig");
 const tool_result_limits = @import("../tooling/tool_result_limits.zig");
 
@@ -124,7 +123,6 @@ pub fn parseArgs(
 /// permissions or swap the model behind permission reviews.
 const Writable = enum {
     auto_compact_percent,
-    auto_upgrade,
     cache_warming,
     collapse_tool_calls,
     context,
@@ -145,7 +143,6 @@ const Writable = enum {
     @"status_line.workspace",
     theme,
     ultrafast_mode,
-    update_channel,
 };
 
 pub const Change = struct {
@@ -181,10 +178,6 @@ pub fn change(options: Options, problem: *WriteProblem) error{ RefusedConfigSett
                 return invalid(problem, "auto or an effort name such as high");
             return .{ .patch = patch, .value = .{ .string = raw } };
         },
-        .update_channel => {
-            patch.update_channel = update_target.Channel.parse(raw) orelse return invalid(problem, "stable or dev");
-            return .{ .patch = patch, .value = .{ .string = patch.update_channel.?.label() } };
-        },
         .theme => {
             const saved: []const u8 = switch (theme.classifyValue(raw) orelse return invalid(problem, profile_paths.displayText(theme_values))) {
                 .pin_light => "light",
@@ -219,7 +212,6 @@ pub fn change(options: Options, problem: *WriteProblem) error{ RefusedConfigSett
 
     const enabled = parseSwitch(raw) orelse return invalid(problem, "true or false");
     switch (writable) {
-        .auto_upgrade => patch.auto_upgrade = enabled,
         .cache_warming => patch.cache_warming = enabled,
         .collapse_tool_calls => patch.collapse_tool_calls = enabled,
         .context => patch.context = enabled,
@@ -236,7 +228,7 @@ pub fn change(options: Options, problem: *WriteProblem) error{ RefusedConfigSett
         .@"status_line.session" => patch.statusline_item = .{ .item = .session, .enabled = enabled },
         .@"status_line.workspace" => patch.statusline_item = .{ .item = .workspace, .enabled = enabled },
         .ultrafast_mode => patch.ultrafast_mode = enabled,
-        .effort, .update_channel, .theme, .max_agent_steps, .max_tool_result_bytes, .auto_compact_percent => unreachable,
+        .effort, .theme, .max_agent_steps, .max_tool_result_bytes, .auto_compact_percent => unreachable,
     }
     return .{ .patch = patch, .value = .{ .bool = enabled } };
 }
@@ -440,16 +432,19 @@ pub const Effective = union(enum) {
 /// The keys `fx config` reads from the resolved state instead of the files.
 /// A test checks that each plain key is here or in `files_only_keys`.
 pub const resolved_keys = [_][]const u8{
-    "auto_compact_percent",     "auto_upgrade",           "cache_warming",
-    "collapse_tool_calls",      "context",                "effort",
-    "fast_mode",                "first_call_tool_choice", "max_agent_steps",
-    "max_tool_result_bytes",    "permission_mode",        "prompt_history.enabled",
-    "provider",                 "provider_order",         "provider_strict",
-    "review_model",             "session_titles",         "slash_menu_categories",
-    "sound.attention_required", "sound.max",              "sound.turn_end",
-    "startup_scrollback",       "status_line.context",    "status_line.session",
-    "status_line.workspace",    "theme",                  "ultrafast_mode",
-    "update_channel",
+    "auto_compact_percent",   "cache_warming",
+    "collapse_tool_calls",    "context",
+    "effort",                 "fast_mode",
+    "first_call_tool_choice", "max_agent_steps",
+    "max_tool_result_bytes",  "permission_mode",
+    "prompt_history.enabled", "provider",
+    "provider_order",         "provider_strict",
+    "review_model",           "session_titles",
+    "slash_menu_categories",  "sound.attention_required",
+    "sound.max",              "sound.turn_end",
+    "startup_scrollback",     "status_line.context",
+    "status_line.session",    "status_line.workspace",
+    "theme",                  "ultrafast_mode",
 };
 
 /// Keys `fx config` shows as the files set them: objects fx checks with its
@@ -476,7 +471,6 @@ pub fn effectiveValue(
 ) Allocator.Error!Effective {
     const eql = std.mem.eql;
     if (eql(u8, key, "auto_compact_percent")) return integer(arena, state.auto_compact_percent);
-    if (eql(u8, key, "auto_upgrade")) return boolean(state.auto_upgrade);
     if (eql(u8, key, "collapse_tool_calls")) return boolean(state.collapse_tool_calls);
     if (eql(u8, key, "context")) return boolean(state.context_enabled);
     if (eql(u8, key, "effort")) return string(state.effort.label());
@@ -510,7 +504,6 @@ pub fn effectiveValue(
         return if (state.theme) |value| string(value) else .none;
     }
     if (eql(u8, key, "ultrafast_mode")) return boolean(state.ultrafast_mode);
-    if (eql(u8, key, "update_channel")) return string(state.update_channel.label());
     return .unresolved;
 }
 
@@ -745,9 +738,6 @@ test "config set turns each value into the patch the save path writes" {
 
     const pinned = try changeForTest(&.{ "set", "theme", "LIGHT" }, &problem);
     try std.testing.expectEqualStrings("light", pinned.patch.theme.?);
-
-    const channel = try changeForTest(&.{ "set", "update_channel", "dev" }, &problem);
-    try std.testing.expectEqualStrings("dev", channel.value.?.string);
 
     const removed = try changeForTest(&.{ "unset", "notifications.max" }, &problem);
     try std.testing.expectEqualStrings("sound.max", removed.patch.remove.?);
