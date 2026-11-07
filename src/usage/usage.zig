@@ -1,7 +1,7 @@
 //! `/usage`: the module's front door. fx hands in a `Host` (HTTP, clock,
-//! home directory) and a `Credential` for the provider in use; the TUI and
-//! CLI call the `Dashboard` and render its `Snapshot`. AI Gateway sign-ins
-//! read usage reports. All usage logic lives here.
+//! home directory) and a `Credential` for the provider in use; the CLI calls
+//! the `Dashboard` and renders its `Snapshot`. AI Gateway sign-ins read usage
+//! reports. All usage logic lives here.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -64,8 +64,7 @@ pub const Credential = struct {
     bearer: []const u8,
     /// Required for `.member`.
     team: ?[]const u8,
-    /// Stable per person: the fx login account or the
-    /// API key itself.
+    /// Stable per person: the fx login account or the API key itself.
     subject: []const u8,
     /// The provider account the numbers belong to, when it has one.
     account_id: ?[]const u8 = null,
