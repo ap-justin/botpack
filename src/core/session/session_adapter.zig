@@ -1884,8 +1884,7 @@ pub const Session = struct {
         for (events.items, encoded) |event, *bytes| bytes.* = try self.encodeEvent(a, event);
         const start = try self.streamedPrefix(encoded, .stream, countResults(events.items));
         // The record goes out in the same write as the pieces before its
-        // send, so a turn's first write already carries it
-        // (`tests/tla/recovery/Resume.tla` CrashLoopAsks).
+        // send, so a turn's first write already carries it.
         var tail: std.ArrayList(sm.Event) = .empty;
         if (try self.recoveryItem(a, record)) |piece| try tail.append(a, .{ .item = piece });
         if (!self.turn_open or start < encoded.len) {
