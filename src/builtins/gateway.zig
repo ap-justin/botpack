@@ -198,6 +198,9 @@ pub fn buildAgentRequest(
     var provider_options = request.provider_options;
     provider_options.cache_markers = vercel_model_policy.cacheMarkers(request.model);
     provider_options.single_system_message = vercel_model_policy.singleSystemMessage(request.model);
+    if (vercel_model_policy.defaultProviderOrder(request.model, provider_options)) |order| {
+        provider_options.provider_order = order;
+    }
 
     if (request.verified_images) |images| {
         const response_format = request.response_format orelse
@@ -322,19 +325,23 @@ fn buildAgentToolsJson(
         first = false;
         try model_tool_schema.writeBuiltinFunctionSchema(alloc, &out.writer, tool);
     }
-    for (request.tools.selected_dynamic) |tool| {
-        if (toolNameSelected(request.tools.advertised_names, tool.name)) continue;
-        if (!first) try out.writer.writeByte(',');
-        first = false;
-        try writeDynamicFunctionTool(&out.writer, tool);
-    }
+    // The fixed tools come first and the selected ones last, in selection
+    // order, so selecting a tool appends to the list and moves nothing
+    // before it.
     if (request.vision_mode == .optional and
         !toolNameSelected(request.tools.advertised_names, "vision"))
     {
         const vision = request.tools.registry.lookup("vision") orelse
             return error.VisionToolNotRegistered;
         if (!first) try out.writer.writeByte(',');
+        first = false;
         try model_tool_schema.writeBuiltinFunctionSchema(alloc, &out.writer, vision.model_schema);
+    }
+    for (request.tools.selected_dynamic) |tool| {
+        if (toolNameSelected(request.tools.advertised_names, tool.name)) continue;
+        if (!first) try out.writer.writeByte(',');
+        first = false;
+        try writeDynamicFunctionTool(&out.writer, tool);
     }
     try out.writer.writeByte(']');
     return out.toOwnedSlice();
