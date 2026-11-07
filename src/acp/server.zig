@@ -69,6 +69,7 @@ const libfx_provider_tool_registry = tool_dispatch.Registry{ .tools = &libfx_pro
 const AcpMethod = enum {
     request_cancel,
     initialize,
+    authenticate,
     session_cancel,
     session_new,
     session_load,
@@ -95,6 +96,7 @@ const AcpMethod = enum {
     fn parse(method: []const u8) AcpMethod {
         if (std.mem.eql(u8, method, "$/cancel_request")) return .request_cancel;
         if (std.mem.eql(u8, method, "initialize")) return .initialize;
+        if (std.mem.eql(u8, method, "authenticate")) return .authenticate;
         if (std.mem.eql(u8, method, "session/cancel")) return .session_cancel;
         if (std.mem.eql(u8, method, "session/new")) return .session_new;
         if (std.mem.eql(u8, method, "session/load")) return .session_load;
@@ -122,6 +124,7 @@ const AcpMethod = enum {
     fn waitsForActivePrompt(self: AcpMethod) bool {
         return switch (self) {
             .initialize,
+            .authenticate,
             .request_cancel,
             .session_cancel,
             .session_set_mode,
@@ -327,6 +330,9 @@ pub const ServerState = struct {
     workspace_access: workspace_access.WorkspaceAccess = .{},
     api_key: []u8 = &.{},
     credential_source: ?types.CredentialSource = null,
+    /// `initialize` found no credential for the selected model. Calls that need
+    /// one re-read the credentials and answer `AUTH_REQUIRED` until they exist.
+    auth_pending: bool = false,
     gateway_source_preference: ?types.CredentialSource = null,
     credential_refresh_after_ms: ?i64 = null,
     account_id: ?[]u8 = null,
@@ -1504,6 +1510,12 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
         });
     }
 
+    if (method == .authenticate) return handleAuthenticate(state, alloc, msg);
+
+    if (state.auth_pending and (method == .session_new or method == .session_load or method == .session_resume)) {
+        if (!try refreshPendingAuth(state)) return writeAuthRequired(state, alloc, msg.id);
+    }
+
     if (method == .session_prompt and state.active_prompt != null) {
         return handleSteeringPrompt(state, alloc, msg);
     }
@@ -1558,6 +1570,7 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
         .libfx_journal_open => handleKernelJournalOpen(state, alloc, msg),
         .libfx_journal_images => handleKernelJournalImages(state, alloc, msg),
         .initialize,
+        .authenticate,
         .request_cancel,
         .session_cancel,
         .session_remove,
@@ -1568,6 +1581,59 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
             .message = "Method not found",
         }),
     };
+}
+
+/// Answers with `AUTH_REQUIRED` and the auth methods the client can offer.
+fn writeAuthRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId) !void {
+    return state.writer.writeError(alloc, id, .{
+        .code = ErrorCode.auth_required,
+        .message = "Authentication required",
+        .data_json = acp_types.auth_required_data_json,
+    });
+}
+
+/// Re-reads the credentials for the selected provider and ends the pending
+/// state when one is now available. Returns false while there is none.
+fn refreshPendingAuth(state: *ServerState) !bool {
+    if (!state.auth_pending) return true;
+    if (!try selectCredentialForProvider(state, state.provider)) return false;
+    state.auth_pending = false;
+    return true;
+}
+
+/// `authenticate`: the client ran the advertised terminal login (or has nothing
+/// to run), so re-read the credentials. Succeeds once one is available.
+fn handleAuthenticate(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
+    const method_id = authenticateMethodId(alloc, msg.params_raw) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return state.writer.writeError(alloc, msg.id, .{
+            .code = ErrorCode.invalid_params,
+            .message = "Invalid authenticate params",
+        }),
+    };
+    defer alloc.free(method_id);
+    if (!std.mem.eql(u8, method_id, acp_types.terminal_auth_method_id)) {
+        return state.writer.writeError(alloc, msg.id, .{
+            .code = ErrorCode.invalid_params,
+            .message = "Unknown authentication method",
+        });
+    }
+    if (!try refreshPendingAuth(state)) return writeAuthRequired(state, alloc, msg.id);
+    return state.writer.writeResponse(alloc, msg.id, "{}");
+}
+
+/// The `methodId` of an `authenticate` request. The caller owns the result.
+fn authenticateMethodId(alloc: Allocator, params: ?[]const u8) ![]u8 {
+    const raw = params orelse return error.InvalidParams;
+    const parsed = std.json.parseFromSlice(std.json.Value, alloc, raw, .{}) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidParams;
+    const id = parsed.value.object.get("methodId") orelse return error.InvalidParams;
+    if (id != .string) return error.InvalidParams;
+    return alloc.dupe(u8, id.string);
 }
 
 fn requestIdsEqual(lhs: jsonrpc.RequestId, rhs: jsonrpc.RequestId) bool {
@@ -2954,7 +3020,7 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
             false;
         const startup_credential_is_final = startup_matches_model and
             !credentials.sourceRefreshable(startup_credential.?.source);
-        const credential: *credentials.Credential = if (state.provider == .gateway and state.cfg.credential_override != null) override: {
+        const credential_or_null: ?*credentials.Credential = if (state.provider == .gateway and state.cfg.credential_override != null) override: {
             routed_credential = .{
                 .token = try alloc.dupe(u8, state.cfg.credential_override.?),
                 .source = .ai_gateway_api_key,
@@ -2970,31 +3036,17 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
                 state.provider,
                 if (state.provider == .gateway) startup.credential_source_preference else null,
             );
-            if (routed_credential == null) {
-                return state.writer.writeError(alloc, msg.id, .{
-                    .code = ErrorCode.invalid_request,
-                    .message = if (state.provider == .codex)
-                        credentials.missing_chatgpt_credential_message
-                    else if (state.provider == .grok)
-                        credentials.missing_grok_credential_message
-                    else
-                        credentials.missing_credential_message,
-                });
-            }
-            break :routed &routed_credential.?;
+            break :routed if (routed_credential != null) &routed_credential.? else null;
         };
-        if (credential.token.len == 0 and credential.source != .configured) {
-            return state.writer.writeError(alloc, msg.id, .{
-                .code = ErrorCode.invalid_request,
-                .message = if (state.provider == .codex)
-                    credentials.missing_chatgpt_credential_message
-                else if (state.provider == .grok)
-                    credentials.missing_grok_credential_message
-                else
-                    credentials.missing_credential_message,
-            });
-        }
-        adoptServerCredential(state, credential);
+        // Without a credential, initialize still succeeds; the calls that need
+        // one answer AUTH_REQUIRED until the client has authenticated.
+        if (credential_or_null) |credential| {
+            if (credential.token.len == 0 and credential.source != .configured) {
+                state.auth_pending = true;
+            } else {
+                adoptServerCredential(state, credential);
+            }
+        } else state.auth_pending = true;
     }
 
     state.permission_mode = startup.permission_mode;
@@ -3023,7 +3075,8 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
         }
     }
 
-    if (!state.cfg.minimal_kernel) {
+    // The model catalog needs a credential; it loads after authentication.
+    if (!state.cfg.minimal_kernel and !state.auth_pending) {
         const startup_catalog = catalogProviderFor(state, state.provider) orelse
             return state.writer.writeError(alloc, msg.id, .{
                 .code = ErrorCode.invalid_request,
@@ -4401,6 +4454,17 @@ test "ACP notifications with absent id are not response targets" {
     );
     defer jsonrpc.freeMessage(alloc, &null_id_request);
     try std.testing.expect(shouldRespondToMessage(&null_id_request));
+}
+
+test "ACP authenticate reads the method id" {
+    const alloc = std.testing.allocator;
+    const id = try authenticateMethodId(alloc, "{\"methodId\":\"fx-login-api-key\"}");
+    defer alloc.free(id);
+    try std.testing.expectEqualStrings("fx-login-api-key", id);
+    try std.testing.expectError(error.InvalidParams, authenticateMethodId(alloc, null));
+    try std.testing.expectError(error.InvalidParams, authenticateMethodId(alloc, "{}"));
+    try std.testing.expectError(error.InvalidParams, authenticateMethodId(alloc, "{\"methodId\":1}"));
+    try std.testing.expectEqual(AcpMethod.authenticate, AcpMethod.parse("authenticate"));
 }
 
 test "ACP method parser classifies request dispatch methods" {

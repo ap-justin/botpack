@@ -277,6 +277,20 @@ pub const AgentCapabilities = struct {
     mcp_sse: bool = true,
 };
 
+/// The id of the Terminal Auth method that runs the AI Gateway key login.
+pub const terminal_auth_method_id = "fx-login-api-key";
+
+/// The auth methods fx advertises, as a JSON array. The terminal method's
+/// `args` replace the ACP launch arguments, so the client runs
+/// `fx login vercel --api-key` in a terminal.
+pub const auth_methods_json = "[{\"id\":\"" ++ terminal_auth_method_id ++ "\"," ++
+    "\"name\":\"Sign in with an AI Gateway API key\"," ++
+    "\"description\":\"Paste a Vercel AI Gateway API key in a terminal. fx saves it for later sessions.\"," ++
+    "\"type\":\"terminal\",\"args\":[\"login\",\"vercel\",\"--api-key\"]}]";
+
+/// The `data` of an `AUTH_REQUIRED` error.
+pub const auth_required_data_json = "{\"authMethods\":" ++ auth_methods_json ++ "}";
+
 pub fn writeInitializeResponse(w: *std.Io.Writer, capabilities: AgentCapabilities) !void {
     const mcp_servers = if (capabilities.mcp_servers) "true" else "false";
     try w.writeAll("{\"protocolVersion\":");
@@ -296,7 +310,7 @@ pub fn writeInitializeResponse(w: *std.Io.Writer, capabilities: AgentCapabilitie
     try w.writeAll("},\"agentInfo\":{\"name\":\"fx\",\"title\":\"fx\",\"version\":");
     try writeJsonStr(build_options.app_version, w);
     try w.writeAll("},");
-    try w.writeAll("\"authMethods\":[]}");
+    try w.writeAll("\"authMethods\":" ++ auth_methods_json ++ "}");
 }
 
 pub fn writePromptResponse(w: *std.Io.Writer, reason: StopReason) !void {
@@ -627,4 +641,29 @@ test "model recovery info update wraps the shared report and is clearable" {
     out.writer.end = 0;
     try writeModelRecoveryInfoUpdate(&out.writer, null);
     try std.testing.expect(std.mem.find(u8, out.writer.buffered(), "\"modelResponseRecovery\":null") != null);
+}
+
+test "initialize response lists the terminal auth method" {
+    const alloc = std.testing.allocator;
+    var out: std.Io.Writer.Allocating = .init(alloc);
+    defer out.deinit();
+    try writeInitializeResponse(&out.writer, .{});
+    const parsed = try std.json.parseFromSlice(std.json.Value, alloc, out.writer.buffered(), .{});
+    defer parsed.deinit();
+    const methods = parsed.value.object.get("authMethods").?.array.items;
+    try std.testing.expectEqual(@as(usize, 1), methods.len);
+    const method = methods[0].object;
+    try std.testing.expectEqualStrings(terminal_auth_method_id, method.get("id").?.string);
+    try std.testing.expectEqualStrings("terminal", method.get("type").?.string);
+    const args = method.get("args").?.array.items;
+    try std.testing.expectEqual(@as(usize, 3), args.len);
+    try std.testing.expectEqualStrings("login", args[0].string);
+    try std.testing.expectEqualStrings("--api-key", args[2].string);
+}
+
+test "AUTH_REQUIRED data carries the same auth methods" {
+    const alloc = std.testing.allocator;
+    const parsed = try std.json.parseFromSlice(std.json.Value, alloc, auth_required_data_json, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 1), parsed.value.object.get("authMethods").?.array.items.len);
 }
