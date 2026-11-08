@@ -1708,7 +1708,6 @@ describe("acp: model-independent", () => {
         expect(kinds).toContain("agent_message_chunk");
         expect(kinds).toContain("session_info_update");
         expect(client.stderr).toBe("");
-        // The trace names each step from the turn's end to the answer.
         const trace = readFileSync(tracePath, "utf8");
         for (const event of ["prompt_turn_ended", "usage_update_skipped reason=no_usage", "prompt_updates_sent", "prompt_handler_returned kind=stop_reason", "prompt_answer kind=stop_reason"]) {
           expect(trace).toContain(`event=${event}`);
