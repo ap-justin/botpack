@@ -1524,6 +1524,31 @@ describe("cli: status", () => {
   );
 
   test(
+    "fx status loads settings left by the retired auto_upgrade and update_channel keys without a warning",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "fx-e2e-status-retired-update-keys-"));
+      try {
+        const home = join(root, "home");
+        mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+        writeFileSync(
+          join(home, ".fx", "settings.json"),
+          JSON.stringify({ auto_upgrade: false, update_channel: "dev", effort: "low" }) + "\n",
+          { mode: 0o600 },
+        );
+
+        const result = await runFx(["status", "--json"], { env: { ...NO_GATEWAY_AUTH, HOME: home } });
+        expect(result.code).toBe(0);
+        expect(result.stderr).toBe("");
+        // The same file's live key still applies, so the file was read, not skipped.
+        expect(JSON.parse(result.stdout.trim()).effort).toBe("low");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "fx mcp list reports bad arguments as JSON when --json is given",
     async () => {
       const home = mkdtempSync(join(tmpdir(), "fx-mcp-list-json-"));

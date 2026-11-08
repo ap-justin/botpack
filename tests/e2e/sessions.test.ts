@@ -1949,6 +1949,227 @@ test("fx session recover copies the good turns and side files of a damaged sessi
   }
 }, TIMEOUT * 4);
 
+const COMPACTION_MODEL = "fixture/compaction";
+const COMPACTOR_SUMMARY_MARKER = "fx-compactor-v1\n";
+/// About 300k estimated tokens, past the fixture model's 128k window, so the
+/// next prompt in the session compacts the reply it follows.
+const COMPACTING_REPLY_PADDING = Array.from(
+  { length: 14_000 },
+  (_, n) => `Assistant reference ${n}: group ${n % 19}, historical data, not new completed work.\n`,
+).join("");
+
+/// Answers each prompt with its pair's text, newest prompt first because a
+/// later request carries the earlier ones. The first pair's answer is padded
+/// to force a compaction at the next prompt, and fx-compactor's notes request
+/// gets "none" since a plain turn has nothing to note.
+function compactingGateway(pairs: [string, string][]) {
+  return startDynamicFakeGateway((body: string) => {
+    if (body.includes("Write the compaction notes")) return fakeGatewayFinalText("none");
+    for (let index = pairs.length - 1; index >= 0; index -= 1) {
+      const [prompt, answer] = pairs[index]!;
+      if (body.includes(prompt)) return fakeGatewayFinalText(index === 0 ? `${answer}\n${COMPACTING_REPLY_PADDING}` : answer);
+    }
+    return fakeGatewayFinalText("UNEXPECTED_REQUEST");
+  }, { models: [{ id: COMPACTION_MODEL, type: "language", tags: ["tool-use"], context_window: 128_000, max_tokens: 8192 }] });
+}
+
+function compactionAsk(fixture: Fixture, gateway: any, args: string[]) {
+  return runFx(["ask", "--json", "--auto", ...args], {
+    cwd: fixture.workspace,
+    env: {
+      ...env(fixture, gateway),
+      FX_MODEL: COMPACTION_MODEL,
+      FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+    },
+    timeoutMs: TIMEOUT,
+  });
+}
+
+/// One session through `fx ask`: the first reply is long, so the second
+/// prompt compacts it and later ones follow the summary. Returns its id.
+async function compactedSession(fixture: Fixture, gateway: any, prompts: string[]) {
+  const first = await compactionAsk(fixture, gateway, [prompts[0]!]);
+  expect(first.code).toBe(0);
+  const id: string = JSON.parse(first.stdout).session_id;
+  for (const prompt of prompts.slice(1)) {
+    const next = await compactionAsk(fixture, gateway, ["--resume", id, prompt]);
+    expect(next.code).toBe(0);
+  }
+  expect((logLines(fixture.home, id) as any[]).filter((line) => line.kind === "compacted")).toHaveLength(1);
+  return id;
+}
+
+test("ACP load after a compaction shows every earlier turn and never the summary", async () => {
+  const fixture = createFixture("fx-v2-acp-compacted-");
+  const prompts = ["Earlier v2 request", "Middle v2 request", "Latest v2 request"];
+  const gateway = compactingGateway([
+    [prompts[0]!, "V2_EARLIER_VISIBLE"],
+    [prompts[1]!, "V2_MIDDLE_VISIBLE"],
+    [prompts[2]!, "V2_LATEST_VISIBLE"],
+  ]);
+  let client: AcpRpc | undefined;
+  try {
+    const id = await compactedSession(fixture, gateway, prompts);
+    const saved = readFileSync(join(storeRoot(fixture.home), id, "log.jsonl"));
+    const requests = gateway.requests.length;
+
+    client = await AcpRpc.start(fixture, gateway);
+    for (let load = 0; load < 2; load += 1) {
+      client.updates.length = 0;
+      await client.ok("session/load", { sessionId: id, cwd: fixture.workspace, mcpServers: [] });
+      const visible = JSON.stringify(client.updates);
+      expect(infoTitles(client.updates)).toEqual([prompts[0]]);
+      expect(client.texts("user_message_chunk")).toEqual(prompts);
+      expect(visible).not.toContain("fx-compactor-v1");
+      const order = ["V2_EARLIER_VISIBLE", "V2_MIDDLE_VISIBLE", "V2_LATEST_VISIBLE"].map((text) => visible.indexOf(text));
+      expect(order.every((at) => at >= 0)).toBe(true);
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+    }
+    expect(await client.close()).toBe(0);
+    client = undefined;
+
+    // Load adds no history: its writable open ends with the clean-exit
+    // marker every close appends, and no model request goes out.
+    const after = readFileSync(join(storeRoot(fixture.home), id, "log.jsonl"));
+    expect(after.subarray(0, saved.length)).toEqual(saved);
+    const appended = after.subarray(saved.length).toString("utf8").split("\n").filter(Boolean);
+    expect(appended.map((line) => JSON.parse(line).kind)).toEqual(["closed"]);
+    expect(gateway.requests.length).toBe(requests);
+    expectWholeLog(fixture, id);
+  } finally {
+    if (client) await client.kill();
+    gateway.stop();
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+}, TIMEOUT * 6);
+
+test("fx session lists a compacted session's every turn and its summary", async () => {
+  const fixture = createFixture("fx-v2-detail-compacted-");
+  const prompts = ["Earlier detail request", "Middle detail request", "Latest detail request"];
+  const gateway = compactingGateway([
+    [prompts[0]!, "DETAIL_EARLIER"],
+    [prompts[1]!, "DETAIL_MIDDLE"],
+    [prompts[2]!, "DETAIL_LATEST"],
+  ]);
+  try {
+    const id = await compactedSession(fixture, gateway, prompts);
+
+    const detail = await command(fixture, gateway, ["session", id, "--json"]);
+    expect(detail.code).toBe(0);
+    expect(detail.stderr).toBe("");
+    const shown = JSON.parse(detail.stdout);
+    expect(shown.history_len).toBe(shown.history.length);
+    const summaryAt = shown.history.findIndex((entry: any) => entry.kind === "compacted_summary");
+    expect(summaryAt).toBeGreaterThan(0);
+    const summary = shown.history[summaryAt];
+    // The summary's text carries fx's own handles, so only its marker counts.
+    expect(String(summary.summary).startsWith(COMPACTOR_SUMMARY_MARKER)).toBe(true);
+    expect(summary.compaction_count).toBe(1);
+    // It stands for exactly the turns listed before it.
+    expect(summary.removed_turn_count).toBe(summaryAt);
+    expect(shown.history.filter((entry: any) => entry.kind === "compacted_summary")).toHaveLength(1);
+    const turns = shown.history.filter((entry: any) => entry.kind !== "compacted_summary");
+    expect(turns.map((entry: any) => entry.user?.text)).toEqual(prompts);
+    expect(JSON.stringify(turns[0].assistant)).toContain("DETAIL_EARLIER");
+    expect(JSON.stringify(turns[1].assistant)).toContain("DETAIL_MIDDLE");
+    expect(JSON.stringify(turns[2].assistant)).toContain("DETAIL_LATEST");
+
+    const text = await command(fixture, gateway, ["session", id]);
+    expect(text.stdout).toContain("Earlier detail request");
+    expect(text.stdout).toContain(`[compacted] removed_turns=${summaryAt} compactions=1`);
+    expectWholeLog(fixture, id);
+  } finally {
+    gateway.stop();
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+}, TIMEOUT * 6);
+
+test("a flipped byte in a turn the newest compaction kept stops resume and ACP load as damage, and recover still salvages it", async () => {
+  const fixture = createFixture("fx-v2-kept-flip-");
+  const prompts = ["Kept flip first request.", "Kept flip second request.", "Kept flip third request."];
+  const gateway = compactingGateway([
+    [prompts[0]!, "KEPT_FLIP_FIRST"],
+    [prompts[1]!, "KEPT_FLIP_SECOND"],
+    [prompts[2]!, "KEPT_FLIP_THIRD"],
+    ["Kept flip after the recovery.", "KEPT_FLIP_RECOVERED"],
+  ]);
+  let client: AcpRpc | undefined;
+  try {
+    const id = await compactedSession(fixture, gateway, prompts);
+
+    // The compaction kept turns, so a resume reads back from it to the start
+    // of the oldest one. One byte of that turn's prompt changes.
+    const lines = logLines(fixture.home, id) as any[];
+    const compaction = lines.findLast((line) => line.kind === "compacted");
+    const data = typeof compaction.data === "string" ? JSON.parse(compaction.data) : compaction.data;
+    const kept = data.keep_from_turn;
+    expect(typeof kept).toBe("number");
+    const path = join(storeRoot(fixture.home), id, "log.jsonl");
+    const raw = readFileSync(path, "utf8").split("\n");
+    const at = raw.findIndex((line) => {
+      if (!line) return false;
+      const parsed = JSON.parse(line);
+      return parsed.kind === "item" && parsed.type === "user" && parsed.turn === kept;
+    });
+    expect(at).toBeGreaterThan(0);
+    raw[at] = raw[at]!.replace("request.", "requast.");
+    const damaged = raw.join("\n");
+    writeFileSync(path, damaged);
+    const requests = gateway.requests.length;
+
+    const asked = await compactionAsk(fixture, gateway, ["--resume", id, "Kept flip after the damage."]);
+    expect(asked.code).toBe(1);
+    expect(asked.stdout + asked.stderr).toContain("InvalidSessionFormat");
+
+    // An ACP client hears the session couldn't be loaded, not that it is missing.
+    client = await AcpRpc.start(fixture, gateway);
+    const loaded = await client.request("session/load", { sessionId: id, cwd: fixture.workspace, mcpServers: [] });
+    expect(loaded.error?.message).toBe("Session could not be loaded");
+    expect(await client.close()).toBe(0);
+    client = undefined;
+
+    // Nothing was sent, and the damaged lines are left for recovery.
+    expect(gateway.requests.length).toBe(requests);
+    expect(readFileSync(path, "utf8").startsWith(damaged)).toBe(true);
+
+    // fx session recover still copies the good turns, and the copy resumes.
+    const result = await command(fixture, gateway, ["session", "recover", id, "--json"]);
+    expect(result.code).toBe(0);
+    const copy: string = JSON.parse(result.stdout).recovered_id;
+    expect(copy).not.toBe(id);
+    const after = await compactionAsk(fixture, gateway, ["--resume", copy, "Kept flip after the recovery."]);
+    expect(after.code).toBe(0);
+    expect(JSON.parse(after.stdout).output).toBe("KEPT_FLIP_RECOVERED");
+  } finally {
+    if (client) await client.kill();
+    gateway.stop();
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+}, TIMEOUT * 8);
+
+test("ACP refuses a session whose blob went missing as damaged, not missing", async () => {
+  const fixture = createFixture("fx-v2-lost-blob-acp-");
+  const big = "ACP_BLOB_START " + "blob-body ".repeat(30_000) + "ACP_BLOB_END";
+  const gateway = startFakeGateway([fakeGatewayFinalText(big)]);
+  let client: AcpRpc | undefined;
+  try {
+    const id = JSON.parse((await ask(fixture, gateway, ["Answer at great length."])).stdout).session_id;
+    const referenced = (logLines(fixture.home, id) as any[]).find((line) => Array.isArray(line.blobs) && line.blobs.length === 1);
+    rmSync(join(storeRoot(fixture.home), id, "blobs", referenced.blobs[0]));
+
+    client = await AcpRpc.start(fixture, gateway);
+    const load = await client.request("session/load", { sessionId: id, cwd: fixture.workspace, mcpServers: [] });
+    expect(load.error?.message).toBe("Session could not be loaded");
+    expect(await client.close()).toBe(0);
+    client = undefined;
+    expect(gateway.requests).toHaveLength(1);
+  } finally {
+    if (client) await client.kill();
+    gateway.stop();
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+}, TIMEOUT * 3);
+
 test("an older session moves off its side folder on its next open, and the model still reads an old handle (D47)", async () => {
   const fixture = createFixture("fx-v2-move-");
   const oldHandle = "result-shell-0011223344556677-8899aabbccddeeff.txt";
