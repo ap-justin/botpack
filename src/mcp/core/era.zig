@@ -955,3 +955,17 @@ test "a refusal that lists legacy versions picks the newest one not yet offered"
     const bare = (try wire.decode("{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32602,\"message\":\"x\"}}")).response.body.failure;
     try testing.expectEqual(@as(?u8, null), nextOffer(config, bare, 0b001));
 }
+
+test "a refusal's list is read in fx's order of preference, not the server's" {
+    const refusal = (try wire.decode("{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32602,\"message\":\"x\"," ++
+        "\"data\":{\"supported\":[\"2025-03-26\",\"2024-11-05\",\"2025-06-18\"]}}}")).response.body.failure;
+    const config: Config = .{};
+    try testing.expectEqual(@as(?u8, 1), nextOffer(config, refusal, 0b001));
+    try testing.expectEqual(@as(?u8, 2), nextOffer(config, refusal, 0b011));
+}
+
+test "a refusal whose only version fx speaks was already offered offers nothing more" {
+    const refusal = (try wire.decode("{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32602,\"message\":\"x\"," ++
+        "\"data\":{\"supported\":[\"2025-06-18\",\"2024-11-05\"]}}}")).response.body.failure;
+    try testing.expectEqual(@as(?u8, null), nextOffer(.{}, refusal, 0b011));
+}

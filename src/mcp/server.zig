@@ -2325,6 +2325,43 @@ test "a detection failure names the versions behind it, also once the server sta
     try std.testing.expect(r.failedVersions() == null);
 }
 
+test "a version keeps only its letters, digits, dots and dashes, and one with an escape is left out" {
+    var r: Server = undefined;
+    try testServer(&r);
+    defer r.deinit();
+    r.noteVersions(.{ .failure = .{ .code = wire.code.invalid_params, .message = "\"x\"", .data = "{\"supported\":[\"'2025-06-18'\",\"\\u001b[31m2025-03-26\",\"2024\\\"11\",\"<2025-11-25>\"]}" } });
+    try std.testing.expectEqualStrings("2025-06-18, 2025-11-25", r.said.slice().?);
+}
+
+test "a refusal whose supported is one string rather than a list still names that version" {
+    var r: Server = undefined;
+    try testServer(&r);
+    defer r.deinit();
+    r.noteVersions(.{ .failure = .{ .code = wire.code.invalid_params, .message = "\"x\"", .data = "{\"supported\":\"2025-06-18\"}" } });
+    try std.testing.expectEqualStrings("2025-06-18", r.said.slice().?);
+}
+
+test "each detection run offers the newest version first, and retries a listed one once, whatever an earlier run settled on" {
+    var r: Server = undefined;
+    // No request may start, so each waits for a slot and nothing reaches the network.
+    try r.init(std.testing.io, std.testing.allocator, .{
+        .link = .{ .http = .{ .url = "http://127.0.0.1:1/mcp", .max_in_flight = 0 } },
+        .client = .{ .info = .{ .name = "test", .version = "0" } },
+    });
+    defer r.deinit();
+    const refusal: @FieldType(wire.Response, "body") = .{ .failure = .{ .code = wire.code.invalid_params, .message = "\"x\"", .data = "{\"supported\":[\"2025-06-18\"]}" } };
+    for (0..2) |_| {
+        try r.stepEra(.process_started);
+        try r.stepEra(.detect_requested);
+        // Discovery answered like a 2025 server: detection falls back to initialize.
+        try r.stepEra(.legacy_answer);
+        try std.testing.expectEqual(@as(u8, 0), r.init_offer);
+        try std.testing.expectEqual(@as(?u8, 1), r.nextOffer(refusal));
+        try std.testing.expectEqual(@as(u8, 1), r.init_offer);
+        try std.testing.expectEqual(@as(?u8, null), r.nextOffer(refusal));
+    }
+}
+
 test "a send that fails after the outbox took its copy frees the copy once" {
     var r: Server = undefined;
     // No request may start, so each waits for a slot and nothing reaches the network.

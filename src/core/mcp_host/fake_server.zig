@@ -25,10 +25,14 @@ pub const Mode = enum {
     older,
     /// Only 2025-06-18: any other version in initialize is refused with an error listing it.
     older_error,
+    /// Refuses every initialize with an error listing 2025-06-18, even one that offers it.
+    older_error_stuck,
     /// Only 2026-07-28: discovery lists it, requests must carry it, initialize fails.
     per_request,
     /// Only 2024-11-05, which fx doesn't speak: discovery fails, initialize is answered with it.
     unsupported_initialize,
+    /// Only 2024-11-05, which fx doesn't speak: discovery fails, initialize is refused with an error listing it.
+    unsupported_initialize_error,
     /// A modern server that lists only a version fx doesn't speak.
     unsupported_discover,
 };
@@ -63,11 +67,16 @@ fn initializeResult(comptime version: []const u8) []const u8 {
         "\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"fake\",\"version\":\"1\"}}}\n' \"$id\" ;;\n";
 }
 
-const initialize_refused =
+const initialize_accepts_2025_06_18 =
     \\    *'"method":"initialize"'*'"protocolVersion":"2025-06-18"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"fake","version":"1"}}}\n' "$id" ;;
-    \\    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"Unsupported protocol version","data":{"supported":["2025-06-18"],"requested":"other"}}}\n' "$id" ;;
     \\
 ;
+
+/// Refuses initialize with -32602, listing `supported` (JSON array elements).
+fn initializeRefusal(comptime supported: []const u8) []const u8 {
+    return "    *'\"method\":\"initialize\"'*) printf '{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":{\"code\":-32602,\"message\":\"Unsupported protocol version\",\"data\":{\"supported\":[" ++ supported ++
+        "],\"requested\":\"other\"}}}\\n' \"$id\" ;;\n";
+}
 
 const discover_modern =
     \\    *'"method":"server/discover"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","supportedVersions":["2026-07-28"],"capabilities":{"tools":{}},"serverInfo":{"name":"fake","version":"1"}}}\n' "$id" ;;
@@ -76,7 +85,6 @@ const discover_modern =
 
 const discover_unsupported =
     \\    *'"method":"server/discover"'*) printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32022,"message":"Unsupported protocol version","data":{"supported":["2027-01-01"]}}}\n' "$id" ;;
-    \\    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32022,"message":"Unsupported protocol version","data":{"supported":["2027-01-01"]}}}\n' "$id" ;;
 ;
 
 /// The script for `mode`; `script` is the `.newest` one.
@@ -85,9 +93,11 @@ pub fn scriptFor(comptime mode: Mode) []const u8 {
     return head ++ nl ++ (if (mode == .per_request) per_request_guard ++ nl else "") ++ body_start ++ nl ++ switch (mode) {
         .newest => method_not_found ++ nl ++ comptime initializeResult("2025-11-25"),
         .older => method_not_found ++ nl ++ comptime initializeResult("2025-03-26"),
-        .older_error => method_not_found ++ nl ++ initialize_refused,
+        .older_error => method_not_found ++ nl ++ initialize_accepts_2025_06_18 ++ comptime initializeRefusal("\"2025-06-18\""),
+        .older_error_stuck => method_not_found ++ nl ++ comptime initializeRefusal("\"2025-06-18\""),
         .per_request => discover_modern ++ nl,
         .unsupported_initialize => method_not_found ++ nl ++ comptime initializeResult("2024-11-05"),
+        .unsupported_initialize_error => method_not_found ++ nl ++ comptime initializeRefusal("\"2024-11-05\""),
         .unsupported_discover => discover_unsupported ++ nl,
     } ++ rest;
 }

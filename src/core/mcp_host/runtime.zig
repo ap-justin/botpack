@@ -2468,6 +2468,7 @@ fn connectFake(comptime mode: fake_server.Mode, arena: Allocator, expected_tools
     try r.start(testing.allocator, testing.io, &configs, &f.inherited, f.options());
     defer r.deinit();
     const listed = try r.tools(arena, "fake", null);
+    try testing.expect(listed == .tools);
     try testing.expectEqual(expected_tools, listed.tools.len);
     return (try r.statuses(arena))[0];
 }
@@ -2532,6 +2533,20 @@ test "a server that answers initialize with a version fx doesn't speak fails, na
     defer arena.deinit();
     const said = try refusedFake(.unsupported_initialize, arena.allocator());
     try testing.expectEqualStrings("it answered with an MCP version fx doesn't support (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2024-11-05)", said);
+}
+
+test "a server that refuses initialize listing only versions fx doesn't speak fails, naming both sides' versions" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const said = try refusedFake(.unsupported_initialize_error, arena.allocator());
+    try testing.expectEqualStrings("it refused or never answered fx's initialize request (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2024-11-05)", said);
+}
+
+test "a server that refuses even the version it lists is offered it once, then fails naming it" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const said = try refusedFake(.older_error_stuck, arena.allocator());
+    try testing.expectEqualStrings("it refused or never answered fx's initialize request (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2025-06-18)", said);
 }
 
 test "a cancelled call ends, and stopping ends a call that never answers" {
