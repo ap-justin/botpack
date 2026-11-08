@@ -2556,6 +2556,35 @@ test "a server that refuses even the version it lists is offered it once, then f
     try testing.expectEqualStrings("it refused or never answered fx's initialize request (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2025-06-18)", said);
 }
 
+test "a 2026 server whose -32020 a bridge forwards over stdio is reached through initialize, which discovery doesn't try again" {
+    var f: Fixture = undefined;
+    try f.initMode(.header_stripped);
+    defer f.deinit();
+    const configs = [_]mcp_contract.McpServerConfig{.{ .name = "fake", .command = f.server }};
+    var r: Runtime = undefined;
+    try r.start(testing.allocator, testing.io, &configs, &f.inherited, f.options());
+    defer r.deinit();
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const listed = try r.tools(arena.allocator(), "fake", null);
+    try testing.expect(listed == .tools);
+    try testing.expectEqual(@as(usize, 1), listed.tools.len);
+    const status = (try r.statuses(arena.allocator()))[0];
+    try testing.expectEqual(State.ready, status.state);
+    try testing.expectEqualStrings("2025-11-25", status.version.?);
+    try testing.expect(try r.tools(arena.allocator(), "fake", null) == .tools);
+    const result = try r.call(arena.allocator(), "fake", "echo", "{\"q\":\"discovers\"}", null, null);
+    try testing.expect(result == .result);
+    try testing.expect(std.mem.find(u8, result.result.content, "discovers=1") != null);
+}
+
+test "a server whose -32020 a bridge forwards over stdio, for initialize too, says its headers were refused, with its message" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const said = try refusedFake(.header_stripped_refused, arena.allocator());
+    try testing.expectEqualStrings("it refused fx's request headers (a proxy may be dropping request headers): " ++ fake_server.header_mismatch_message, said);
+}
+
 const HttpFake = fake_server.HttpFake;
 
 /// Starts the runtime on the HTTP fake, which must already serve.
@@ -2633,6 +2662,8 @@ test "a 2026 server over HTTP that lists no version fx speaks fails, naming both
     var discovers: u32 = 0;
     const said = try refusedHttpFake(.unsupported_discover, arena.allocator(), &discovers);
     try testing.expectEqualStrings("it supports no MCP version fx speaks (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2027-01-01)", said);
+    // -32022 doesn't fall back to initialize.
+    try testing.expectEqual(@as(u32, 1), discovers);
 }
 
 test "a server behind a proxy that drops request headers and refuses initialize too says so, with the server's message" {
@@ -2643,6 +2674,15 @@ test "a server behind a proxy that drops request headers and refuses initialize 
     try testing.expectEqualStrings("it refused fx's request headers (a proxy may be dropping request headers): " ++ fake_server.header_mismatch_message, said);
     // The refused initialize hints at a modern server: one more probe, no more.
     try testing.expectEqual(@as(u32, 2), discovers);
+}
+
+test "a server behind a proxy that drops request headers whose initialize fails for its own reason says initialize failed, not the headers" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var discovers: u32 = 0;
+    const said = try refusedHttpFake(.header_stripped_failing, arena.allocator(), &discovers);
+    try testing.expectEqualStrings("it refused or never answered fx's initialize request", said);
+    try testing.expectEqual(@as(u32, 1), discovers);
 }
 
 test "a server that refuses fx for a missing capability says so with its message, not as a version refusal" {

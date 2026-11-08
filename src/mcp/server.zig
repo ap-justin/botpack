@@ -148,8 +148,9 @@ pub const Failure = union(enum) {
     initialized_timed_out,
     /// Detection needs a sign-in first; `detect` again after it.
     needs_auth,
-    /// Detection fell back to initialize after discovery got -32020, and
-    /// failed there: the server refuses fx's request headers, as when a
+    /// Detection fell back to initialize after discovery got -32020, the
+    /// server refused initialize with a modern code, and discovery got
+    /// -32020 again: the server refuses fx's request headers, as when a
     /// proxy drops them. `failedRefusal` has the server's message.
     headers_refused,
     /// Detection needed a refresh, and the authorization server gave no
@@ -505,9 +506,10 @@ pub const Server = struct {
         if (body != .failure) return;
         const failure = body.failure;
         if (failure.code != wire.code.header_mismatch and failure.code != wire.code.missing_required_client_capability) return;
-        var text: [1024]u8 = undefined;
-        var fixed: std.heap.FixedBufferAllocator = .init(&text);
-        const said = wire.decodeString(fixed.allocator(), failure.message) catch null;
+        // Past `note_max` by more than a UTF-8 sequence, so `excerptOf`
+        // sees a longer message as cut.
+        var text: [note_max + 4]u8 = undefined;
+        const said = wire.decodeStringPrefix(&text, failure.message);
         r.refusal = .{ .code = failure.code };
         if (said) |m| r.refusal.len = @intCast(excerptOf(note_max, &r.refusal.buf, m).len);
     }
@@ -2198,8 +2200,10 @@ pub const Server = struct {
         if (r.stdio) r.proc.stop() catch {};
         r.failed_said = r.said;
         r.failed_refusal = r.refusal;
-        // After -32020 the fallback's failure is the headers' refusal.
-        const headers = r.refusal.code == wire.code.header_mismatch and (f == .initialize_failed or f == .went_quiet);
+        // Only `went_quiet` proves the headers: initialize was refused with
+        // a modern code, and the probe it sent again got -32020 once more.
+        // An initialize that failed for its own reason is `initialize_failed`.
+        const headers = r.refusal.code == wire.code.header_mismatch and f == .went_quiet;
         r.emit(.{ .failed = if (headers) .headers_refused else .{ .era = f } });
     }
 
@@ -2373,13 +2377,18 @@ test "a detection failure names the versions behind it, also once the server sta
     try std.testing.expect(r.failedVersions() == null);
 }
 
-test "a -32020 answer to discovery makes the fallback's failure a refusal of the headers, naming the server's message" {
+test "a -32020 answer to the probe after initialize was refused too is a refusal of the headers, naming the server's message" {
     var r: Server = undefined;
     try testServer(&r);
     defer r.deinit();
     const mismatch: @FieldType(wire.Response, "body") = .{ .failure = .{ .code = wire.code.header_mismatch, .message = "\"Mcp-Method is \\u001b[31mabsent\"", .data = null } };
+    // An initialize that fails for its own reason after -32020 (a 502, a
+    // timeout, -32603) says so, not that the headers were refused.
     r.noteRefusal(mismatch);
     r.detectionFailed(.initialize_failed);
+    try std.testing.expectEqual(Failure{ .era = .initialize_failed }, r.events[r.event_count - 1].failed);
+    r.noteRefusal(mismatch);
+    r.detectionFailed(.went_quiet);
     try std.testing.expectEqual(Failure.headers_refused, r.events[r.event_count - 1].failed);
     // Decoded, and terminal-safe.
     try std.testing.expectEqualStrings("Mcp-Method is ?[31mabsent", r.failedRefusal().?);
@@ -2398,6 +2407,22 @@ test "a -32020 answer to discovery makes the fallback's failure a refusal of the
     r.detectionFailed(.rejected);
     try std.testing.expectEqual(Failure{ .era = .rejected }, r.events[r.event_count - 1].failed);
     try std.testing.expectEqualStrings("Missing sampling", r.failedRefusal().?);
+}
+
+test "a long refusal message with escapes is kept cut, not dropped" {
+    var r: Server = undefined;
+    try testServer(&r);
+    defer r.deinit();
+    const head = "\"the \\\"Mcp-Method\\\" header is absent";
+    var long: [head.len + 2048 + 1]u8 = @splat('x');
+    @memcpy(long[0..head.len], head);
+    long[long.len - 1] = '"';
+    r.noteRefusal(.{ .failure = .{ .code = wire.code.header_mismatch, .message = &long, .data = null } });
+    r.detectionFailed(.went_quiet);
+    const said = r.failedRefusal().?;
+    try std.testing.expect(std.mem.startsWith(u8, said, "the \"Mcp-Method\" header is absentxxx"));
+    try std.testing.expectEqual(note_max + 3, said.len);
+    try std.testing.expect(std.mem.endsWith(u8, said, "..."));
 }
 
 test "a version keeps only its letters, digits, dots and dashes, and one with an escape is left out" {

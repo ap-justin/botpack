@@ -35,6 +35,13 @@ pub const Mode = enum {
     unsupported_initialize_error,
     /// A modern server that lists only a version fx doesn't speak.
     unsupported_discover,
+    /// A 2026 server whose -32020 a bridge forwards, as when a proxy before
+    /// it drops request headers: discovery gets -32020, initialize succeeds
+    /// with 2025-11-25. A call that mentions "discovers" returns how many
+    /// discovery requests it got, as "discovers=" and the number.
+    header_stripped,
+    /// Like `.header_stripped`, and initialize gets -32020 too.
+    header_stripped_refused,
     /// Like `.newest`, and it also lists `tool_call`, whose `arguments` is an
     /// open object; a call to it answers "arguments=object" or
     /// "arguments=string" for what its `arguments` arrived as.
@@ -91,6 +98,16 @@ const discover_unsupported =
     \\    *'"method":"server/discover"'*) printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32022,"message":"Unsupported protocol version","data":{"supported":["2027-01-01"]}}}\n' "$id" ;;
 ;
 
+const discover_header_mismatch =
+    "    *'\"method\":\"server/discover\"'*) discovers=$((discovers + 1)); " ++ headerMismatchReply("server/discover");
+
+const initialize_header_mismatch = "    *'\"method\":\"initialize\"'*) " ++ headerMismatchReply("initialize");
+
+fn headerMismatchReply(comptime method: []const u8) []const u8 {
+    return "printf '{\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":{\"code\":-32020,\"message\":\"" ++ std.fmt.comptimePrint(header_mismatch_format, .{method}) ++
+        "\",\"data\":{\"mismatch\":{\"header\":\"(missing)\",\"body\":\"" ++ method ++ "\"}}}}\\n' \"$id\" ;;\n";
+}
+
 /// The script for `mode`; `script` is the `.newest` one.
 pub fn scriptFor(comptime mode: Mode) []const u8 {
     const nl = "\n";
@@ -103,6 +120,8 @@ pub fn scriptFor(comptime mode: Mode) []const u8 {
         .unsupported_initialize => method_not_found ++ nl ++ comptime initializeResult("2024-11-05"),
         .unsupported_initialize_error => method_not_found ++ nl ++ comptime initializeRefusal("\"2024-11-05\""),
         .unsupported_discover => discover_unsupported ++ nl,
+        .header_stripped => discover_header_mismatch ++ comptime initializeResult("2025-11-25"),
+        .header_stripped_refused => discover_header_mismatch ++ initialize_header_mismatch,
     } ++ (if (mode == .open_object) open_object_list else default_list) ++ calls;
 }
 
@@ -135,6 +154,7 @@ const calls =
     \\    *'"id":"e2"'*)
     \\      name=$(printf '%s' "$line" | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')
     \\      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"%se2=%s"}]}}\n' "$call" "$got" "$name" ;;
+    \\    *'"method":"tools/call"'*discovers*) printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"discovers=%s"}]}}\n' "$id" "${discovers:-0}" ;;
     \\    *'"method":"tools/call"'*pid*) printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"pid=%s"}]}}\n' "$id" "$$" ;;
     \\    *'"method":"tools/call"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"hi"}]}}\n' "$id" ;;
     \\  esac
@@ -153,6 +173,9 @@ pub const HttpMode = enum {
     header_stripped,
     /// Like `.header_stripped`, and `initialize` gets 400 and -32020 too.
     header_stripped_refused,
+    /// Like `.header_stripped`, and `initialize` gets -32603, a failure of
+    /// the server's own.
+    header_stripped_failing,
     /// A 2026 server that reads the headers: discovery lists 2026-07-28, and
     /// a tools request is served when its `Mcp-Method` names its method and
     /// its `_meta` carries that version.
@@ -232,11 +255,11 @@ pub const HttpFake = struct {
         const id = idOf(body);
         const method = methodOf(body);
         var text: [1024]u8 = undefined;
-        const stripped = f.mode == .header_stripped or f.mode == .header_stripped_refused;
+        const stripped = f.mode == .header_stripped or f.mode == .header_stripped_refused or f.mode == .header_stripped_failing;
         if (std.mem.eql(u8, method, "server/discover")) {
             _ = f.discovers.fetchAdd(1, .monotonic);
             return switch (f.mode) {
-                .header_stripped, .header_stripped_refused => respond(&w.interface, "400 Bad Request", try headerMismatch(&text, id, method)),
+                .header_stripped, .header_stripped_refused, .header_stripped_failing => respond(&w.interface, "400 Bad Request", try headerMismatch(&text, id, method)),
                 .per_request => respond(&w.interface, "200 OK", try std.mem.print(&text, "{{\"jsonrpc\":\"2.0\",\"id\":{s},\"result\":{{\"resultType\":\"complete\",\"supportedVersions\":[\"2026-07-28\"],\"capabilities\":{{\"tools\":{{}}}},\"serverInfo\":{{\"name\":\"fake\",\"version\":\"1\"}}}}}}", .{id})),
                 .unsupported_discover => respond(&w.interface, "400 Bad Request", try std.mem.print(&text, "{{\"jsonrpc\":\"2.0\",\"id\":{s},\"error\":{{\"code\":-32022,\"message\":\"Unsupported protocol version\",\"data\":{{\"supported\":[\"2027-01-01\"],\"requested\":\"2026-07-28\"}}}}}}", .{id})),
                 .missing_capability => respond(&w.interface, "400 Bad Request", try std.mem.print(&text, "{{\"jsonrpc\":\"2.0\",\"id\":{s},\"error\":{{\"code\":-32021,\"message\":\"" ++ missing_capability_message ++ "\",\"data\":{{\"requiredCapabilities\":{{\"sampling\":{{}}}}}}}}}}", .{id})),
@@ -244,6 +267,7 @@ pub const HttpFake = struct {
         }
         if (std.mem.eql(u8, method, "initialize")) {
             if (f.mode == .header_stripped_refused) return respond(&w.interface, "400 Bad Request", try headerMismatch(&text, id, method));
+            if (f.mode == .header_stripped_failing) return respond(&w.interface, "200 OK", try std.mem.print(&text, "{{\"jsonrpc\":\"2.0\",\"id\":{s},\"error\":{{\"code\":-32603,\"message\":\"database unavailable\"}}}}", .{id}));
             if (f.mode != .header_stripped) return respond(&w.interface, "400 Bad Request", try std.mem.print(&text, "{{\"jsonrpc\":\"2.0\",\"id\":{s},\"error\":{{\"code\":-32600,\"message\":\"initialize is not served\"}}}}", .{id}));
             return respond(&w.interface, "200 OK", try std.mem.print(&text, "{{\"jsonrpc\":\"2.0\",\"id\":{s},\"result\":{{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{{\"tools\":{{}}}},\"serverInfo\":{{\"name\":\"fake\",\"version\":\"1\"}}}}}}", .{id}));
         }
