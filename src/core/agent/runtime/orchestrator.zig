@@ -7330,8 +7330,8 @@ fn processQueuedPromptLoop(
         recovery_resume = null;
         if (try request_recovery.start(route_fast_mode, resumed) == null) {
             // The module asks before resending a resumed request. The turn
-            // reaches the log now, with the question's record, so Esc ends
-            // it and a relaunch asks again.
+            // reaches the log now, with the question's record, so a cancel
+            // ends it and a relaunch asks again.
             try persistRecoveryCheckpoint(
                 deps,
                 finalization,

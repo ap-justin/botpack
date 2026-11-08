@@ -585,18 +585,6 @@ function seedV2Credential(root: ReturnType<typeof createRoot>, activeAuth: AuthF
   return path;
 }
 
-/**
- * The MCP credential store's Keychain item for a throwaway account, through
- * the same Security calls fx's osascript helper makes, so no other program
- * needs Keychain access to it. `op` is "load" (the item's text, "" when
- * there is none) or "delete".
- */
-
-/**
- * Pauses the first Keychain read fx makes for `account` from now on, as a
- * slow Keychain does; resolves with its pid, or null if none starts in 15 s.
- */
-
 function startToolGateway() {
   return startFakeGateway([
     fakeGatewayToolCall("select_mcp", "mcp_select_tool", { name: TOOL_NAME }),
@@ -1125,11 +1113,6 @@ describe("MCP login", () => {
     expect(auth.tokenExchanges).toBe(1);
   }, 90_000);
 
-  // Before, nothing changed on the screen until the address came, which a
-  // slow sign-in server makes seconds, and each Enter in the meantime closed
-  // the port the browser comes back to, so the sign-in could never finish.
-  // On the code before, this fails at "Signing in…".
-
   // A v1 login taken over would be refreshed by an older fx and this one
   // apart, neither seeing the other's saves, so a server that takes each
   // refresh token once signs both out. fx signs in on its own instead.
@@ -1611,15 +1594,6 @@ describe("MCP login", () => {
     expect(readFileSync(storePath, "utf8")).toContain(ACCESS_INITIAL);
   }, 60_000);
 
-  // Two shells share one login on the Keychain. Shell A starts while B is
-  // idle, and A's Keychain read hangs past the 10 s it may hold the store's
-  // lock; meanwhile B's token is refused, so B refreshes and saves. The
-  // auth server's refresh tokens work once, as WorkOS's do.
-  // Before, B waited 2 s for the lock, dropped its new login with "another
-  // fx kept it busy", and A, taking the saved login, replayed a refresh
-  // token B had already used. Now A's hung read is cut at its budget, B
-  // waits for that and saves, and A takes B's login without refreshing.
-
   test("a configured oauth.resource reaches the authorization server as written", async () => {
     upstream = startModernMcpHttpFixture("json");
     // The fixture advertises its origin as the resource and checks it on
@@ -1709,13 +1683,6 @@ describe("MCP login", () => {
     expect(auth.protectedToolCalls).toBe(1);
   }, 60_000);
 
-  // Before, a shell that started before another terminal signed in logged out
-  // without that login, which stayed valid at the server for every other fx.
-
-  // Before, a shell holding a login renewed it at its next use after another
-  // terminal logged out, and saved it again: at a server that doesn't end the
-  // login on revocation, as this fixture, the logout undid itself.
-
   // RFC 8414 section 3.2: the metadata is an application/json response.
   test("fx mcp login refuses sign-in metadata that isn't JSON before opening the browser", async () => {
     upstream = startModernMcpHttpFixture("json");
@@ -1757,10 +1724,6 @@ describe("MCP login", () => {
       expect(methods).toContain("tools/list");
     }, 30_000);
   }
-
-  // Esc stops only the call: the renewal runs on, so a server that swaps its
-  // refresh token on each renewal never sees an old one. A renewal gets 30 s;
-  // the call waiting when it runs out fails, and the next call renews afresh.
 
   test("a pinned callback port is bound again for each of several sign-ins in a row", async () => {
     upstream = startModernMcpHttpFixture("json");

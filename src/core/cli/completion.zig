@@ -134,7 +134,7 @@ fn addOptions(model: *Model, arena: Allocator, target: *Node, options: []const O
 const help_flag: Entry = .{ .name = "--help", .description = "Show help for this command" };
 
 /// A word offers only the flags it declares, plus `--help`: a parent's flags
-/// may not apply, as `--api-key` doesn't after a subcommand that declares no flags.
+/// may not apply to it.
 fn addSubcommands(model: *Model, arena: Allocator, parent_path: []const u8, subcommands: []const SubcommandDoc) !void {
     for (subcommands) |sub| {
         const name = sub.name();

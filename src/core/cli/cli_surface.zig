@@ -151,7 +151,7 @@ fn parseProviderOrderFlag(alloc: Allocator, raw: []const u8, previous: ?[][]cons
 
 pub const InteractiveLaunch = struct {
     modifiers: LaunchModifiers = .{},
-    /// `fx "<prompt>"`: sent once the session's first frame is on screen.
+    /// `fx "<prompt>"`: parsed so the launch can be refused, and never sent.
     /// Owned by the allocator that parsed the launch.
     initial_prompt: ?[]u8 = null,
 

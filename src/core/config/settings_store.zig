@@ -1375,7 +1375,7 @@ fn cleanupLegacyWorkspacePreferences(
 }
 
 /// The settings paths a patch from `fx config set` or `unset` writes that the
-/// `/settings` cleanup above doesn't already cover.
+/// per-key cleanup above doesn't already cover.
 fn configWrittenPaths(patch: UserSettingsPatch) [8]?[]const u8 {
     return .{
         if (patch.theme != null) "theme" else null,
