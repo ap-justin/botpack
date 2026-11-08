@@ -293,7 +293,7 @@
   },
   "exceptions": {
     "setting_keys": {
-      "statusLine": "Older spelling of status_line, still read so existing settings files keep working; fx writes only status_line."
+      "statusLine": "Retired with the terminal status line, as status_line is. It stays listed as retired so existing settings files load without a report."
     }
   },
   "hand_parsed_files": {
