@@ -235,13 +235,11 @@ pub const LoadMode = enum { stored, refresh_if_needed };
 const FxLoginRefreshMode = enum { if_needed, force };
 
 pub const missing_credential_message = "fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.";
-pub const missing_interactive_credential_message = "fx needs access to Vercel AI Gateway. Run /login to sign in, /provider to use an API key, or set AI_GATEWAY_API_KEY.";
 pub const unreadable_store_message = "fx could not read the stored API key from " ++ stored_key_backend_label ++ ". A key may be saved but unreadable. Set FX_TRACE_LOG for the failing step, or set AI_GATEWAY_API_KEY.";
 pub const host_managed_auth_message = "Authentication is managed by the host.";
 
 test "public credential guidance spells fx lowercase" {
     try std.testing.expect(std.mem.startsWith(u8, missing_credential_message, "fx needs"));
-    try std.testing.expect(std.mem.startsWith(u8, missing_interactive_credential_message, "fx needs"));
     try std.testing.expect(std.mem.startsWith(u8, unreadable_store_message, "fx could"));
 }
 
@@ -829,13 +827,8 @@ test "missing credential messages use surface commands in preferred order" {
     try std.testing.expect(cli_login < cli_api_key);
     try std.testing.expect(cli_api_key < cli_env);
     try std.testing.expect(std.mem.find(u8, missing_credential_message, "fx setup") == null);
-
-    const tui_login = std.mem.find(u8, missing_interactive_credential_message, "/login").?;
-    const tui_setup = std.mem.find(u8, missing_interactive_credential_message, "/provider").?;
-    const tui_env = std.mem.find(u8, missing_interactive_credential_message, "AI_GATEWAY_API_KEY").?;
-
-    try std.testing.expect(tui_login < tui_setup);
-    try std.testing.expect(tui_setup < tui_env);
+    try std.testing.expect(std.mem.find(u8, missing_credential_message, "/login") == null);
+    try std.testing.expect(std.mem.find(u8, missing_credential_message, "/provider") == null);
 }
 
 test "credential gateway team prefers team id" {

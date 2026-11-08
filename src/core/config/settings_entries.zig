@@ -23,7 +23,7 @@ pub const Origin = enum {
 pub const Scope = enum { all, global, workspace };
 
 pub const Entry = struct {
-    /// Dotted key under its current name, such as `status_line.context`.
+    /// Dotted key under its current name, such as `sound.turn_end`.
     key: []const u8,
     /// Borrowed from the parsed file or the environment.
     value: std.json.Value,
@@ -99,8 +99,8 @@ pub fn appendEnv(alloc: Allocator, entries: *Entries, overrides: []const env_set
     entries.items = grown;
 }
 
-/// The entries for `key` and the keys under it, such as every `status_line.*`
-/// for `status_line`, keeping only the entry fx uses for each. Caller frees the
+/// The entries for `key` and the keys under it, such as every `sound.*` for
+/// `sound`, keeping only the entry fx uses for each. Caller frees the
 /// returned slice; its entries borrow from `entries`.
 pub fn lookup(alloc: Allocator, entries: []const Entry, key: []const u8) ![]Entry {
     var found: std.ArrayList(Entry) = .empty;
@@ -153,7 +153,7 @@ fn appendSettings(alloc: Allocator, list: *std.ArrayList(Entry), object: std.jso
     }
 }
 
-/// Shows a setting saved under its older name, such as `statusLine`, under its
+/// Shows a setting saved under its older name, such as `notifications`, under its
 /// current one, leaving out each value the current key also sets, since that
 /// one wins.
 fn appendRenamed(
@@ -211,7 +211,7 @@ test "entries follow precedence and flatten nested values" {
     const alloc = std.testing.allocator;
     var profile = try parseForTest(
         \\{"fast_mode":true,"maxxing_mode":1,"fast_mdoe":2,"model":"a/b",
-        \\ "statusLine":{"context":true,"contxt":false},
+        \\ "notifications":{"max":true,"mx":false},"status_line":{"context":true},
         \\ "models":{"gateway":"gpt"},"provider_order":["x","y"],
         \\ "workspaces":{"/w":{"fast_mode":false,"effort":"high"},"/other":{"effort":"low"}}}
     );
@@ -228,7 +228,7 @@ test "entries follow precedence and flatten nested values" {
         .{ .key = "max_agent_steps", .origin = .project },
         .{ .key = "fast_mode", .origin = .global },
         .{ .key = "model", .origin = .global },
-        .{ .key = "status_line.context", .origin = .global },
+        .{ .key = "sound.max", .origin = .global },
         .{ .key = "models.gateway", .origin = .global },
         .{ .key = "provider_order", .origin = .global },
         .{ .key = "fast_mode", .origin = .workspace },
@@ -245,17 +245,15 @@ test "entries follow precedence and flatten nested values" {
 test "an older name shows under the current one, which wins any value both set" {
     const alloc = std.testing.allocator;
     var profile = try parseForTest(
-        \\{"status_line":{"context":true},"statusLine":{"context":false,"session":true},
-        \\ "notifications":{"max":true}}
+        \\{"sound":{"max":true},"notifications":{"max":false,"turn_end":true}}
     );
     defer profile.deinit();
     var entries = try collect(alloc, .{ .profile = profile.value, .workspace_root = "/w" }, .all);
     defer entries.deinit(alloc);
 
     const expected = [_]struct { key: []const u8, value: bool }{
-        .{ .key = "status_line.context", .value = true },
-        .{ .key = "status_line.session", .value = true },
         .{ .key = "sound.max", .value = true },
+        .{ .key = "sound.turn_end", .value = true },
     };
     try std.testing.expectEqual(expected.len, entries.items.len);
     for (expected, entries.items) |want, got| {
@@ -294,9 +292,9 @@ test "scopes pick the profile's own settings or this workspace's override" {
 test "lookup keeps the entry fx uses for each key under the name" {
     const alloc = std.testing.allocator;
     var profile = try parseForTest(
-        \\{"fast_mode":true,"statusLine":{"context":true,"session":true},
+        \\{"fast_mode":true,"notifications":{"max":true,"turn_end":true},
         \\ "provider":"gateway","provider_order":["x"],
-        \\ "workspaces":{"/w":{"fast_mode":false,"status_line":{"context":false}}}}
+        \\ "workspaces":{"/w":{"fast_mode":false,"sound":{"max":false}}}}
     );
     defer profile.deinit();
     var entries = try collect(alloc, .{ .profile = profile.value, .workspace_root = "/w" }, .all);
@@ -308,13 +306,13 @@ test "lookup keeps the entry fx uses for each key under the name" {
     try std.testing.expectEqual(Origin.workspace, fast[0].origin);
     try std.testing.expect(!fast[0].value.bool);
 
-    const status = try lookup(alloc, entries.items, "status_line");
-    defer alloc.free(status);
-    try std.testing.expectEqual(@as(usize, 2), status.len);
-    try std.testing.expectEqualStrings("status_line.session", status[0].key);
-    try std.testing.expectEqual(Origin.global, status[0].origin);
-    try std.testing.expectEqualStrings("status_line.context", status[1].key);
-    try std.testing.expectEqual(Origin.workspace, status[1].origin);
+    const sound = try lookup(alloc, entries.items, "sound");
+    defer alloc.free(sound);
+    try std.testing.expectEqual(@as(usize, 2), sound.len);
+    try std.testing.expectEqualStrings("sound.turn_end", sound[0].key);
+    try std.testing.expectEqual(Origin.global, sound[0].origin);
+    try std.testing.expectEqualStrings("sound.max", sound[1].key);
+    try std.testing.expectEqual(Origin.workspace, sound[1].origin);
 
     const provider = try lookup(alloc, entries.items, "provider");
     defer alloc.free(provider);
@@ -328,7 +326,7 @@ test "lookup keeps the entry fx uses for each key under the name" {
 
 test "collect frees its keys when it runs out of memory" {
     var profile = try parseForTest(
-        \\{"fast_mode":true,"statusLine":{"context":true},"models":{"gateway":"gpt"},
+        \\{"fast_mode":true,"notifications":{"max":true},"models":{"gateway":"gpt"},
         \\ "workspaces":{"/w":{"effort":"high"}}}
     );
     defer profile.deinit();

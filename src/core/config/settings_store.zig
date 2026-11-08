@@ -32,17 +32,6 @@ pub const Availability = union(enum) {
     unavailable,
 };
 
-pub const StatuslineItem = enum {
-    context,
-    session,
-    workspace,
-};
-
-pub const StatuslineItemPatch = struct {
-    item: StatuslineItem,
-    enabled: bool,
-};
-
 pub const AllowlistResetScope = enum {
     all,
     commands,
@@ -105,11 +94,7 @@ pub const UserSettingsPatch = struct {
     effort: ?types.ReasoningEffort = null,
     fast_mode: ?bool = null,
     ultrafast_mode: ?bool = null,
-    slash_menu_categories: ?bool = null,
-    collapse_tool_calls: ?bool = null,
-    startup_scrollback: ?bool = null,
     prompt_history_enabled: ?bool = null,
-    statusline_item: ?StatuslineItemPatch = null,
     session_titles: ?bool = null,
     notification_turn_end: ?bool = null,
     notification_attention_required: ?bool = null,
@@ -122,7 +107,7 @@ pub const UserSettingsPatch = struct {
     provider_strict: ?bool = null,
     context: ?bool = null,
     cache_warming: ?bool = null,
-    /// Removes a plain setting, such as `fast_mode` or `statusLine.context`,
+    /// Removes a plain setting, such as `fast_mode` or `sound.turn_end`,
     /// so it falls back to its default. Distinct from the fields above, where
     /// null means "leave unchanged".
     remove: ?[]const u8 = null,
@@ -137,11 +122,7 @@ pub const UserSettingsPatch = struct {
             self.effort == null and
             self.fast_mode == null and
             self.ultrafast_mode == null and
-            self.slash_menu_categories == null and
-            self.collapse_tool_calls == null and
-            self.startup_scrollback == null and
             self.prompt_history_enabled == null and
-            self.statusline_item == null and
             self.session_titles == null and
             self.notification_turn_end == null and
             self.notification_attention_required == null and
@@ -239,12 +220,7 @@ const UserPreferenceField = enum(u4) {
     effort,
     fast_mode,
     ultrafast_mode,
-    slash_menu_categories,
-    collapse_tool_calls,
-    startup_scrollback,
     prompt_history_enabled,
-    statusline_context,
-    statusline_session,
     session_titles,
 
     fn mask(self: UserPreferenceField) u16 {
@@ -258,12 +234,7 @@ const UserPreferenceField = enum(u4) {
             .effort => "settings.json.preference-migration.effort.json",
             .fast_mode => "settings.json.preference-migration.fast_mode.json",
             .ultrafast_mode => "settings.json.preference-migration.ultrafast_mode.json",
-            .slash_menu_categories => "settings.json.preference-migration.slash_menu_categories.json",
-            .collapse_tool_calls => "settings.json.preference-migration.collapse_tool_calls.json",
-            .startup_scrollback => "settings.json.preference-migration.startup_scrollback.json",
             .prompt_history_enabled => "settings.json.preference-migration.prompt_history_enabled.json",
-            .statusline_context => "settings.json.preference-migration.statusline_context.json",
-            .statusline_session => "settings.json.preference-migration.statusline_session.json",
             .session_titles => "settings.json.preference-migration.session_titles.json",
         };
     }
@@ -275,12 +246,7 @@ const user_preference_fields = [_]UserPreferenceField{
     .effort,
     .fast_mode,
     .ultrafast_mode,
-    .slash_menu_categories,
-    .collapse_tool_calls,
-    .startup_scrollback,
     .prompt_history_enabled,
-    .statusline_context,
-    .statusline_session,
     .session_titles,
 };
 
@@ -1001,7 +967,7 @@ fn validateUserPatch(patch: UserSettingsPatch) !void {
 }
 
 /// A plain setting `remove` may clear: a listed key that isn't a map, or one
-/// fixed child such as `statusLine.context`.
+/// fixed child such as `sound.turn_end`.
 fn removablePath(path: []const u8) bool {
     if (settings_keys.unknownPart(path) != null) return false;
     const dot = std.mem.findScalar(u8, path, '.');
@@ -1020,7 +986,7 @@ fn removePath(object: *std.json.ObjectMap, path: []const u8) bool {
         return removed;
     };
     var removed = removeChild(object, path[0..dot], path[dot + 1 ..]);
-    // A renamed group, such as `status_line`, may still hold the value under
+    // A renamed group, such as `sound`, may still hold the value under
     // its older name, which would otherwise keep applying.
     for (settings_keys.keys) |key| {
         const current = key.renamed_to orelse continue;
@@ -1079,14 +1045,14 @@ test "removing a plain preference clears it and an emptied parent" {
     var root = try std.json.parseFromSliceLeaky(
         std.json.Value,
         arena.allocator(),
-        "{\"fast_mode\":true,\"fast_mode_model_bound\":true,\"statusLine\":{\"context\":true},\"notifications\":{\"max\":true,\"turn_end\":true}}",
+        "{\"fast_mode\":true,\"fast_mode_model_bound\":true,\"prompt_history\":{\"enabled\":true},\"notifications\":{\"max\":true,\"turn_end\":true}}",
         .{},
     );
     try std.testing.expect((try applyUserPatchToRoot(arena.allocator(), &root, .{ .remove = "fast_mode" })).changed);
     try std.testing.expect(!root.object.contains("fast_mode") and !root.object.contains("fast_mode_model_bound"));
 
-    try std.testing.expect((try applyUserPatchToRoot(arena.allocator(), &root, .{ .remove = "statusLine.context" })).changed);
-    try std.testing.expect(!root.object.contains("statusLine"));
+    try std.testing.expect((try applyUserPatchToRoot(arena.allocator(), &root, .{ .remove = "prompt_history.enabled" })).changed);
+    try std.testing.expect(!root.object.contains("prompt_history"));
 
     try std.testing.expect((try applyUserPatchToRoot(arena.allocator(), &root, .{ .remove = "notifications.max" })).changed);
     try std.testing.expect(root.object.get("notifications").?.object.contains("turn_end"));
@@ -1097,7 +1063,7 @@ test "removing a plain preference clears it and an emptied parent" {
 test "plain preference patches reject values the parser would refuse" {
     try validateUserPatch(.{ .theme = "light" });
     try validateUserPatch(.{ .theme = "my-theme.v2" });
-    try validateUserPatch(.{ .remove = "statusLine.workspace" });
+    try validateUserPatch(.{ .remove = "notifications.max" });
     const bad = [_]UserSettingsPatch{
         .{ .theme = "" },
         .{ .theme = "../escape" },
@@ -1105,8 +1071,10 @@ test "plain preference patches reject values the parser would refuse" {
         .{ .auto_compact_percent = 95 },
         .{ .remove = "models" },
         .{ .remove = "models.gateway" },
-        .{ .remove = "statusLine.contxt" },
+        .{ .remove = "sound.mx" },
         .{ .remove = "fast_mdoe" },
+        .{ .remove = "status_line.context" },
+        .{ .remove = "startup_scrollback" },
     };
     for (bad) |patch| try std.testing.expectError(error.InvalidSettingsFormat, validateUserPatch(patch));
 }
@@ -1144,17 +1112,26 @@ test "ultrafast user patch writes a profile-owned bool" {
     try std.testing.expect(!root.object.get("ultrafast_mode").?.bool);
 }
 
-test "collapse tool calls user patch writes the profile preference" {
+test "a save drops the terminal UI settings, at the top and in workspaces" {
     const alloc = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
-    var parsed = try std.json.parseFromSlice(std.json.Value, arena.allocator(), "{}", .{});
-    defer parsed.deinit();
-    var root = parsed.value;
+    var root = try std.json.parseFromSliceLeaky(
+        std.json.Value,
+        arena.allocator(),
+        "{\"collapse_tool_calls\":true,\"slash_menu_categories\":\"off\",\"startup_scrollback\":false," ++
+            "\"status_line\":{\"context\":true},\"statusLine\":7,\"theme\":\"dark\"," ++
+            "\"workspaces\":{\"/w\":{\"startup_scrollback\":true,\"statusLine\":{\"workspace\":\"yes\"},\"effort\":\"low\"}}}",
+        .{},
+    );
 
-    const application = try applyUserPatchToRoot(arena.allocator(), &root, .{ .collapse_tool_calls = true });
+    const application = try applyMutationToRoot(arena.allocator(), &root, .{ .user = .{ .session_titles = false } });
     try std.testing.expect(application.changed);
-    try std.testing.expect(root.object.get("collapse_tool_calls").?.bool);
+    inline for (retired_presentation_settings) |key| try std.testing.expect(!root.object.contains(key));
+    try std.testing.expectEqualStrings("dark", root.object.get("theme").?.string);
+    const workspace = root.object.get("workspaces").?.object.get("/w").?.object;
+    try std.testing.expect(!workspace.contains("startup_scrollback") and !workspace.contains("statusLine"));
+    try std.testing.expectEqualStrings("low", workspace.get("effort").?.string);
 }
 
 test "model and fast patch binds the fast preference atomically" {
@@ -1228,9 +1205,6 @@ fn applyUserPatchToRoot(
         _ = root.object.orderedRemove("fast_mode_model_bound");
         application.changed = true;
     }
-    if (patch.slash_menu_categories) |value| application.changed = try putBool(arena, &root.object, "slash_menu_categories", value) or application.changed;
-    if (patch.collapse_tool_calls) |value| application.changed = try putBool(arena, &root.object, "collapse_tool_calls", value) or application.changed;
-    if (patch.startup_scrollback) |value| application.changed = try putBool(arena, &root.object, "startup_scrollback", value) or application.changed;
     if (patch.session_titles) |value| application.changed = try putBool(arena, &root.object, "session_titles", value) or application.changed;
 
     if (patch.prompt_history_enabled) |enabled| {
@@ -1242,11 +1216,6 @@ fn applyUserPatchToRoot(
             break :blk root.object.getPtr("prompt_history").?;
         };
         application.changed = try putBool(arena, &prompt_history.object, "enabled", enabled) or application.changed;
-    }
-
-    if (patch.statusline_item) |item_patch| {
-        const statusline = try renamedGroup(arena, &root.object, "statusLine", "status_line", &application.changed);
-        application.changed = try putBool(arena, statusline, @tagName(item_patch.item), item_patch.enabled) or application.changed;
     }
 
     if (patch.notification_turn_end != null or
@@ -1276,9 +1245,20 @@ fn applyUserPatchToRoot(
     return application;
 }
 
+/// The settings only fx's removed presentation layers read. Saving drops them.
+const retired_presentation_settings = .{
+    "input_appearance",
+    "maxxing_mode",
+    "collapse_tool_calls",
+    "slash_menu_categories",
+    "startup_scrollback",
+    "statusLine",
+    "status_line",
+};
+
 fn removeRetiredPresentationSettings(root: *std.json.ObjectMap) bool {
     var changed = false;
-    inline for (&.{ "input_appearance", "maxxing_mode" }) |key| {
+    inline for (retired_presentation_settings) |key| {
         if (root.contains(key)) {
             _ = root.orderedRemove(key);
             changed = true;
@@ -1290,7 +1270,7 @@ fn removeRetiredPresentationSettings(root: *std.json.ObjectMap) bool {
     var iterator = workspaces.object.iterator();
     while (iterator.next()) |entry| {
         if (entry.value_ptr.* != .object) continue;
-        inline for (&.{ "input_appearance", "maxxing_mode" }) |key| {
+        inline for (retired_presentation_settings) |key| {
             if (entry.value_ptr.object.contains(key)) {
                 _ = entry.value_ptr.object.orderedRemove(key);
                 changed = true;
@@ -1359,27 +1339,6 @@ fn cleanupLegacyWorkspacePreferences(
         }
         removeLegacyLeaf(
             &entry.value_ptr.object,
-            "slash_menu_categories",
-            .slash_menu_categories,
-            patch.slash_menu_categories != null,
-            application,
-        );
-        removeLegacyLeaf(
-            &entry.value_ptr.object,
-            "collapse_tool_calls",
-            .collapse_tool_calls,
-            patch.collapse_tool_calls != null,
-            application,
-        );
-        removeLegacyLeaf(
-            &entry.value_ptr.object,
-            "startup_scrollback",
-            .startup_scrollback,
-            patch.startup_scrollback != null,
-            application,
-        );
-        removeLegacyLeaf(
-            &entry.value_ptr.object,
             "session_titles",
             .session_titles,
             patch.session_titles != null,
@@ -1393,25 +1352,6 @@ fn cleanupLegacyWorkspacePreferences(
             patch.prompt_history_enabled != null,
             application,
         );
-        if (patch.statusline_item) |item_patch| {
-            const legacy_field: ?UserPreferenceField = switch (item_patch.item) {
-                .context => .statusline_context,
-                .session => .statusline_session,
-                .workspace => null,
-            };
-            if (legacy_field) |field| {
-                inline for (.{ "statusLine", "status_line" }) |name| {
-                    removeLegacyNestedLeaf(
-                        &entry.value_ptr.object,
-                        name,
-                        @tagName(item_patch.item),
-                        field,
-                        true,
-                        application,
-                    );
-                }
-            }
-        }
         // A workspace entry can still hold the keys only fx config set writes,
         // or the one fx config unset removes. Left there, the older copy
         // would keep applying in that folder after the save reports success.
@@ -1815,8 +1755,8 @@ fn ensureGroup(arena: Allocator, root: *std.json.ObjectMap, name: []const u8, ch
     return &root.getPtr(name).?.object;
 }
 
-/// The object a renamed settings group is saved under, such as `status_line`
-/// for the older `statusLine`. Values that only the older key sets move into
+/// The object a renamed settings group is saved under, such as `sound` for
+/// the older `notifications`. Values that only the older key sets move into
 /// the current one, and the older key is removed, so the file keeps one
 /// spelling. A value both keys set keeps the current one, which startup
 /// already used, and the older value is dropped with a log line. Sets
@@ -2203,7 +2143,7 @@ fn validateKnownSettingsObject(
             }
         }
     }
-    inline for (&.{ "context", "fast_mode", "ultrafast_mode", "slash_menu_categories", "startup_scrollback", "yolo_acknowledged", "provider_strict" }) |key| {
+    inline for (&.{ "context", "fast_mode", "ultrafast_mode", "yolo_acknowledged", "provider_strict" }) |key| {
         if (object.get(key)) |value| {
             if (value != .bool) return error.InvalidSettingsFormat;
         }
@@ -2237,25 +2177,6 @@ fn validateKnownSettingsObject(
             }
         } else if (!tolerate_non_object_user_containers) {
             return error.InvalidSettingsFormat;
-        }
-    }
-    inline for (.{ "statusLine", "status_line" }) |name| {
-        if (object.get(name)) |value| {
-            if (value == .object) {
-                inline for (&.{"context"}) |key| {
-                    if (value.object.get(key)) |enabled| {
-                        if (enabled != .bool) return error.InvalidSettingsFormat;
-                    }
-                }
-                if (!tolerate_non_object_user_containers) {
-                    if (value.object.get("workspace")) |enabled| {
-                        if (enabled != .bool) return error.InvalidSettingsFormat;
-                    }
-                }
-            } else if (!tolerate_non_object_user_containers and comptime std.mem.eql(u8, name, "statusLine")) {
-                // A non-object `status_line` predates the rename; saving replaces it.
-                return error.InvalidSettingsFormat;
-            }
         }
     }
 }
@@ -2438,10 +2359,8 @@ test "user patch writes user preferences at top level" {
         .yolo_acknowledged = true,
         .effort = types.ReasoningEffort.literal("high"),
         .fast_mode = true,
-        .slash_menu_categories = false,
-        .startup_scrollback = false,
+        .session_titles = false,
         .prompt_history_enabled = false,
-        .statusline_item = .{ .item = .context, .enabled = true },
         .notification_turn_end = true,
         .notification_attention_required = false,
     });
@@ -2458,12 +2377,9 @@ test "user patch writes user preferences at top level" {
     try std.testing.expect(std.mem.find(u8, bytes, "\"yolo_acknowledged\":true") != null);
     try std.testing.expect(std.mem.find(u8, bytes, "\"effort\":\"high\"") != null);
     try std.testing.expect(std.mem.find(u8, bytes, "\"fast_mode\":true") != null);
-    try std.testing.expect(std.mem.find(u8, bytes, "\"slash_menu_categories\":false") != null);
-    try std.testing.expect(std.mem.find(u8, bytes, "\"startup_scrollback\":false") != null);
+    try std.testing.expect(std.mem.find(u8, bytes, "\"session_titles\":false") != null);
     try std.testing.expect(std.mem.find(u8, bytes, "\"prompt_history\":{\"enabled\":false}") != null);
-    try std.testing.expect(std.mem.find(u8, bytes, "\"status_line\":{\"context\":true}") != null);
     try std.testing.expect(std.mem.find(u8, bytes, "\"sound\":{\"turn_end\":true,\"attention_required\":false}") != null);
-    try std.testing.expect(std.mem.find(u8, bytes, "statusLine") == null);
     try std.testing.expect(std.mem.find(u8, bytes, "notifications") == null);
     try std.testing.expect(std.mem.find(u8, bytes, "\"future\":{\"nested\":7}") != null);
     try std.testing.expect(std.mem.find(u8, bytes, "\"workspaces\"") == null);
@@ -2477,7 +2393,9 @@ test "user patch retires presentation settings without rejecting their values" {
     try writeStoreFixture(
         tmp.dir,
         "home/.fx/settings.json",
-        "{\"input_appearance\":false,\"maxxing_mode\":7,\"future\":{\"profile\":1},\"workspaces\":{\"/workspace\":{\"input_appearance\":[],\"maxxing_mode\":{},\"future\":{\"workspace\":2}}}}\n",
+        "{\"input_appearance\":false,\"maxxing_mode\":7,\"startup_scrollback\":\"off\",\"status_line\":7,\"statusLine\":{\"workspace\":\"yes\"}," ++
+            "\"future\":{\"profile\":1},\"workspaces\":{\"/workspace\":{\"input_appearance\":[],\"maxxing_mode\":{}," ++
+            "\"collapse_tool_calls\":[],\"slash_menu_categories\":{},\"future\":{\"workspace\":2}}}}\n",
     );
 
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
@@ -2491,53 +2409,11 @@ test "user patch retires presentation settings without rejecting their values" {
 
     const bytes = try store.readPrimaryForTest(alloc);
     defer alloc.free(bytes);
-    try std.testing.expect(std.mem.find(u8, bytes, "input_appearance") == null);
-    try std.testing.expect(std.mem.find(u8, bytes, "maxxing_mode") == null);
+    inline for (retired_presentation_settings) |key| {
+        try std.testing.expect(std.mem.find(u8, bytes, "\"" ++ key ++ "\"") == null);
+    }
     try std.testing.expect(std.mem.find(u8, bytes, "\"future\":{\"profile\":1}") != null);
     try std.testing.expect(std.mem.find(u8, bytes, "\"future\":{\"workspace\":2}") != null);
-}
-
-test "workspace statusline patch writes globally and preserves nested leaf" {
-    const alloc = std.testing.allocator;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
-    try writeStoreFixture(
-        tmp.dir,
-        "home/.fx/settings.json",
-        "{\"statusLine\":{\"future\":7},\"workspaces\":{\"/workspace\":{\"statusLine\":{\"workspace\":false,\"future\":8}}}}\n",
-    );
-
-    const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
-    defer alloc.free(home);
-    var store = try Store.initFromHome(alloc, home, .writable);
-    defer store.deinit(alloc);
-
-    var outcome = try store.applyUserPatch(alloc, .{
-        .statusline_item = .{ .item = .workspace, .enabled = true },
-    });
-    defer outcome.deinit(alloc);
-
-    try std.testing.expect(outcome == .committed);
-    try std.testing.expectEqual(@as(usize, 0), outcome.committed.cleanup.fields_removed);
-    try std.testing.expectEqual(@as(usize, 0), outcome.committed.cleanup.recovery_paths.len);
-
-    const bytes = try store.readPrimaryForTest(alloc);
-    defer alloc.free(bytes);
-    var parsed = try std.json.parseFromSlice(std.json.Value, alloc, bytes, .{});
-    defer parsed.deinit();
-
-    // Saving moves the older `statusLine` group, unknown children included.
-    try std.testing.expect(parsed.value.object.get("statusLine") == null);
-    const root_statusline = parsed.value.object.get("status_line").?.object;
-    try std.testing.expectEqual(true, root_statusline.get("workspace").?.bool);
-    try std.testing.expectEqual(@as(i64, 7), root_statusline.get("future").?.integer);
-
-    // A legacy workspace copy keeps its name; workspace preferences aren't saved.
-    const nested_statusline = parsed.value.object.get("workspaces").?.object
-        .get("/workspace").?.object.get("statusLine").?.object;
-    try std.testing.expectEqual(false, nested_statusline.get("workspace").?.bool);
-    try std.testing.expectEqual(@as(i64, 8), nested_statusline.get("future").?.integer);
 }
 
 test "saving moves a renamed group, and remove clears either spelling" {
@@ -2548,14 +2424,14 @@ test "saving moves a renamed group, and remove clears either spelling" {
     try writeStoreFixture(
         tmp.dir,
         "home/.fx/settings.json",
-        "{\"statusLine\":{\"context\":false,\"session\":true},\"status_line\":{\"context\":true},\"notifications\":{\"max\":true}}\n",
+        "{\"notifications\":{\"max\":false,\"turn_end\":true},\"sound\":{\"max\":true}}\n",
     );
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
     defer alloc.free(home);
     var store = try Store.initFromHome(alloc, home, .writable);
     defer store.deinit(alloc);
 
-    var moved = try store.applyUserPatch(alloc, .{ .statusline_item = .{ .item = .workspace, .enabled = true } });
+    var moved = try store.applyUserPatch(alloc, .{ .notification_attention_required = true });
     defer moved.deinit(alloc);
     try std.testing.expect(moved == .committed);
     {
@@ -2563,14 +2439,12 @@ test "saving moves a renamed group, and remove clears either spelling" {
         defer alloc.free(bytes);
         var parsed = try std.json.parseFromSlice(std.json.Value, alloc, bytes, .{});
         defer parsed.deinit();
-        try std.testing.expect(parsed.value.object.get("statusLine") == null);
-        const status = parsed.value.object.get("status_line").?.object;
+        try std.testing.expect(parsed.value.object.get("notifications") == null);
+        const sound = parsed.value.object.get("sound").?.object;
         // The current key keeps its own value; the older one only fills gaps.
-        try std.testing.expect(status.get("context").?.bool);
-        try std.testing.expect(status.get("session").?.bool);
-        try std.testing.expect(status.get("workspace").?.bool);
-        // A group nothing saved keeps its older name until it's saved.
-        try std.testing.expect(parsed.value.object.get("notifications").?.object.get("max").?.bool);
+        try std.testing.expect(sound.get("max").?.bool);
+        try std.testing.expect(sound.get("turn_end").?.bool);
+        try std.testing.expect(sound.get("attention_required").?.bool);
     }
 
     var removed = try store.applyUserPatch(alloc, .{ .remove = "sound.max" });
@@ -2593,10 +2467,7 @@ test "saving a renamed group replaces a stray value fx ignored under its current
     var store = try Store.initFromHome(alloc, home, .writable);
     defer store.deinit(alloc);
 
-    var outcome = try store.applyUserPatch(alloc, .{
-        .notification_turn_end = false,
-        .statusline_item = .{ .item = .context, .enabled = true },
-    });
+    var outcome = try store.applyUserPatch(alloc, .{ .notification_turn_end = false });
     defer outcome.deinit(alloc);
     try std.testing.expect(outcome == .committed);
     const bytes = try store.readPrimaryForTest(alloc);
@@ -2606,11 +2477,11 @@ test "saving a renamed group replaces a stray value fx ignored under its current
     const sound = parsed.value.object.get("sound").?.object;
     try std.testing.expect(sound.get("max").?.bool);
     try std.testing.expect(!sound.get("turn_end").?.bool);
-    try std.testing.expect(parsed.value.object.get("status_line").?.object.get("context").?.bool);
+    try std.testing.expect(parsed.value.object.get("status_line") == null);
     try std.testing.expect(parsed.value.object.get("notifications") == null);
 }
 
-test "durable validation rejects malformed workspace statusline" {
+test "durable validation rejects malformed prompt history" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -2618,7 +2489,7 @@ test "durable validation rejects malformed workspace statusline" {
     try writeStoreFixture(
         tmp.dir,
         "home/.fx/settings.json",
-        "{\"statusLine\":{\"workspace\":\"yes\"}}\n",
+        "{\"prompt_history\":{\"enabled\":\"yes\"}}\n",
     );
 
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
@@ -2628,7 +2499,7 @@ test "durable validation rejects malformed workspace statusline" {
 
     try std.testing.expectError(
         error.InvalidSettingsFormat,
-        store.applyUserPatch(alloc, .{ .startup_scrollback = false }),
+        store.applyUserPatch(alloc, .{ .session_titles = false }),
     );
 }
 
@@ -2740,7 +2611,7 @@ test "fx config set and unset remove the workspace copy they would lose to" {
     try writeStoreFixture(
         tmp.dir,
         "home/.fx/settings.json",
-        "{\"effort\":\"high\",\"workspaces\":{\"/workspace\":{\"max_agent_steps\":5,\"effort\":\"low\",\"status_line\":{\"session\":true}}}}\n",
+        "{\"effort\":\"high\",\"workspaces\":{\"/workspace\":{\"max_agent_steps\":5,\"effort\":\"low\",\"sound\":{\"turn_end\":true}}}}\n",
     );
 
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
@@ -2754,9 +2625,9 @@ test "fx config set and unset remove the workspace copy they would lose to" {
     var unset_effort = try store.applyUserPatch(alloc, .{ .remove = "effort" });
     defer unset_effort.deinit(alloc);
     try std.testing.expect(unset_effort == .committed);
-    var unset_session = try store.applyUserPatch(alloc, .{ .remove = "status_line.session" });
-    defer unset_session.deinit(alloc);
-    try std.testing.expect(unset_session == .committed);
+    var unset_sound = try store.applyUserPatch(alloc, .{ .remove = "sound.turn_end" });
+    defer unset_sound.deinit(alloc);
+    try std.testing.expect(unset_sound == .committed);
 
     const bytes = try store.readPrimaryForTest(alloc);
     defer alloc.free(bytes);
@@ -2768,7 +2639,7 @@ test "fx config set and unset remove the workspace copy they would lose to" {
     if (parsed.value.object.get("workspaces")) |workspaces| try std.testing.expect(workspaces.object.get("/workspace") == null);
 }
 
-test "slash menu category patch removes legacy workspace copies" {
+test "session titles patch removes legacy workspace copies" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -2776,7 +2647,7 @@ test "slash menu category patch removes legacy workspace copies" {
     try writeStoreFixture(
         tmp.dir,
         "home/.fx/settings.json",
-        "{\"workspaces\":{\"/workspace\":{\"slash_menu_categories\":false,\"sandbox\":\"none\"}}}\n",
+        "{\"workspaces\":{\"/workspace\":{\"session_titles\":false,\"sandbox\":\"none\"}}}\n",
     );
 
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
@@ -2784,7 +2655,7 @@ test "slash menu category patch removes legacy workspace copies" {
     var store = try Store.initFromHome(alloc, home, .writable);
     defer store.deinit(alloc);
 
-    var outcome = try store.applyUserPatch(alloc, .{ .slash_menu_categories = true });
+    var outcome = try store.applyUserPatch(alloc, .{ .session_titles = true });
     defer outcome.deinit(alloc);
 
     try std.testing.expect(outcome == .committed);
@@ -2793,8 +2664,8 @@ test "slash menu category patch removes legacy workspace copies" {
 
     const bytes = try store.readPrimaryForTest(alloc);
     defer alloc.free(bytes);
-    try std.testing.expect(std.mem.find(u8, bytes, "\"slash_menu_categories\":true") != null);
-    try std.testing.expect(std.mem.find(u8, bytes, "\"slash_menu_categories\":false") == null);
+    try std.testing.expect(std.mem.find(u8, bytes, "\"session_titles\":true") != null);
+    try std.testing.expect(std.mem.find(u8, bytes, "\"session_titles\":false") == null);
     try std.testing.expect(std.mem.find(u8, bytes, "\"sandbox\":\"none\"") != null);
 }
 
@@ -2878,7 +2749,7 @@ test "user patch preserves unknown fields in unrelated workspaces" {
 
     var outcome = try store.applyUserPatch(
         alloc,
-        .{ .startup_scrollback = false },
+        .{ .session_titles = false },
     );
     defer outcome.deinit(alloc);
     try std.testing.expect(outcome == .committed);
@@ -2929,11 +2800,11 @@ test "nested user cleanup preserves siblings and skips non-object containers" {
     defer tmp.cleanup();
     try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
     const original =
-        "{\"prompt_history\":{\"future\":1},\"statusLine\":{\"context\":true,\"future\":2}," ++
+        "{\"prompt_history\":{\"future\":1}," ++
         "\"workspaces\":{" ++
         "\"/workspace/a\":{\"prompt_history\":{\"enabled\":true,\"future\":3}," ++
         "\"statusLine\":{\"sandbox\":false,\"context\":false,\"future\":4}}," ++
-        "\"/workspace/b\":{\"prompt_history\":\"preserve\",\"statusLine\":7}," ++
+        "\"/workspace/b\":{\"prompt_history\":\"preserve\"}," ++
         "\"/workspace/c\":{\"prompt_history\":{\"enabled\":false}}}}\n";
     try writeStoreFixture(tmp.dir, "home/.fx/settings.json", original);
 
@@ -2942,15 +2813,12 @@ test "nested user cleanup preserves siblings and skips non-object containers" {
     var store = try Store.initFromHome(alloc, home, .writable);
     defer store.deinit(alloc);
 
-    var outcome = try store.applyUserPatch(alloc, .{
-        .prompt_history_enabled = false,
-        .statusline_item = .{ .item = .context, .enabled = true },
-    });
+    var outcome = try store.applyUserPatch(alloc, .{ .prompt_history_enabled = false });
     defer outcome.deinit(alloc);
 
-    try std.testing.expectEqual(@as(usize, 3), outcome.committed.cleanup.fields_removed);
+    try std.testing.expectEqual(@as(usize, 2), outcome.committed.cleanup.fields_removed);
     try std.testing.expectEqual(@as(usize, 2), outcome.committed.cleanup.workspaces_changed);
-    try std.testing.expectEqual(@as(usize, 2), outcome.committed.cleanup.recovery_paths.len);
+    try std.testing.expectEqual(@as(usize, 1), outcome.committed.cleanup.recovery_paths.len);
 
     const bytes = try store.readPrimaryForTest(alloc);
     defer alloc.free(bytes);
@@ -2962,13 +2830,6 @@ test "nested user cleanup preserves siblings and skips non-object containers" {
         return error.TestMissingRootPromptHistoryEnabled).bool);
     try std.testing.expectEqual(@as(i64, 1), (root_prompt_history.object.get("future") orelse
         return error.TestMissingRootPromptHistoryFuture).integer);
-    try std.testing.expect(parsed.value.object.get("statusLine") == null);
-    const root_statusline = parsed.value.object.get("status_line") orelse
-        return error.TestMissingRootStatusline;
-    try std.testing.expectEqual(true, (root_statusline.object.get("context") orelse
-        return error.TestMissingRootStatuslineContext).bool);
-    try std.testing.expectEqual(@as(i64, 2), (root_statusline.object.get("future") orelse
-        return error.TestMissingRootStatuslineFuture).integer);
 
     const workspaces = (parsed.value.object.get("workspaces") orelse
         return error.TestMissingWorkspaces).object;
@@ -2979,15 +2840,9 @@ test "nested user cleanup preserves siblings and skips non-object containers" {
     try std.testing.expect(workspace_prompt_history.object.get("enabled") == null);
     try std.testing.expectEqual(@as(i64, 3), (workspace_prompt_history.object.get("future") orelse
         return error.TestMissingWorkspacePromptHistoryFuture).integer);
-    const workspace_statusline = workspace_a.get("statusLine") orelse
-        return error.TestMissingWorkspaceStatusline;
-    try std.testing.expectEqual(false, (workspace_statusline.object.get("sandbox") orelse
-        return error.TestMissingLegacySandbox).bool);
-    try std.testing.expect(workspace_statusline.object.get("context") == null);
-    try std.testing.expectEqual(@as(i64, 4), (workspace_statusline.object.get("future") orelse
-        return error.TestMissingWorkspaceStatuslineFuture).integer);
+    // A retired container goes with the save, whatever it holds.
+    try std.testing.expect(workspace_a.get("statusLine") == null);
     try std.testing.expectEqualStrings("preserve", workspaces.get("/workspace/b").?.object.get("prompt_history").?.string);
-    try std.testing.expectEqual(@as(i64, 7), workspaces.get("/workspace/b").?.object.get("statusLine").?.integer);
     try std.testing.expect(workspaces.get("/workspace/c") == null);
 }
 
@@ -3328,7 +3183,7 @@ test "missing user settings is created through private durable commit" {
     var store = try Store.initFromHome(alloc, home, .writable);
     defer store.deinit(alloc);
 
-    var outcome = try store.applyUserPatch(alloc, .{ .startup_scrollback = false });
+    var outcome = try store.applyUserPatch(alloc, .{ .session_titles = false });
     defer outcome.deinit(alloc);
     const stat = try store.primaryStatForTest();
     try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), stat.permissions.toMode() & 0o777);
@@ -3398,13 +3253,13 @@ test "oversized candidate leaves prior primary unchanged" {
     try std.testing.expectEqualStrings("{}\n", primary);
 }
 
-test "startup scrollback false is a present user patch" {
+test "session titles false is a present user patch" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
-    try writeStoreFixture(tmp.dir, "home/.fx/settings.json", "{\"startup_scrollback\":false}\n");
+    try writeStoreFixture(tmp.dir, "home/.fx/settings.json", "{\"session_titles\":false}\n");
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
     defer alloc.free(home);
     const workspace = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
@@ -3412,12 +3267,12 @@ test "startup scrollback false is a present user patch" {
     var store = try Store.initFromHome(alloc, home, .writable);
     defer store.deinit(alloc);
 
-    var outcome = try store.applyUserPatch(alloc, .{ .startup_scrollback = false });
+    var outcome = try store.applyUserPatch(alloc, .{ .session_titles = false });
     defer outcome.deinit(alloc);
     try std.testing.expect(outcome == .unchanged);
 }
 
-test "startup scrollback user patch removes matching legacy workspace value" {
+test "session titles user patch removes matching legacy workspace value" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -3427,13 +3282,13 @@ test "startup scrollback user patch removes matching legacy workspace value" {
     defer alloc.free(home);
     const workspace = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
     defer alloc.free(workspace);
-    const fixture = try alloc.print("{{\"startup_scrollback\":true,\"workspaces\":{{\"{s}\":{{\"startup_scrollback\":false}}}}}}\n", .{workspace});
+    const fixture = try alloc.print("{{\"session_titles\":true,\"workspaces\":{{\"{s}\":{{\"session_titles\":false}}}}}}\n", .{workspace});
     defer alloc.free(fixture);
     try writeStoreFixture(tmp.dir, "home/.fx/settings.json", fixture);
     var store = try Store.initFromHome(alloc, home, .writable);
     defer store.deinit(alloc);
 
-    var outcome = try store.applyUserPatch(alloc, .{ .startup_scrollback = false });
+    var outcome = try store.applyUserPatch(alloc, .{ .session_titles = false });
     defer outcome.deinit(alloc);
     try std.testing.expect(outcome == .committed);
     try std.testing.expectEqual(@as(usize, 1), outcome.committed.cleanup.fields_removed);
@@ -3459,7 +3314,7 @@ test "unrelated user patch preserves inert output level values" {
     var store = try Store.initFromHome(alloc, home, .writable);
     defer store.deinit(alloc);
 
-    var outcome = try store.applyUserPatch(alloc, .{ .startup_scrollback = false });
+    var outcome = try store.applyUserPatch(alloc, .{ .session_titles = false });
     defer outcome.deinit(alloc);
     try std.testing.expect(outcome == .committed);
     try std.testing.expectEqual(@as(usize, 0), outcome.committed.cleanup.fields_removed);
@@ -3471,7 +3326,7 @@ test "unrelated user patch preserves inert output level values" {
     try std.testing.expect(std.mem.find(u8, primary, "\"output_level\":{\"legacy\":true}") != null);
     try std.testing.expect(std.mem.find(u8, primary, "\"output_level\":[\"quiet\",7]") != null);
     try std.testing.expect(std.mem.find(u8, primary, "\"future\":true") != null);
-    try std.testing.expect(std.mem.find(u8, primary, "\"startup_scrollback\":false") != null);
+    try std.testing.expect(std.mem.find(u8, primary, "\"session_titles\":false") != null);
 }
 
 test "second settings commit creates a sequenced private backup" {
@@ -3688,7 +3543,7 @@ test "post-rename failure returns SettingsCommitIndeterminate" {
 
     try std.testing.expectError(
         error.SettingsCommitIndeterminate,
-        store.applyUserPatch(alloc, .{ .startup_scrollback = false }),
+        store.applyUserPatch(alloc, .{ .session_titles = false }),
     );
 }
 

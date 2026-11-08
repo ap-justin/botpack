@@ -249,7 +249,7 @@ pub const top_level_specs = [_]TopLevelSpec{
         .kind = .login,
         .token = "login",
         .usage = "login [vercel] [--api-key]",
-        .summary = "Sign in to Vercel or a selected provider",
+        .summary = "Sign in to Vercel AI Gateway in the browser or with an API key",
         .subcommands = &login_providers,
         .options = &login_options,
     },
@@ -257,7 +257,7 @@ pub const top_level_specs = [_]TopLevelSpec{
         .kind = .logout,
         .token = "logout",
         .usage = "logout [vercel]",
-        .summary = "Sign out of Vercel or a selected provider session",
+        .summary = "Sign out of Vercel AI Gateway",
         .subcommands = &login_providers,
     },
     .{
@@ -310,7 +310,7 @@ pub const top_level_specs = [_]TopLevelSpec{
         .kind = .provider,
         .token = "provider",
         .usage = "provider <name>",
-        .summary = "Choose the model provider used by fx",
+        .summary = "Choose AI Gateway (gateway) or an OpenAI-compatible connection named under providers in settings.json",
     },
     .{
         .kind = .doctor,
@@ -395,8 +395,8 @@ pub const top_level_specs = [_]TopLevelSpec{
         .options = &config_options,
         .details = &.{
             "Values come from .fx.json, ~/.fx/settings.json, and this workspace's override in it. When a key repeats, the last line is the one fx uses.",
-            "Keys are dotted, such as status_line.context. A flag or an FX_* variable can override a value for one run; fx status shows what a run uses.",
-            "set and unset change plain preferences for every workspace, such as fast_mode, effort, theme, and status_line.context. Switches take true or false. Permission, model, provider, and account settings keep their own commands.",
+            "Keys are dotted, such as sound.turn_end. A flag or an FX_* variable can override a value for one run; fx status shows what a run uses.",
+            "set and unset change plain preferences for every workspace, such as fast_mode, effort, and sound.turn_end. Switches take true or false. Permission, model, provider, and account settings keep their own commands or flags.",
             "schema prints a JSON Schema that editors use to complete and check ~/.fx/settings.json, and --project prints the one for .fx.json. A file whose \"$schema\" names https://fx.sh/schemas/settings.json or https://fx.sh/schemas/fx.json gets the same check.",
         },
     },
@@ -419,9 +419,9 @@ pub const top_level_help_groups = [_]TopLevelHelpGroup{
         .{ .usage = "session recover <id>", .summary = "Copy a recoverable corrupt session" },
     } },
     .{ .entries = &.{
-        .{ .kind = .login, .usage = "login [vercel] [--api-key]", .summary = "Sign in to a model provider" },
-        .{ .kind = .logout, .usage = "logout [vercel]", .summary = "Sign out of a model provider" },
-        .{ .kind = .provider, .usage = "provider <name>", .summary = "Choose the active model provider" },
+        .{ .kind = .login, .usage = "login [vercel] [--api-key]", .summary = "Sign in to Vercel AI Gateway" },
+        .{ .kind = .logout, .usage = "logout [vercel]", .summary = "Sign out of Vercel AI Gateway" },
+        .{ .kind = .provider, .usage = "provider <name>", .summary = "Choose AI Gateway or a configured connection" },
         .{ .kind = .models, .usage = "models" },
     } },
     .{ .entries = &.{

@@ -55,9 +55,6 @@ pub const StartupState = struct {
     ultrafast_mode_source: config_runtime.ConfigSource = .compiled_default,
     fast_mode_model_bound: bool = false,
     fast_mode_source: config_runtime.ConfigSource = .compiled_default,
-    slash_menu_categories: bool = true,
-    collapse_tool_calls: bool = false,
-    startup_scrollback: bool = true,
     prompt_history_enabled: bool = true,
     prompt_history_store_allowed: bool = true,
     config_diagnostics: []config_runtime.ConfigDiagnostic = &.{},
@@ -70,9 +67,6 @@ pub const StartupState = struct {
     /// empty keeps the reviewer's compiled default.
     review_model: []u8 = &.{},
     first_call_tool_choice: types.ToolChoice = .auto,
-    statusline_context: bool = false,
-    statusline_session: bool = false,
-    statusline_workspace: bool = false,
     session_title_generation: bool = true,
     /// Resolved `cache_warming` preference.
     cache_warming: bool = true,
@@ -680,9 +674,6 @@ pub fn resolveSettings(alloc: Allocator, state: *StartupState, detailed: *const 
     state.ultrafast_process_override = detailed.ultrafast_mode_env_override;
     state.ultrafast_mode = state.ultrafast_process_override orelse state.configured_ultrafast_mode;
     state.ultrafast_mode_source = detailed.sources.ultrafast_mode;
-    state.slash_menu_categories = settings.slash_menu_categories orelse true;
-    state.collapse_tool_calls = settings.collapse_tool_calls orelse false;
-    state.startup_scrollback = settings.startup_scrollback orelse true;
     state.theme = if (settings.theme) |value| try alloc.dupe(u8, value) else null;
     state.effort = settings.effort orelse .auto;
     state.review_model = try alloc.dupe(u8, settings.review_model orelse "");
@@ -701,9 +692,6 @@ pub fn resolveSettings(alloc: Allocator, state: *StartupState, detailed: *const 
         }
         state.provider_order = owned_order;
     }
-    state.statusline_context = settings.statusline_context orelse false;
-    state.statusline_session = settings.statusline_session orelse false;
-    state.statusline_workspace = settings.statusline_workspace orelse false;
     state.session_title_generation = settings.session_titles orelse true;
     state.cache_warming = settings.cache_warming orelse true;
     const sound_override = soundEnvOverride();
@@ -1029,41 +1017,7 @@ test "host-managed startup skips every local credential source" {
     try std.testing.expectEqual(credentials.CatalogAccess.host_managed, state.modelCatalogAccess());
 }
 
-test "loadStartupState resolves startup scrollback default and explicit false" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
-    try tmp.dir.createDirPath(io_mod.getIo(), "absent");
-    try tmp.dir.createDirPath(io_mod.getIo(), "disabled");
-
-    const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
-    defer std.testing.allocator.free(home_root);
-    const absent_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "absent");
-    defer std.testing.allocator.free(absent_root);
-    const disabled_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "disabled");
-    defer std.testing.allocator.free(disabled_root);
-
-    const fixture = try std.testing.allocator.print(
-        "{{\"workspaces\":{{\"{s}\":{{\"startup_scrollback\":false}}}}}}\n",
-        .{disabled_root},
-    );
-    defer std.testing.allocator.free(fixture);
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", fixture);
-
-    var env = try TestEnv.install(std.testing.allocator, &.{.{ .key = "HOME", .value = home_root }});
-    defer env.deinit();
-
-    var absent = try loadStartupStateForWorkspace(std.testing.allocator, absent_root, "default-model", 25);
-    defer absent.deinit(std.testing.allocator);
-    try std.testing.expect(absent.startup_scrollback);
-
-    var disabled = try loadStartupStateForWorkspace(std.testing.allocator, disabled_root, "default-model", 25);
-    defer disabled.deinit(std.testing.allocator);
-    try std.testing.expect(!disabled.startup_scrollback);
-}
-
-test "loadStartupState resolves slash menu categories default and explicit false" {
+test "loadStartupState starts with a profile that still sets the terminal UI settings" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
@@ -1075,17 +1029,19 @@ test "loadStartupState resolves slash menu categories default and explicit false
     const workspace_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "workspace");
     defer std.testing.allocator.free(workspace_root);
 
+    try writeFixtureFile(
+        tmp.dir,
+        "home/.fx/settings.json",
+        "{\"session_titles\":false,\"collapse_tool_calls\":\"off\",\"slash_menu_categories\":false,\"startup_scrollback\":1,\"status_line\":{\"context\":true},\"statusLine\":7}\n",
+    );
+
     var env = try TestEnv.install(std.testing.allocator, &.{.{ .key = "HOME", .value = home_root }});
     defer env.deinit();
 
-    var initial = try loadStartupStateForWorkspace(std.testing.allocator, workspace_root, "default-model", 25);
-    defer initial.deinit(std.testing.allocator);
-    try std.testing.expect(initial.slash_menu_categories);
-
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", "{\"slash_menu_categories\":false}\n");
-    var hidden = try loadStartupStateForWorkspace(std.testing.allocator, workspace_root, "default-model", 25);
-    defer hidden.deinit(std.testing.allocator);
-    try std.testing.expect(!hidden.slash_menu_categories);
+    var state = try loadStartupStateForWorkspace(std.testing.allocator, workspace_root, "default-model", 25);
+    defer state.deinit(std.testing.allocator);
+    // A profile fx discarded as malformed would leave the default, true.
+    try std.testing.expect(!state.session_title_generation);
 }
 
 test "loadStartupState resolves max_agent_steps default zero and positive values" {
