@@ -2622,12 +2622,14 @@ const max_restored_mcp_tools: usize = 32;
 
 /// Advertises, at the start of a turn, the live MCP tools the previous turn
 /// ended with: each tool the conversation selected with `mcp_select_tool` or
-/// called directly, in the order it first did either, which is the order
-/// those tools joined the list mid-turn. The tool list is part of the prefix
-/// a provider caches, so a list that differs from the last request's rewrites
-/// the whole conversation's cache entry. Names that no longer resolve are
-/// left out, and once a server yields no tool list its other names are not
-/// looked up this pass: each lookup would wait on another start.
+/// called directly, in the order it first did either. That is the order those
+/// tools joined the list mid-turn, except that one model response mixing a
+/// direct call and a selection may have added them in the other order. The
+/// tool list is part of the prefix a provider caches, so a list that differs
+/// from the last request's rewrites the whole conversation's cache entry.
+/// Names that no longer resolve are left out, and once a server yields no
+/// tool list its other names are not looked up this pass: each lookup would
+/// wait on another start.
 fn restoreAdvertisedMcpTools(
     deps: *const AgentRuntimeDeps,
     arena: Allocator,

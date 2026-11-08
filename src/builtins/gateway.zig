@@ -325,9 +325,10 @@ fn buildAgentToolsJson(
         first = false;
         try model_tool_schema.writeBuiltinFunctionSchema(alloc, &out.writer, tool);
     }
-    // The fixed tools come first and the selected ones last, in selection
-    // order, so selecting a tool appends to the list and moves nothing
-    // before it.
+    // The fixed tools and an optional `vision` come first and the selected
+    // ones last, in selection order, so selecting a tool appends to the list
+    // and moves nothing before it. `vision` turning optional mid-session
+    // still shifts the selected tools.
     if (request.vision_mode == .optional and
         !toolNameSelected(request.tools.advertised_names, "vision"))
     {
