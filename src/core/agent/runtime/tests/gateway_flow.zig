@@ -10160,7 +10160,7 @@ const many_mcp = blk: {
     var tools: [count]SelectedTool = undefined;
     var calls: [count]ToolCall = undefined;
     var names: [count][]const u8 = undefined;
-    inline for (0..count) |index| {
+    for (0..count) |index| {
         const name = std.fmt.comptimePrint("mcp_fixture_t{d:0>2}", .{index});
         tools[index] = fixtureTool(name);
         calls[index] = toolCall(name, name, "{}");
