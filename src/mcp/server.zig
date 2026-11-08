@@ -2104,7 +2104,10 @@ pub const Server = struct {
                 const l = try r.newLogical(.{ .discover = i }, .idempotent);
                 if (r.stdio) try r.sendAttempt(l) else try r.stepExchange(l, .send);
             },
-            .send_initialize => if (r.resetOffer() and r.stdio) try r.sendAttempt(try r.newLogical(.initialize, .idempotent)) else try r.startSession(),
+            .send_initialize => {
+                r.resetOffer();
+                if (r.stdio) try r.sendAttempt(try r.newLogical(.initialize, .idempotent)) else try r.startSession();
+            },
             // Over HTTP the session posts it once initialize is answered.
             .send_initialized => if (r.stdio) {
                 var body: std.Io.Writer.Allocating = .init(r.gpa);
@@ -2137,11 +2140,9 @@ pub const Server = struct {
     }
 
     /// Detection chose initialize: the newest legacy version is offered first.
-    /// True, so it can lead a condition.
-    fn resetOffer(r: *Server) bool {
+    fn resetOffer(r: *Server) void {
         r.init_offer = 0;
         r.init_offered = 1;
-        return true;
     }
 
     /// The next version to offer when initialize was answered with `body`, if

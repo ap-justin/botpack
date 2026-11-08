@@ -2302,7 +2302,7 @@ fn writeFailure(w: *std.Io.Writer, why: []const u8, said: ?[]const u8, exit: ?mc
     if (tail) |t| try w.print("; its last stderr lines: \"{s}\"", .{t});
 }
 
-/// The failures that come from the versions fx and the server could agree on.
+/// The failures that mean fx and the server found no MCP version in common.
 const version_failures = [_][]const u8{ "rejected", "no_shared_version", "unsupported_version", "initialize_failed" };
 
 /// The MCP versions fx speaks, most preferred first.
