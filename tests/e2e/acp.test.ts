@@ -1659,6 +1659,60 @@ describe("acp: model-independent", () => {
   );
 
   test(
+    "ACP answers the first prompt after a streamed reply, a generated title and a usage update",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-title-usage-");
+      // The shape a real gateway streams: step and metadata events around the
+      // text, usage with cache counts, and a context window for the model.
+      const streamedAnswer = () => fakeGatewaySse([
+        { type: "stream-start", warnings: [] },
+        { type: "response-metadata", id: "resp_1", modelId: FAKE_GATEWAY_MODEL },
+        { type: "text-start", id: "answer_1" },
+        { type: "text-delta", id: "answer_1", delta: "ok" },
+        { type: "text-end", id: "answer_1" },
+        {
+          type: "finish",
+          finishReason: { unified: "stop", raw: "end_turn" },
+          usage: {
+            inputTokens: { total: 120, cacheRead: 100, cacheWrite: 10 },
+            outputTokens: { total: 5, reasoning: 2 },
+          },
+          providerMetadata: { gateway: { cost: "0.0001", generationId: "gen_1" } },
+        },
+      ]);
+      const gateway = startDynamicFakeGateway(_raw => streamedAnswer(), {
+        titleResponses: [finalText("A Short Title")],
+        models: [{ id: "anthropic/claude-haiku-5.5", type: "language", tags: ["tool-use"], context_window: 200_000 }],
+      });
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: { ...fakeGatewayEnv(root, gateway), FX_MODEL: "anthropic/claude-haiku-5.5" },
+        });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        await client.request("session/new", { mcpServers: [] }, 2);
+        await client.readLine();
+        const result = await runPrompt(client, "Reply with just: ok", TIMEOUT);
+
+        expect(result.promptResult.error).toBeUndefined();
+        expect(result.promptResult.result.stopReason).toBe("end_turn");
+        const kinds = result.messages
+          .filter((message: any) => message.method === "session/update")
+          .map((message: any) => message.params.update.sessionUpdate);
+        expect(kinds).toContain("agent_message_chunk");
+        expect(kinds).toContain("session_info_update");
+        expect(kinds).toContain("usage_update");
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "ACP replies to the first prompt soon after its answer while the title request never answers",
     async () => {
       const root = createIsolatedRoot("fx-acp-title-hang-");
