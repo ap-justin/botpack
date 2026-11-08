@@ -54,6 +54,7 @@ const subscriptions = @import("protocol/subscriptions.zig");
 
 /// Bytes of a line an excerpt keeps, before "...".
 const excerpt_max = 80;
+const said_max = 96;
 /// Bytes of a progress note the host is shown, before "...".
 const note_max = 160;
 
@@ -285,6 +286,10 @@ pub const Server = struct {
     /// An excerpt of the last stdout line that answered nothing, since the
     /// server was last ready: what a failed start wrote instead.
     stray: [excerpt_max + 3]u8 = undefined,
+    /// The versions the server named in its last discover or initialize
+    /// answer, comma-separated, until a new process or detection run.
+    said: [said_max]u8 = undefined,
+    said_len: u8 = 0,
     stray_len: u8 = 0,
     /// The message of the last progress event, until the next `next`.
     note: [note_max + 3]u8 = undefined,
@@ -432,6 +437,52 @@ pub const Server = struct {
 
     /// An excerpt of the last stdout line that answered nothing since the
     /// server was last ready.
+    pub fn versionsSaid(r: *const Server) ?[]const u8 {
+        return if (r.said_len == 0) null else r.said[0..r.said_len];
+    }
+
+    /// Remembers the versions `body` names: a refusal's `data.supported`, a
+    /// discover result's `supportedVersions`, or the `protocolVersion` an
+    /// initialize result answers with. Only [0-9A-Za-z.-] is kept, since
+    /// the text is the server's and reaches the user.
+    fn noteVersions(r: *Server, body: @FieldType(wire.Response, "body")) void {
+        var found: [1]?[]const u8 = .{null};
+        switch (body) {
+            .failure => |failure| {
+                wire.objectFields(failure.data orelse return, &.{"supported"}, &found) catch return;
+            },
+            .result => |result| {
+                wire.objectFields(result.raw, &.{"supportedVersions"}, &found) catch return;
+                if (found[0] == null) wire.objectFields(result.raw, &.{"protocolVersion"}, &found) catch return;
+            },
+        }
+        const raw = found[0] orelse return;
+        r.said_len = 0;
+        if (raw.len > 0 and raw[0] == '"') return r.sayVersion(raw);
+        var elements: wire.Elements = undefined;
+        elements.init(raw) catch return;
+        while (elements.next() catch null) |element| r.sayVersion(element);
+    }
+
+    fn sayVersion(r: *Server, raw: []const u8) void {
+        const text = wire.plainString(raw) orelse return;
+        var n: usize = r.said_len;
+        if (n != 0) {
+            if (n == said_max) return;
+            r.said[n] = ',';
+            n += 1;
+        }
+        const first = n;
+        for (text) |c| {
+            if (n == said_max) break;
+            if (std.ascii.isAlphanumeric(c) or c == '.' or c == '-') {
+                r.said[n] = c;
+                n += 1;
+            }
+        }
+        if (n > first) r.said_len = @intCast(n);
+    }
+
     pub fn strayLine(r: *const Server) ?[]const u8 {
         return if (r.stray_len == 0) null else r.stray[0..r.stray_len];
     }
@@ -842,13 +893,17 @@ pub const Server = struct {
         switch (l.what) {
             .discover => {
                 try r.keepInstructions(body);
+                r.noteVersions(body);
                 try r.stepEra(era.classifyDiscover(r.detector.config, body));
             },
-            .initialize => if (r.nextOffer(body) != null) {
-                retry = true;
-            } else {
-                try r.keepInstructions(body);
-                try r.stepEra(era.classifyInitialize(r.detector.config, body));
+            .initialize => {
+                r.noteVersions(body);
+                if (r.nextOffer(body) != null) {
+                    retry = true;
+                } else {
+                    try r.keepInstructions(body);
+                    try r.stepEra(era.classifyInitialize(r.detector.config, body));
+                }
             },
             .list => try r.stepCatalog(try r.pageEvent(body)),
             .call => _ = try r.callAnswer(body),
@@ -1178,6 +1233,7 @@ pub const Server = struct {
                 const answer: http_modern.Answer = switch (l.what) {
                     .discover => blk: {
                         try r.keepInstructions(resp.body);
+                        r.noteVersions(resp.body);
                         try r.stepEra(era.classifyDiscoverHttp(r.detector.config, status, resp.body));
                         break :blk if (resp.body == .result) .result else .failure;
                     },
@@ -1585,6 +1641,7 @@ pub const Server = struct {
         const id = l.id.?;
         try r.stepRequest(.{ .response_received = .{ .id = id, .response = if (body == .result) .result else .peer_error } });
         l.used = false;
+        r.noteVersions(body);
         // A refusal that lists a version fx speaks: offer that one instead.
         if (r.nextOffer(body) != null) return r.sendInitialize();
         try r.keepInstructions(body);
@@ -2033,6 +2090,7 @@ pub const Server = struct {
     fn stepEra(r: *Server, event: era.Event) Error!void {
         const was = r.detector.state;
         var out: era.Output = .{};
+        if (event == .process_started) r.said_len = 0;
         r.detector.step(event, &out) catch return;
         if (was == .unknown and r.detector.state != .unknown) r.start_due_ms = r.now() + r.options.timeouts.start_ms;
         if (r.tracer()) |t| try era.writeTrace(t, r.era_instance, &out);
