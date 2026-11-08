@@ -9908,6 +9908,33 @@ fn freeToolNames(alloc: Allocator, names: [][]const u8) void {
     alloc.free(names);
 }
 
+/// The request's `tools` array as JSON: names, descriptions and schemas, the
+/// bytes the provider caches.
+fn toolsJson(alloc: Allocator, body: []const u8) ![]u8 {
+    var parsed = try std.json.parseFromSlice(std.json.Value, alloc, body, .{});
+    defer parsed.deinit();
+    return std.json.Stringify.valueAlloc(alloc, parsed.value.object.get("tools").?, .{});
+}
+
+/// Asserts `later`'s prompt repeats every entry of `earlier`'s, unchanged and
+/// in order, and adds at least one after them.
+fn expectPromptExtends(alloc: Allocator, earlier: []const u8, later: []const u8) !void {
+    var earlier_parsed = try std.json.parseFromSlice(std.json.Value, alloc, earlier, .{});
+    defer earlier_parsed.deinit();
+    var later_parsed = try std.json.parseFromSlice(std.json.Value, alloc, later, .{});
+    defer later_parsed.deinit();
+    const before = earlier_parsed.value.object.get("prompt").?.array.items;
+    const after = later_parsed.value.object.get("prompt").?.array.items;
+    try std.testing.expect(after.len > before.len);
+    for (before, after[0..before.len]) |want, got| {
+        const want_json = try std.json.Stringify.valueAlloc(alloc, want, .{});
+        defer alloc.free(want_json);
+        const got_json = try std.json.Stringify.valueAlloc(alloc, got, .{});
+        defer alloc.free(got_json);
+        try std.testing.expectEqualStrings(want_json, got_json);
+    }
+}
+
 test "an Anthropic request sticks to Anthropic until the user routes" {
     const alloc = std.testing.allocator;
     {
@@ -9934,6 +9961,72 @@ test "an Anthropic request sticks to Anthropic until the user routes" {
         try expectBodyContains(&gateway, 0, "\"gateway\":{\"caching\":\"auto\",\"order\":[\"bedrock\",\"anthropic\"]}");
         try expectBodyNotContains(&gateway, 0, "\"order\":[\"anthropic\"]");
     }
+}
+
+test "strict routing on an Anthropic model sends the user's providers and no default order" {
+    const alloc = std.testing.allocator;
+    {
+        const completions = [_]FakeCompletion{.{ .content = "Done" }};
+        var gateway = FakeGateway.init(alloc, &completions);
+        defer gateway.deinit();
+        var hooks = FakeAgentRuntimeDeps.init(alloc);
+        defer hooks.deinit();
+        var fixture = PromptFixture{};
+        var config = fixture.config();
+        const user_order = [_][]const u8{ "bedrock", "vertex" };
+        config.provider_order = &user_order;
+        config.provider_strict = true;
+        try runFakePrompt(&gateway, &hooks, config, fixture.job());
+        try expectBodyContains(&gateway, 0, "\"gateway\":{\"caching\":\"auto\",\"only\":[\"bedrock\",\"vertex\"]}");
+        try expectBodyNotContains(&gateway, 0, "\"order\":[");
+    }
+    {
+        // Strict with no providers named restricts nothing, so the default
+        // Anthropic preference must not turn into a hard `only` filter.
+        const completions = [_]FakeCompletion{.{ .content = "Done" }};
+        var gateway = FakeGateway.init(alloc, &completions);
+        defer gateway.deinit();
+        var hooks = FakeAgentRuntimeDeps.init(alloc);
+        defer hooks.deinit();
+        var fixture = PromptFixture{};
+        var config = fixture.config();
+        config.provider_strict = true;
+        try runFakePrompt(&gateway, &hooks, config, fixture.job());
+        try expectBodyContains(&gateway, 0, "\"providerOptions\":{\"gateway\":{\"caching\":\"auto\"}}");
+        try expectBodyNotContains(&gateway, 0, "\"only\":[");
+        try expectBodyNotContains(&gateway, 0, "\"order\":[");
+    }
+}
+
+test "a cached request to a non-Anthropic model leaves routing to the gateway" {
+    const alloc = std.testing.allocator;
+    const completions = [_]FakeCompletion{.{ .content = "Done" }};
+    var gateway = FakeGateway.init(alloc, &completions);
+    defer gateway.deinit();
+    var hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer hooks.deinit();
+    var fixture = PromptFixture{};
+    var job = fixture.job();
+    job.model = @constCast("openai/gpt-5.6-sol");
+    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
+    try std.testing.expectEqualStrings("openai/gpt-5.6-sol", gateway.request_models.items[0]);
+    try expectBodyContains(&gateway, 0, "\"gateway\":{\"caching\":\"auto\"}");
+    try expectBodyNotContains(&gateway, 0, "\"order\":[");
+}
+
+test "an uncached Anthropic request leaves routing to the gateway" {
+    const alloc = std.testing.allocator;
+    const completions = [_]FakeCompletion{.{ .content = "Done" }};
+    var gateway = FakeGateway.init(alloc, &completions);
+    defer gateway.deinit();
+    var hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer hooks.deinit();
+    var fixture = PromptFixture{};
+    var config = fixture.config();
+    config.provider_capabilities.gateway_prompt_caching = false;
+    try runFakePrompt(&gateway, &hooks, config, fixture.job());
+    try expectBodyNotContains(&gateway, 0, "\"caching\":\"auto\"");
+    try expectBodyNotContains(&gateway, 0, "\"order\":[");
 }
 
 test "selecting a tool mid-turn leaves the cached prompt prefix byte-identical" {
@@ -9964,15 +10057,22 @@ test "selecting a tool mid-turn leaves the cached prompt prefix byte-identical" 
     const after = try promptThroughLastBreakpoint(alloc, gateway.request_bodies.items[1]);
     defer alloc.free(after);
     try std.testing.expectEqualStrings(before, after);
+    try expectPromptExtends(alloc, gateway.request_bodies.items[0], gateway.request_bodies.items[1]);
 
-    // The selected tool is appended; no earlier tool moves.
+    // The selected tool is appended; no earlier tool moves or changes a byte.
     const names_before = try toolNames(alloc, gateway.request_bodies.items[0]);
     defer freeToolNames(alloc, names_before);
     const names_after = try toolNames(alloc, gateway.request_bodies.items[1]);
     defer freeToolNames(alloc, names_after);
     try std.testing.expectEqual(names_before.len + 1, names_after.len);
-    for (names_before, 0..) |name, index| try std.testing.expectEqualStrings(name, names_after[index]);
     try std.testing.expectEqualStrings("mcp_fixture_echo", names_after[names_after.len - 1]);
+    const tools_before = try toolsJson(alloc, gateway.request_bodies.items[0]);
+    defer alloc.free(tools_before);
+    const tools_after = try toolsJson(alloc, gateway.request_bodies.items[1]);
+    defer alloc.free(tools_after);
+    const before_open = tools_before[0 .. tools_before.len - 1];
+    try std.testing.expectEqualStrings(before_open, tools_after[0..before_open.len]);
+    try std.testing.expectEqual(@as(u8, ','), tools_after[before_open.len]);
 }
 
 test "two turns of one session share the prompt prefix and the tool list" {
@@ -10020,15 +10120,19 @@ test "two turns of one session share the prompt prefix and the tool list" {
     const second_prefix = try promptThroughLastBreakpoint(alloc, second_gateway.request_bodies.items[0]);
     defer alloc.free(second_prefix);
     try std.testing.expectEqualStrings(first_prefix, second_prefix);
+    // The old turn's history, up to its last request, is replayed unchanged.
+    try expectPromptExtends(alloc, gateway.request_bodies.items[2], second_gateway.request_bodies.items[0]);
 
-    // The new turn starts with the list the last request of the old one ended on.
-    const last_of_first = try toolNames(alloc, gateway.request_bodies.items[2]);
-    defer freeToolNames(alloc, last_of_first);
-    const start_of_second = try toolNames(alloc, second_gateway.request_bodies.items[0]);
-    defer freeToolNames(alloc, start_of_second);
-    try std.testing.expectEqual(last_of_first.len, start_of_second.len);
-    for (last_of_first, 0..) |name, index| try std.testing.expectEqualStrings(name, start_of_second[index]);
-    try std.testing.expectEqualStrings("mcp_fixture_echo", start_of_second[start_of_second.len - 1]);
+    // The new turn starts with the list the last request of the old one ended
+    // on, byte for byte.
+    const last_of_first = try toolsJson(alloc, gateway.request_bodies.items[2]);
+    defer alloc.free(last_of_first);
+    const start_of_second = try toolsJson(alloc, second_gateway.request_bodies.items[0]);
+    defer alloc.free(start_of_second);
+    try std.testing.expectEqualStrings(last_of_first, start_of_second);
+    const names = try toolNames(alloc, second_gateway.request_bodies.items[0]);
+    defer freeToolNames(alloc, names);
+    try std.testing.expectEqualStrings("mcp_fixture_echo", names[names.len - 1]);
 }
 
 fn fixtureTool(comptime name: []const u8) SelectedTool {
