@@ -385,9 +385,9 @@ fn parseEnv(alloc: Allocator, env_value: std.json.Value) ParseError![]mcp_contra
         if (entry_value != .object) return error.InvalidEnv;
         const name_value = entry_value.object.get("name") orelse return error.InvalidEnv;
         const value_value = entry_value.object.get("value") orelse return error.InvalidEnv;
-        if (name_value != .string or name_value.string.len == 0 or value_value != .string) {
-            return error.InvalidEnv;
-        }
+        if (name_value != .string or value_value != .string) return error.InvalidEnv;
+        // The process environment asserts on a name it cannot hold.
+        if (!std.process.Environ.Map.validateKeyForPut(name_value.string)) return error.InvalidEnv;
         const key = try alloc.dupe(u8, name_value.string);
         errdefer alloc.free(key);
         const value = try alloc.dupe(u8, value_value.string);
@@ -474,6 +474,9 @@ test "ACP MCP parser rejects malformed required stdio fields" {
         .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[1],\"env\":[]}]}", .expected = error.InvalidArgs },
         .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[]}]}", .expected = error.MissingEnv },
         .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[],\"env\":[{\"name\":\"TOKEN\",\"value\":1}]}]}", .expected = error.InvalidEnv },
+        .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[],\"env\":[{\"name\":\"KEY=VALUE\",\"value\":\"v\"}]}]}", .expected = error.InvalidEnv },
+        .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[],\"env\":[{\"name\":\"\",\"value\":\"v\"}]}]}", .expected = error.InvalidEnv },
+        .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[],\"env\":[{\"name\":\"A\\u0000B\",\"value\":\"v\"}]}]}", .expected = error.InvalidEnv },
     };
 
     for (cases) |case| {
