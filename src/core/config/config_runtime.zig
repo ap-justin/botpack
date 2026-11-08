@@ -218,6 +218,8 @@ pub const ConfigDiagnosticCause = enum {
     invalid_additional_directories,
     invalid_skill_symlink_authorities,
     invalid_ultrafast_mode_override,
+    removed_sign_in_provider,
+    removed_sign_in_credential_source,
 };
 
 pub const ConfigDiagnostic = struct {
@@ -235,6 +237,10 @@ pub const ConfigDiagnostic = struct {
         return switch (self.cause) {
             .private_state_permissions_tightened => profile_paths.displayText("Other users could write to ~/.fx, so fx took that access away. " ++
                 "If you didn't write ~/.fx/settings.json yourself, check it."),
+            .removed_sign_in_provider => "fx no longer supports ChatGPT or Grok sign-in, so it is using AI Gateway. " ++
+                "Run fx provider gateway to save that choice.",
+            .removed_sign_in_credential_source => "fx no longer supports ChatGPT or Grok sign-in, so it ignored the saved credential choice. " ++
+                "Run fx login to choose another.",
             else => null,
         };
     }
@@ -352,6 +358,29 @@ pub fn unknownProviderMessage(alloc: Allocator, name: []const u8) ![]u8 {
     );
 }
 
+/// The unbound provider name the profile saves for `workspace_root`, its
+/// workspace override first; null when none is saved. Caller owns the result.
+pub fn savedProviderNameAlloc(alloc: Allocator, workspace_root: []const u8) !?[]u8 {
+    var paths = try discoverPaths(alloc, workspace_root);
+    defer paths.deinit(alloc);
+    const bytes = (try readOptionalUserSettingsFile(alloc, paths)) orelse return null;
+    defer alloc.free(bytes);
+    var parsed = try std.json.parseFromSlice(std.json.Value, alloc, bytes, .{});
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    const workspace = if (parsed.value.object.get("workspaces")) |workspaces|
+        if (workspaces == .object) workspaces.object.get(paths.workspace_root) else null
+    else
+        null;
+    for ([_]?std.json.Value{ workspace, parsed.value }) |layer| {
+        const object = layer orelse continue;
+        if (object != .object) continue;
+        const name = object.object.get("provider") orelse continue;
+        if (name == .string) return try alloc.dupe(u8, name.string);
+    }
+    return null;
+}
+
 /// User-facing guidance for a `ModelSelectionError`, or null for any other error.
 pub fn modelNotSelectedMessage(err: anyerror) ?[]const u8 {
     const for_this_run = "or set a model for this run with --model or FX_MODEL";
@@ -361,11 +390,26 @@ pub fn modelNotSelectedMessage(err: anyerror) ?[]const u8 {
     };
 }
 
-fn resolve_provider_selection(settings: *Settings) !void {
+/// Returns true when the saved provider was a removed sign-in label that no
+/// connection under "providers" defines; that selection is dropped, so the run
+/// falls back to Gateway unless FX_PROVIDER picks another.
+fn resolve_provider_selection(settings: *Settings) !bool {
+    const dropped = dropRemovedSignInProvider(settings);
     if (providerEnvOverride()) |raw| {
         settings.provider = model_provider.parse(raw) orelse return error.InvalidProviderValue;
     }
     if (settings.provider) |provider| settings.provider = try provider.bind(settings.providers orelse .{});
+    return dropped;
+}
+
+fn dropRemovedSignInProvider(settings: *Settings) bool {
+    const provider = settings.provider orelse return false;
+    if (provider != .configured or !model_provider.isRemovedSignIn(provider.label())) return false;
+    if (settings.providers) |registry| {
+        if (registry.get(provider.label()) != null) return false;
+    }
+    settings.provider = null;
+    return true;
 }
 
 /// Reads only profile-global connection definitions. Caller owns the registry.
@@ -646,7 +690,14 @@ fn loadMergedSettingsDetailedWithOptionalHome(
         }
     }
 
-    try resolve_provider_selection(&settings);
+    if (try resolve_provider_selection(&settings) and providerEnvOverride() == null) {
+        sources.provider = .compiled_default;
+        try diagnostics.append(alloc, .{
+            .layer = .user,
+            .cause = .removed_sign_in_provider,
+            .setting_key = try alloc.dupe(u8, "provider"),
+        });
+    }
     if (providerEnvOverride() != null) sources.provider = .process_override;
     if (modelEnvOverride() != null) {
         const override_provider = model_provider.NameKey.fromProvider(settings.provider orelse .gateway);
@@ -925,6 +976,13 @@ fn mergeDetailedSettingsLayer(
     source: ConfigSource,
     permission_source: DetailedPermissionSource,
 ) !void {
+    if (diagnostic_layer == .user and savesRemovedCredentialSource(value)) {
+        try state.diagnostics.append(alloc, .{
+            .layer = .user,
+            .cause = .removed_sign_in_credential_source,
+            .setting_key = try alloc.dupe(u8, "credential_source"),
+        });
+    }
     if (parseSettingsValueForLayer(
         alloc,
         value,
@@ -970,6 +1028,12 @@ fn mergeDetailedSettingsLayer(
             .cause = diagnosticCauseForParseError(err),
         });
     }
+}
+
+fn savesRemovedCredentialSource(value: std.json.Value) bool {
+    if (value != .object) return false;
+    const source = value.object.get("credential_source") orelse return false;
+    return source == .string and types.isRemovedCredentialSource(source.string);
 }
 
 fn diagnosticCauseForParseError(err: anyerror) ConfigDiagnosticCause {
@@ -1250,12 +1314,12 @@ pub fn loadMergedSettingsFromPaths(alloc: Allocator, paths: Paths) !Settings {
         try mergeSettings(&settings, &user_settings, alloc);
 
         try mergeWorkspaceOverridesFromValue(&settings, alloc, parsed.value, paths.workspace_root);
-        try resolve_provider_selection(&settings);
+        _ = try resolve_provider_selection(&settings);
         return settings;
     }
 
     try mergeSettingsFile(&settings, alloc, paths.workspace_settings);
-    try resolve_provider_selection(&settings);
+    _ = try resolve_provider_selection(&settings);
     return settings;
 }
 
@@ -1714,8 +1778,10 @@ fn parseProfileOnlyFields(
 
     if (root.object.get("credential_source")) |credential_source_value| {
         if (credential_source_value != .string) return error.InvalidCredentialSourceType;
-        settings.credential_source = types.parseCredentialSource(credential_source_value.string) orelse
-            return error.InvalidCredentialSource;
+        if (!types.isRemovedCredentialSource(credential_source_value.string)) {
+            settings.credential_source = types.parseCredentialSource(credential_source_value.string) orelse
+                return error.InvalidCredentialSource;
+        }
     }
 
     if (root.object.get("yolo_acknowledged")) |acknowledged_value| {
@@ -4261,6 +4327,112 @@ test "provider routing stays fail-closed only when provider fields are broken" {
         if (diagnostic.layer == .user and diagnostic.cause == .malformed_settings) saw_user_diagnostic = true;
     }
     try std.testing.expect(saw_user_diagnostic);
+}
+
+test "a saved ChatGPT or Grok provider with no connection of that name loads as Gateway with a note" {
+    for ([_][]const u8{ "codex", "grok" }) |legacy| {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+        try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
+
+        const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
+        defer std.testing.allocator.free(home_root);
+        const workspace_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "workspace");
+        defer std.testing.allocator.free(workspace_root);
+        const user_settings = try std.testing.allocator.print(
+            "{{\"provider\":\"{s}\",\"models\":{{\"{s}\":\"old-model\"}},\"model\":\"user/model\"}}\n",
+            .{ legacy, legacy },
+        );
+        defer std.testing.allocator.free(user_settings);
+        try writeFixtureFile(tmp.dir, "home/.fx/settings.json", user_settings);
+
+        const home = try TestHome.install(std.testing.allocator, home_root);
+        defer home.deinit();
+
+        var result = try loadMergedSettingsDetailedFromHome(std.testing.allocator, home_root, workspace_root);
+        defer result.deinit(std.testing.allocator);
+        try std.testing.expect(result.settings.provider == null);
+        try std.testing.expectEqual(ConfigSource.compiled_default, result.sources.provider);
+        try std.testing.expectEqualStrings("user/model", result.settings.models.get(.gateway).?);
+        var notes: usize = 0;
+        for (result.diagnostics) |diagnostic| {
+            if (diagnostic.cause != .removed_sign_in_provider) continue;
+            notes += 1;
+            try std.testing.expect(!diagnostic.reportAtStartup());
+            try std.testing.expect(std.mem.find(u8, diagnostic.note().?, "fx provider gateway") != null);
+        }
+        try std.testing.expectEqual(@as(usize, 1), notes);
+
+        // The commands that repair settings load them through the plain loader.
+        var plain = try loadMergedSettingsFromHome(std.testing.allocator, home_root, workspace_root);
+        defer plain.deinit(std.testing.allocator);
+        try std.testing.expect(plain.provider == null);
+    }
+}
+
+test "a custom connection named codex or grok stays the selected provider" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
+
+    const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
+    defer std.testing.allocator.free(home_root);
+    const workspace_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "workspace");
+    defer std.testing.allocator.free(workspace_root);
+    try writeFixtureFile(
+        tmp.dir,
+        "home/.fx/settings.json",
+        "{\"providers\":{\"codex\":{\"protocol\":\"openai-chat-completions\",\"base_url\":\"http://localhost:11434/v1/\",\"auth\":{\"type\":\"none\"}}},\"provider\":\"codex\",\"models\":{\"codex\":\"local-model\"}}\n",
+    );
+
+    const home = try TestHome.install(std.testing.allocator, home_root);
+    defer home.deinit();
+
+    var result = try loadMergedSettingsDetailedFromHome(std.testing.allocator, home_root, workspace_root);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.settings.provider.? == .configured);
+    try std.testing.expectEqualStrings("codex", result.settings.provider.?.label());
+    try std.testing.expect(result.settings.provider.?.configured.binding != null);
+    for (result.diagnostics) |diagnostic| try std.testing.expect(diagnostic.cause != .removed_sign_in_provider);
+}
+
+test "a saved ChatGPT or Grok credential_source loads as no choice with a note" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
+
+    const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
+    defer std.testing.allocator.free(home_root);
+    const workspace_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "workspace");
+    defer std.testing.allocator.free(workspace_root);
+    try writeFixtureFile(
+        tmp.dir,
+        "home/.fx/settings.json",
+        "{\"credential_source\":\"chatgpt_subscription\",\"permission_mode\":\"ask\",\"codex_model\":\"gpt-5.4-mini\",\"grok_model\":\"grok-4\"}\n",
+    );
+
+    const home = try TestHome.install(std.testing.allocator, home_root);
+    defer home.deinit();
+
+    var result = try loadMergedSettingsDetailedFromHome(std.testing.allocator, home_root, workspace_root);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.settings.credential_source == null);
+    // The rest of the profile still loads.
+    try std.testing.expectEqual(types.PermissionMode.ask, result.settings.permission_mode.?);
+    var notes: usize = 0;
+    for (result.diagnostics) |diagnostic| {
+        try std.testing.expect(diagnostic.cause != .malformed_settings);
+        if (diagnostic.cause == .removed_sign_in_credential_source) notes += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), notes);
+
+    var parsed = try parseSettingsJson(std.testing.allocator, "{\"credential_source\":\"grok_subscription\"}");
+    defer parsed.deinit(std.testing.allocator);
+    try std.testing.expect(parsed.credential_source == null);
+    try std.testing.expectError(error.InvalidCredentialSource, parseSettingsJson(std.testing.allocator, "{\"credential_source\":\"keychain\"}"));
 }
 
 test "broken provider definitions in the profile still fail the load" {

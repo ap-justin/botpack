@@ -255,6 +255,8 @@ fn configLayerRejected(
             .legacy_workspace_preferences,
             .manual_backup_available,
             .private_state_permissions_tightened,
+            .removed_sign_in_provider,
+            .removed_sign_in_credential_source,
             => {},
         }
     }

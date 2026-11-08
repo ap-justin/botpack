@@ -1232,6 +1232,20 @@ fn writeAskUsage(deps: RunDeps, usage: []const u8) !void {
     try deps.write_stderr(deps.stderr_ctx, "\n");
 }
 
+/// The provider settings select, to name it in an error; null when none is
+/// saved or the file can't be read again. Caller owns the result.
+fn savedProviderName(alloc: Allocator) error{OutOfMemory}!?[]u8 {
+    const workspace_root = io_mod.realpathAlloc(alloc, ".") catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return null,
+    };
+    defer alloc.free(workspace_root);
+    return config_runtime.savedProviderNameAlloc(alloc, workspace_root) catch |err| switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        else => null,
+    };
+}
+
 fn askErrorNotice(err: anyerror) ?[]const u8 {
     if (auth_runtime.preparationFailureNotice(err)) |notice| return notice;
     if (config_runtime.modelNotSelectedMessage(err)) |message| return message;
@@ -1366,7 +1380,12 @@ fn runWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Config, deps: 
             // settings file, it's a failure to run.
             const from_flag = options.agent.provider != null;
             const code: u8 = if (from_flag) output_contracts.usage_exit_code else 1;
-            const name = if (options.agent.provider) |provider| provider.label() else config_runtime.providerEnvOverride() orelse "";
+            const saved_name = if (from_flag or config_runtime.providerEnvOverride() != null)
+                null
+            else
+                try savedProviderName(alloc);
+            defer if (saved_name) |owned| alloc.free(owned);
+            const name = if (options.agent.provider) |provider| provider.label() else config_runtime.providerEnvOverride() orelse saved_name orelse "";
             if (options.json_output) {
                 const json = try renderErrorJsonResult(alloc, @errorName(err), code);
                 defer alloc.free(json);

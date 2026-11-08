@@ -175,6 +175,12 @@ pub fn parseCredentialSource(text: []const u8) ?CredentialSource {
     return if (source == .host_managed or source == .configured) null else source;
 }
 
+/// The saved names of the ChatGPT and Grok sign-ins, which older builds wrote
+/// to `credential_source` and recovery checkpoints. They load as no choice.
+pub fn isRemovedCredentialSource(text: []const u8) bool {
+    return std.mem.eql(u8, text, "chatgpt_subscription") or std.mem.eql(u8, text, "grok_subscription");
+}
+
 pub fn parseRuntimeCredentialSource(text: []const u8) ?CredentialSource {
     return std.meta.stringToEnum(CredentialSource, text);
 }
