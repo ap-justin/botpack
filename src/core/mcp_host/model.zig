@@ -1152,6 +1152,25 @@ test "an object-typed argument sent as a JSON string becomes the object" {
     // An object nested past fx's 64-level argument limit stays the string it came as.
     const too_deep = "{\"arguments\":\"" ++ ("{\\\"a\\\":" ** 70) ++ "{}" ++ ("}" ** 70) ++ "\"}";
     try std.testing.expectEqualStrings(too_deep, try tools_feature.coerceObjectArguments(a, schema, too_deep));
+
+    // Only exactly `"type":"object"` is coerced: a type list or an `anyOf` branch is left as sent.
+    const unions =
+        \\{"type":"object","properties":{"nullable":{"type":["object","null"]},"either":{"anyOf":[{"type":"object"},{"type":"string"}]}}}
+    ;
+    const to_unions = "{\"nullable\":\"{\\\"k\\\":1}\",\"either\":\"{\\\"k\\\":1}\"}";
+    try std.testing.expectEqualStrings(to_unions, try tools_feature.coerceObjectArguments(a, unions, to_unions));
+
+    // With nothing to coerce, the original bytes come back, not a re-stringified copy.
+    const loose =
+        \\{ "name" : "x", "arguments" : {"k": 1.0}, "note": "\u00e9" }
+    ;
+    try std.testing.expectEqualStrings(loose, try tools_feature.coerceObjectArguments(a, schema, loose));
+
+    // A schema without a `properties` object, or that isn't JSON, coerces nothing.
+    const stringified = "{\"arguments\":\"{\\\"k\\\":1}\"}";
+    for ([_][]const u8{ "{\"type\":\"object\"}", "{\"type\":", "{\"type\":\"object\",\"properties\":[]}" }) |bare| {
+        try std.testing.expectEqualStrings(stringified, try tools_feature.coerceObjectArguments(a, bare, stringified));
+    }
 }
 
 test "a reload keeps a kept server's list and the bindings made from it, until a server is dropped" {
