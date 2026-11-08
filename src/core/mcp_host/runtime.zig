@@ -2333,7 +2333,7 @@ fn describeFailure(why: []const u8) []const u8 {
     const known = [_]struct { []const u8, []const u8 }{
         .{ "no_shared_version", "it supports no MCP version fx speaks" },
         .{ "rejected", "it refused fx's request" },
-        .{ "headers_refused", "it refused fx's request headers (a proxy may be dropping request headers)" },
+        .{ "headers_refused", "it refused fx's request headers (a proxy may be dropping them)" },
         .{ "went_quiet", "it stopped answering while starting" },
         .{ "unsupported_version", "it answered with an MCP version fx doesn't support" },
         .{ "initialize_failed", "it refused or never answered fx's initialize request" },
@@ -2582,7 +2582,7 @@ test "a server whose -32020 a bridge forwards over stdio, for initialize too, sa
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
     const said = try refusedFake(.header_stripped_refused, arena.allocator());
-    try testing.expectEqualStrings("it refused fx's request headers (a proxy may be dropping request headers): " ++ fake_server.header_mismatch_message, said);
+    try testing.expectEqualStrings("it refused fx's request headers (a proxy may be dropping them): " ++ fake_server.header_mismatch_message, said);
 }
 
 const HttpFake = fake_server.HttpFake;
@@ -2671,7 +2671,7 @@ test "a server behind a proxy that drops request headers and refuses initialize 
     defer arena.deinit();
     var discovers: u32 = 0;
     const said = try refusedHttpFake(.header_stripped_refused, arena.allocator(), &discovers);
-    try testing.expectEqualStrings("it refused fx's request headers (a proxy may be dropping request headers): " ++ fake_server.header_mismatch_message, said);
+    try testing.expectEqualStrings("it refused fx's request headers (a proxy may be dropping them): " ++ fake_server.header_mismatch_message, said);
     // The refused initialize hints at a modern server: one more probe, no more.
     try testing.expectEqual(@as(u32, 2), discovers);
 }
@@ -3101,7 +3101,7 @@ test "a refusal that names no version says nothing about versions, since it may 
     try testing.expectEqualStrings("it refused fx's request: Missing required client capability", w.buffered());
     w = .fixed(&buf);
     try writeFailure(&w, "headers_refused", null, "the Mcp-Method header is absent", null, null, null);
-    try testing.expectEqualStrings("it refused fx's request headers (a proxy may be dropping request headers): the Mcp-Method header is absent", w.buffered());
+    try testing.expectEqualStrings("it refused fx's request headers (a proxy may be dropping them): the Mcp-Method header is absent", w.buffered());
     w = .fixed(&buf);
     try writeFailure(&w, "rejected", "2025-06-18", "x", null, null, null);
     try testing.expectEqualStrings("it refused fx's MCP version (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2025-06-18)", w.buffered());

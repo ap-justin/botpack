@@ -340,8 +340,8 @@ pub const Server = struct {
     /// `said` as it was when detection last failed: the failure's text
     /// names these even after the server starts again.
     failed_said: Versions = .{},
-    /// The last probe's answer, if it was -32020 or -32021, and that answer
-    /// as it was when detection last failed, kept like `failed_said`.
+    /// The last probe's -32020 or -32021 answer; `failed_refusal` is it as it
+    /// was when detection last failed, kept like `failed_said`.
     refusal: Refusal = .{},
     failed_refusal: Refusal = .{},
     stray_len: u8 = 0,
