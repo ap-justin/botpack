@@ -2277,6 +2277,8 @@ fn finalizeTurn(raw_ctx: *anyopaque, turn_id: u64, outcome: types.TurnPresentati
     const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
     if (disposition == .length_limited) {
         ctx.stop_reason = .max_output_tokens;
+    } else if (disposition == .step_limited) {
+        ctx.stop_reason = .max_model_turns;
     } else if (outcome == .failed or outcome == .paused) {
         ctx.turn_failed = true;
     }
@@ -5362,6 +5364,7 @@ test "ACP finalization maps failed turns and provider length" {
     }{
         .{ .outcome = .completed, .disposition = .length_limited, .expected = .max_output_tokens, .failed = false },
         .{ .outcome = .failed, .disposition = .length_limited, .expected = .max_output_tokens, .failed = false },
+        .{ .outcome = .failed, .disposition = .step_limited, .expected = .max_model_turns, .failed = false },
         .{ .outcome = .failed, .disposition = null, .expected = .end_turn, .failed = true },
         .{ .outcome = .paused, .disposition = null, .expected = .end_turn, .failed = true },
     };
