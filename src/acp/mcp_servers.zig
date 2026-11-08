@@ -386,7 +386,7 @@ fn parseEnv(alloc: Allocator, env_value: std.json.Value) ParseError![]mcp_contra
         const name_value = entry_value.object.get("name") orelse return error.InvalidEnv;
         const value_value = entry_value.object.get("value") orelse return error.InvalidEnv;
         if (name_value != .string or value_value != .string) return error.InvalidEnv;
-        // The process environment asserts on a name it cannot hold.
+        // The process environment asserts on a name or value it cannot hold.
         if (!std.process.Environ.Map.validateKeyForPut(name_value.string)) return error.InvalidEnv;
         if (std.mem.findScalar(u8, value_value.string, 0) != null) return error.InvalidEnv;
         const key = try alloc.dupe(u8, name_value.string);

@@ -1325,7 +1325,7 @@ fn parseEnvironment(alloc: Allocator, value: std.json.Value) ![]McpEnvVar {
     var it = value.object.iterator();
     while (it.next()) |entry| {
         if (entry.value_ptr.* != .string) return error.McpConfigInvalidEnvironment;
-        // The process environment asserts on a name it cannot hold.
+        // The process environment asserts on a name or value it cannot hold.
         if (!std.process.Environ.Map.validateKeyForPut(entry.key_ptr.*)) return error.McpConfigInvalidEnvironment;
         if (std.mem.findScalar(u8, entry.value_ptr.*.string, 0) != null) return error.McpConfigInvalidEnvironment;
         const key = try alloc.dupe(u8, entry.key_ptr.*);

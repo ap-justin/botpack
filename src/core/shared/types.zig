@@ -2067,7 +2067,7 @@ pub const ProviderCompletionDisposition = enum {
     provider_failure,
     invalid_completion,
     /// The runtime ended the turn at the configured agent step limit;
-    /// `classifyProviderCompletion` never answers it.
+    /// `classifyProviderCompletion` never returns it.
     step_limited,
 };
 
