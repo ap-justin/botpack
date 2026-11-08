@@ -418,16 +418,16 @@ pub const Effective = union(enum) {
 /// The keys `fx config` reads from the resolved state instead of the files.
 /// A test checks that each plain key is here or in `files_only_keys`.
 pub const resolved_keys = [_][]const u8{
-    "auto_compact_percent",   "cache_warming",
-    "context",                "effort",
-    "fast_mode",              "first_call_tool_choice",
-    "max_agent_steps",        "max_tool_result_bytes",
-    "permission_mode",        "prompt_history.enabled",
-    "provider",               "provider_order",
-    "provider_strict",        "review_model",
-    "session_titles",         "sound.attention_required",
-    "sound.max",              "sound.turn_end",
-    "theme",                  "ultrafast_mode",
+    "auto_compact_percent", "cache_warming",
+    "context",              "effort",
+    "fast_mode",            "first_call_tool_choice",
+    "max_agent_steps",      "max_tool_result_bytes",
+    "permission_mode",      "prompt_history.enabled",
+    "provider",             "provider_order",
+    "provider_strict",      "review_model",
+    "session_titles",       "sound.attention_required",
+    "sound.max",            "sound.turn_end",
+    "theme",                "ultrafast_mode",
 };
 
 /// Keys `fx config` shows as the files set them: objects fx checks with its
