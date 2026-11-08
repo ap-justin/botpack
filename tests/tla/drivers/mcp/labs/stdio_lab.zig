@@ -471,7 +471,7 @@ const Lab = struct {
         const config = lab.detector.config;
         if (kind == .request) switch (lab.pending) {
             .discover => |index| try era.writeDiscover(&buffer.writer, config, lab.client, index, id),
-            .initialize => try era.writeInitialize(&buffer.writer, config, lab.client, id),
+            .initialize => try era.writeInitialize(&buffer.writer, config, lab.client, 0, id),
             .script => |version| {
                 var w: wire.Writer = try .request(&buffer.writer, id, lab.pending_method, lab.metaFor(version, id));
                 if (lab.pending_params) |params| try writeFields(&w, params);

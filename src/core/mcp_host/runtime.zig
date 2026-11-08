@@ -2398,7 +2398,8 @@ test {
 
 const testing = std.testing;
 
-const Fixture = @import("fake_server.zig").Fixture;
+const fake_server = @import("fake_server.zig");
+const Fixture = fake_server.Fixture;
 
 test "tools and calls go through the owner thread, from several threads at once" {
     var f: Fixture = undefined;
@@ -2432,6 +2433,52 @@ test "tools and calls go through the owner thread, from several threads at once"
     for (&threads) |*t| t.* = try std.Thread.spawn(.{}, Caller.run, .{ &r, &ok });
     for (threads) |t| t.join();
     try testing.expectEqual(@as(u32, 4), ok.load(.acquire));
+}
+
+/// Starts the fake server in `mode`, lists its tools, and returns its status.
+fn connectFake(comptime mode: fake_server.Mode, arena: Allocator, expected_tools: usize) !Status {
+    var f: Fixture = undefined;
+    try f.initMode(mode);
+    defer f.deinit();
+    const configs = [_]mcp_contract.McpServerConfig{.{ .name = "fake", .command = f.server }};
+    var r: Runtime = undefined;
+    try r.start(testing.allocator, testing.io, &configs, &f.inherited, f.options());
+    defer r.deinit();
+    const listed = try r.tools(arena, "fake", null);
+    try testing.expectEqual(expected_tools, listed.tools.len);
+    return (try r.statuses(arena))[0];
+}
+
+test "a server that accepts only an older legacy version connects and lists its tools" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const status = try connectFake(.older, arena.allocator(), 1);
+    try testing.expectEqual(State.ready, status.state);
+    try testing.expectEqualStrings("2025-03-26", status.version.?);
+}
+
+test "a server that refuses initialize and lists the version it speaks gets that version offered" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const status = try connectFake(.older_error, arena.allocator(), 1);
+    try testing.expectEqual(State.ready, status.state);
+    try testing.expectEqualStrings("2025-06-18", status.version.?);
+}
+
+test "a server that accepts only the newest legacy version connects and lists its tools" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const status = try connectFake(.newest, arena.allocator(), 1);
+    try testing.expectEqual(State.ready, status.state);
+    try testing.expectEqualStrings("2025-11-25", status.version.?);
+}
+
+test "a server in the per-request era connects and lists its tools" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const status = try connectFake(.per_request, arena.allocator(), 1);
+    try testing.expectEqual(State.ready, status.state);
+    try testing.expectEqualStrings("2026-07-28", status.version.?);
 }
 
 test "a cancelled call ends, and stopping ends a call that never answers" {

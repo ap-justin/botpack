@@ -301,6 +301,11 @@ pub const Server = struct {
     bad_session: bool = false,
     /// The agreed version, an index into `Config.legacy`.
     legacy_version: u8 = 0,
+    /// The `Config.legacy` index the current initialize offers, and a mask
+    /// of those offered since detection chose initialize. A refusal that lists
+    /// an untried version is answered with one more initialize.
+    init_offer: u8 = 0,
+    init_offered: u8 = 1,
     /// What the last discover or initialize result told the client to
     /// tell the model about the server; in `gpa`.
     instructions: ?[]const u8 = null,
@@ -833,12 +838,15 @@ pub const Server = struct {
     /// A stdio answer: what it answers is read, then the request table ends
     /// the request, and `stdioDelivered` the logical one.
     fn onStdioAnswer(r: *Server, l: *Logical, id: request.Id, body: @FieldType(wire.Response, "body")) Error!void {
+        var retry = false;
         switch (l.what) {
             .discover => {
                 try r.keepInstructions(body);
                 try r.stepEra(era.classifyDiscover(r.detector.config, body));
             },
-            .initialize => {
+            .initialize => if (r.nextOffer(body) != null) {
+                retry = true;
+            } else {
                 try r.keepInstructions(body);
                 try r.stepEra(era.classifyInitialize(r.detector.config, body));
             },
@@ -847,6 +855,8 @@ pub const Server = struct {
             .listen => try r.stepSubs(.{ .final = .{ .id = id, .end = listenEnd(body) } }),
         }
         try r.stepRequest(.{ .response_received = .{ .id = id, .response = if (body == .result) .result else .peer_error } });
+        // The refused initialize is over; the detector still waits for an answer.
+        if (retry) try r.sendAttempt(try r.newLogical(.initialize, .idempotent));
     }
 
     /// A complete result ends a listen gracefully. An error refuses it, and so
@@ -1057,7 +1067,7 @@ pub const Server = struct {
         const meta = era.meta(config, r.options.client, version, id);
         switch (l.what) {
             .discover => |i| try era.writeDiscover(&body.writer, config, r.options.client, i, id),
-            .initialize => try era.writeInitialize(&body.writer, config, r.options.client, id),
+            .initialize => try era.writeInitialize(&body.writer, config, r.options.client, r.init_offer, id),
             .list, .call => try r.writeOperation(&body.writer, l, meta),
             .listen => try subscriptions.writeListen(&body.writer, id, meta, l.filter),
         }
@@ -1475,7 +1485,7 @@ pub const Server = struct {
         l.id = id;
         var body: std.Io.Writer.Allocating = .init(r.gpa);
         defer body.deinit();
-        try era.writeInitialize(&body.writer, r.detector.config, r.options.client, id);
+        try era.writeInitialize(&body.writer, r.detector.config, r.options.client, r.init_offer, id);
         if (r.incoming_session) |v| r.gpa.free(v);
         r.incoming_session = null;
         r.bad_session = false;
@@ -1575,11 +1585,14 @@ pub const Server = struct {
         const id = l.id.?;
         try r.stepRequest(.{ .response_received = .{ .id = id, .response = if (body == .result) .result else .peer_error } });
         l.used = false;
+        // A refusal that lists a version fx speaks: offer that one instead.
+        if (r.nextOffer(body) != null) return r.sendInitialize();
         try r.keepInstructions(body);
         const event = era.classifyInitialize(r.detector.config, body);
         const first = r.detector.state == .initializing;
         if (event == .initialize_result and event.initialize_result == .legacy and !r.bad_session) {
             r.legacy_version = event.initialize_result.legacy;
+            r.init_offer = r.legacy_version;
             if (r.session_id) |v| r.gpa.free(v);
             r.session_id = r.incoming_session;
             r.incoming_session = null;
@@ -2032,7 +2045,7 @@ pub const Server = struct {
                 const l = try r.newLogical(.{ .discover = i }, .idempotent);
                 if (r.stdio) try r.sendAttempt(l) else try r.stepExchange(l, .send);
             },
-            .send_initialize => if (r.stdio) try r.sendAttempt(try r.newLogical(.initialize, .idempotent)) else try r.startSession(),
+            .send_initialize => if (r.resetOffer() and r.stdio) try r.sendAttempt(try r.newLogical(.initialize, .idempotent)) else try r.startSession(),
             // Over HTTP the session posts it once initialize is answered.
             .send_initialized => if (r.stdio) {
                 var body: std.Io.Writer.Allocating = .init(r.gpa);
@@ -2062,6 +2075,25 @@ pub const Server = struct {
                 r.emit(.{ .failed = .{ .era = f } });
             },
         };
+    }
+
+    /// Detection chose initialize: the newest legacy version is offered first.
+    /// True, so it can lead a condition.
+    fn resetOffer(r: *Server) bool {
+        r.init_offer = 0;
+        r.init_offered = 1;
+        return true;
+    }
+
+    /// The next version to offer when initialize was answered with `body`, if
+    /// it is a refusal that lists one fx speaks and hasn't offered yet. It is
+    /// recorded as offered.
+    fn nextOffer(r: *Server, body: @FieldType(wire.Response, "body")) ?u8 {
+        if (r.detector.state != .initializing or body != .failure) return null;
+        const offer = era.nextOffer(r.detector.config, body.failure, r.init_offered) orelse return null;
+        r.init_offer = offer;
+        r.init_offered |= @as(u8, 1) << @intCast(offer);
+        return offer;
     }
 
     fn stepCatalog(r: *Server, event: catalog.Event) Error!void {

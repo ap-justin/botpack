@@ -443,6 +443,20 @@ pub fn classifyInitialize(config: Config, body: @FieldType(wire.Response, "body"
     }
 }
 
+/// The legacy version to offer after initialize was refused with an error whose
+/// `data.supported` lists versions: the newest in `Config.legacy` that the
+/// server lists and `offered` (a mask over `Config.legacy`) doesn't have yet.
+pub fn nextOffer(config: Config, failure: wire.Failure, offered: u8) ?u8 {
+    var found: [1]?[]const u8 = undefined;
+    wire.objectFields(failure.data orelse return null, &.{"supported"}, &found) catch return null;
+    const array = found[0] orelse return null;
+    for (config.legacy, 0..) |version, i| {
+        if (offered & (@as(u8, 1) << @intCast(i)) != 0) continue;
+        if (wire.arrayHasString(array, version) catch return null) return @intCast(i);
+    }
+    return null;
+}
+
 /// The event for -32022 in reply to an operation request.
 pub fn classifyOperationRejection(config: Config, failure: wire.Failure) ?Event {
     if (failure.code != wire.code.unsupported_protocol_version) return null;
@@ -478,11 +492,11 @@ pub fn writeDiscover(out: *std.Io.Writer, config: Config, client: Client, index:
     try w.end();
 }
 
-/// The newest legacy version, the client's capabilities, and who it is.
-pub fn writeInitialize(out: *std.Io.Writer, config: Config, client: Client, id: wire.RequestId) wire.EncodeError!void {
-    var w: wire.Writer = try .request(out, id, "initialize", meta(config, client, .{ .legacy = 0 }, id));
+/// `Config.legacy[offer]` (0 is the newest), the client's capabilities, and who it is.
+pub fn writeInitialize(out: *std.Io.Writer, config: Config, client: Client, offer: u8, id: wire.RequestId) wire.EncodeError!void {
+    var w: wire.Writer = try .request(out, id, "initialize", meta(config, client, .{ .legacy = offer }, id));
     try w.field("protocolVersion");
-    try w.string(config.legacy[0]);
+    try w.string(config.legacy[offer]);
     try w.field("capabilities");
     try w.raw(client.capabilities);
     try w.field("clientInfo");
@@ -915,7 +929,7 @@ test "writes the detection messages" {
     const client: Client = .{ .info = .{ .name = "fx", .version = "1.0.0" } };
     try writeDiscover(&out.writer, test_config, client, 0, 1);
     try out.writer.writeByte('\n');
-    try writeInitialize(&out.writer, test_config, client, 2);
+    try writeInitialize(&out.writer, test_config, client, 0, 2);
     try out.writer.writeByte('\n');
     try writeInitialized(&out.writer);
     try testing.expectEqualStrings(
@@ -927,4 +941,17 @@ test "writes the detection messages" {
             "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}",
         out.written(),
     );
+}
+
+test "a refusal that lists legacy versions picks the newest one not yet offered" {
+    const refusal = (try wire.decode("{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32602,\"message\":\"Unsupported protocol version\"," ++
+        "\"data\":{\"supported\":[\"2024-11-05\",\"2025-03-26\",\"2025-06-18\"],\"requested\":\"2025-11-25\"}}}")).response.body.failure;
+    const config: Config = .{};
+    try testing.expectEqual(@as(?u8, 1), nextOffer(config, refusal, 0b001));
+    try testing.expectEqual(@as(?u8, 2), nextOffer(config, refusal, 0b011));
+    try testing.expectEqual(@as(?u8, null), nextOffer(config, refusal, 0b111));
+    const none = (try wire.decode("{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32602,\"message\":\"x\",\"data\":{\"supported\":[\"2024-11-05\"]}}}")).response.body.failure;
+    try testing.expectEqual(@as(?u8, null), nextOffer(config, none, 0b001));
+    const bare = (try wire.decode("{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32602,\"message\":\"x\"}}")).response.body.failure;
+    try testing.expectEqual(@as(?u8, null), nextOffer(config, bare, 0b001));
 }
