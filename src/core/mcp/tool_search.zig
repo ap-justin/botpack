@@ -214,14 +214,8 @@ const SchemaLoads = struct {
         var loads: SchemaLoads = .{ .entries = entries };
         errdefer loads.deinit(alloc);
         var remaining = limits.mcp_selected_schema_bytes.effectiveBytes();
-        // A server's instructions ride in its first loaded schema only.
-        var instructed: std.ArrayList([]const u8) = .empty;
-        defer instructed.deinit(alloc);
         for (matches, entries, 0..) |match, *entry, index| {
-            const carries_instructions = for (instructed.items) |server| {
-                if (std.mem.eql(u8, server, match.server_name)) break false;
-            } else true;
-            const projection = try selected_schema.project(alloc, match.tool.*, match.server_name, if (carries_instructions) match.instructions else null, limits);
+            const projection = try selected_schema.project(alloc, match.tool.*, match.instructions, limits);
             const payload = switch (projection) {
                 .selected, .rejected => |value| value,
             };
@@ -236,7 +230,6 @@ const SchemaLoads = struct {
                 break;
             }
             errdefer alloc.free(payload.model_output);
-            if (carries_instructions) try instructed.append(alloc, match.server_name);
             const name = try alloc.dupe(u8, match.tool.prefixed_name);
             entry.tool = .{ .name = name, .schema_json = payload.model_output, .mcp_binding = match.binding };
             remaining -= payload.model_output.len;

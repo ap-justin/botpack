@@ -3352,11 +3352,10 @@ fn pushContextNotice(raw_ctx: *anyopaque, text: []const u8) !void {
     const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
     const session = if (ctx.state.active_session) |*active| active else return;
     if (!try session.session_rt.claimContextNotice(ctx.alloc, text)) return;
-    // ACP v1 Session Notices where the client shows them. Otherwise the
-    // trace keeps it: a message chunk would join the model's reply in the
-    // client's transcript.
+    // ACP v1 Session Notices where the client shows them;
+    // otherwise a message, as ACP allows.
     if (ctx.state.client_notices) return ctx.sendNotice(text) catch {};
-    debug_trace.logf("acp", "context notice not shown to a client without session notices: {s}", .{text});
+    try pushSystemNotice(raw_ctx, text);
 }
 
 fn pushDiffBlock(raw_ctx: *anyopaque, payload: agent_runtime.DiffEntryPayload) !void {

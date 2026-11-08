@@ -17,15 +17,6 @@ pub const SearchRequest = capability_retrieval.Request;
 pub const SearchToolsFn = *const fn (*anyopaque, Allocator, SearchRequest, types.PermissionRuleSet, context_limits.Values, Access, ?*std.atomic.Value(bool)) anyerror!SearchResult;
 pub const ToolSchemaFn = *const fn (*anyopaque, Allocator, []const u8, types.PermissionRuleSet, context_limits.Values, Access, ?*std.atomic.Value(bool)) anyerror!?ToolSchemaResult;
 
-/// The tools a server-qualified spelling of a name (`server.tool`) may mean.
-/// Names are the exposed `mcp_` names, borrowed from the lookup's arena.
-pub const QualifiedLookup = union(enum) {
-    none,
-    one: []const u8,
-    many: []const []const u8,
-};
-pub const ResolveQualifiedFn = *const fn (*anyopaque, Allocator, []const u8, types.PermissionRuleSet, Access, ?*std.atomic.Value(bool)) anyerror!QualifiedLookup;
-
 pub const Progress = mcp_contract.Progress;
 pub const ProgressSink = mcp_contract.ProgressSink;
 
@@ -321,12 +312,7 @@ pub const SelectedTool = struct {
 /// What looking up a live MCP tool by name, without the model selecting it,
 /// found. Borrows from the lookup's arena.
 pub const UnselectedLookup = union(enum) {
-    /// `name` is the tool's exposed name, which differs from the name looked
-    /// up when that was a server-qualified spelling.
     resolved: SelectedTool,
-    /// The name is a server-qualified spelling that fits several tools: their
-    /// exposed names.
-    ambiguous: []const []const u8,
     /// No tool by that name may be advertised: none exists, or the permission
     /// rules or the access view refuse it.
     missing,

@@ -72,7 +72,21 @@ pub const StopReason = enum {
     /// next model request with the turn kept open for a later resume.
     yielded,
 
+    /// The ACP v1 `stopReason` value closest to this reason.
     pub fn jsonString(self: StopReason) []const u8 {
+        return switch (self) {
+            .end_turn => "end_turn",
+            .max_output_tokens => "max_tokens",
+            .max_model_turns => "max_turn_requests",
+            .refused => "refusal",
+            .cancelled => "cancelled",
+            .yielded => "max_turn_requests",
+        };
+    }
+
+    /// fx's own name for this reason, sent as `_meta.fx.stopReason` when it
+    /// differs from the v1 value.
+    fn fxString(self: StopReason) []const u8 {
         return switch (self) {
             .end_turn => "end_turn",
             .max_output_tokens => "max_output_tokens",
@@ -82,7 +96,17 @@ pub const StopReason = enum {
             .yielded => "yielded",
         };
     }
+
+    fn hasFxMeta(self: StopReason) bool {
+        return !std.mem.eql(u8, self.jsonString(), self.fxString());
+    }
 };
+
+/// Writes `,"stopReason":"..."` inside an `_meta.fx` object.
+fn writeFxStopReasonField(w: *std.Io.Writer, reason: StopReason) !void {
+    try w.writeAll("\"stopReason\":");
+    try writeJsonStr(reason.fxString(), w);
+}
 
 pub const ToolCallKind = enum {
     read,
@@ -398,6 +422,11 @@ pub fn writeInitializeResponse(w: *std.Io.Writer, capabilities: AgentCapabilitie
 pub fn writePromptResponse(w: *std.Io.Writer, reason: StopReason) !void {
     try w.writeAll("{\"stopReason\":");
     try writeJsonStr(reason.jsonString(), w);
+    if (reason.hasFxMeta()) {
+        try w.writeAll(",\"_meta\":{\"fx\":{");
+        try writeFxStopReasonField(w, reason);
+        try w.writeAll("}}");
+    }
     try w.writeAll("}");
 }
 
@@ -414,6 +443,10 @@ pub fn writeSteeringPromptResponse(w: *std.Io.Writer, reason: StopReason, delive
     try writeJsonStr(reason.jsonString(), w);
     try w.writeAll(",\"_meta\":{\"fx\":{\"steering\":");
     try writeJsonStr(@tagName(delivery), w);
+    if (reason.hasFxMeta()) {
+        try w.writeByte(',');
+        try writeFxStopReasonField(w, reason);
+    }
     try w.writeAll("}}}");
 }
 
@@ -478,7 +511,13 @@ pub fn writePromptResponseWithUsage(
             try w.print(":{d}", .{value});
         }
     }
-    try w.writeAll("}}");
+    try w.writeAll("}");
+    if (reason.hasFxMeta()) {
+        try w.writeAll(",\"_meta\":{\"fx\":{");
+        try writeFxStopReasonField(w, reason);
+        try w.writeAll("}}");
+    }
+    try w.writeAll("}");
 }
 
 pub fn writeAvailableCommandsUpdate(w: *std.Io.Writer, commands_json: []const u8) !void {
@@ -553,11 +592,46 @@ test "writePromptResponse produces valid json" {
     try std.testing.expectEqualStrings("{\"stopReason\":\"end_turn\"}", out.writer.buffered());
 }
 
-test "StopReason jsonString values" {
-    try std.testing.expectEqualStrings("end_turn", StopReason.end_turn.jsonString());
-    try std.testing.expectEqualStrings("cancelled", StopReason.cancelled.jsonString());
-    try std.testing.expectEqualStrings("max_output_tokens", StopReason.max_output_tokens.jsonString());
-    try std.testing.expectEqualStrings("yielded", StopReason.yielded.jsonString());
+test "StopReason maps every reason to an ACP v1 value" {
+    const cases = [_]struct { reason: StopReason, v1: []const u8, fx: ?[]const u8 }{
+        .{ .reason = .end_turn, .v1 = "end_turn", .fx = null },
+        .{ .reason = .cancelled, .v1 = "cancelled", .fx = null },
+        .{ .reason = .max_output_tokens, .v1 = "max_tokens", .fx = "max_output_tokens" },
+        .{ .reason = .max_model_turns, .v1 = "max_turn_requests", .fx = "max_model_turns" },
+        .{ .reason = .refused, .v1 = "refusal", .fx = "refused" },
+        .{ .reason = .yielded, .v1 = "max_turn_requests", .fx = "yielded" },
+    };
+    const alloc = std.testing.allocator;
+    for (cases) |case| {
+        try std.testing.expectEqualStrings(case.v1, case.reason.jsonString());
+        var out: std.Io.Writer.Allocating = .init(alloc);
+        defer out.deinit();
+        try writePromptResponse(&out.writer, case.reason);
+        const expected = if (case.fx) |fx|
+            try alloc.print("{{\"stopReason\":\"{s}\",\"_meta\":{{\"fx\":{{\"stopReason\":\"{s}\"}}}}}}", .{ case.v1, fx })
+        else
+            try alloc.print("{{\"stopReason\":\"{s}\"}}", .{case.v1});
+        defer alloc.free(expected);
+        try std.testing.expectEqualStrings(expected, out.writer.buffered());
+    }
+}
+
+test "steering and usage responses carry the fx stop reason" {
+    const alloc = std.testing.allocator;
+    var out: std.Io.Writer.Allocating = .init(alloc);
+    defer out.deinit();
+    try writeSteeringPromptResponse(&out.writer, .yielded, .absorbed);
+    try std.testing.expectEqualStrings(
+        "{\"stopReason\":\"max_turn_requests\",\"_meta\":{\"fx\":{\"steering\":\"absorbed\",\"stopReason\":\"yielded\"}}}",
+        out.writer.buffered(),
+    );
+    var usage_out: std.Io.Writer.Allocating = .init(alloc);
+    defer usage_out.deinit();
+    try writePromptResponseWithUsage(&usage_out.writer, .refused, .{ .input_tokens = 3 });
+    try std.testing.expectEqualStrings(
+        "{\"stopReason\":\"refusal\",\"usage\":{\"inputTokens\":3},\"_meta\":{\"fx\":{\"stopReason\":\"refused\"}}}",
+        usage_out.writer.buffered(),
+    );
 }
 
 test "ToolCallKind jsonString values" {

@@ -25,9 +25,7 @@ pub const max_result_bytes: usize = 16 * 1024 * 1024;
 
 pub const Authorization = union(enum) {
     /// The check allowed the call, for the tool definition it checked.
-    /// `tool` is the exposed name the check resolved the requested name to,
-    /// which the call then runs under; null keeps the requested name.
-    allow: struct { binding: ?types.McpToolBinding = null, tool: ?[]const u8 = null },
+    allow: struct { binding: ?types.McpToolBinding = null },
     /// Why not, for the client: a denial, a held review, or an unknown tool.
     deny: []const u8,
 };
