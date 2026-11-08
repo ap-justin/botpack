@@ -90,6 +90,9 @@ pub const Status = struct {
     /// detection failure, ", "-separated; they stay as they were when it
     /// starts again.
     versions_said: ?[]const u8,
+    /// The message of the -32020 or -32021 answer to discovery behind the
+    /// last detection failure, kept like `versions_said`.
+    refusal_said: ?[]const u8,
 };
 
 pub const Error = server_mod.Error || error{ UnknownServer, UnknownCall, TooManyCalls };
@@ -218,6 +221,7 @@ pub const Engine = struct {
             .exit = if (slot.server) |s| s.exitStatus() else null,
             .stray_line = if (slot.server) |s| s.strayLine() else null,
             .versions_said = if (slot.server) |s| s.failedVersions() else null,
+            .refusal_said = if (slot.server) |s| s.failedRefusal() else null,
         };
     }
 
@@ -440,6 +444,7 @@ pub const Engine = struct {
                     .session => "session",
                     .initialized_timed_out => "initialized_timed_out",
                     .needs_auth => "needs_auth",
+                    .headers_refused => "headers_refused",
                     .auth_unavailable => "auth_unavailable",
                 };
                 // One that needs a sign-in is dropped, as the host would,

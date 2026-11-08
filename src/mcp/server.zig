@@ -88,6 +88,19 @@ const Versions = struct {
     }
 };
 
+/// A -32020 or -32021 answer to discovery: its code, and its message, decoded,
+/// terminal-safe, and cut to `note_max` bytes.
+const Refusal = struct {
+    /// 0 when there is none.
+    code: i64 = 0,
+    buf: [note_max + 3]u8 = undefined,
+    len: u8 = 0,
+
+    fn message(f: *const Refusal) ?[]const u8 {
+        return if (f.code == 0 or f.len == 0) null else f.buf[0..f.len];
+    }
+};
+
 /// The start of `line`, at most `max` bytes, terminal-safe, in `buf`: never
 /// a cut UTF-8 sequence, control bytes as '?', and "..." when cut.
 fn excerptOf(comptime max: usize, buf: *[max + 3]u8, line: []const u8) []const u8 {
@@ -135,6 +148,10 @@ pub const Failure = union(enum) {
     initialized_timed_out,
     /// Detection needs a sign-in first; `detect` again after it.
     needs_auth,
+    /// Detection fell back to initialize after discovery got -32020, and
+    /// failed there: the server refuses fx's request headers, as when a
+    /// proxy drops them. `failedRefusal` has the server's message.
+    headers_refused,
     /// Detection needed a refresh, and the authorization server gave no
     /// usable answer: a 429, a 5xx, or none. The login stays, and the
     /// server starts again after its backoff.
@@ -322,6 +339,10 @@ pub const Server = struct {
     /// `said` as it was when detection last failed: the failure's text
     /// names these even after the server starts again.
     failed_said: Versions = .{},
+    /// The last probe's answer, if it was -32020 or -32021, and that answer
+    /// as it was when detection last failed, kept like `failed_said`.
+    refusal: Refusal = .{},
+    failed_refusal: Refusal = .{},
     stray_len: u8 = 0,
     /// The message of the last progress event, until the next `next`.
     note: [note_max + 3]u8 = undefined,
@@ -471,6 +492,24 @@ pub const Server = struct {
     /// detection failure, if any; a new process or detection run keeps them.
     pub fn failedVersions(r: *const Server) ?[]const u8 {
         return r.failed_said.slice();
+    }
+
+    /// The message of the -32020 or -32021 answer to discovery behind the
+    /// last detection failure, if any; a new process or detection run keeps it.
+    pub fn failedRefusal(r: *const Server) ?[]const u8 {
+        return r.failed_refusal.message();
+    }
+
+    /// Remembers a -32020 or -32021 answer to discovery.
+    fn noteRefusal(r: *Server, body: @FieldType(wire.Response, "body")) void {
+        if (body != .failure) return;
+        const failure = body.failure;
+        if (failure.code != wire.code.header_mismatch and failure.code != wire.code.missing_required_client_capability) return;
+        var text: [1024]u8 = undefined;
+        var fixed: std.heap.FixedBufferAllocator = .init(&text);
+        const said = wire.decodeString(fixed.allocator(), failure.message) catch null;
+        r.refusal = .{ .code = failure.code };
+        if (said) |m| r.refusal.len = @intCast(excerptOf(note_max, &r.refusal.buf, m).len);
     }
 
     /// Remembers the versions `body` names: a refusal's `data.supported`, a
@@ -908,6 +947,7 @@ pub const Server = struct {
             .discover => {
                 try r.keepInstructions(body);
                 r.noteVersions(body);
+                r.noteRefusal(body);
                 try r.stepEra(era.classifyDiscover(r.detector.config, body));
             },
             .initialize => {
@@ -1248,6 +1288,7 @@ pub const Server = struct {
                     .discover => blk: {
                         try r.keepInstructions(resp.body);
                         r.noteVersions(resp.body);
+                        r.noteRefusal(resp.body);
                         try r.stepEra(era.classifyDiscoverHttp(r.detector.config, status, resp.body));
                         break :blk if (resp.body == .result) .result else .failure;
                     },
@@ -2104,7 +2145,10 @@ pub const Server = struct {
     fn stepEra(r: *Server, event: era.Event) Error!void {
         const was = r.detector.state;
         var out: era.Output = .{};
-        if (event == .process_started) r.said = .{};
+        if (event == .process_started) {
+            r.said = .{};
+            r.refusal = .{};
+        }
         r.detector.step(event, &out) catch return;
         if (was == .unknown and r.detector.state != .unknown) r.start_due_ms = r.now() + r.options.timeouts.start_ms;
         if (r.tracer()) |t| try era.writeTrace(t, r.era_instance, &out);
@@ -2113,6 +2157,7 @@ pub const Server = struct {
                 // Detection went back to probing; a session started for
                 // the fallback is dropped.
                 r.legacy = null;
+                r.refusal = .{};
                 try r.endElicitations();
                 const l = try r.newLogical(.{ .discover = i }, .idempotent);
                 if (r.stdio) try r.sendAttempt(l) else try r.stepExchange(l, .send);
@@ -2152,7 +2197,10 @@ pub const Server = struct {
         // next start is a new one.
         if (r.stdio) r.proc.stop() catch {};
         r.failed_said = r.said;
-        r.emit(.{ .failed = .{ .era = f } });
+        r.failed_refusal = r.refusal;
+        // After -32020 the fallback's failure is the headers' refusal.
+        const headers = r.refusal.code == wire.code.header_mismatch and (f == .initialize_failed or f == .went_quiet);
+        r.emit(.{ .failed = if (headers) .headers_refused else .{ .era = f } });
     }
 
     /// Detection chose initialize: the newest legacy version is offered first.
@@ -2323,6 +2371,33 @@ test "a detection failure names the versions behind it, also once the server sta
     // A failure whose answers named nothing names nothing, not an earlier run's versions.
     r.detectionFailed(.initialize_failed);
     try std.testing.expect(r.failedVersions() == null);
+}
+
+test "a -32020 answer to discovery makes the fallback's failure a refusal of the headers, naming the server's message" {
+    var r: Server = undefined;
+    try testServer(&r);
+    defer r.deinit();
+    const mismatch: @FieldType(wire.Response, "body") = .{ .failure = .{ .code = wire.code.header_mismatch, .message = "\"Mcp-Method is \\u001b[31mabsent\"", .data = null } };
+    r.noteRefusal(mismatch);
+    r.detectionFailed(.initialize_failed);
+    try std.testing.expectEqual(Failure.headers_refused, r.events[r.event_count - 1].failed);
+    // Decoded, and terminal-safe.
+    try std.testing.expectEqualStrings("Mcp-Method is ?[31mabsent", r.failedRefusal().?);
+    try r.stepEra(.process_started);
+    try std.testing.expectEqualStrings("Mcp-Method is ?[31mabsent", r.failedRefusal().?);
+    // A version failure stays one, and a failure after no refusal names none.
+    r.noteRefusal(mismatch);
+    r.detectionFailed(.no_shared_version);
+    try std.testing.expectEqual(Failure{ .era = .no_shared_version }, r.events[r.event_count - 1].failed);
+    r.refusal = .{};
+    r.detectionFailed(.initialize_failed);
+    try std.testing.expectEqual(Failure{ .era = .initialize_failed }, r.events[r.event_count - 1].failed);
+    try std.testing.expect(r.failedRefusal() == null);
+    // -32021 keeps its era failure and carries its message.
+    r.noteRefusal(.{ .failure = .{ .code = wire.code.missing_required_client_capability, .message = "\"Missing sampling\"", .data = null } });
+    r.detectionFailed(.rejected);
+    try std.testing.expectEqual(Failure{ .era = .rejected }, r.events[r.event_count - 1].failed);
+    try std.testing.expectEqualStrings("Missing sampling", r.failedRefusal().?);
 }
 
 test "a version keeps only its letters, digits, dots and dashes, and one with an escape is left out" {
