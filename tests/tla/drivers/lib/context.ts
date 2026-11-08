@@ -17,7 +17,7 @@ export const binary = process.env.FX_BIN ?? join(worktree, "zig-out", "bin", "fx
 export const artifacts = outDir(process.env.FX_TLA_CASE ?? "driver");
 export const repetitions = Number(process.env.FX_TLA_REPEAT ?? "1");
 
-/// The checkout's tests/e2e/fake-gateway.ts: tmux sessions and fake gateways.
+/// The checkout's tests/e2e/fake-gateway.ts: the fake gateways and their response builders.
 export async function targetHelpers() {
   return await targetModule("fake-gateway.ts");
 }

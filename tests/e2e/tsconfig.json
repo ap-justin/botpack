@@ -8,5 +8,5 @@
     "skipLibCheck": true,
     "types": ["bun"]
   },
-  "include": ["*.ts", "render-lab/**/*.ts", "../evals/eval-helpers.ts"]
+  "include": ["*.ts", "../evals/eval-helpers.ts"]
 }

@@ -1,36 +1,6 @@
-/**
- * Fake AI Gateway servers and fixtures shared by the end-to-end tests.
- */
-
-import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-
-import { join } from "node:path";
-import { FX_BIN, REPO_ROOT } from "../evals/eval-helpers";
+import { existsSync } from "node:fs";
 
 export const FAKE_GATEWAY_MODEL = "openai/gpt-5";
-const AUTH_ENV_KEYS = [
-  "AI_GATEWAY_API_KEY",
-  "VERCEL_OIDC_TOKEN",
-] as const;
-const DEFAULT_UNSET_ENV_KEYS = [
-  ...AUTH_ENV_KEYS,
-  "FX_TEST_GATEWAY_CHAT_URL",
-  "FX_TEST_GATEWAY_MODELS_URL",
-  "FX_TEST_GATEWAY_CREDITS_URL",
-  "FX_PERMISSION_MODE",
-] as const;
-const MIRRORED_ENV_KEYS = [
-  "FX_GATEWAY_BASE_URL",
-  "FX_GATEWAY_CHAT_URL",
-  "FX_MAX_AGENT_STEPS",
-  "FX_MODEL",
-] as const;
-
-export function canonicalSubagentIdForStore(childId: string): string {
-  const match = /^(\d+)-(\d{6})-([0-9a-f]{16})$/.exec(childId);
-  return match ? `${match[1]}-${match[1]}${match[2]}-${match[3]}` : childId;
-}
 
 export function terminalFixtureShell(): string {
   for (const path of ["/bin/zsh", "/bin/bash"]) {
@@ -324,16 +294,6 @@ export function fakeGatewayTitleDefault() {
   }]);
 }
 
-// Finish-only Responses-protocol stream for title generation side calls at
-// fake servers that speak the Responses protocol: completes without text deltas and without usable
-// title content, leaving the locally derived session title in place.
-export function fakeResponsesTitleDefault() {
-  return new Response(
-    'data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":2,"output_tokens":0}}}\n\n',
-    { headers: { "content-type": "text/event-stream" } },
-  );
-}
-
 function serveFakeGateway(
   nextCompletion: (body: string) => Response | Promise<Response>,
   options: FakeGatewayOptions,
@@ -470,12 +430,3 @@ export function startDynamicFakeGateway(
 ) {
   return serveFakeGateway(response, options);
 }
-
-// Serves a fake update channel whose "new" artifact is a wrapper script that
-// logs its argv to argvLogPath and execs the real FX_BIN, so upgrade relaunch
-// tests can drive the handoff without shipping a second binary.
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
