@@ -1,4 +1,4 @@
-// Loopback fakes for /usage and `fx usage`. One handler answers every usage
+// Loopback fakes for `fx usage`. One handler answers every usage
 // read fx makes, so a single fake gateway serves chat, models, and usage:
 // AI Gateway's /v1/report and the Vercel usage-report budget. Every name and
 // token here is synthetic.

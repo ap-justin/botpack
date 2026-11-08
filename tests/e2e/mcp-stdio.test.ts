@@ -740,9 +740,6 @@ describe("modern MCP stdio compatibility", () => {
     expect(result.stderr).not.toContain("skipped unapproved project MCP servers");
   }, 25_000);
 
-  // A project server stays inert until it's approved, in the shell too, and
-  // stops when it's rejected.
-
   test("fresh and resumed native sessions reconstruct MCP from the current profile", async () => {
     const root = createRoot("resume-current-profile", MODERN_FIXTURE);
     const initialGateway = startFakeGateway([

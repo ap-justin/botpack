@@ -2429,13 +2429,10 @@ test("a parent killed while a named child runs a tool records that work interrup
   }
 }, TIMEOUT * 4);
 
-// The user keeps talking to the parent while its child works, and the
-// child's report arrives on its own when the work ends.
-
 // ---------------------------------------------------------------------------
 // The fault matrix beyond fx ask: kills between turns, a damaged or missing
-// piece, a read-only folder, a full disk and contention, for the app and
-// ACP, and a damaged child log for subagents.
+// piece, a read-only folder, a full disk and contention, for ACP, and a
+// damaged child log for subagents.
 
 /// Flips one bit in the middle of the log's middle line.
 function flipMiddleByte(path: string) {
@@ -2740,7 +2737,7 @@ const GRID_SAYS: Record<"damaged" | "denied" | "busy" | "full", Record<GridHost,
 /// A first reply over the blob limit, so every base session has a blob.
 const GRID_BIG = `GRID_BIG_START ${"grid-body ".repeat(30_000)}GRID_BIG_END`;
 
-/// One saved home per exit and host, made once and copied into every case.
+/// One saved home per exit, made by `fx ask` once and copied into every case.
 const gridBases = new Map<string, Promise<{ fixture: Fixture; id: string }>>();
 
 function gridBase(exit: GridExit, by: "ask") {

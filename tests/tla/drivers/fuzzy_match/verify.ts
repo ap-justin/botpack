@@ -7,12 +7,12 @@
 //   4. the edge table agrees with the model, and a doctored one does not;
 //   5. the oracle agrees with TLC on the edge table, random cases, and
 //      random listings, and every planted oracle bug is caught;
-//   7. the engine: the edge table, random cases against the oracle and TLC,
+//   6. the engine: the edge table, random cases against the oracle and TLC,
 //      random listings built by its `Ranking` and `Filter` against the
 //      oracle and TLC, the laws on its own answers, the stress budgets, and
 //      every planted engine bug caught;
-//   8. every surface calls the engine, and the matchers it replaced are gone;
-//   9. traceability: design/GOAL.md and the checks name each other.
+//   7. every surface calls the engine, and the matchers it replaced are gone;
+//   8. traceability: design/GOAL.md and the checks name each other.
 //
 // Settings: FX_FUZZY_SEED (default 20261028), FX_FUZZY_RANDOM (random cases,
 // default 1500), FX_FUZZY_DIFFERENTIAL (engine against oracle, default
@@ -98,7 +98,7 @@ try {
   stage("oracle", real.handMismatches.length === 0 && real.tlcMismatches === 0 && real.listingMismatches === 0 && oracleBugs.every((b) => b.caught),
     `${edge.length + random.length} cases and ${real.listings} listings agree with TLC; ${oracleBugs.filter((b) => b.caught).length} of ${oracleBugs.length} planted bugs caught, ${elapsed(at)}`);
 
-  // 7.
+  // 6.
   if (!engineExists()) {
     stage("engine", false, "src/core/shared/fuzzy_match.zig does not exist");
   } else {
@@ -141,7 +141,7 @@ try {
     stage("code mutations", bugs.length > 0 && codeBugs.every((b) => b.caught), `${codeBugs.filter((b) => b.caught).length} of ${codeBugs.length} caught, ${elapsed(at)}`);
   }
 
-  // 8.
+  // 7.
   {
     const problems: string[] = [];
     for (const caller of CALLERS) {
@@ -155,7 +155,7 @@ try {
       : `${problems.length} problems in ${CALLERS.length} files`);
   }
 
-  // 9.
+  // 8.
   const goal = readFileSync(join(MODEL_DIR, "design", "GOAL.md"), "utf8");
   const cfgInvariants = new Set(cfgs.flatMap((cfg) => configInfo(cfg).invariants));
   const lawProperties = [...goal.matchAll(/^\| L\d+ \|[^|]*\|([^|]*)\|/gm)].flatMap((m) => [...m[1]!.matchAll(/`(\w+)`/g)].map((p) => p[1]!));

@@ -22,13 +22,11 @@
 //! a completed response clears it in the write that saves the response
 //! (`responseRecord`); any other save is written at once. A launch reads the
 //! newest one to resume the request. Every request that keeps a record
-//! registers for `closeActive`, which SIGHUP and SIGTERM call from the closer
-//! thread, and a terminal that hangs up calls from the main thread. One fx
-//! process runs main, its subagents and other instances, and each can have a
-//! request in flight.
+//! registers for `closeActive`. One fx process runs main and its subagents,
+//! and each can have a request in flight.
 //!
 //! The module retries every transient failure for as long as it lasts, and fx
-//! adds no limit of its own: only Esc ends a request whose failures keep
+//! adds no limit of its own: only a cancel ends a request whose failures keep
 //! coming.
 
 const std = @import("std");
@@ -194,12 +192,10 @@ pub const RequestRecovery = struct {
         self.writeRecordLocked();
     }
 
-    /// SIGHUP, SIGTERM, or a terminal that hangs up: delivers `closing` to
-    /// every registered request and writes the clean record each returns, so
-    /// the next launch resumes them without counting a death. Main, its
-    /// subagents and other instances can each have a request in flight.
-    /// Waits at most `close_wait_ms` for each lock. Returns how many records
-    /// were written.
+    /// Delivers `closing` to every registered request and writes the clean
+    /// record each returns, so the next launch resumes them without counting
+    /// a death. Waits at most `close_wait_ms` for each lock. Returns how many
+    /// records were written.
     pub fn closeActive() usize {
         const io = io_mod.getIo();
         if (!lockWithin(&registry_mutex, close_wait_ms)) {

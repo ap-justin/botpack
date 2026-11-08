@@ -1,4 +1,4 @@
-//! `/usage`: the module's front door. fx hands in a `Host` (HTTP, clock,
+//! `fx usage`: the module's front door. fx hands in a `Host` (HTTP, clock,
 //! home directory) and a `Credential` for the provider in use; the CLI calls
 //! the `Dashboard` and renders its `Snapshot`. AI Gateway sign-ins read usage
 //! reports. All usage logic lives here.

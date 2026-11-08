@@ -4107,8 +4107,8 @@ fn speedSupportedBy(
     };
 }
 
-/// After a model or provider switch, turns off any lane the new model lacks,
-/// like the CLI model picker. A hidden lane would otherwise stay on: Ultrafast
+/// After a model or provider switch, turns off any lane the new model lacks.
+/// A hidden lane would otherwise stay on: Ultrafast
 /// would fail the next prompt and Fast would return on a later switch back.
 /// Returns false after writing the error response.
 fn dropUnsupportedSpeeds(

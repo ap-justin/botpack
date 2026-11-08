@@ -4736,13 +4736,13 @@ test "the settings list names every value the settings enums accept" {
 }
 
 test "selectProviderModel accepts the run model when the provider has none saved" {
-    // FX_PROVIDER=local names a custom connection, which has no default either.
+    // FX_PROVIDER=local names a custom connection, which has no default model.
     const missing_local = Settings{ .provider = model_provider.parse("local").? };
     try std.testing.expectError(error.ConfiguredModelNotSelected, selectProviderModel("default/model", &missing_local, null, null));
     const env_local = try selectProviderModel("default/model", &missing_local, null, "local-env");
     try std.testing.expectEqualStrings("local-env", env_local.model);
 
-    // --provider gateway with FX_MODEL from a Gateway-only profile.
+    // FX_MODEL in a Gateway-only profile.
     const gateway_only = Settings{ .provider = .gateway };
 
     // Gateway keeps its compiled default as the persisted preference.
