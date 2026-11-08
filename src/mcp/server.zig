@@ -2306,7 +2306,7 @@ test "the versions a server names are joined with a comma and a space, and one t
     defer r.deinit();
     r.noteVersions(.{ .failure = .{ .code = wire.code.invalid_params, .message = "\"x\"", .data = "{\"supported\":[\"2025-06-18\",\"2024-11-05\"]}" } });
     try std.testing.expectEqualStrings("2025-06-18, 2024-11-05", r.said.slice().?);
-    // Eight fill 94 of the 96 bytes; the ninth would be cut.
+    // Eight fill 94 of the 96 bytes; the ninth doesn't fit whole.
     r.noteVersions(.{ .result = .{ .kind = .complete, .raw = "{\"supportedVersions\":[\"2025-06-01\",\"2025-06-02\",\"2025-06-03\",\"2025-06-04\",\"2025-06-05\",\"2025-06-06\",\"2025-06-07\",\"2025-06-08\",\"2025-06-09\"]}" } });
     try std.testing.expectEqualStrings("2025-06-01, 2025-06-02, 2025-06-03, 2025-06-04, 2025-06-05, 2025-06-06, 2025-06-07, 2025-06-08", r.said.slice().?);
 }
