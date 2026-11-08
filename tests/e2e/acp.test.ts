@@ -1698,7 +1698,9 @@ describe("acp: model-independent", () => {
         await client.request("initialize", { protocolVersion: 1 }, 1);
         await client.request("session/new", { mcpServers: [] }, 2);
         await client.readLine();
-        const result = await runPrompt(client, "Reply with just: ok", TIMEOUT);
+        // The client keeps stdin open, so the answer has to be written without
+        // any later request or shutdown to push it out.
+        const result = await runPrompt(client, "Reply with just: ok", 8_000);
 
         expect(result.promptResult.error).toBeUndefined();
         expect(result.promptResult.result.stopReason).toBe("end_turn");
@@ -1709,7 +1711,7 @@ describe("acp: model-independent", () => {
         expect(kinds).toContain("session_info_update");
         expect(client.stderr).toBe("");
         const trace = readFileSync(tracePath, "utf8");
-        for (const event of ["prompt_turn_ended", "usage_update_skipped reason=no_usage", "prompt_updates_sent", "prompt_handler_returned kind=stop_reason", "prompt_answer kind=stop_reason"]) {
+        for (const event of ["prompt_turn_ended", "usage_update_skipped reason=no_usage", "prompt_updates_sent", "prompt_handler_returned kind=stop_reason", "prompt_answer kind=stop_reason", "frame_write_done kind=response"]) {
           expect(trace).toContain(`event=${event}`);
         }
       } finally {

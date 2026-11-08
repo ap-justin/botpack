@@ -2,6 +2,7 @@ const std = @import("std");
 const testing_allocator = @import("../core/shared/testing_allocator.zig");
 const io_mod = @import("../core/shared/io.zig");
 const host_target = @import("../core/hosts/target.zig");
+const debug_trace = @import("../core/shared/debug_trace.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -285,14 +286,20 @@ pub const Writer = struct {
         const slice = try out.toOwnedSlice();
         defer alloc.free(slice);
 
+        // An answer to a request is traced at each step, since a client that
+        // never receives one only waits.
+        const answers = frame == .response or frame == .error_response;
         const io = io_mod.getIo();
+        if (answers) debug_trace.logf("acp", "event=frame_write_begin kind={s} bytes={d}", .{ @tagName(frame), slice.len });
         self.mutex.lockUncancelable(io);
         defer self.mutex.unlock(io);
+        if (answers) debug_trace.logf("acp", "event=frame_write_locked kind={s}", .{@tagName(frame)});
         if (self.callback) |callback| {
             try callback.write_fn(callback.context, slice);
         } else {
             try self.stdout.writeStreamingAll(io, slice);
         }
+        if (answers) debug_trace.logf("acp", "event=frame_write_done kind={s}", .{@tagName(frame)});
     }
 
     pub fn writeId(w: *std.Io.Writer, id: ?RequestId) !void {
