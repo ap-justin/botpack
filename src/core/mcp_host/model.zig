@@ -5,6 +5,7 @@
 //! are fx's own MCP code.
 
 const std = @import("std");
+const text_utils = @import("../shared/text_utils.zig");
 const runtime_mod = @import("runtime.zig");
 const config = @import("config.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
@@ -1150,7 +1151,7 @@ test "an object-typed argument sent as a JSON string becomes the object" {
     );
 
     // An object nested past fx's 64-level argument limit stays the string it came as.
-    const too_deep = "{\"arguments\":\"" ++ ("{\\\"a\\\":" ** 70) ++ "{}" ++ ("}" ** 70) ++ "\"}";
+    const too_deep = "{\"arguments\":\"" ++ text_utils.repeat("{\\\"a\\\":", 70) ++ "{}" ++ text_utils.repeat("}", 70) ++ "\"}";
     try std.testing.expectEqualStrings(too_deep, try tools_feature.coerceObjectArguments(a, schema, too_deep));
 
     // Only exactly `"type":"object"` is coerced: a type list or an `anyOf` branch is left as sent.
