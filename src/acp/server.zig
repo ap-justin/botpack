@@ -323,6 +323,8 @@ pub const ServerState = struct {
     client_fs_read: bool = false,
     client_fs_write: bool = false,
     client_terminal: bool = false,
+    /// The client can run a Terminal Auth method (`auth.terminal`).
+    client_terminal_auth: bool = false,
     /// The client shows ACP v1 Session Notices (`session.notices`).
     client_notices: bool = false,
     client_elicitation: elicitation.Capabilities = .{},
@@ -1583,17 +1585,25 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
     };
 }
 
+/// The auth methods this connection is offered, in `initialize` and in
+/// `AUTH_REQUIRED` alike.
+fn authOffer(state: *const ServerState) acp_types.AuthOffer {
+    return .{
+        .login = .forProvider(state.provider),
+        .client_terminal_auth = state.client_terminal_auth,
+    };
+}
+
 /// Answers with `AUTH_REQUIRED` and the auth methods the client can offer.
 fn writeAuthRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId) !void {
+    const offer = authOffer(state);
+    var data: std.Io.Writer.Allocating = .init(alloc);
+    defer data.deinit();
+    try acp_types.writeAuthRequiredData(&data.writer, offer);
     return state.writer.writeError(alloc, id, .{
         .code = ErrorCode.auth_required,
-        .message = if (state.provider == .codex)
-            credentials.missing_chatgpt_credential_message
-        else if (state.provider == .grok)
-            credentials.missing_grok_credential_message
-        else
-            credentials.missing_credential_message,
-        .data_json = acp_types.auth_required_data_json,
+        .message = offer.login.instruction(),
+        .data_json = data.written(),
     });
 }
 
@@ -1606,8 +1616,8 @@ fn refreshPendingAuth(state: *ServerState) !bool {
     return true;
 }
 
-/// `authenticate`: the client ran the advertised terminal login (or has nothing
-/// to run), so re-read the credentials. Succeeds once one is available.
+/// `authenticate`: the person ran the login an advertised method names, so
+/// re-read the credentials. Succeeds once one is available.
 fn handleAuthenticate(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
     const method_id = authenticateMethodId(alloc, msg.params_raw) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
@@ -1617,7 +1627,7 @@ fn handleAuthenticate(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Messa
         }),
     };
     defer alloc.free(method_id);
-    if (!std.mem.eql(u8, method_id, acp_types.terminal_auth_method_id)) {
+    if (!acp_types.isAuthMethodId(method_id)) {
         return state.writer.writeError(alloc, msg.id, .{
             .code = ErrorCode.invalid_params,
             .message = "Unknown authentication method",
@@ -2761,6 +2771,8 @@ const InitializeRequest = struct {
     client_fs_read: bool = false,
     client_fs_write: bool = false,
     client_terminal: bool = false,
+    /// The client can run a Terminal Auth method (`auth.terminal`).
+    client_terminal_auth: bool = false,
     /// The client shows ACP v1 Session Notices (`session.notices`).
     client_notices: bool = false,
     client_elicitation: elicitation.Capabilities = .{},
@@ -2816,6 +2828,11 @@ fn parseInitializeRequest(
     }
     if (capabilities.object.get("terminal")) |value| {
         request.client_terminal = value == .bool and value.bool;
+    }
+    if (capabilities.object.get("auth")) |auth| {
+        if (auth == .object) if (auth.object.get("terminal")) |value| {
+            request.client_terminal_auth = value == .bool and value.bool;
+        };
     }
     request.client_elicitation = elicitation.parseAcpCapabilities(capabilities);
     if (allow_libfx) {
@@ -3108,6 +3125,7 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
     state.client_fs_read = request.client_fs_read;
     state.client_fs_write = request.client_fs_write;
     state.client_terminal = request.client_terminal;
+    state.client_terminal_auth = request.client_terminal_auth;
     state.client_notices = request.client_notices;
     state.client_elicitation = request.client_elicitation;
     state.host_tools.deinit();
@@ -3133,7 +3151,7 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
         // HTTP.
         .mcp_over_acp = false,
         .mcp_sse = false,
-    });
+    }, authOffer(state));
     try state.writer.writeResponse(alloc, msg.id, out.writer.buffered());
 }
 
@@ -4470,6 +4488,107 @@ test "ACP authenticate reads the method id" {
     try std.testing.expectError(error.InvalidParams, authenticateMethodId(alloc, "{}"));
     try std.testing.expectError(error.InvalidParams, authenticateMethodId(alloc, "{\"methodId\":1}"));
     try std.testing.expectEqual(AcpMethod.authenticate, AcpMethod.parse("authenticate"));
+}
+
+const LastFrame = struct {
+    buf: [4096]u8 = undefined,
+    len: usize = 0,
+
+    fn write(raw: ?*anyopaque, frame: []const u8) !void {
+        const self: *LastFrame = @ptrCast(@alignCast(raw.?));
+        if (frame.len > self.buf.len) return error.NoSpaceLeft;
+        @memcpy(self.buf[0..frame.len], frame);
+        self.len = frame.len;
+    }
+
+    fn bytes(self: *const LastFrame) []const u8 {
+        return self.buf[0..self.len];
+    }
+};
+
+test "ACP authenticate accepts the agent and terminal method ids" {
+    const alloc = std.testing.allocator;
+    var capture = LastFrame{};
+    var state = ServerState{
+        .alloc = alloc,
+        .cfg = undefined,
+        .writer = jsonrpc.Writer.initCallback(&capture, LastFrame.write),
+    };
+    for ([_][]const u8{ "fx-login", "fx-login-api-key" }) |method_id| {
+        const params = try alloc.print("{{\"methodId\":\"{s}\"}}", .{method_id});
+        defer alloc.free(params);
+        var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "authenticate", .params_raw = params };
+        try handleAuthenticate(&state, alloc, &msg);
+        try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n", capture.bytes());
+    }
+    var unknown = jsonrpc.Message{ .id = .{ .integer = 2 }, .method = "authenticate", .params_raw = "{\"methodId\":\"fx-login-codex\"}" };
+    try handleAuthenticate(&state, alloc, &unknown);
+    try std.testing.expect(std.mem.find(u8, capture.bytes(), "\"code\":-32602") != null);
+}
+
+test "ACP AUTH_REQUIRED carries the initialize auth methods for the provider" {
+    const alloc = std.testing.allocator;
+    const cases = [_]struct { provider: model_provider.ProviderId, terminal_auth: bool, message: []const u8 }{
+        .{ .provider = .gateway, .terminal_auth = false, .message = credentials.missing_credential_message },
+        .{ .provider = .gateway, .terminal_auth = true, .message = credentials.missing_credential_message },
+        .{ .provider = .codex, .terminal_auth = true, .message = credentials.missing_chatgpt_credential_message },
+        .{ .provider = .grok, .terminal_auth = true, .message = credentials.missing_grok_credential_message },
+    };
+    for (cases) |case| {
+        var capture = LastFrame{};
+        var state = ServerState{
+            .alloc = alloc,
+            .cfg = undefined,
+            .writer = jsonrpc.Writer.initCallback(&capture, LastFrame.write),
+            .provider = case.provider,
+            .client_terminal_auth = case.terminal_auth,
+        };
+        try writeAuthRequired(&state, alloc, .{ .integer = 3 });
+        const parsed = try std.json.parseFromSlice(std.json.Value, alloc, capture.bytes(), .{});
+        defer parsed.deinit();
+        const err = parsed.value.object.get("error").?.object;
+        try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), err.get("code").?.integer);
+        try std.testing.expectEqualStrings(case.message, err.get("message").?.string);
+
+        var from_error: std.Io.Writer.Allocating = .init(alloc);
+        defer from_error.deinit();
+        try std.json.Stringify.value(err.get("data").?.object.get("authMethods").?, .{}, &from_error.writer);
+
+        var init_out: std.Io.Writer.Allocating = .init(alloc);
+        defer init_out.deinit();
+        try acp_types.writeInitializeResponse(&init_out.writer, .{ .image_prompts = false }, authOffer(&state));
+        const init_parsed = try std.json.parseFromSlice(std.json.Value, alloc, init_out.written(), .{});
+        defer init_parsed.deinit();
+        var from_initialize: std.Io.Writer.Allocating = .init(alloc);
+        defer from_initialize.deinit();
+        try std.json.Stringify.value(init_parsed.value.object.get("authMethods").?, .{}, &from_initialize.writer);
+
+        try std.testing.expectEqualStrings(from_initialize.written(), from_error.written());
+        if (case.provider != .gateway) {
+            try std.testing.expect(std.mem.find(u8, from_error.written(), "\"vercel\"") == null);
+        }
+    }
+}
+
+test "ACP initialize reads auth.terminal only as a true boolean" {
+    const alloc = std.testing.allocator;
+    const cases = [_]struct { capabilities: []const u8, terminal_auth: bool }{
+        .{ .capabilities = "{\"auth\":{\"terminal\":true}}", .terminal_auth = true },
+        .{ .capabilities = "{}", .terminal_auth = false },
+        .{ .capabilities = "{\"terminal\":true,\"_meta\":{\"terminal-auth\":true}}", .terminal_auth = false },
+        .{ .capabilities = "{\"auth\":{\"terminal\":false}}", .terminal_auth = false },
+        .{ .capabilities = "{\"auth\":{\"terminal\":\"yes\"}}", .terminal_auth = false },
+        .{ .capabilities = "{\"auth\":true}", .terminal_auth = false },
+    };
+    for (cases) |case| {
+        const params = try alloc.print("{{\"protocolVersion\":1,\"clientCapabilities\":{s}}}", .{case.capabilities});
+        defer alloc.free(params);
+        const request = try parseInitializeRequest(alloc, params, false);
+        std.testing.expectEqual(case.terminal_auth, request.client_terminal_auth) catch |err| {
+            std.debug.print("capabilities: {s}\n", .{case.capabilities});
+            return err;
+        };
+    }
 }
 
 test "ACP method parser classifies request dispatch methods" {
