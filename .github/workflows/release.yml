@@ -78,7 +78,7 @@ jobs:
           tar -czf "$RUNNER_TEMP/$ARCHIVE" -C "$dir" fx LICENSE THIRD_PARTY_NOTICES.md
           cd "$RUNNER_TEMP" && sha256sum "$ARCHIVE" > "$ARCHIVE.sha256" && cat "$ARCHIVE.sha256"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.name }}
           path: |
@@ -89,19 +89,19 @@ jobs:
   publish:
     name: Publish release
     needs: build
-    # A manual run started from a tag builds artifacts but never publishes.
+    # A manual run on a tag has a tag ref too; only a tag push publishes.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
 
       - name: Create the release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: dist/*
           fail_on_unmatched_files: true
