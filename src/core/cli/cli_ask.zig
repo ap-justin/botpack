@@ -2343,9 +2343,9 @@ fn snapshotMcpDefinition(raw_ctx: *anyopaque, arena: Allocator, name: []const u8
     return tool_runtime.snapshotMcpDefinition(ctx.toolContext(), arena, name, known);
 }
 
-fn resolveUnselectedMcpTool(raw_ctx: *anyopaque, arena: Allocator, name: []const u8) !?tool_mcp_runtime.SelectedTool {
+fn resolveUnselectedMcpTool(raw_ctx: *anyopaque, arena: Allocator, name: []const u8) !tool_mcp_runtime.UnselectedLookup {
     const ctx: *AskContext = @ptrCast(@alignCast(raw_ctx));
-    return tool_runtime.resolveUnselectedMcpTool(ctx.toolContext(), arena, name);
+    return tool_runtime.lookupUnselectedMcpTool(ctx.toolContext(), arena, name);
 }
 
 fn validateToolCall(raw_ctx: *anyopaque, arena: Allocator, call: ToolCall) !agent_runtime.ToolCallValidationResult {

@@ -2588,14 +2588,17 @@ fn advertiseUnselectedMcpCalls(
     for (calls) |call| {
         if (deps.tool_registry.lookup(call.name) != null) continue;
         if (containsString(advertised_names.*, call.name)) continue;
-        const resolved = resolve(deps.ctx, arena, call.name) catch |err| switch (err) {
+        const found = resolve(deps.ctx, arena, call.name) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => {
                 debug_trace.logf("mcp", "unselected MCP tool lookup failed tool={s} err={s}", .{ call.name, @errorName(err) });
                 continue;
             },
         };
-        const definition = resolved orelse continue;
+        const definition = switch (found) {
+            .resolved => |tool| tool,
+            .missing, .server_unavailable => continue,
+        };
         if (!std.mem.eql(u8, definition.name, call.name) or definition.mcp_binding == null) continue;
         try runtime_gateway_step.recordSelectedDynamicTool(arena, selected, definition);
         const tool = for (selected.items) |item| {
@@ -2611,6 +2614,79 @@ fn advertiseUnselectedMcpCalls(
         advertised_names.* = names;
         debug_trace.logf("mcp", "loaded unselected MCP tool for direct call tool={s}", .{call.name});
     }
+}
+
+/// The most MCP tool lookups a turn makes to re-advertise tools from the
+/// conversation so far; each may wait on a server start.
+const max_restored_mcp_tools: usize = 32;
+
+/// Advertises, at the start of a turn, the live MCP tools the previous turn
+/// ended with: each tool the conversation selected with `mcp_select_tool` or
+/// called directly, in the order it first did either. That is the order those
+/// tools joined the list mid-turn, except that one model response mixing a
+/// direct call and a selection may have added them in the other order. The
+/// tool list is part of the prefix a provider caches, so a list that differs
+/// from the last request's rewrites the whole conversation's cache entry.
+/// Names that no longer resolve are left out, and once a server yields no
+/// tool list its other names are not looked up this pass: each lookup would
+/// wait on another start.
+fn restoreAdvertisedMcpTools(
+    deps: *const AgentRuntimeDeps,
+    arena: Allocator,
+    history: []const ChatMessage,
+    selected: *std.ArrayList(agent_stream_provider.DynamicFunctionTool),
+) !void {
+    const resolve = deps.resolve_unselected_mcp_tool orelse return;
+    var attempts: usize = 0;
+    var seen: std.ArrayList([]const u8) = .empty;
+    var unavailable_servers: std.ArrayList([]const u8) = .empty;
+    for (history) |message| {
+        for (message.tool_calls) |call| {
+            if (attempts >= max_restored_mcp_tools) return;
+            const name = (try advertisedMcpToolName(deps.tool_registry, arena, call)) orelse continue;
+            if (containsString(seen.items, name)) continue;
+            try seen.append(arena, name);
+            const already = for (selected.items) |item| {
+                if (std.mem.eql(u8, item.name, name)) break true;
+            } else false;
+            if (already) continue;
+            if (tool_mcp_runtime.UnselectedLookup.namesUnavailableServer(unavailable_servers.items, name)) continue;
+            attempts += 1;
+            const found = resolve(deps.ctx, arena, name) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => {
+                    debug_trace.logf("mcp", "restoring MCP tool failed tool={s} err={s}", .{ name, @errorName(err) });
+                    continue;
+                },
+            };
+            switch (found) {
+                .resolved => |definition| {
+                    if (!std.mem.eql(u8, definition.name, name) or definition.mcp_binding == null) continue;
+                    try runtime_gateway_step.recordSelectedDynamicTool(arena, selected, definition);
+                },
+                .missing => {},
+                .server_unavailable => |server| {
+                    debug_trace.logf("mcp", "restoring MCP tools skips unavailable server={s} tool={s}", .{ server, name });
+                    try unavailable_servers.append(arena, server);
+                },
+            }
+        }
+    }
+}
+
+/// The MCP tool a history call put on the tool list: the name an
+/// `mcp_select_tool` call selected, or a direct call's own name. Null for
+/// every other built-in tool, and for a selection whose arguments name none.
+fn advertisedMcpToolName(registry: tool_dispatch.Registry, arena: Allocator, call: ToolCall) !?[]const u8 {
+    const registered = registry.lookup(call.name) orelse return call.name;
+    if (registered.executor_kind != .mcp_select_tool) return null;
+    const parsed = std.json.parseFromSliceLeaky(std.json.Value, arena, call.arguments_json, .{}) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return null,
+    };
+    if (parsed != .object) return null;
+    const name = parsed.object.get("name") orelse return null;
+    return if (name == .string) name.string else null;
 }
 
 fn containsString(items: []const []const u8, item: []const u8) bool {
@@ -7203,6 +7279,7 @@ fn processQueuedPromptLoop(
     for (config.initial_dynamic_tools) |tool| {
         selected_dynamic_tools.appendAssumeCapacity(tool);
     }
+    try restoreAdvertisedMcpTools(deps, arena, history_messages.items, &selected_dynamic_tools);
     const current_user_effective = current_user_message;
     const initial_pending_image_ids = try arena.alloc(usize, job.images.len);
     for (job.images, 0..) |attachment, index| initial_pending_image_ids[index] = attachment.id;

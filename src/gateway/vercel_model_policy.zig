@@ -21,6 +21,32 @@ pub fn cacheMarkers(model: []const u8) model_capabilities.CacheMarkers {
     return .none;
 }
 
+/// The provider order fx sends for `model` when the user set none, or null to
+/// leave routing to the gateway. Only a request that asks the gateway to cache
+/// is routed, because only it has a cache to return to. A prompt cache lives
+/// with one provider account, so an Anthropic model starts every request on
+/// Anthropic and the gateway still fails over to another provider when it is
+/// unavailable (`order` is a preference, `only` is the hard filter). A user
+/// `provider_order` or `provider_strict`, and Ultrafast routing, always win.
+pub fn defaultProviderOrder(model: []const u8, options: model_capabilities.ResolvedProviderOptions) ?[]const []const u8 {
+    if (!options.prompt_caching or options.provider_order.len != 0 or options.provider_strict or options.ultrafast) return null;
+    if (!std.mem.startsWith(u8, model, "anthropic/")) return null;
+    return &.{"anthropic"};
+}
+
+test "an Anthropic model defaults to Anthropic unless the user routes" {
+    const default = defaultProviderOrder("anthropic/claude-sonnet-5.5", .{ .prompt_caching = true }).?;
+    try std.testing.expectEqual(@as(usize, 1), default.len);
+    try std.testing.expectEqualStrings("anthropic", default[0]);
+    try std.testing.expect(defaultProviderOrder("anthropic/claude-sonnet-5.5", .{}) == null);
+    try std.testing.expect(defaultProviderOrder("anthropic/claude-sonnet-5.5", .{ .prompt_caching = true, .provider_order = &.{"bedrock"} }) == null);
+    try std.testing.expect(defaultProviderOrder("anthropic/claude-sonnet-5.5", .{ .prompt_caching = true, .provider_strict = true }) == null);
+    try std.testing.expect(defaultProviderOrder("anthropic/claude-sonnet-5.5", .{ .prompt_caching = true, .ultrafast = true }) == null);
+    const cached: model_capabilities.ResolvedProviderOptions = .{ .prompt_caching = true };
+    try std.testing.expect(defaultProviderOrder("openai/gpt-6.1-sol", cached) == null);
+    try std.testing.expect(defaultProviderOrder("bedrock/anthropic.claude", cached) == null);
+}
+
 /// Whether `model` takes only one system message, at the start. Qwen's chat
 /// template rejects a second one once a tool call is in the history ("System
 /// message must be at the beginning").

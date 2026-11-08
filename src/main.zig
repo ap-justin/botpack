@@ -2281,7 +2281,7 @@ const App = struct {
         return AgentAppRuntime.validateToolCall(self, agent, arena, call, &ignored_list_entries, max_list_entries, max_read_file_bytes, max_read_file_lines, max_read_file_line_len, max_command_output_bytes, builtin_gateway.retry_count, builtin_gateway.defaultChatUrl());
     }
 
-    pub fn resolveUnselectedMcpTool(self: *App, agent: *agents.Agent, arena: Allocator, name: []const u8) !?tool_mcp_runtime.SelectedTool {
+    pub fn resolveUnselectedMcpTool(self: *App, agent: *agents.Agent, arena: Allocator, name: []const u8) !tool_mcp_runtime.UnselectedLookup {
         return AgentAppRuntime.resolveUnselectedMcpTool(self, agent, arena, name, &ignored_list_entries, max_list_entries, max_read_file_bytes, max_read_file_lines, max_read_file_line_len, max_command_output_bytes, builtin_gateway.retry_count, builtin_gateway.defaultChatUrl());
     }
 
