@@ -207,6 +207,43 @@ const ScriptedCaller = struct {
     }
 };
 
+test "a failed or empty summary falls back to another family at its lowest reasoning" {
+    var cancel = std.atomic.Value(bool).init(false);
+    const prompt: summarize.Prompt = .{ .model = "anthropic/claude-opus-5.5", .system = "s", .user = "u" };
+    for ([_]?[]const u8{ null, " \n" }) |first| {
+        var scripted: ScriptedCaller = .{ .replies = &.{ first, "summary" } };
+        defer scripted.calls.deinit(std.testing.allocator);
+        var summarizer: Summarizer = .{ .caller = scripted.caller(.gateway), .cancel_flag = &cancel, .trace_ctx = .{} };
+        const summary_model = summarizer.model();
+        const text = try summary_model.summarize_fn(summary_model.context, std.testing.allocator, prompt);
+        defer std.testing.allocator.free(text);
+        try std.testing.expectEqualStrings("summary", text);
+        try std.testing.expectEqualStrings("openai/gpt-6-sol", summarizer.fallback_used.?);
+        try std.testing.expectEqual(@as(usize, 2), scripted.calls.items.len);
+        try std.testing.expect(scripted.calls.items[0].reasoning.?.eql(types.ReasoningEffort.literal("low")));
+        try std.testing.expectEqualStrings("openai/gpt-6-sol", scripted.calls.items[1].model);
+        try std.testing.expect(scripted.calls.items[1].reasoning.?.eql(types.ReasoningEffort.literal("none")));
+    }
+    // Only the gateway can reach another family.
+    const configured = model_provider.parse("local").?;
+    var failed: ScriptedCaller = .{ .replies = &.{null} };
+    defer failed.calls.deinit(std.testing.allocator);
+    var failed_summarizer: Summarizer = .{ .caller = failed.caller(configured), .cancel_flag = &cancel, .trace_ctx = .{} };
+    const failed_model = failed_summarizer.model();
+    try std.testing.expectError(error.ModelFailed, failed_model.summarize_fn(failed_model.context, std.testing.allocator, prompt));
+    try std.testing.expectEqual(@as(usize, 1), failed.calls.items.len);
+    try std.testing.expect(failed_summarizer.fallback_used == null);
+
+    var empty: ScriptedCaller = .{ .replies = &.{" \n"} };
+    defer empty.calls.deinit(std.testing.allocator);
+    var empty_summarizer: Summarizer = .{ .caller = empty.caller(configured), .cancel_flag = &cancel, .trace_ctx = .{} };
+    const empty_model = empty_summarizer.model();
+    const empty_text = try empty_model.summarize_fn(empty_model.context, std.testing.allocator, prompt);
+    defer std.testing.allocator.free(empty_text);
+    try std.testing.expectEqualStrings("", empty_text);
+    try std.testing.expectEqual(@as(usize, 1), empty.calls.items.len);
+}
+
 test "a request after the conversation goes to its own model only, with the agent's settings" {
     var cancel = std.atomic.Value(bool).init(false);
     const prompt: summarize.Prompt = .{ .model = "anthropic/claude-opus-5.5", .system = "", .user = "u", .after_conversation = true };

@@ -3728,6 +3728,51 @@ fn shouldRejectRecoveryAuthority(
     );
 }
 
+test "potentially sent recovery rejects missing or changed credential authority" {
+    const checkpoint = session_codec.RecoveryCheckpoint{
+        .turn_id = 1,
+        .user = .{ .text = @constCast("continue") },
+        .assistant_source = @constCast("partial"),
+        .cause = .response_interrupted,
+        .action = .continuing_response,
+        .authority = .{
+            .provider = .gateway,
+            .model = @constCast("openai/gpt-6-sol"),
+            .credential_source = .ai_gateway_api_key,
+            .credential_identity = credential_authority.derive(.ai_gateway_api_key, null),
+        },
+        .requested_fast_mode = false,
+        .fast_mode = false,
+        .max_provider_attempts = 3,
+        .consumed_provider_attempts = 1,
+    };
+    try std.testing.expect(!shouldRejectRecoveryAuthority(checkpoint, .ai_gateway_api_key, null));
+    try std.testing.expect(shouldRejectRecoveryAuthority(checkpoint, .stored_key, null));
+    try std.testing.expect(shouldRejectRecoveryAuthority(checkpoint, null, null));
+
+    var configured = checkpoint;
+    configured.authority.provider = model_provider.parse("local").?;
+    configured.authority.credential_source = .configured;
+    configured.authority.credential_identity = credential_authority.derive(.configured, null);
+    try std.testing.expect(!shouldRejectRecoveryAuthority(configured, .configured, null));
+    try std.testing.expect(shouldRejectRecoveryAuthority(configured, .ai_gateway_api_key, null));
+    try std.testing.expect(shouldRejectRecoveryAuthority(configured, .host_managed, null));
+
+    var legacy = checkpoint;
+    legacy.authority.credential_source = null;
+    legacy.authority.credential_identity = null;
+    try std.testing.expect(shouldRejectRecoveryAuthority(legacy, .ai_gateway_api_key, null));
+    legacy.outstanding_reservation = true;
+    legacy.consumed_provider_attempts = 0;
+    try std.testing.expect(shouldRejectRecoveryAuthority(legacy, .ai_gateway_api_key, null));
+    legacy.outstanding_reservation = false;
+    try std.testing.expect(!shouldRejectRecoveryAuthority(legacy, .ai_gateway_api_key, null));
+    try std.testing.expect(!shouldRejectRecoveryAuthority(legacy, null, null));
+    legacy.disposition = .history_only;
+    try std.testing.expect(shouldRejectRecoveryAuthority(legacy, .ai_gateway_api_key, null));
+    try std.testing.expect(shouldRejectRecoveryAuthority(legacy, null, null));
+}
+
 /// Saved as `max_provider_attempts` in the recovery checkpoint. Attempts no
 /// longer have a limit, but the field stays for older readers and its
 /// validation (consumed <= max, and < max with a send outstanding). The

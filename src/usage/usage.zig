@@ -1240,16 +1240,22 @@ test "a sign-in that arrives during another's fetch gets its fetch when that one
     dashboard.open(member);
 
     dashboard.close();
+    dashboard.open(api_key);
     gateway.held.store(false, .release);
     dashboard.waitForFetch();
     var before = try dashboard.snapshot(testing.allocator);
     defer before.deinit();
+    // The member's numbers are cached for the member, not shown to the key.
+    try testing.expectEqual(@as(?Scope, .api_key), before.scope);
+    try testing.expect(before.of(.today).fetched_at_ms == null);
 
     // The next event-loop pass starts it, without waiting out any floor.
     dashboard.tick();
     dashboard.waitForFetch();
     var after = try dashboard.snapshot(testing.allocator);
     defer after.deinit();
+    try testing.expectEqual(@as(?Scope, .api_key), after.scope);
+    try testing.expectEqual(@as(?i64, gateway.now_ms), after.of(.today).fetched_at_ms);
     // Owed once: later passes wait for the 15-minute timer.
     const fetched = gateway.count;
     dashboard.tick();

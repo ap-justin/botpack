@@ -582,6 +582,42 @@ test "ACP credential preparation preserves the existing borrowed credential" {
     try std.testing.expectEqual(types.CredentialSource.configured, state.credential_source.?);
 }
 
+test "ACP provider routes are host-managed only when configured and never leak into Gateway" {
+    const alloc = std.testing.allocator;
+    var state: ServerState = undefined;
+    state.alloc = alloc;
+    state.cfg.auth_mode = .local;
+    state.cfg.provider_auth_mode = .host_managed;
+    state.cfg.credential_override = "gateway-key";
+    state.active_session = null;
+    state.api_key = &.{};
+    state.credential_refresh_after_ms = null;
+    state.account_id = null;
+    state.gateway_team = null;
+
+    // A configured provider's turn leaves the process host-managed with no
+    // token: the host adds its API key, if any.
+    const configured = model_provider.parse("local").?;
+    var custom = (try prepareCredentialForProvider(&state, configured)).?;
+    try std.testing.expectEqual(types.CredentialSource.host_managed, custom.source);
+    try std.testing.expectEqual(@as(usize, 0), custom.token.len);
+    adoptServerCredential(&state, &custom);
+    custom.deinit(alloc);
+    try std.testing.expectEqual(types.CredentialSource.host_managed, state.credential_source.?);
+
+    // The next Gateway turn gets its own key, not the host-managed source.
+    var gateway = (try prepareCredentialForProvider(&state, .gateway)).?;
+    defer gateway.deinit(alloc);
+    try std.testing.expectEqual(types.CredentialSource.ai_gateway_api_key, gateway.source);
+    try std.testing.expectEqualStrings("gateway-key", gateway.token);
+    try std.testing.expect(!hostManagesRoute(state.cfg, .gateway));
+
+    // Without the policy each provider needs its own credential.
+    state.cfg.provider_auth_mode = .local;
+    try std.testing.expect(!hostManagesRoute(state.cfg, configured));
+    try std.testing.expect(!hostManagesRoute(state.cfg, .gateway));
+}
+
 pub fn streamProviderFor(
     state: *const ServerState,
     provider: model_provider.ProviderId,
