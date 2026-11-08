@@ -49,12 +49,14 @@ fx login                    # Vercel AI Gateway
 fx login vercel --api-key   # AI Gateway API key
 ```
 
-Then open a project and send a request with `fx ask`. If something doesn't work, run `fx doctor` to check your setup. Add `--json` when a script needs to read the result:
+Then send a request from your project with `fx ask`, adding `--json` when a script needs to read the result:
 
 ```bash
 fx ask "explain the changes in this repository"
 fx ask --json "summarize the failing tests" | jq -r .final_output
 ```
+
+If something doesn't work, run `fx doctor` to check your setup.
 
 ## Embed and extend
 
@@ -98,7 +100,7 @@ You need [Zig 0.17.0](https://ziglang.org/download/) to build fx:
 git clone https://github.com/vercel-labs/fx.git
 cd fx
 zig build
-./zig-out/bin/fx
+./zig-out/bin/fx --version
 ```
 
 Test your changes with the freshly built `./zig-out/bin/fx`, because a bare `fx` may be an older copy on your `PATH`.
