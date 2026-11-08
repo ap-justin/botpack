@@ -69,10 +69,14 @@ jobs:
           shellcheck "${scripts[@]}"
 
       - name: Model-check request recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           jar="$RUNNER_TEMP/tla2tools.jar"
-          curl -fsSL -o "$jar" https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+          # The API download keeps working when release-asset links return 504.
+          gh release download v1.7.4 -R tlaplus/tlaplus -p tla2tools.jar -O "$jar" \
+            || curl -fsSL --retry 3 --retry-all-errors -o "$jar" https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
           echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  $jar" | sha256sum -c -
           TLA2TOOLS_JAR="$jar" tests/tla/recovery/check.sh
 
