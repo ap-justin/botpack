@@ -35,15 +35,16 @@ describe("config persistence", () => {
       expect(malformedStatus.stderr).toContain("malformed_settings");
       expect(readFileSync(settingsPath, "utf8")).toBe(malformed);
 
-      const malformedStatusLine = "{\"statusLine\":{\"context\":1}}\n";
-      writeFileSync(settingsPath, malformedStatusLine, { mode: 0o600 });
-      const malformedStatusLineStatus = await runFx(["status", "--json"], {
+      // statusLine is retired, so a value of any type loads without a warning.
+      const retiredStatusLine = "{\"statusLine\":{\"context\":1}}\n";
+      writeFileSync(settingsPath, retiredStatusLine, { mode: 0o600 });
+      const retiredStatusLineStatus = await runFx(["status", "--json"], {
         cwd: workspaceRoot,
         env: { HOME: home },
       });
-      expect(malformedStatusLineStatus.code).toBe(0);
-      expect(malformedStatusLineStatus.stderr).toContain("malformed_settings");
-      expect(readFileSync(settingsPath, "utf8")).toBe(malformedStatusLine);
+      expect(retiredStatusLineStatus.code).toBe(0);
+      expect(retiredStatusLineStatus.stderr).not.toContain("malformed_settings");
+      expect(readFileSync(settingsPath, "utf8")).toBe(retiredStatusLine);
 
       const inertOutputSettings =
         JSON.stringify({
