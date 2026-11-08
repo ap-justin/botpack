@@ -204,7 +204,7 @@ pub const Catalog = struct {
         if (options.expected_binding) |b| if (b.runtime_generation != c.currentGeneration()) return error.McpAdvertisedToolChanged;
         if (options.expected_runtime_generation) |g| if (g != c.currentGeneration()) return error.McpAuthorityChanged;
         try c.ensureCurrent(name, options.cancel_flag);
-        const server, const tool, const transport, const how = found: {
+        const server, const tool, const transport, const how, const schema_json = found: {
             c.mutex.lockUncancelable(c.io);
             defer c.mutex.unlock(c.io);
             const found = c.findLocked(name) orelse return null;
@@ -213,12 +213,15 @@ pub const Catalog = struct {
                 if (!b.sameDefinition(c.bindingLocked(found.server, found.tool.*))) return error.McpAdvertisedToolChanged;
             }
             const s = c.servers[found.server];
-            break :found .{ s.name, try arena.dupe(u8, found.tool.original_name), @tagName(s.transport), signIn(c.runtime.options.slash_commands, s.source) };
+            break :found .{ s.name, try arena.dupe(u8, found.tool.original_name), @tagName(s.transport), signIn(c.runtime.options.slash_commands, s.source), try arena.dupe(u8, found.tool.input_schema_json) };
+        };
+        const arguments = tools_feature.coerceObjectArguments(arena, schema_json, arguments_json) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
         };
         var asking: Asking = .{ .responder = options.input_responder orelse undefined, .tool = name, .cancel = options.cancel_flag, .io = c.io };
         const observed = if (options.observer) |observer| observer.beginMcp(.{ .call_id = options.call_id, .server = server, .tool = tool, .transport = transport }) else null;
         const asker: ?runtime_mod.Asker = if (options.input_responder != null) .{ .context = &asking, .ask = Asking.ask } else null;
-        const answer = c.runtime.callObserved(arena, server, tool, arguments_json, options.cancel_flag, asker, options.progress, observed) catch |err| {
+        const answer = c.runtime.callObserved(arena, server, tool, arguments, options.cancel_flag, asker, options.progress, observed) catch |err| {
             if (observed) |call| call.end(if (err == error.Cancelled) .cancelled else .failure, @errorName(err));
             asking.finish(arena, .abandoned);
             return err;
