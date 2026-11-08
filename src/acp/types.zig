@@ -736,7 +736,6 @@ test "model recovery info update wraps the shared report and is clearable" {
     try std.testing.expect(std.mem.find(u8, out.writer.buffered(), "\"modelResponseRecovery\":null") != null);
 }
 
-
 fn initializeAuthMethodsAlloc(alloc: Allocator, offer: AuthOffer) !std.json.Parsed(std.json.Value) {
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
