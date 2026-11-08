@@ -35,6 +35,10 @@ pub const Mode = enum {
     unsupported_initialize_error,
     /// A modern server that lists only a version fx doesn't speak.
     unsupported_discover,
+    /// Like `.newest`, and it also lists `tool_call`, whose `arguments` is an
+    /// open object; a call to it answers "arguments=object" or
+    /// "arguments=string" for what its `arguments` arrived as.
+    open_object,
 };
 
 const head =
@@ -91,7 +95,7 @@ const discover_unsupported =
 pub fn scriptFor(comptime mode: Mode) []const u8 {
     const nl = "\n";
     return head ++ nl ++ (if (mode == .per_request) per_request_guard ++ nl else "") ++ body_start ++ nl ++ switch (mode) {
-        .newest => method_not_found ++ nl ++ comptime initializeResult("2025-11-25"),
+        .newest, .open_object => method_not_found ++ nl ++ comptime initializeResult("2025-11-25"),
         .older => method_not_found ++ nl ++ comptime initializeResult("2025-03-26"),
         .older_error => method_not_found ++ nl ++ initialize_accepts_2025_06_18 ++ comptime initializeRefusal("\"2025-06-18\""),
         .older_error_stuck => method_not_found ++ nl ++ comptime initializeRefusal("\"2025-06-18\""),
@@ -99,11 +103,22 @@ pub fn scriptFor(comptime mode: Mode) []const u8 {
         .unsupported_initialize => method_not_found ++ nl ++ comptime initializeResult("2024-11-05"),
         .unsupported_initialize_error => method_not_found ++ nl ++ comptime initializeRefusal("\"2024-11-05\""),
         .unsupported_discover => discover_unsupported ++ nl,
-    } ++ rest;
+    } ++ (if (mode == .open_object) open_object_list else default_list) ++ calls;
 }
 
-const rest =
+const default_list =
     \\    *'"method":"tools/list"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"echo","description":"Echoes","inputSchema":{"type":"object"}}]}}\n' "$id" ;;
+    \\
+;
+
+const open_object_list =
+    \\    *'"method":"tools/list"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"echo","description":"Echoes","inputSchema":{"type":"object"}},{"name":"tool_call","description":"Calls a tool by name","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"arguments":{"type":"object","additionalProperties":true}},"required":["name"]}}]}}\n' "$id" ;;
+    \\    *'"method":"tools/call"'*'"name":"tool_call","arguments":{'*'"arguments":{'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"arguments=object"}]}}\n' "$id" ;;
+    \\    *'"method":"tools/call"'*'"name":"tool_call","arguments":{'*'"arguments":"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"arguments=string"}]}}\n' "$id" ;;
+    \\
+;
+
+const calls =
     \\    *'"method":"tools/call"'*slow*) ;;
     \\    *'"method":"tools/call"'*withdraw*)
     \\      call=$id

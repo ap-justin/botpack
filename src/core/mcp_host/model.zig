@@ -1090,6 +1090,66 @@ test "an MCP server's tools reach the model under fx's names" {
     try testing.expectEqual(@as(?usize, 1), snapshot.servers[0].tool_count);
 }
 
+test "an open-object argument stays an object in the schema and reaches the server as one" {
+    var f: Fixture = undefined;
+    try f.initMode(.open_object);
+    defer f.deinit();
+    const configs = [_]mcp_contract.McpServerConfig{.{ .name = "fake", .command = f.server }};
+    var r: Runtime = undefined;
+    try r.start(testing.allocator, testing.io, &configs, &f.inherited, f.options());
+    defer r.deinit();
+    var c: Catalog = undefined;
+    try c.init(testing.allocator, testing.io, &r, .{});
+    defer c.deinit();
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // The schema `mcp_select_tool` loads is the server's own.
+    const open_object = "\"arguments\":{\"type\":\"object\",\"additionalProperties\":true}";
+    const schema = (try c.toolSchema(a, "mcp_fake_tool_call", .{}, .{}, .unrestricted, null)).?;
+    try testing.expect(std.mem.find(u8, schema.selected.model_output, open_object) != null);
+    try testing.expect(std.mem.find(u8, schema.selected.model_output, "additionalProperties\":true}},\"required\":[\"name\"]") != null);
+
+    const sent = [_]struct { arguments: []const u8, reaches: []const u8 }{
+        .{ .arguments = "{\"name\":\"memory_get\",\"arguments\":{\"k\":1}}", .reaches = "arguments=object" },
+        .{ .arguments = "{\"name\":\"memory_get\",\"arguments\":\"{\\\"k\\\":1}\"}", .reaches = "arguments=object" },
+        // A string that isn't an object is left for the server to refuse.
+        .{ .arguments = "{\"name\":\"memory_get\",\"arguments\":\"not json\"}", .reaches = "arguments=string" },
+    };
+    for (sent) |case| {
+        const result = (try c.callTool(a, "mcp_fake_tool_call", case.arguments, 4096, .{})).?;
+        try testing.expectEqual(tool_mcp_runtime.CallStatus.success, result.status);
+        try testing.expect(std.mem.find(u8, result.model_output, case.reaches) != null);
+    }
+}
+
+test "an object-typed argument sent as a JSON string becomes the object" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const schema =
+        \\{"type":"object","properties":{"name":{"type":"string"},"arguments":{"type":"object","additionalProperties":true},"note":{"type":"string"},"deep":{"type":"object","properties":{"inner":{"type":"object"}}}}}
+    ;
+    // Already an object, or not described as one: the bytes pass unchanged.
+    const object = "{\"name\":\"x\",\"arguments\":{\"k\":1}}";
+    try std.testing.expectEqualStrings(object, try tools_feature.coerceObjectArguments(a, schema, object));
+    const text = "{\"note\":\"{\\\"k\\\":1}\",\"extra\":\"{}\"}";
+    try std.testing.expectEqualStrings(text, try tools_feature.coerceObjectArguments(a, schema, text));
+    const not_object = "{\"arguments\":\"[1]\"}";
+    try std.testing.expectEqualStrings(not_object, try tools_feature.coerceObjectArguments(a, schema, not_object));
+    try std.testing.expectEqualStrings("[", try tools_feature.coerceObjectArguments(a, schema, "["));
+
+    try std.testing.expectEqualStrings(
+        "{\"name\":\"x\",\"arguments\":{\"k\":1.50}}",
+        try tools_feature.coerceObjectArguments(a, schema, "{\"name\":\"x\",\"arguments\":\" {\\\"k\\\":1.50} \"}"),
+    );
+    try std.testing.expectEqualStrings(
+        "{\"deep\":{\"inner\":{\"a\":true}}}",
+        try tools_feature.coerceObjectArguments(a, schema, "{\"deep\":\"{\\\"inner\\\":\\\"{\\\\\\\"a\\\\\\\":true}\\\"}\"}"),
+    );
+}
+
 test "a reload keeps a kept server's list and the bindings made from it, until a server is dropped" {
     var f: Fixture = undefined;
     try f.init();
