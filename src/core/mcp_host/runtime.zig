@@ -2305,7 +2305,7 @@ fn writeFailure(w: *std.Io.Writer, why: []const u8, said: ?[]const u8, exit: ?mc
 const version_failures = [_][]const u8{ "no_shared_version", "unsupported_version" };
 /// Failures that are about versions only when the server named some: each
 /// also covers a timeout, a crash, or a refusal for another reason
-/// (-32020, -32021).
+/// (-32021).
 const refusals = [_][]const u8{ "rejected", "initialize_failed" };
 
 fn isOneOf(why: []const u8, names: []const []const u8) bool {
@@ -2547,6 +2547,85 @@ test "a server that refuses even the version it lists is offered it once, then f
     defer arena.deinit();
     const said = try refusedFake(.older_error_stuck, arena.allocator());
     try testing.expectEqualStrings("it refused or never answered fx's initialize request (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2025-06-18)", said);
+}
+
+const HttpFake = fake_server.HttpFake;
+
+/// Starts the runtime on the HTTP fake, which must already serve.
+fn startHttp(r: *Runtime, f: *Fixture, fake: *const HttpFake) !void {
+    const configs = [_]mcp_contract.McpServerConfig{.{ .name = "fake", .transport = .http, .url = fake.url }};
+    try r.start(testing.allocator, testing.io, &configs, &f.inherited, f.options());
+}
+
+test "a 2026 server behind a proxy that drops request headers is reached through initialize, which discovery doesn't try again" {
+    var fake: HttpFake = undefined;
+    try fake.start(.header_stripped);
+    defer fake.stop();
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    var r: Runtime = undefined;
+    try startHttp(&r, &f, &fake);
+    defer r.deinit();
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const listed = try r.tools(arena.allocator(), "fake", null);
+    try testing.expect(listed == .tools);
+    try testing.expectEqual(@as(usize, 1), listed.tools.len);
+    const status = (try r.statuses(arena.allocator()))[0];
+    try testing.expectEqual(State.ready, status.state);
+    try testing.expectEqualStrings("2025-11-25", status.version.?);
+    // Later requests stay on the 2025 session.
+    try testing.expect(try r.tools(arena.allocator(), "fake", null) == .tools);
+    const result = try r.call(arena.allocator(), "fake", "echo", "{}", null, null);
+    try testing.expect(result == .result);
+    try testing.expect(std.mem.find(u8, result.result.content, "hi") != null);
+    try testing.expectEqual(@as(u32, 1), fake.discovers.load(.monotonic));
+}
+
+test "a 2026 server over HTTP that reads the request headers connects on the per-request era" {
+    var fake: HttpFake = undefined;
+    try fake.start(.per_request);
+    defer fake.stop();
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    var r: Runtime = undefined;
+    try startHttp(&r, &f, &fake);
+    defer r.deinit();
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const listed = try r.tools(arena.allocator(), "fake", null);
+    try testing.expect(listed == .tools);
+    try testing.expectEqual(@as(usize, 1), listed.tools.len);
+    const status = (try r.statuses(arena.allocator()))[0];
+    try testing.expectEqualStrings("2026-07-28", status.version.?);
+}
+
+/// Starts the runtime on the HTTP fake in `mode` and returns why listing
+/// its tools failed, in `arena`, and the fake's discover count in `discovers`.
+fn refusedHttpFake(mode: fake_server.HttpMode, arena: Allocator, discovers: *u32) ![]const u8 {
+    var fake: HttpFake = undefined;
+    try fake.start(mode);
+    defer fake.stop();
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    var r: Runtime = undefined;
+    try startHttp(&r, &f, &fake);
+    defer r.deinit();
+    const listed = try r.tools(arena, "fake", null);
+    try testing.expect(listed == .failed);
+    discovers.* = fake.discovers.load(.monotonic);
+    return listed.failed;
+}
+
+test "a 2026 server over HTTP that lists no version fx speaks fails, naming both sides' versions" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    var discovers: u32 = 0;
+    const said = try refusedHttpFake(.unsupported_discover, arena.allocator(), &discovers);
+    try testing.expectEqualStrings("it supports no MCP version fx speaks (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2027-01-01)", said);
 }
 
 test "a cancelled call ends, and stopping ends a call that never answers" {

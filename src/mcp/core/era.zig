@@ -58,7 +58,7 @@ pub fn versionName(config: Config, version: Version) ?[]const u8 {
 pub const Failure = enum {
     /// The server lists no version the client supports.
     no_shared_version,
-    /// -32020 or -32021: a modern server that won't serve this client.
+    /// -32021: a modern server that won't serve this client.
     rejected,
     /// A server that answered like a modern one stopped answering.
     went_quiet,
@@ -75,7 +75,7 @@ pub const Event = union(enum) {
     discover_result: Listed,
     /// The probe got -32022.
     unsupported_version: Listed,
-    /// The probe got -32020 or -32021.
+    /// The probe got -32021.
     modern_rejection,
     /// The probe got any other error, or an error without an id.
     legacy_answer,
@@ -387,7 +387,9 @@ fn supportedIn(config: Config, failure: wire.Failure) Listed {
 /// `supportedVersions` list isn't a DiscoverResult, so it counts as legacy,
 /// like every error that isn't a recognized modern one. So does a result whose
 /// `resultType` isn't complete: an unknown one is invalid, and a discover
-/// result is never input_required (WIRE-07).
+/// result is never input_required (WIRE-07). So does -32020: a proxy that
+/// drops `Mcp-Method` makes a modern server refuse discover, and the same
+/// server may still accept `initialize`, which needs no such header.
 pub fn classifyDiscover(config: Config, body: @FieldType(wire.Response, "body")) Event {
     switch (body) {
         .result => |result| {
@@ -398,7 +400,7 @@ pub fn classifyDiscover(config: Config, body: @FieldType(wire.Response, "body"))
         },
         .failure => |failure| return switch (failure.code) {
             wire.code.unsupported_protocol_version => .{ .unsupported_version = supportedIn(config, failure) },
-            wire.code.header_mismatch, wire.code.missing_required_client_capability => .modern_rejection,
+            wire.code.missing_required_client_capability => .modern_rejection,
             else => .legacy_answer,
         },
     }
@@ -830,7 +832,7 @@ test "a legacy server is found by any other error, no answer, or an error withou
     }
 }
 
-test "-32020 and -32021 fail without falling back; a modern server that goes quiet fails" {
+test "-32021 fails without falling back; a modern server that goes quiet fails" {
     var d: Detector = .init(test_config);
     var out: Output = .{};
     try d.step(.process_started, &out);
@@ -890,6 +892,7 @@ test "classifies answers by their content" {
         .{ "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32022,\"message\":\"x\",\"data\":{\"supported\":[\"2026-07-28\"]}}}", .{ .unsupported_version = .{ .preferred = 1 } } },
         .{ "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32022,\"message\":\"x\"}}", .{ .unsupported_version = .{} } },
         .{ "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32021,\"message\":\"x\"}}", .modern_rejection },
+        .{ "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32020,\"message\":\"x\"}}", .legacy_answer },
         .{ "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}", .legacy_answer },
         .{ "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32001,\"message\":\"x\"}}", .legacy_answer },
     };
@@ -921,6 +924,38 @@ test "over HTTP, 404 with -32601 to the probe is a modern server without discove
     // The first request learns the real versions.
     try d.step(.{ .operation_version_rejected = .{ .preferred = 0b10 } }, &out);
     try testing.expectEqualSlices(Effect, &.{.{ .ready = .{ .preferred = 1 } }}, out.effects());
+}
+
+test "-32020 to the probe, as when a proxy drops request headers, falls back to initialize, and the session stays there" {
+    const mismatch = (try wire.decode("{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32020,\"message\":\"Bad Request\"," ++
+        "\"data\":{\"mismatch\":{\"header\":\"(missing)\",\"body\":\"server/discover\"}}}}")).response.body;
+    try testing.expectEqual(Event.legacy_answer, classifyDiscoverHttp(test_config, 400, mismatch));
+    var d: Detector = .init(test_config);
+    var out: Output = .{};
+    try d.step(.process_started, &out);
+    try d.step(.detect_requested, &out);
+    try d.step(classifyDiscoverHttp(test_config, 400, mismatch), &out);
+    try testing.expectEqualSlices(Effect, &.{.send_initialize}, out.effects());
+    try d.step(.{ .initialize_result = .{ .legacy = 0 } }, &out);
+    try testing.expectEqualSlices(Effect, &.{ .send_initialized, .{ .ready = .{ .legacy = 0 } } }, out.effects());
+    // Requests go out on the 2025 session; none probes again.
+    for (0..3) |_| {
+        try d.step(.operation_sent, &out);
+        try testing.expectEqual(Version.none, out.meta.?);
+        try testing.expectEqual(@as(usize, 0), out.effect_count);
+    }
+    try testing.expectEqual(State.legacy, d.state);
+
+    // An initialize refused with a modern code probes once more, and the
+    // same answer to that probe ends detection.
+    var refused: Detector = .init(test_config);
+    try refused.step(.process_started, &out);
+    try refused.step(.detect_requested, &out);
+    try refused.step(classifyDiscover(test_config, mismatch), &out);
+    try refused.step(classifyInitialize(test_config, mismatch), &out);
+    try testing.expectEqual(Effect{ .send_discover = 0 }, out.effects()[0]);
+    try refused.step(classifyDiscover(test_config, mismatch), &out);
+    try testing.expectEqualSlices(Effect, &.{.{ .failed = .went_quiet }}, out.effects());
 }
 
 test "writes the detection messages" {
