@@ -477,6 +477,7 @@ test "ACP MCP parser rejects malformed required stdio fields" {
         .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[],\"env\":[{\"name\":\"KEY=VALUE\",\"value\":\"v\"}]}]}", .expected = error.InvalidEnv },
         .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[],\"env\":[{\"name\":\"\",\"value\":\"v\"}]}]}", .expected = error.InvalidEnv },
         .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[],\"env\":[{\"name\":\"A\\u0000B\",\"value\":\"v\"}]}]}", .expected = error.InvalidEnv },
+        .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[],\"env\":[{\"name\":\"TOKEN\",\"value\":\"a\\u0000b\"}]}]}", .expected = error.InvalidEnv },
     };
 
     for (cases) |case| {

@@ -1873,6 +1873,22 @@ test "workspace parsing isolates invalid entries" {
     try std.testing.expectEqualStrings("bad", result.diagnostics.items[0].server_name.?);
 }
 
+test "env names the process environment cannot hold are rejected" {
+    const alloc = std.testing.allocator;
+    const json =
+        \\{"mcpServers":{"good":{"command":"node","env":{"TOKEN":"x"}},"empty":{"command":"node","env":{"":"x"}},"assign":{"command":"node","env":{"A=B":"x"}},"nul":{"command":"node","env":{"A\u0000B":"x"}}}}
+    ;
+    var result = try parseWorkspaceJson(alloc, json, .workspace, .{});
+    defer result.deinit(alloc);
+    try std.testing.expectEqual(@as(usize, 1), result.configs.items.len);
+    try std.testing.expectEqualStrings("good", result.configs.items[0].name);
+    try std.testing.expectEqual(@as(usize, 3), result.diagnostics.items.len);
+    try std.testing.expectError(
+        error.McpConfigInvalidEnvironment,
+        parseProfileJson(alloc, "{\"mcp\":{\"bad\":{\"command\":\"node\",\"env\":{\"A=B\":\"x\"}}}}"),
+    );
+}
+
 test "streamable-http reads as http in both files" {
     const alloc = std.testing.allocator;
     var profile = try parseProfileJson(alloc, "{\"mcpServers\":{\"web\":{\"type\":\"streamable-http\",\"url\":\"https://w.example/mcp\"}}}");

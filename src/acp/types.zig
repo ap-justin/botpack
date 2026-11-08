@@ -102,7 +102,8 @@ pub const StopReason = enum {
     }
 };
 
-/// Writes `,"stopReason":"..."` inside an `_meta.fx` object.
+/// Writes `"stopReason":"..."` inside an `_meta.fx` object; the caller writes
+/// any separating comma.
 fn writeFxStopReasonField(w: *std.Io.Writer, reason: StopReason) !void {
     try w.writeAll("\"stopReason\":");
     try writeJsonStr(reason.fxString(), w);
@@ -631,6 +632,32 @@ test "steering and usage responses carry the fx stop reason" {
     try std.testing.expectEqualStrings(
         "{\"stopReason\":\"refusal\",\"usage\":{\"inputTokens\":3},\"_meta\":{\"fx\":{\"stopReason\":\"refused\"}}}",
         usage_out.writer.buffered(),
+    );
+
+    // A reason ACP names itself adds no `_meta.fx.stopReason`.
+    out.clearRetainingCapacity();
+    try writeSteeringPromptResponse(&out.writer, .end_turn, .absorbed);
+    try std.testing.expectEqualStrings(
+        "{\"stopReason\":\"end_turn\",\"_meta\":{\"fx\":{\"steering\":\"absorbed\"}}}",
+        out.written(),
+    );
+    out.clearRetainingCapacity();
+    try writeSteeringPromptResponse(&out.writer, .cancelled, .dropped);
+    try std.testing.expectEqualStrings(
+        "{\"stopReason\":\"cancelled\",\"_meta\":{\"fx\":{\"steering\":\"dropped\"}}}",
+        out.written(),
+    );
+    out.clearRetainingCapacity();
+    try writePromptResponseWithUsage(&out.writer, .end_turn, .{ .input_tokens = 3 });
+    try std.testing.expectEqualStrings(
+        "{\"stopReason\":\"end_turn\",\"usage\":{\"inputTokens\":3}}",
+        out.written(),
+    );
+    out.clearRetainingCapacity();
+    try writePromptResponseWithUsage(&out.writer, .cancelled, .{ .output_tokens = 5 });
+    try std.testing.expectEqualStrings(
+        "{\"stopReason\":\"cancelled\",\"usage\":{\"outputTokens\":5}}",
+        out.written(),
     );
 }
 
