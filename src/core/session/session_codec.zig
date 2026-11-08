@@ -6234,6 +6234,89 @@ test "a v1 or v2 checkpoint from a removed sign-in is dropped, not bound as a co
     try std.testing.expectEqualStrings("local", checkpoint.authority.provider.label());
 }
 
+test "recovery checkpoint round trips while legacy state stays absent" {
+    const alloc = std.testing.allocator;
+    const checkpoint = RecoveryCheckpoint{
+        .turn_id = 42,
+        .user = .{ .text = @constCast("keep working") },
+        .assistant_source = @constCast("partial answer"),
+        .cause = .response_interrupted,
+        .action = .continuing_response,
+        .tool_state = .confirmed,
+        .authority = .{
+            .provider = .gateway,
+            .model = @constCast("openai/gpt-6-sol"),
+            .credential_source = .ai_gateway_api_key,
+            .credential_identity = credential_authority.derive(.ai_gateway_api_key, null),
+        },
+        .requested_fast_mode = true,
+        .fast_mode = true,
+        .requested_ultrafast_mode = true,
+        .ultrafast_mode = true,
+        .max_provider_attempts = 10,
+        .consumed_provider_attempts = 4,
+        .outstanding_reservation = true,
+    };
+    const state = DurableSessionState{
+        .id = @constCast("session-recovery"),
+        .origin_workspace_root = @constCast("/tmp/origin"),
+        .workspace_root = @constCast("/tmp/current"),
+        .created_at_ms = 1,
+        .updated_at_ms = 2,
+        .conversation_language = session.ConversationLanguage.literal("en"),
+        .preferences = .{
+            .provider = .gateway,
+            .model = @constCast("openai/gpt-6-sol"),
+            .effort = .auto,
+            .fast_mode = false,
+            .ultrafast_mode = true,
+        },
+        .history = &.{},
+        .total_input_tokens = 0,
+        .total_output_tokens = 0,
+        .recovery_checkpoint = checkpoint,
+    };
+
+    var encoded: std.Io.Writer.Allocating = .init(alloc);
+    defer encoded.deinit();
+    _ = try encodeState(state, &encoded.writer);
+    try std.testing.expect(std.mem.find(u8, encoded.written(), "\"requested_ultrafast_mode\":true") != null);
+    try std.testing.expect(std.mem.find(u8, encoded.written(), "\"ultrafast_mode\":true") != null);
+    var source = std.Io.Reader.fixed(encoded.written());
+    var decoded = try decodeState(alloc, &source, .{});
+    defer decoded.deinit(alloc);
+
+    const restored = decoded.recovery_checkpoint.?;
+    try std.testing.expectEqual(@as(u64, 42), restored.turn_id);
+    try std.testing.expectEqualStrings("keep working", restored.user.text);
+    try std.testing.expectEqualStrings("partial answer", restored.assistant_source);
+    try std.testing.expectEqual(types.ModelRecoveryCause.response_interrupted, restored.cause);
+    try std.testing.expectEqual(types.ModelRecoveryAction.continuing_response, restored.action);
+    try std.testing.expectEqual(RecoveryToolState.confirmed, restored.tool_state);
+    try std.testing.expectEqual(model_provider.ProviderId.gateway, restored.authority.provider);
+    try std.testing.expectEqualStrings("openai/gpt-6-sol", restored.authority.model);
+    try std.testing.expectEqual(types.CredentialSource.ai_gateway_api_key, restored.authority.credential_source.?);
+    try std.testing.expect(restored.authority.credential_identity.?.eql(checkpoint.authority.credential_identity.?));
+    try std.testing.expectEqual(model_provider.ProviderId.gateway, decoded.preferences.provider);
+    try std.testing.expect(restored.requested_fast_mode);
+    try std.testing.expect(restored.fast_mode);
+    try std.testing.expect(restored.requested_ultrafast_mode);
+    try std.testing.expect(restored.ultrafast_mode);
+    try std.testing.expect(decoded.preferences.ultrafast_mode);
+    try std.testing.expectEqual(@as(usize, 4), restored.consumed_provider_attempts);
+    try std.testing.expect(restored.outstanding_reservation);
+
+    const legacy =
+        "{\"id\":\"legacy\",\"origin_workspace_root\":\"/tmp/origin\",\"workspace_root\":\"/tmp/current\",\"created_at_ms\":1,\"updated_at_ms\":2,\"conversation_language\":\"en\",\"preferences\":{\"model\":\"openai/gpt-test\",\"effort\":\"auto\",\"fast_mode\":false},\"history\":[],\"total_input_tokens\":0,\"total_output_tokens\":0}";
+    var legacy_source = std.Io.Reader.fixed(legacy);
+    var legacy_state = try decodeState(alloc, &legacy_source, .{});
+    defer legacy_state.deinit(alloc);
+    try std.testing.expectEqual(model_provider.ProviderId.gateway, legacy_state.preferences.provider);
+    try std.testing.expect(!legacy_state.preferences.provider_removed);
+    try std.testing.expect(!legacy_state.preferences.ultrafast_mode);
+    try std.testing.expectEqual(@as(?RecoveryCheckpoint, null), legacy_state.recovery_checkpoint);
+}
+
 test "recovery checkpoint accepts the exact composer byte limit" {
     const alloc = std.testing.allocator;
     const prompt = try alloc.alloc(u8, 8 * 1024 * 1024);
