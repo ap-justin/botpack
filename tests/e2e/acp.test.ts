@@ -1702,6 +1702,113 @@ describe("acp: model-independent", () => {
     TIMEOUT,
   );
 
+  const heldOverrides = [
+    { flag: ["--effort", "high"], code: "LIBFX_MODEL_UNSUPPORTED_EFFORT" },
+    { flag: ["--fast"], code: "LIBFX_MODEL_UNSUPPORTED_FAST" },
+    { flag: ["--ultrafast"], code: "LIBFX_MODEL_UNSUPPORTED_ULTRAFAST" },
+  ];
+
+  for (const { flag } of heldOverrides) {
+    test(
+      `fx acp ${flag.join(" ")} initializes without a credential and loads no model catalog`,
+      async () => {
+        const root = createIsolatedRoot("fx-acp-held-override-init-");
+        const gateway = startFakeGateway([finalText("unused")]);
+        try {
+          client = await AcpClient.create({
+            cwd: root.workspace,
+            env: noCredentialEnv(root, gateway),
+            args: ["acp", ...flag],
+          });
+          const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+          expect(initialized.error).toBeUndefined();
+          expect(initialized.result.authMethods).toHaveLength(1);
+          expect(gateway.modelRequests).toHaveLength(0);
+        } finally {
+          await client?.close();
+          gateway.stop();
+          rmSync(root.root, { recursive: true, force: true });
+        }
+      },
+      TIMEOUT,
+    );
+  }
+
+  for (const { flag, code } of heldOverrides) {
+    test(
+      `fx acp ${flag.join(" ")} is rejected on the first session/new after login when the model lacks it`,
+      async () => {
+        const root = createIsolatedRoot("fx-acp-held-override-reject-");
+        const gateway = startFakeGateway([finalText("unused")], {
+          models: [{ id: FAKE_GATEWAY_MODEL, type: "language", tags: ["tool-use"], context_window: 128_000 }],
+        });
+        try {
+          client = await AcpClient.create({
+            cwd: root.workspace,
+            env: noCredentialEnv(root, gateway),
+            args: ["acp", ...flag],
+          });
+          const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+          expect(initialized.error).toBeUndefined();
+
+          writeSeededFxAuth(root.home, "team_123");
+
+          const rejected = await client.request("session/new", { mcpServers: [] }, 2) as any;
+          expect(rejected.result).toBeUndefined();
+          expect(rejected.error.code).toBe(-32602);
+          expect(rejected.error.data.code).toBe(code);
+          expect(gateway.modelRequests).toHaveLength(1);
+
+          // The override stays held, so the next session call fails the same way.
+          const again = await client.request("session/new", { mcpServers: [] }, 3) as any;
+          expect(again.error.code).toBe(-32602);
+          expect(again.error.data.code).toBe(code);
+        } finally {
+          await client?.close();
+          gateway.stop();
+          rmSync(root.root, { recursive: true, force: true });
+        }
+      },
+      TIMEOUT,
+    );
+  }
+
+  test(
+    "fx acp --effort high creates a session after login when the model supports it",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-held-override-accept-");
+      const gateway = startFakeGateway([finalText("unused")], {
+        models: [{
+          id: FAKE_GATEWAY_MODEL,
+          type: "language",
+          tags: ["tool-use"],
+          context_window: 128_000,
+          reasoning_options: [{ type: "effort", values: ["low", "high"] }],
+        }],
+      });
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: noCredentialEnv(root, gateway),
+          args: ["acp", "--effort", "high"],
+        });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+
+        writeSeededFxAuth(root.home, "team_123");
+
+        const created = await client.request("session/new", { mcpServers: [] }, 2) as any;
+        expect(created.error).toBeUndefined();
+        const effort = created.result.configOptions.find((option: any) => option.id === "effort");
+        expect(effort.currentValue).toBe("high");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
   test(
     "ACP authenticate returns {} when a credential exists from the start",
     async () => {
