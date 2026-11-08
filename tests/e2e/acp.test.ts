@@ -10189,7 +10189,7 @@ describe("acp: model catalog authentication", () => {
   );
 });
 
-describe.skipIf(!HAS_API_KEY)("acp: model-backed protocol", () => {
+describe("acp: model-backed protocol", () => {
   let client: AcpClient;
 
   afterEach(async () => {
@@ -10211,12 +10211,20 @@ describe.skipIf(!HAS_API_KEY)("acp: model-backed protocol", () => {
   test(
     "unknown method returns error -32601",
     async () => {
-      client = await AcpClient.create();
-      await client.request("initialize", { protocolVersion: 1 }, 1);
-      const resp = await client.request("nonexistent/method", {}, 2) as any;
-      expect(resp.error).toBeDefined();
-      expect(resp.error.code).toBe(-32601);
-      expect(resp.error.message).toContain("Method not found");
+      const root = createIsolatedRoot("fx-acp-unknown-method-");
+      const gateway = startFakeGateway([]);
+      try {
+        client = await AcpClient.create({ cwd: root.workspace, env: fakeGatewayEnv(root, gateway) });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const resp = await client.request("nonexistent/method", {}, 2) as any;
+        expect(resp.error).toBeDefined();
+        expect(resp.error.code).toBe(-32601);
+        expect(resp.error.message).toContain("Method not found");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
     },
     TIMEOUT,
   );
