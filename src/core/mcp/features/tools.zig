@@ -188,7 +188,8 @@ pub fn validateArguments(alloc: Allocator, arguments_json: []const u8, limits: L
 /// Models sometimes send an object-typed argument as a string holding that
 /// object's JSON. Returns `arguments_json` with each such string, at any depth
 /// the schema describes, replaced by the object it holds; returns it as it
-/// came when there is nothing to replace. A string that isn't a JSON object
+/// came when there is nothing to replace, or when the replaced value is past
+/// the limits `validateArguments` applies. A string that isn't a JSON object
 /// stays a string, for the server to reject. Allocates from `arena`.
 pub fn coerceObjectArguments(arena: Allocator, schema_json: []const u8, arguments_json: []const u8) Allocator.Error![]const u8 {
     const schema = std.json.parseFromSliceLeaky(std.json.Value, arena, schema_json, .{ .parse_numbers = false }) catch |err| switch (err) {
@@ -200,6 +201,9 @@ pub fn coerceObjectArguments(arena: Allocator, schema_json: []const u8, argument
         else => return arguments_json,
     };
     if (!try coerceObject(arena, schema, &arguments, 0)) return arguments_json;
+    // Before stringifying: Stringify panics past 256 levels in safe builds.
+    var remaining: usize = 4096;
+    checkValueBounds(arguments, 0, &remaining) catch return arguments_json;
     var out: std.Io.Writer.Allocating = .init(arena);
     std.json.Stringify.value(arguments, .{}, &out.writer) catch return error.OutOfMemory;
     return out.written();

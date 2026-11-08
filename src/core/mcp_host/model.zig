@@ -1148,6 +1148,10 @@ test "an object-typed argument sent as a JSON string becomes the object" {
         "{\"deep\":{\"inner\":{\"a\":true}}}",
         try tools_feature.coerceObjectArguments(a, schema, "{\"deep\":\"{\\\"inner\\\":\\\"{\\\\\\\"a\\\\\\\":true}\\\"}\"}"),
     );
+
+    // An object nested past fx's 64-level argument limit stays the string it came as.
+    const too_deep = "{\"arguments\":\"" ++ ("{\\\"a\\\":" ** 70) ++ "{}" ++ ("}" ** 70) ++ "\"}";
+    try std.testing.expectEqualStrings(too_deep, try tools_feature.coerceObjectArguments(a, schema, too_deep));
 }
 
 test "a reload keeps a kept server's list and the bindings made from it, until a server is dropped" {
