@@ -952,7 +952,7 @@ pub fn Bindings(comptime App: type) type {
             return .unavailable;
         }
 
-        fn agentResolveUnselectedMcpTool(ctx: *anyopaque, arena: Allocator, name: []const u8) !?tool_mcp_runtime.SelectedTool {
+        fn agentResolveUnselectedMcpTool(ctx: *anyopaque, arena: Allocator, name: []const u8) !tool_mcp_runtime.UnselectedLookup {
             const agent: *AppAgent = @ptrCast(@alignCast(ctx));
             const app = appOf(agent);
             return app.resolveUnselectedMcpTool(agent, arena, name);

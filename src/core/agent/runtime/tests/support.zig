@@ -27,6 +27,7 @@ const io_mod = @import("../../../shared/io.zig");
 const pathing = @import("../../../workspace/pathing.zig");
 const tool_dispatch = @import("../../../tooling/tool_dispatch.zig");
 const tool_runtime = @import("../../../tooling/tool_runtime.zig");
+const tool_mcp_runtime = @import("../../../tooling/tool_mcp_runtime.zig");
 const command_output_content = @import("../../../tooling/command_output_content.zig");
 const testing_write_file = if (builtin.is_test)
     @import("../../../../tools/filesystem/write_file.zig")
@@ -464,6 +465,13 @@ pub const FakeAgentRuntimeDeps = struct {
     recorded_usages: std.ArrayList(types.Usage) = .empty,
     validation_mcp_runtime_generation: ?u64 = null,
     validation_mcp_tool_name: ?[]const u8 = null,
+    /// The live MCP tools a model call may name without selecting them first,
+    /// and a turn may restore from history.
+    resolvable_mcp_tools: []const tool_mcp_runtime.SelectedTool = &.{},
+    /// Servers whose namespaced names look up as `.server_unavailable`.
+    unavailable_mcp_servers: []const []const u8 = &.{},
+    /// Every name looked up through `resolve_unselected_mcp_tool`, in order.
+    mcp_lookups: std.ArrayList([]u8) = .empty,
     execute_mutex: std.Io.Mutex = .init,
     log: std.ArrayList([]u8) = .empty,
     texts: std.ArrayList([]u8) = .empty,
@@ -683,6 +691,7 @@ pub const FakeAgentRuntimeDeps = struct {
         freeStringList(self.alloc, &self.assistant_sources);
         freeStringList(self.alloc, &self.system_notices);
         freeStringList(self.alloc, &self.restored_prompts);
+        freeStringList(self.alloc, &self.mcp_lookups);
         for (self.interactive_notices.items) |notice| types.freeSemanticNotice(self.alloc, notice);
         self.interactive_notices.deinit(self.alloc);
         for (self.model_calls.items) |call| types.freeModelCallRecordStrings(self.alloc, call);
@@ -764,6 +773,8 @@ pub const FakeAgentRuntimeDeps = struct {
             .append_runtime_context = appendRuntimeContext,
             .append_static_context = appendStaticContext,
             .validate_tool_call = validateToolCall,
+            .snapshot_mcp_definition = if (self.resolvesMcpTools()) snapshotMcpDefinition else null,
+            .resolve_unselected_mcp_tool = if (self.resolvesMcpTools()) resolveUnselectedMcpTool else null,
             .check_tool_availability = checkToolAvailability,
             .request_tool_permission = requestPermission,
             .resolve_tool_action_display_target = resolveToolActionDisplayTarget,
@@ -856,6 +867,29 @@ pub const FakeAgentRuntimeDeps = struct {
                 cancel_flag.store(true, .seq_cst);
             }
         }
+    }
+
+    fn snapshotMcpDefinition(_: *anyopaque, _: Allocator, _: []const u8, _: types.McpToolBinding) anyerror!@import("../../../tooling/tool_mcp_runtime.zig").DefinitionSnapshot {
+        return .current;
+    }
+
+    fn resolvesMcpTools(self: *const FakeAgentRuntimeDeps) bool {
+        return self.resolvable_mcp_tools.len > 0 or self.unavailable_mcp_servers.len > 0;
+    }
+
+    fn resolveUnselectedMcpTool(raw: *anyopaque, _: Allocator, name: []const u8) anyerror!tool_mcp_runtime.UnselectedLookup {
+        const self: *FakeAgentRuntimeDeps = @ptrCast(@alignCast(raw));
+        const owned = try self.alloc.dupe(u8, name);
+        errdefer self.alloc.free(owned);
+        try self.mcp_lookups.append(self.alloc, owned);
+        for (self.unavailable_mcp_servers, 0..) |server, index| {
+            const one = self.unavailable_mcp_servers[index..][0..1];
+            if (tool_mcp_runtime.UnselectedLookup.namesUnavailableServer(one, name)) return .{ .server_unavailable = server };
+        }
+        for (self.resolvable_mcp_tools) |tool| {
+            if (std.mem.eql(u8, tool.name, name)) return .{ .resolved = tool };
+        }
+        return .missing;
     }
 
     fn snapshotRootPermissionMode(raw: *anyopaque) PermissionMode {
