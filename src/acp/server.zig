@@ -293,6 +293,10 @@ pub const ActiveSessionState = struct {
         self.failure_message_len = len;
     }
 
+    pub fn clearFailureMessage(self: *ActiveSessionState) void {
+        self.failure_message_len = 0;
+    }
+
     pub fn failureMessage(self: *const ActiveSessionState) []const u8 {
         return self.failure_message_buf[0..self.failure_message_len];
     }
