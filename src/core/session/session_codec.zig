@@ -6193,6 +6193,7 @@ test "a ChatGPT session with a Grok replay turn and checkpoint loads as Gateway 
     try std.testing.expectEqual(model_provider.ProviderId.gateway, decoded.preferences.provider);
     try std.testing.expect(decoded.preferences.provider_removed);
     try std.testing.expectEqualStrings("gpt-5.4-mini", decoded.preferences.model);
+    try std.testing.expectEqualStrings("high", decoded.preferences.effort.label());
     try std.testing.expectEqual(@as(usize, 1), decoded.history.len);
     try std.testing.expectEqualStrings("write a note", decoded.history[0].assistant.user.text);
     try std.testing.expectEqualStrings("done", decoded.history[0].assistant.assistant);

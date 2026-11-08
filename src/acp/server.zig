@@ -469,6 +469,13 @@ fn credentialReadyAt(
     return true;
 }
 
+test "ACP credential readiness rejects refresh-due access tokens" {
+    try std.testing.expect(credentialReadyAt(.fx_login, "token", 11, 10));
+    try std.testing.expect(!credentialReadyAt(.fx_login, "token", 10, 10));
+    try std.testing.expect(credentialReadyAt(.ai_gateway_api_key, "token", null, 10));
+    try std.testing.expect(!credentialReadyAt(.ai_gateway_api_key, "", null, 10));
+}
+
 /// Transfers credential storage after the caller has stopped its prior borrowers.
 pub fn adoptServerCredential(state: *ServerState, credential: *credentials.Credential) void {
     if (state.active_session) |*active| active.api_key = &.{};
@@ -4619,25 +4626,21 @@ test "ACP authenticate accepts the agent and terminal method ids" {
 
 test "ACP AUTH_REQUIRED carries the initialize auth methods for the provider" {
     const alloc = std.testing.allocator;
-    const cases = [_]struct { provider: model_provider.ProviderId, terminal_auth: bool, message: []const u8 }{
-        .{ .provider = .gateway, .terminal_auth = false, .message = credentials.missing_credential_message },
-        .{ .provider = .gateway, .terminal_auth = true, .message = credentials.missing_credential_message },
-    };
-    for (cases) |case| {
+    for ([_]bool{ false, true }) |terminal_auth| {
         var capture = LastFrame{};
         var state = ServerState{
             .alloc = alloc,
             .cfg = undefined,
             .writer = jsonrpc.Writer.initCallback(&capture, LastFrame.write),
-            .provider = case.provider,
-            .client_terminal_auth = case.terminal_auth,
+            .provider = .gateway,
+            .client_terminal_auth = terminal_auth,
         };
         try writeAuthRequired(&state, alloc, .{ .integer = 3 });
         const parsed = try std.json.parseFromSlice(std.json.Value, alloc, capture.bytes(), .{});
         defer parsed.deinit();
         const err = parsed.value.object.get("error").?.object;
         try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), err.get("code").?.integer);
-        try std.testing.expectEqualStrings(case.message, err.get("message").?.string);
+        try std.testing.expectEqualStrings(credentials.missing_credential_message, err.get("message").?.string);
 
         var from_error: std.Io.Writer.Allocating = .init(alloc);
         defer from_error.deinit();
@@ -4653,9 +4656,6 @@ test "ACP AUTH_REQUIRED carries the initialize auth methods for the provider" {
         try std.json.Stringify.value(init_parsed.value.object.get("authMethods").?, .{}, &from_initialize.writer);
 
         try std.testing.expectEqualStrings(from_initialize.written(), from_error.written());
-        if (case.provider != .gateway) {
-            try std.testing.expect(std.mem.find(u8, from_error.written(), "\"vercel\"") == null);
-        }
     }
 }
 
@@ -5064,6 +5064,59 @@ test "ACP legacy URL state requires consent and completion" {
     try std.testing.expectEqual(@as(usize, 1), state.pending_legacy_urls.items.len);
     try std.testing.expectEqualStrings("acp-new", state.pending_legacy_urls.items[0].acp_id);
     removeLegacyUrl(&state, "acp-new");
+}
+
+test "ACP ultrafast writes preserve v2 baselines across other preference changes" {
+    const alloc = testing_allocator.no_resize;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
+    defer alloc.free(home);
+    var store = try session_adapter.Store.open(alloc, home);
+    defer store.deinit(alloc);
+    const v2 = try session_adapter.Session.create(alloc, &store, home, .acp, .{
+        .preferences = .{ .model = @constCast("old-model"), .effort = .auto, .fast_mode = false },
+        .language = types.ConversationLanguage.default(),
+        .permission_state = .{},
+    });
+    defer v2.close();
+    var active: ActiveSessionState = undefined;
+    active.session_write_mutex = .init;
+    active.wasm_state = null;
+    active.v2 = v2;
+    active.model = try alloc.dupe(u8, "old-model");
+    defer alloc.free(active.model);
+    active.provider = .gateway;
+    active.effort = .auto;
+    active.fast_mode = false;
+    active.ultrafast_mode = false;
+    try commitActiveSessionUltrafast(alloc, &active, true);
+    try std.testing.expect(active.ultrafast_mode);
+    active.ultrafast_mode = false;
+    try commitActiveSessionModel(alloc, &active, "new-model");
+    try commitActiveSessionProvider(alloc, &active, .gateway, "child-model");
+    try commitActiveSessionEffort(alloc, &active, .literal("high"));
+    {
+        var preferences = try v2.currentPreferences(alloc);
+        defer preferences.deinit(alloc);
+        try std.testing.expect(preferences.ultrafast_mode);
+        try std.testing.expectEqualStrings("child-model", preferences.model);
+        try std.testing.expectEqual(model_provider.ProviderId.gateway, preferences.provider);
+        try std.testing.expectEqualStrings("high", preferences.effort.label());
+    }
+    var failing = std.testing.FailingAllocator.init(alloc, .{ .fail_index = 0 });
+    try std.testing.expectError(error.OutOfMemory, commitActiveSessionUltrafast(failing.allocator(), &active, false));
+    try std.testing.expect(!active.ultrafast_mode);
+    {
+        var preferences = try v2.currentPreferences(alloc);
+        defer preferences.deinit(alloc);
+        try std.testing.expect(preferences.ultrafast_mode);
+    }
+    try commitActiveSessionUltrafast(alloc, &active, false);
+    var preferences = try v2.currentPreferences(alloc);
+    defer preferences.deinit(alloc);
+    try std.testing.expect(!preferences.ultrafast_mode);
+    try std.testing.expect(!active.ultrafast_mode);
 }
 
 test "ACP model commits honor the active session write boundary" {

@@ -598,7 +598,9 @@ test "rendered top-level help is a complete CLI navigation page" {
     try std.testing.expect(std.mem.find(u8, text, "credits|balance") != null);
     try std.testing.expect(std.mem.find(u8, text, "Sign in to Vercel AI Gateway") != null);
     try std.testing.expect(std.mem.find(u8, text, "Sign out of Vercel AI Gateway") != null);
-    try std.testing.expect(std.mem.find(u8, text, "Choose AI Gateway or a configured") != null);
+    // At the default width "connection" wraps onto the next line.
+    try std.testing.expect(lineContainsBoth(text, "provider <name>", "Choose AI Gateway or a configured"));
+    try std.testing.expect(std.mem.find(u8, text, "connection") != null);
     // ChatGPT and Grok sign-in are gone; nothing offers another provider to sign in to.
     try std.testing.expect(std.mem.find(u8, text, "a model provider") == null);
     try std.testing.expect(std.mem.find(u8, text, "selected provider") == null);
