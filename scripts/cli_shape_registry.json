@@ -230,7 +230,6 @@
     "GIT_CONFIG_SYSTEM",
     "HOME",
     "NO_COLOR",
-    "PATH",
     "SHELL",
     "SSH_CONNECTION",
     "TERM",
@@ -291,11 +290,7 @@
       "acp": "ultrafast"
     }
   },
-  "exceptions": {
-    "setting_keys": {
-      "statusLine": "Retired with the terminal status line, as status_line is. It stays listed as retired so existing settings files load without a report."
-    }
-  },
+  "exceptions": {},
   "hand_parsed_files": {
     "src/builtins/skills.zig": "Reads a pasted npx skills add command line, another program's flags.",
     "src/core/shell_command/command_classification.zig": "Classifies shell commands the agent runs, another program's flags.",

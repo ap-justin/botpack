@@ -6156,7 +6156,7 @@ test "a ChatGPT session with a Grok replay turn and checkpoint loads as Gateway 
         .created_at_ms = 1,
         .updated_at_ms = 2,
         .conversation_language = session.ConversationLanguage.literal("en"),
-        .preferences = .{ .model = @constCast("gpt-5.4-mini"), .effort = .high, .fast_mode = false },
+        .preferences = .{ .model = @constCast("gpt-5.4-mini"), .effort = .literal("high"), .fast_mode = false },
         .history = turns[0..],
         .total_input_tokens = 0,
         .total_output_tokens = 0,
