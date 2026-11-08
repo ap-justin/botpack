@@ -335,6 +335,10 @@ pub const ServerState = struct {
     /// `initialize` found no credential for the selected model. Calls that need
     /// one re-read the credentials and answer `AUTH_REQUIRED` until they exist.
     auth_pending: bool = false,
+    /// `initialize` kept the effort, fast and ultrafast overrides unvalidated
+    /// because auth was pending. Session creation validates them against the
+    /// catalog and fails until they pass, as `initialize` would have.
+    startup_overrides_held: bool = false,
     gateway_source_preference: ?types.CredentialSource = null,
     credential_refresh_after_ms: ?i64 = null,
     account_id: ?[]u8 = null,
@@ -1516,6 +1520,9 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
 
     if (state.auth_pending and (method == .session_new or method == .session_load or method == .session_resume)) {
         if (!try refreshPendingAuth(state)) return writeAuthRequired(state, alloc, msg.id);
+    }
+    if (method == .session_new or method == .session_load or method == .session_resume) {
+        if (!try validateHeldStartupOverrides(state, alloc, msg)) return;
     }
 
     if (method == .session_prompt and state.active_prompt != null) {
@@ -3097,29 +3104,11 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
         }
     }
 
-    // The model catalog needs a credential, so initialize skips it while auth is pending.
-    if (!state.cfg.minimal_kernel and !state.auth_pending) {
-        const startup_catalog = catalogProviderFor(state, state.provider) orelse
-            return state.writer.writeError(alloc, msg.id, .{
-                .code = ErrorCode.invalid_request,
-                .message = "Selected provider is unavailable in this host",
-            });
-        _ = try resolveSelectedModelCapabilities(state, startup_catalog);
-    }
-
-    if (state.cfg.effort_override) |raw| {
-        const effort = types.ReasoningEffort.parse(raw) orelse
-            return state.writer.writeError(alloc, msg.id, .{
-                .code = ErrorCode.invalid_params,
-                .message = "Invalid reasoning effort",
-            });
-        if (!try applyEffortOverride(state, alloc, msg, effort)) return;
-    }
-
-    if (state.cfg.fast_override) |fast| {
-        if (!try applyFastOverride(state, alloc, msg, fast)) return;
-    }
-    if (!try applyUltrafastOverride(state, alloc, msg, state.ultrafast_mode)) return;
+    // The model catalog needs a credential, so initialize skips it while auth
+    // is pending and the overrides wait for session creation to validate them.
+    if (!state.auth_pending and !try resolveStartupCatalog(state, alloc, msg)) return;
+    if (!try applyStartupOverrides(state, alloc, msg)) return;
+    state.startup_overrides_held = state.auth_pending;
 
     state.terminal_ui = request.terminal_ui;
     state.client_fs_read = request.client_fs_read;
@@ -3153,6 +3142,55 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
         .mcp_sse = false,
     }, authOffer(state));
     try state.writer.writeResponse(alloc, msg.id, out.writer.buffered());
+}
+
+/// Loads the selected provider's catalog before the overrides are validated
+/// against it; libfx cores skip it. Returns false after writing the error
+/// response.
+fn resolveStartupCatalog(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !bool {
+    if (state.cfg.minimal_kernel) return true;
+    const startup_catalog = catalogProviderFor(state, state.provider) orelse {
+        try state.writer.writeError(alloc, msg.id, .{
+            .code = ErrorCode.invalid_request,
+            .message = "Selected provider is unavailable in this host",
+        });
+        return false;
+    };
+    _ = try resolveSelectedModelCapabilities(state, startup_catalog);
+    return true;
+}
+
+/// Applies the process's effort, fast and ultrafast overrides. Returns false
+/// after writing the rejection response.
+fn applyStartupOverrides(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !bool {
+    if (state.cfg.effort_override) |raw| {
+        const effort = types.ReasoningEffort.parse(raw) orelse {
+            try state.writer.writeError(alloc, msg.id, .{
+                .code = ErrorCode.invalid_params,
+                .message = "Invalid reasoning effort",
+            });
+            return false;
+        };
+        if (!try applyEffortOverride(state, alloc, msg, effort)) return false;
+    }
+    if (state.cfg.fast_override) |fast| {
+        if (!try applyFastOverride(state, alloc, msg, fast)) return false;
+    }
+    return applyUltrafastOverride(state, alloc, msg, state.ultrafast_mode);
+}
+
+/// Validates the overrides `initialize` held while auth was pending, against
+/// the catalog the now-adopted credential loads, with the rejection
+/// `initialize` gives when a credential is present. They stay held after a
+/// rejection, so every session call fails until they pass. Returns false after
+/// writing the error response.
+fn validateHeldStartupOverrides(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !bool {
+    if (!state.startup_overrides_held) return true;
+    std.debug.assert(!state.auth_pending);
+    if (!try resolveStartupCatalog(state, alloc, msg)) return false;
+    if (!try applyStartupOverrides(state, alloc, msg)) return false;
+    state.startup_overrides_held = false;
+    return true;
 }
 
 /// The selected model's capabilities from `provider`'s catalog, loading it
@@ -3195,6 +3233,8 @@ fn resolveSelectedModelCapabilities(
 fn applyEffortOverride(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message, effort: types.ReasoningEffort) !bool {
     state.effort = effort;
     if (effort.isDefault()) return true;
+    // Without a credential there is no catalog to check against yet.
+    if (state.auth_pending) return true;
 
     const bundle = state.cfg.provider_set.select(state.provider);
     const fallback = bundle.fallbackModelCapabilities(state.selected_model);
@@ -3301,6 +3341,7 @@ test "effortOverrideRejection reports models without advertised efforts" {
 fn applyFastOverride(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message, fast: bool) !bool {
     state.fast_mode = fast;
     if (!fast) return true;
+    if (state.auth_pending) return true;
 
     const bundle = state.cfg.provider_set.select(state.provider);
     const fallback = bundle.fallbackModelCapabilities(state.selected_model);
@@ -3372,6 +3413,10 @@ test "fastOverrideRejection names models without a fast path" {
 fn applyUltrafastOverride(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message, ultrafast: bool) !bool {
     if (!ultrafast) {
         state.ultrafast_mode = false;
+        return true;
+    }
+    if (state.auth_pending) {
+        state.ultrafast_mode = true;
         return true;
     }
     if (state.provider != .gateway) {
@@ -3481,6 +3526,96 @@ test "ACP answers an ultrafast override without waiting out a model catalog that
     try std.testing.expect(elapsed_ms < 5_000);
     try std.testing.expect(capture.saw_catalog_failure);
     try std.testing.expect(!state.ultrafast_mode);
+}
+
+/// A Gateway catalog listing `openai/gpt-5.5` with no effort, fast or
+/// ultrafast capability, counting the requests it answers.
+const PlainModelCatalog = struct {
+    fetches: usize = 0,
+
+    fn fetch(raw: ?*anyopaque, alloc: Allocator, input: model_catalog.FetchInput) Allocator.Error!model_catalog.ProviderResult {
+        const self: *@This() = @ptrCast(@alignCast(raw.?));
+        self.fetches += 1;
+        if (input.connected) |connected| connected.store(true, .release);
+        var entries: std.ArrayList(model_catalog.ModelCatalogEntry) = .empty;
+        errdefer model_catalog.freeModelCatalog(alloc, &entries);
+        const id = try alloc.dupe(u8, "openai/gpt-5.5");
+        errdefer alloc.free(id);
+        const model_type = try alloc.dupe(u8, "language");
+        errdefer alloc.free(model_type);
+        try entries.append(alloc, .{ .id = id, .model_type = model_type });
+        return .{ .catalog = entries };
+    }
+};
+
+test "ACP holds effort, fast and ultrafast overrides unvalidated while auth is pending" {
+    var catalog = PlainModelCatalog{};
+    var model = "openai/gpt-5.5".*;
+    var state = ServerState{
+        .alloc = std.testing.allocator,
+        .cfg = undefined,
+        .writer = jsonrpc.Writer.init(),
+        .selected_model = &model,
+        .auth_pending = true,
+    };
+    defer state.capability_resolver.deinit(state.alloc);
+    state.cfg.minimal_kernel = false;
+    state.cfg.auth_mode = .host_managed;
+    state.cfg.gateway_models_path = "/v1/models";
+    state.cfg.provider_set = @import("../core/gateway/provider_set.zig").gateway_only(.{
+        .model_catalog = .{ .context = &catalog, .fetch_fn = PlainModelCatalog.fetch },
+    });
+    var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "initialize" };
+
+    try std.testing.expect(try applyEffortOverride(&state, std.testing.allocator, &msg, .literal("high")));
+    try std.testing.expect(try applyFastOverride(&state, std.testing.allocator, &msg, true));
+    try std.testing.expect(try applyUltrafastOverride(&state, std.testing.allocator, &msg, true));
+
+    try std.testing.expectEqualStrings("high", state.effort.label());
+    try std.testing.expect(state.fast_mode);
+    try std.testing.expect(state.ultrafast_mode);
+    // Neither validated against fallback capabilities nor loaded without a credential.
+    try std.testing.expectEqual(@as(usize, 0), catalog.fetches);
+    try std.testing.expect(state.capability_resolver.state == .idle);
+}
+
+test "ACP rejects a held override at each session call after a credential arrives" {
+    const Capture = struct {
+        rejections: usize = 0,
+
+        fn write(raw: ?*anyopaque, frame: []const u8) !void {
+            const self: *@This() = @ptrCast(@alignCast(raw.?));
+            if (std.mem.find(u8, frame, "LIBFX_MODEL_UNSUPPORTED_EFFORT") != null) self.rejections += 1;
+        }
+    };
+    var catalog = PlainModelCatalog{};
+    var capture = Capture{};
+    var model = "openai/gpt-5.5".*;
+    var state = ServerState{
+        .alloc = std.testing.allocator,
+        .cfg = undefined,
+        .writer = jsonrpc.Writer.initCallback(&capture, Capture.write),
+        .selected_model = &model,
+        .startup_overrides_held = true,
+    };
+    defer state.capability_resolver.deinit(state.alloc);
+    state.cfg.minimal_kernel = false;
+    state.cfg.auth_mode = .host_managed;
+    state.cfg.gateway_models_path = "/v1/models";
+    state.cfg.effort_override = "high";
+    state.cfg.fast_override = null;
+    state.cfg.provider_set = @import("../core/gateway/provider_set.zig").gateway_only(.{
+        .model_catalog = .{ .context = &catalog, .fetch_fn = PlainModelCatalog.fetch },
+    });
+    var msg = jsonrpc.Message{ .id = .{ .integer = 2 }, .method = "session/new" };
+
+    try std.testing.expect(!try validateHeldStartupOverrides(&state, std.testing.allocator, &msg));
+    try std.testing.expectEqual(@as(usize, 1), capture.rejections);
+    try std.testing.expectEqual(@as(usize, 1), catalog.fetches);
+    // Still held, so the next session/new is rejected the same way.
+    try std.testing.expect(state.startup_overrides_held);
+    try std.testing.expect(!try validateHeldStartupOverrides(&state, std.testing.allocator, &msg));
+    try std.testing.expectEqual(@as(usize, 2), capture.rejections);
 }
 
 test "ACP keeps its model catalog when a due refresh cannot connect" {
