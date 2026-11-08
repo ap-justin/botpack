@@ -185,6 +185,62 @@ pub fn validateArguments(alloc: Allocator, arguments_json: []const u8, limits: L
     checkValueBounds(parsed.value, 0, &remaining) catch return error.InstanceLimitExceeded;
 }
 
+/// Models sometimes send an object-typed argument as a string holding that
+/// object's JSON. Returns `arguments_json` with each such string, at each level
+/// the schema's `properties` describe down to nine, replaced by the object it
+/// holds; returns it as it came when there is nothing to replace, or when the
+/// replaced value is past the limits `validateArguments` applies. A string
+/// that isn't a JSON object stays a string, for the server to reject.
+/// Allocates from `arena`.
+pub fn coerceObjectArguments(arena: Allocator, schema_json: []const u8, arguments_json: []const u8) Allocator.Error![]const u8 {
+    const schema = std.json.parseFromSliceLeaky(std.json.Value, arena, schema_json, .{ .parse_numbers = false }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return arguments_json,
+    };
+    var arguments = std.json.parseFromSliceLeaky(std.json.Value, arena, arguments_json, .{ .parse_numbers = false }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return arguments_json,
+    };
+    if (!try coerceObject(arena, schema, &arguments, 0)) return arguments_json;
+    // Before stringifying: Stringify panics past 256 levels in safe builds.
+    var remaining: usize = 4096;
+    checkValueBounds(arguments, 0, &remaining) catch return arguments_json;
+    var out: std.Io.Writer.Allocating = .init(arena);
+    std.json.Stringify.value(arguments, .{}, &out.writer) catch return error.OutOfMemory;
+    return out.written();
+}
+
+/// Whether `value` or anything under it changed.
+fn coerceObject(arena: Allocator, schema: std.json.Value, value: *std.json.Value, depth: usize) Allocator.Error!bool {
+    if (depth > 8 or schema != .object or value.* != .object) return false;
+    const properties = schema.object.get("properties") orelse return false;
+    if (properties != .object) return false;
+    var changed = false;
+    var it = value.object.iterator();
+    while (it.next()) |entry| {
+        const property = properties.object.get(entry.key_ptr.*) orelse continue;
+        if (!declaresOnlyObject(property)) continue;
+        if (entry.value_ptr.* == .string) {
+            const inner = std.json.parseFromSliceLeaky(std.json.Value, arena, entry.value_ptr.string, .{ .parse_numbers = false }) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => continue,
+            };
+            if (inner != .object) continue;
+            entry.value_ptr.* = inner;
+            changed = true;
+        }
+        if (try coerceObject(arena, property, entry.value_ptr, depth + 1)) changed = true;
+    }
+    return changed;
+}
+
+/// Whether `schema` says its value is an object, and nothing a string could be.
+fn declaresOnlyObject(schema: std.json.Value) bool {
+    if (schema != .object) return false;
+    const kind = schema.object.get("type") orelse return false;
+    return kind == .string and std.mem.eql(u8, kind.string, "object");
+}
+
 fn checkValueBounds(value: std.json.Value, depth: usize, remaining: *usize) error{SchemaLimitExceeded}!void {
     if (depth > 64 or remaining.* == 0) return error.SchemaLimitExceeded;
     remaining.* -= 1;

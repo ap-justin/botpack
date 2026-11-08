@@ -5,6 +5,7 @@
 //! are fx's own MCP code.
 
 const std = @import("std");
+const text_utils = @import("../shared/text_utils.zig");
 const runtime_mod = @import("runtime.zig");
 const config = @import("config.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
@@ -204,7 +205,7 @@ pub const Catalog = struct {
         if (options.expected_binding) |b| if (b.runtime_generation != c.currentGeneration()) return error.McpAdvertisedToolChanged;
         if (options.expected_runtime_generation) |g| if (g != c.currentGeneration()) return error.McpAuthorityChanged;
         try c.ensureCurrent(name, options.cancel_flag);
-        const server, const tool, const transport, const how = found: {
+        const server, const tool, const transport, const how, const schema_json = found: {
             c.mutex.lockUncancelable(c.io);
             defer c.mutex.unlock(c.io);
             const found = c.findLocked(name) orelse return null;
@@ -213,12 +214,15 @@ pub const Catalog = struct {
                 if (!b.sameDefinition(c.bindingLocked(found.server, found.tool.*))) return error.McpAdvertisedToolChanged;
             }
             const s = c.servers[found.server];
-            break :found .{ s.name, try arena.dupe(u8, found.tool.original_name), @tagName(s.transport), signIn(c.runtime.options.slash_commands, s.source) };
+            break :found .{ s.name, try arena.dupe(u8, found.tool.original_name), @tagName(s.transport), signIn(c.runtime.options.slash_commands, s.source), try arena.dupe(u8, found.tool.input_schema_json) };
+        };
+        const arguments = tools_feature.coerceObjectArguments(arena, schema_json, arguments_json) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
         };
         var asking: Asking = .{ .responder = options.input_responder orelse undefined, .tool = name, .cancel = options.cancel_flag, .io = c.io };
         const observed = if (options.observer) |observer| observer.beginMcp(.{ .call_id = options.call_id, .server = server, .tool = tool, .transport = transport }) else null;
         const asker: ?runtime_mod.Asker = if (options.input_responder != null) .{ .context = &asking, .ask = Asking.ask } else null;
-        const answer = c.runtime.callObserved(arena, server, tool, arguments_json, options.cancel_flag, asker, options.progress, observed) catch |err| {
+        const answer = c.runtime.callObserved(arena, server, tool, arguments, options.cancel_flag, asker, options.progress, observed) catch |err| {
             if (observed) |call| call.end(if (err == error.Cancelled) .cancelled else .failure, @errorName(err));
             asking.finish(arena, .abandoned);
             return err;
@@ -1085,6 +1089,89 @@ test "an MCP server's tools reach the model under fx's names" {
     defer snapshot.deinit(testing.allocator);
     try testing.expectEqual(model_catalog.Availability.ready, snapshot.servers[0].availability);
     try testing.expectEqual(@as(?usize, 1), snapshot.servers[0].tool_count);
+}
+
+test "an open-object argument stays an object in the schema and reaches the server as one" {
+    var f: Fixture = undefined;
+    try f.initMode(.open_object);
+    defer f.deinit();
+    const configs = [_]mcp_contract.McpServerConfig{.{ .name = "fake", .command = f.server }};
+    var r: Runtime = undefined;
+    try r.start(testing.allocator, testing.io, &configs, &f.inherited, f.options());
+    defer r.deinit();
+    var c: Catalog = undefined;
+    try c.init(testing.allocator, testing.io, &r, .{});
+    defer c.deinit();
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // The schema `mcp_select_tool` loads is the server's own.
+    const open_object = "\"arguments\":{\"type\":\"object\",\"additionalProperties\":true}";
+    const schema = (try c.toolSchema(a, "mcp_fake_tool_call", .{}, .{}, .unrestricted, null)).?;
+    try testing.expect(std.mem.find(u8, schema.selected.model_output, open_object) != null);
+    try testing.expect(std.mem.find(u8, schema.selected.model_output, "additionalProperties\":true}},\"required\":[\"name\"]") != null);
+
+    const sent = [_]struct { arguments: []const u8, reaches: []const u8 }{
+        .{ .arguments = "{\"name\":\"memory_get\",\"arguments\":{\"k\":1}}", .reaches = "arguments=object" },
+        .{ .arguments = "{\"name\":\"memory_get\",\"arguments\":\"{\\\"k\\\":1}\"}", .reaches = "arguments=object" },
+        // A string that isn't an object is left for the server to refuse.
+        .{ .arguments = "{\"name\":\"memory_get\",\"arguments\":\"not json\"}", .reaches = "arguments=string" },
+    };
+    for (sent) |case| {
+        const result = (try c.callTool(a, "mcp_fake_tool_call", case.arguments, 4096, .{})).?;
+        try testing.expectEqual(tool_mcp_runtime.CallStatus.success, result.status);
+        try testing.expect(std.mem.find(u8, result.model_output, case.reaches) != null);
+    }
+}
+
+test "an object-typed argument sent as a JSON string becomes the object" {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const schema =
+        \\{"type":"object","properties":{"name":{"type":"string"},"arguments":{"type":"object","additionalProperties":true},"note":{"type":"string"},"deep":{"type":"object","properties":{"inner":{"type":"object"}}}}}
+    ;
+    // Already an object, or not described as one: the bytes pass unchanged.
+    const object = "{\"name\":\"x\",\"arguments\":{\"k\":1}}";
+    try std.testing.expectEqualStrings(object, try tools_feature.coerceObjectArguments(a, schema, object));
+    const text = "{\"note\":\"{\\\"k\\\":1}\",\"extra\":\"{}\"}";
+    try std.testing.expectEqualStrings(text, try tools_feature.coerceObjectArguments(a, schema, text));
+    const not_object = "{\"arguments\":\"[1]\"}";
+    try std.testing.expectEqualStrings(not_object, try tools_feature.coerceObjectArguments(a, schema, not_object));
+    try std.testing.expectEqualStrings("[", try tools_feature.coerceObjectArguments(a, schema, "["));
+
+    try std.testing.expectEqualStrings(
+        "{\"name\":\"x\",\"arguments\":{\"k\":1.50}}",
+        try tools_feature.coerceObjectArguments(a, schema, "{\"name\":\"x\",\"arguments\":\" {\\\"k\\\":1.50} \"}"),
+    );
+    try std.testing.expectEqualStrings(
+        "{\"deep\":{\"inner\":{\"a\":true}}}",
+        try tools_feature.coerceObjectArguments(a, schema, "{\"deep\":\"{\\\"inner\\\":\\\"{\\\\\\\"a\\\\\\\":true}\\\"}\"}"),
+    );
+
+    // An object nested past fx's 64-level argument limit stays the string it came as.
+    const too_deep = "{\"arguments\":\"" ++ text_utils.repeat("{\\\"a\\\":", 70) ++ "{}" ++ text_utils.repeat("}", 70) ++ "\"}";
+    try std.testing.expectEqualStrings(too_deep, try tools_feature.coerceObjectArguments(a, schema, too_deep));
+
+    // Only exactly `"type":"object"` is coerced: a type list or an `anyOf` branch is left as sent.
+    const unions =
+        \\{"type":"object","properties":{"nullable":{"type":["object","null"]},"either":{"anyOf":[{"type":"object"},{"type":"string"}]}}}
+    ;
+    const to_unions = "{\"nullable\":\"{\\\"k\\\":1}\",\"either\":\"{\\\"k\\\":1}\"}";
+    try std.testing.expectEqualStrings(to_unions, try tools_feature.coerceObjectArguments(a, unions, to_unions));
+
+    // With nothing to coerce, the original bytes come back, not a re-stringified copy.
+    const loose =
+        \\{ "name" : "x", "arguments" : {"k": 1.0}, "note": "\u00e9" }
+    ;
+    try std.testing.expectEqualStrings(loose, try tools_feature.coerceObjectArguments(a, schema, loose));
+
+    // A schema without a `properties` object, or that isn't JSON, coerces nothing.
+    const stringified = "{\"arguments\":\"{\\\"k\\\":1}\"}";
+    for ([_][]const u8{ "{\"type\":\"object\"}", "{\"type\":", "{\"type\":\"object\",\"properties\":[]}" }) |bare| {
+        try std.testing.expectEqualStrings(stringified, try tools_feature.coerceObjectArguments(a, bare, stringified));
+    }
 }
 
 test "a reload keeps a kept server's list and the bindings made from it, until a server is dropped" {
