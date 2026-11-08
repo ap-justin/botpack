@@ -912,7 +912,8 @@ test("ACP finishes a provider search the turn ended before it finished", async (
     if (created.error) throw new Error(JSON.stringify(created));
     sendPrompt(client, 3, "Search the web.");
     const { responses } = await readUntilResponses(client, [3]);
-    expect(responses.get(3)!.result.stopReason).toBe("refusal");
+    expect(responses.get(3)!.result).toBeUndefined();
+    expect(responses.get(3)!.error).toEqual({ code: -32603, message: "The turn stopped before it finished" });
     const search = client.rawLines
       .map(line => JSON.parse(line))
       .filter((message: any) => message.method === "session/update" && message.params?.update?.toolCallId === "search_open")
@@ -7758,8 +7759,11 @@ describe("acp: model-independent", () => {
           }
         }
 
-        expect(response.error).toBeUndefined();
-        expect(response.result.stopReason).toBe("refusal");
+        expect(response.result).toBeUndefined();
+        expect(response.error).toEqual({
+          code: -32603,
+          message: "AI_GATEWAY_API_KEY authentication failed · HTTP 401",
+        });
         const authUpdate = messages.find((message) =>
           message.method === "session/update" &&
           message.params?.update?.sessionUpdate === "agent_message_chunk"

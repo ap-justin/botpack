@@ -111,6 +111,9 @@ const ToolPermissionDecision = types.ToolPermissionDecision;
 const ToolExecutionResult = agent_runtime.ToolExecutionResult;
 const McpHasToolFn = tool_mcp_runtime.HasToolFn;
 
+/// What a failed turn's prompt answers when the failure named no message.
+const turn_failed_message = "The turn stopped before it finished";
+
 pub const TerminalOutcome = union(enum) {
     stop_reason: acp_types.StopReason,
     rpc_error: jsonrpc.RpcError,
@@ -244,6 +247,9 @@ const AcpContext = struct {
     message_id: acp_types.MessageIdBuffer = undefined,
     message_kind: ?AgentMessageKind = null,
     stop_reason: acp_types.StopReason = .end_turn,
+    /// The turn ended as an error, not at a stop reason; its prompt answers
+    /// with a JSON-RPC error carrying the session's failure message.
+    turn_failed: bool = false,
     auto_classifier: permission_auto_classifier.Classifier =
         permission_auto_classifier.Classifier.disabled(),
     /// Mode and permission policy captured at prompt dispatch so mid-turn
@@ -1197,6 +1203,12 @@ pub fn handlePrompt(
     if (state.cfg.minimal_kernel) server.releaseSteeringInterrupt(state);
     if (session.cancel_flag.load(.seq_cst)) {
         ctx.stop_reason = .cancelled;
+    } else if (ctx.turn_failed) {
+        const message = session.failureMessage();
+        return .{ .rpc_error = .{
+            .code = ErrorCode.internal_error,
+            .message = if (message.len > 0) message else turn_failed_message,
+        } };
     }
 
     return .{ .stop_reason = ctx.stop_reason };
@@ -2255,7 +2267,7 @@ fn finalizeTurn(raw_ctx: *anyopaque, turn_id: u64, outcome: types.TurnPresentati
     if (disposition == .length_limited) {
         ctx.stop_reason = .max_output_tokens;
     } else if (outcome == .failed or outcome == .paused) {
-        ctx.stop_reason = .refused;
+        ctx.turn_failed = true;
     }
     // The core reports no more tool events once a turn finishes, so close
     // what it left open, as the terminal transcript does at the same point.
@@ -3378,6 +3390,10 @@ fn pushHttpError(raw_ctx: *anyopaque, status: std.http.Status, detail: []const u
         std.mem.print(&buf, "HTTP {d}: {s}", .{ @backingInt(status), detail }) catch "HTTP error"
     else
         std.mem.print(&buf, "HTTP {d}", .{@backingInt(status)}) catch "HTTP error";
+    // Only the user's turn answers with this; a subagent's turn has no prompt.
+    if (ctx.current_prompt_input != null) {
+        if (ctx.state.active_session) |*session| session.setFailureMessage(msg);
+    }
     ctx.sendAgentText(ctx.operationalMessageId(), msg) catch {};
 }
 
@@ -5317,10 +5333,12 @@ test "ACP finalization maps failed turns and provider length" {
         outcome: types.TurnPresentationOutcome,
         disposition: ?types.ProviderCompletionDisposition,
         expected: acp_types.StopReason,
+        failed: bool,
     }{
-        .{ .outcome = .completed, .disposition = .length_limited, .expected = .max_output_tokens },
-        .{ .outcome = .failed, .disposition = .length_limited, .expected = .max_output_tokens },
-        .{ .outcome = .failed, .disposition = null, .expected = .refused },
+        .{ .outcome = .completed, .disposition = .length_limited, .expected = .max_output_tokens, .failed = false },
+        .{ .outcome = .failed, .disposition = .length_limited, .expected = .max_output_tokens, .failed = false },
+        .{ .outcome = .failed, .disposition = null, .expected = .end_turn, .failed = true },
+        .{ .outcome = .paused, .disposition = null, .expected = .end_turn, .failed = true },
     };
 
     for (cases) |case| {
@@ -5333,6 +5351,7 @@ test "ACP finalization maps failed turns and provider length" {
         try deps.finalize_turn(deps.ctx, 8, case.outcome, case.disposition);
 
         try std.testing.expectEqual(case.expected, ctx.stop_reason);
+        try std.testing.expectEqual(case.failed, ctx.turn_failed);
     }
 }
 

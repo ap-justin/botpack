@@ -226,6 +226,8 @@ const PendingLegacyUrl = struct {
     }
 };
 
+const failure_message_max_bytes = 1024;
+
 pub const ActiveSessionState = struct {
     observer_hooks: ?@import("libfx_hooks.zig").Config = null,
     session_id: []u8,
@@ -268,6 +270,11 @@ pub const ActiveSessionState = struct {
     tool_identities: tool_call_identities.Record = .{},
     cancel_flag: std.atomic.Value(bool),
     pending_prompt_id: ?jsonrpc.RequestId,
+    /// The message a failed turn answers `session/prompt` with. It lives here
+    /// because the turn's own context is gone when the response is written.
+    failure_message_buf: [failure_message_max_bytes]u8 = undefined,
+    failure_message_len: usize = 0,
+
     steering: libfx_steering.Runtime = .{},
     /// Set when the host passed a journal; every state change is sent to it.
     journal: ?libfx_journal.Journal = null,
@@ -278,6 +285,17 @@ pub const ActiveSessionState = struct {
     /// an open turn's tool images can take a session past one window and one
     /// prompt, and what a running session held must reopen.
     staging_needed: StagedTotals = .{},
+
+    /// Keeps the first `failure_message_max_bytes` bytes of `message`.
+    pub fn setFailureMessage(self: *ActiveSessionState, message: []const u8) void {
+        const len = @min(message.len, self.failure_message_buf.len);
+        @memcpy(self.failure_message_buf[0..len], message[0..len]);
+        self.failure_message_len = len;
+    }
+
+    pub fn failureMessage(self: *const ActiveSessionState) []const u8 {
+        return self.failure_message_buf[0..self.failure_message_len];
+    }
 
     pub fn retainGrant(self: *ActiveSessionState, alloc: Allocator, tool_name: []const u8, target_path: []const u8) !void {
         for (self.session_grants) |grant| {
