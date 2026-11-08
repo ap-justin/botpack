@@ -1524,7 +1524,7 @@ fn missingCredentialResult(
     const status = auth_runtime.StatusSnapshot{
         .required_source = auth_runtime.requestedSource(provider, preferred),
     };
-    const message = status.missingHelp(.cli).?;
+    const message = status.missingHelp().?;
     try options.deps.write_stderr(options.deps.stderr_ctx, "fx ask: ");
     try options.deps.write_stderr(options.deps.stderr_ctx, message);
     try options.deps.write_stderr(options.deps.stderr_ctx, "\n");

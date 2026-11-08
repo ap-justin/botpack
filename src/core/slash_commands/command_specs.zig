@@ -596,9 +596,12 @@ test "rendered top-level help is a complete CLI navigation page" {
     try std.testing.expect(std.mem.find(u8, text, "Run one noninteractive request") != null);
     try std.testing.expect(std.mem.find(u8, text, "Draft a GitHub issue") != null);
     try std.testing.expect(std.mem.find(u8, text, "credits|balance") != null);
-    try std.testing.expect(std.mem.find(u8, text, "Sign in to a model provider") != null);
-    try std.testing.expect(std.mem.find(u8, text, "Sign out of a model provider") != null);
-    try std.testing.expect(std.mem.find(u8, text, "Choose the active model provider") != null);
+    try std.testing.expect(std.mem.find(u8, text, "Sign in to Vercel AI Gateway") != null);
+    try std.testing.expect(std.mem.find(u8, text, "Sign out of Vercel AI Gateway") != null);
+    try std.testing.expect(std.mem.find(u8, text, "Choose AI Gateway or a configured connection") != null);
+    // ChatGPT and Grok sign-in are gone; nothing offers another provider to sign in to.
+    try std.testing.expect(std.mem.find(u8, text, "a model provider") == null);
+    try std.testing.expect(std.mem.find(u8, text, "selected provider") == null);
     // `fx setup` is deprecated and hidden; `fx login --api-key` replaces it.
     try std.testing.expect(std.mem.find(u8, text, "Configure a Vercel AI Gateway API key") == null);
     try std.testing.expect(std.mem.find(u8, text, "login [vercel] [--api-key]") != null);
@@ -632,8 +635,12 @@ test "top-level help summary overrides do not change command-specific help" {
     const login = try renderTopLevelCommandHelp(std.testing.allocator, testTopLevelRegistry(), .login);
     defer std.testing.allocator.free(login);
 
-    try std.testing.expect(std.mem.find(u8, login, "Sign in to Vercel or a selected provider") != null);
-    try std.testing.expect(std.mem.find(u8, login, "Sign in to a model provider") == null);
+    try std.testing.expect(std.mem.find(u8, login, "Sign in to Vercel AI Gateway in the browser or with an API key") != null);
+    try std.testing.expect(std.mem.find(u8, login, "selected provider") == null);
+
+    const top = try testTopLevelHelpText(std.testing.allocator);
+    defer std.testing.allocator.free(top);
+    try std.testing.expect(std.mem.find(u8, top, "in the browser or with an API key") == null);
 }
 
 test "terminal top-level help adds styling without changing visible content" {

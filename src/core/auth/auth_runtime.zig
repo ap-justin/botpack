@@ -1521,11 +1521,6 @@ pub const GatewayTeamStatus = enum {
     }
 };
 
-pub const MissingHelpSurface = enum {
-    cli,
-    interactive,
-};
-
 pub const StatusSnapshot = struct {
     active_source: ?credentials.Source = null,
     required_source: ?credentials.Source = null,
@@ -1553,48 +1548,36 @@ pub const StatusSnapshot = struct {
         return credentials.sourceRefreshable(source);
     }
 
-    pub fn missingHelp(self: StatusSnapshot, surface: MissingHelpSurface) ?[]const u8 {
+    pub fn missingHelp(self: StatusSnapshot) ?[]const u8 {
         if (self.active_source != null) return null;
         if (self.stored_key_status == .unavailable) {
-            if (self.required_source == .stored_key) return switch (surface) {
-                .cli => "The selected stored API key could not be read from " ++ credentials.stored_key_backend_label ++ ". Start fx and open /provider to choose an available credential; no other credential was selected.",
-                .interactive => "The selected stored API key could not be read from " ++ credentials.stored_key_backend_label ++ ". Run /provider to choose an available credential; no other credential was selected.",
-            };
+            if (self.required_source == .stored_key) return stored_key_unreadable_help;
             return credentials.unreadable_store_message;
         }
         if (self.failure) |failure| {
             if (preparationError(failure)) |err| return preparationFailureNotice(err);
         }
-        const automatic_help: []const u8 = switch (surface) {
-            .cli => credentials.missing_credential_message,
-            .interactive => credentials.missing_interactive_credential_message,
-        };
-        const required_source = self.required_source orelse return automatic_help;
+        const required_source = self.required_source orelse return credentials.missing_credential_message;
         return switch (required_source) {
             .vercel_oidc_token => "VERCEL_OIDC_TOKEN is selected but unavailable. Set VERCEL_OIDC_TOKEN before starting fx; no other credential was selected.",
             .ai_gateway_api_key => "AI_GATEWAY_API_KEY is selected but unavailable. Set AI_GATEWAY_API_KEY before starting fx; no other credential was selected.",
-            .stored_key => switch (surface) {
-                .cli => "A stored API key is selected but unavailable. Start fx and open /provider to choose an available credential; no other credential was selected.",
-                .interactive => "A stored API key is selected but unavailable. Run /provider to choose an available credential; no other credential was selected.",
-            },
-            .fx_login => switch (surface) {
-                .cli => if (self.fx_login_status == .unavailable)
-                    "The saved fx login could not be loaded. Run fx login to repair this source; no other credential was selected."
-                else
-                    "fx login is selected but unavailable. Run fx login to reconnect; no other credential was selected.",
-                .interactive => if (self.fx_login_status == .unavailable)
-                    "The saved fx login could not be loaded. Run /login to repair this source; no other credential was selected."
-                else
-                    "fx login is selected but unavailable. Run /login to reconnect; no other credential was selected.",
-            },
-            .host_managed => automatic_help,
+            .stored_key => stored_key_unavailable_help,
+            .fx_login => if (self.fx_login_status == .unavailable)
+                "The saved fx login could not be loaded. Run fx login to repair this source; no other credential was selected."
+            else
+                "fx login is selected but unavailable. Run fx login to reconnect; no other credential was selected.",
+            .host_managed => credentials.missing_credential_message,
             .configured => "The configured provider credential is unavailable. Check its auth environment variable in settings.json; no other provider was selected.",
         };
     }
 
+    const stored_key_repair = "Run fx login vercel --api-key to save a key again, or fx login to sign in instead; no other credential was selected.";
+    const stored_key_unreadable_help = "The selected stored API key could not be read from " ++ credentials.stored_key_backend_label ++ ". " ++ stored_key_repair;
+    const stored_key_unavailable_help = "A stored API key is selected but unavailable. " ++ stored_key_repair;
+
     /// Returns owned doctor status text containing no credential bytes.
     pub fn formatDoctorDetail(self: StatusSnapshot, alloc: Allocator) ![]u8 {
-        if (self.missingHelp(.cli)) |help| return alloc.dupe(u8, help);
+        if (self.missingHelp()) |help| return alloc.dupe(u8, help);
 
         var out: std.Io.Writer.Allocating = .init(alloc);
         defer out.deinit();
@@ -3709,7 +3692,7 @@ test "confirmed source removal clears stale store status after adoption and logo
     var fixture: LogoutFixture = .{ .existing = .empty };
     _ = try runtime.reconcileAfterFxLoginLogoutWithDeps(alloc, &fixture, LogoutFixture.probe, LogoutFixture.load);
 
-    try std.testing.expectEqualStrings(credentials.missing_interactive_credential_message, runtime.statusSnapshotAt(100, .gateway, null).missingHelp(.interactive).?);
+    try std.testing.expectEqualStrings(credentials.missing_credential_message, runtime.statusSnapshotAt(100, .gateway, null).missingHelp().?);
 }
 
 test "auth status snapshot labels every credential source without exposing tokens" {
@@ -3738,14 +3721,13 @@ test "auth status snapshot labels every credential source without exposing token
     }
 }
 
-test "auth status snapshot preserves display team and surface-specific missing help" {
+test "auth status snapshot preserves display team and missing help" {
     const alloc = std.testing.allocator;
     var runtime: Runtime = .{};
     defer runtime.deinit(alloc);
 
     const missing = runtime.statusSnapshot(.gateway, null);
-    try std.testing.expectEqualStrings(credentials.missing_credential_message, missing.missingHelp(.cli).?);
-    try std.testing.expectEqualStrings(credentials.missing_interactive_credential_message, missing.missingHelp(.interactive).?);
+    try std.testing.expectEqualStrings(credentials.missing_credential_message, missing.missingHelp().?);
 
     var credential = try makeTestCredential(alloc, "token", .fx_login, "team_123", "vercel-labs");
     defer credential.deinit(alloc);
@@ -3753,51 +3735,56 @@ test "auth status snapshot preserves display team and surface-specific missing h
 
     const selected = runtime.statusSnapshot(.gateway, null);
     try std.testing.expectEqualStrings("vercel-labs", selected.team.?);
-    try std.testing.expect(selected.missingHelp(.cli) == null);
+    try std.testing.expect(selected.missingHelp() == null);
 }
 
 test "auth status snapshot distinguishes an absent store from an unreadable one" {
     const alloc = std.testing.allocator;
 
     const absent = StatusSnapshot{ .stored_key_status = .not_found };
-    try std.testing.expectEqualStrings(credentials.missing_credential_message, absent.missingHelp(.cli).?);
+    try std.testing.expectEqualStrings(credentials.missing_credential_message, absent.missingHelp().?);
 
     const unreadable = StatusSnapshot{
         .stored_key_status = .unavailable,
         .failure = .{ .source = .stored_key, .reason = .invalid_storage },
     };
-    try std.testing.expectEqualStrings(credentials.unreadable_store_message, unreadable.missingHelp(.cli).?);
-    try std.testing.expectEqualStrings(credentials.unreadable_store_message, unreadable.missingHelp(.interactive).?);
+    try std.testing.expectEqualStrings(credentials.unreadable_store_message, unreadable.missingHelp().?);
 
     const detail = try unreadable.formatDoctorDetail(alloc);
     defer alloc.free(detail);
     try std.testing.expectEqualStrings(credentials.unreadable_store_message, detail);
 
     const resolved = StatusSnapshot{ .active_source = .fx_login, .stored_key_status = .unavailable };
-    try std.testing.expect(resolved.missingHelp(.cli) == null);
+    try std.testing.expect(resolved.missingHelp() == null);
 }
 
 test "auth status names each explicit key source and its recovery" {
     const cases = [_]struct {
         source: credentials.Source,
         label: []const u8,
-        cli_recovery: []const u8,
-        interactive_recovery: []const u8,
+        recovery: []const u8,
     }{
-        .{ .source = .vercel_oidc_token, .label = "VERCEL_OIDC_TOKEN", .cli_recovery = "Set VERCEL_OIDC_TOKEN before starting fx", .interactive_recovery = "Set VERCEL_OIDC_TOKEN before starting fx" },
-        .{ .source = .ai_gateway_api_key, .label = "AI_GATEWAY_API_KEY", .cli_recovery = "Set AI_GATEWAY_API_KEY before starting fx", .interactive_recovery = "Set AI_GATEWAY_API_KEY before starting fx" },
-        .{ .source = .stored_key, .label = "stored API key", .cli_recovery = "Start fx and open /provider", .interactive_recovery = "Run /provider" },
+        .{ .source = .vercel_oidc_token, .label = "VERCEL_OIDC_TOKEN", .recovery = "Set VERCEL_OIDC_TOKEN before starting fx" },
+        .{ .source = .ai_gateway_api_key, .label = "AI_GATEWAY_API_KEY", .recovery = "Set AI_GATEWAY_API_KEY before starting fx" },
+        .{ .source = .stored_key, .label = "stored API key", .recovery = "Run fx login vercel --api-key" },
     };
     for (cases) |case| {
         const status = StatusSnapshot{ .required_source = case.source };
-        for ([_]MissingHelpSurface{ .cli, .interactive }) |surface| {
-            const help = status.missingHelp(surface).?;
-            try std.testing.expect(std.mem.find(u8, help, case.label) != null);
-            try std.testing.expect(std.mem.find(u8, help, if (surface == .cli) case.cli_recovery else case.interactive_recovery) != null);
-            try std.testing.expect(std.mem.find(u8, help, "no other credential was selected") != null);
-            if (case.source != .ai_gateway_api_key) try std.testing.expect(std.mem.find(u8, help, "AI_GATEWAY_API_KEY") == null);
-        }
+        const help = status.missingHelp().?;
+        try std.testing.expect(std.mem.find(u8, help, case.label) != null);
+        try std.testing.expect(std.mem.find(u8, help, case.recovery) != null);
+        try std.testing.expect(std.mem.find(u8, help, "no other credential was selected") != null);
+        try std.testing.expect(std.mem.find(u8, help, "/provider") == null);
+        if (case.source != .ai_gateway_api_key) try std.testing.expect(std.mem.find(u8, help, "AI_GATEWAY_API_KEY") == null);
     }
+}
+
+test "a selected stored key that is missing points at fx login, not the removed /provider" {
+    const status = StatusSnapshot{ .required_source = .stored_key };
+    try std.testing.expectEqualStrings(
+        "A stored API key is selected but unavailable. Run fx login vercel --api-key to save a key again, or fx login to sign in instead; no other credential was selected.",
+        status.missingHelp().?,
+    );
 }
 
 test "auth status preserves selected stored-key read failure without suggesting an excluded key" {
@@ -3806,17 +3793,15 @@ test "auth status preserves selected stored-key read failure without suggesting 
         .stored_key_status = .unavailable,
         .failure = classifyCredentialFailure(.stored_key, error.CredentialStorageUnavailable),
     };
-    for ([_]MissingHelpSurface{ .cli, .interactive }) |surface| {
-        const help = status.missingHelp(surface).?;
-        try std.testing.expect(std.mem.find(u8, help, "could not be read") != null);
-        try std.testing.expect(std.mem.find(u8, help, credentials.stored_key_backend_label) != null);
-        try std.testing.expect(std.mem.find(u8, help, "/provider") != null);
-        try std.testing.expect(std.mem.find(u8, help, "AI_GATEWAY_API_KEY") == null);
-    }
+    try std.testing.expectEqualStrings(
+        "The selected stored API key could not be read from " ++ credentials.stored_key_backend_label ++
+            ". Run fx login vercel --api-key to save a key again, or fx login to sign in instead; no other credential was selected.",
+        status.missingHelp().?,
+    );
     status.required_source = null;
-    try std.testing.expectEqualStrings(credentials.unreadable_store_message, status.missingHelp(.cli).?);
+    try std.testing.expectEqualStrings(credentials.unreadable_store_message, status.missingHelp().?);
     status.active_source = .ai_gateway_api_key;
-    try std.testing.expect(status.missingHelp(.cli) == null);
+    try std.testing.expect(status.missingHelp() == null);
 }
 
 test "auth status keeps an unavailable explicit fx login distinct from automatic absence" {
@@ -3825,12 +3810,9 @@ test "auth status keeps an unavailable explicit fx login distinct from automatic
             .required_source = .fx_login,
             .fx_login_status = read_status,
         };
-        const help = status.missingHelp(.cli).?;
+        const help = status.missingHelp().?;
         try std.testing.expect(std.mem.find(u8, help, "Run fx login") != null);
         try std.testing.expect(std.mem.find(u8, help, "no other credential was selected") != null);
-        const interactive = status.missingHelp(.interactive).?;
-        try std.testing.expect(std.mem.find(u8, interactive, "Run /login") != null);
-        try std.testing.expect(std.mem.find(u8, interactive, "no other credential was selected") != null);
     }
 }
 
@@ -3855,7 +3837,7 @@ test "auth status snapshot reports an expired session without claiming it is unr
 
     // The expired signal is additional state, never a downgrade of `refreshable`.
     try std.testing.expect(stale.refreshable());
-    try std.testing.expect(stale.missingHelp(.cli) == null);
+    try std.testing.expect(stale.missingHelp() == null);
 }
 
 test "auth runtime view lists only detected credential sources" {
@@ -4983,7 +4965,7 @@ test "provider status snapshot preserves loaded and host-managed authority" {
     try std.testing.expectEqualStrings("team", loaded.team.?);
     try std.testing.expect(loaded.expired);
     try std.testing.expect(loaded.required_source == null);
-    try std.testing.expect(loaded.missingHelp(.interactive) == null);
+    try std.testing.expect(loaded.missingHelp() == null);
 
     runtime.auth_mode = .host_managed;
 }

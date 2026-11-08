@@ -177,6 +177,8 @@ const version_usage = "usage: fx --version\n";
 pub const Config = struct {
     version: []const u8 = "",
     revision: []const u8 = "",
+    /// The `-Dupdate-channel` this binary was built with.
+    build_channel: []const u8 = "stable",
     auth_mode: credentials.AuthMode = .local,
     command_catalog: CommandCatalog,
     default_model: []const u8,
@@ -1516,6 +1518,7 @@ fn runNonInteractiveWithDeps(
             var snapshot = statusSnapshotFromStartupWithBuild(startup, .{
                 .version = cfg.version,
                 .revision = cfg.revision,
+                .channel = cfg.build_channel,
             }, mcp_inspection.profile_diagnostic);
             snapshot.mcp = localMcpView(&mcp_inspection);
             snapshot.provider_endpoint = startup.provider_endpoint;
@@ -2241,16 +2244,18 @@ fn writeStatusJsonLine(alloc: Allocator, deps: RunDeps, snapshot: output_contrac
     try writeRenderedJsonLine(alloc, deps, buf[0..], .{ .status = snapshot });
 }
 
-/// The version and revision this binary was built from.
+/// The version, revision, and update channel this binary was built from.
 const CurrentBuild = struct {
     version: []const u8,
     revision: []const u8,
+    channel: []const u8,
 };
 
 fn statusSnapshotFromStartup(startup: app_lifecycle.StartupStatus) output_contracts.StatusSnapshot {
     return statusSnapshotFromStartupWithBuild(startup, .{
         .version = "",
         .revision = "",
+        .channel = "stable",
     }, .clear);
 }
 
@@ -2265,13 +2270,16 @@ fn statusSnapshotFromStartupWithBuild(
         .effort = startup.effort,
         .provider = startup.provider,
         .auth = startup.auth,
-        .auth_help = startup.auth.missingHelp(.cli),
+        .auth_help = startup.auth.missingHelp(),
         .permission_mode = permissionModeForSnapshot(startup.permission_mode),
         .workspace_root = startup.workspace_root,
         .history_turns = 0,
         .session_permission_grants = 0,
         .agent_step_limit = startup.agent_step_limit,
         .ultrafast_requested = startup.ultrafast_mode,
+        // No setting chooses a channel, so fx follows the one it was built for.
+        .update_channel = build.channel,
+        .build_channel = build.channel,
         .build_revision = build.revision,
         .mcp_config_error = switch (mcp_config_diagnostic) {
             .clear, .warning => null,
@@ -5325,7 +5333,7 @@ test "runIfRequested local json success appends exactly one newline" {
     const result = try runIfRequestedWithDeps(std.testing.allocator, &.{ @constCast("status"), @constCast("--json") }, testConfig(), deps);
     try std.testing.expectEqual(RunResult.handled_success, result);
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"status\",\"model\":\"test-model\",\"model_origin\":\"default\",\"effort\":\"auto\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"auto\",\"workspace\":\"/tmp/fx\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":42,\"ultrafast_requested\":false,\"mcp\":{\"connection_check\":\"not_checked\",\"servers\":[],\"configuration_issues\":[],\"inspection_error\":null}}\n",
+        "{\"kind\":\"status\",\"model\":\"test-model\",\"model_origin\":\"default\",\"effort\":\"auto\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"auto\",\"workspace\":\"/tmp/fx\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":42,\"ultrafast_requested\":false,\"mcp\":{\"connection_check\":\"not_checked\",\"servers\":[],\"configuration_issues\":[],\"inspection_error\":null}}\n",
         capture.stdout.written(),
     );
     try std.testing.expect(!std.mem.endsWith(u8, capture.stdout.written(), "\n\n"));
@@ -5414,7 +5422,7 @@ test "writeRenderedJsonLine falls back to heap and appends exactly one newline" 
     );
 
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"status\",\"model\":\"test-model\",\"model_origin\":\"default\",\"effort\":\"auto\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/fx\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":42,\"ultrafast_requested\":true}\n",
+        "{\"kind\":\"status\",\"model\":\"test-model\",\"model_origin\":\"default\",\"effort\":\"auto\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/fx\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":42,\"ultrafast_requested\":true}\n",
         capture.stdout.written(),
     );
 }
@@ -5425,7 +5433,7 @@ test "writeRenderedJsonLine renders doctor json through output contract" {
 
     var checks = [_]doctor_runtime.Check{
         .{ .name = "auth", .status = .ok, .detail = "AI_GATEWAY_API_KEY is configured" },
-        .{ .name = "gh", .status = .warn, .detail = "GitHub CLI not found in PATH" },
+        .{ .name = "git", .status = .warn, .detail = "not a git repository; pr/issue workflows will be limited" },
     };
     const snapshot = doctor_runtime.Snapshot{
         .workspace_root = @constCast("/tmp/fx"),
@@ -5445,7 +5453,7 @@ test "writeRenderedJsonLine renders doctor json through output contract" {
     );
 
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"doctor\",\"ok_count\":1,\"warn_count\":1,\"fail_count\":0,\"workspace\":\"/tmp/fx\",\"model\":\"test-model\",\"auth\":\"AI_GATEWAY_API_KEY\",\"auth_refreshable\":false,\"permission_mode\":\"auto\",\"agent_step_limit\":42,\"checks\":[{\"name\":\"auth\",\"status\":\"ok\",\"detail\":\"AI_GATEWAY_API_KEY is configured\"},{\"name\":\"gh\",\"status\":\"warn\",\"detail\":\"GitHub CLI not found in PATH\"}]}\n",
+        "{\"kind\":\"doctor\",\"ok_count\":1,\"warn_count\":1,\"fail_count\":0,\"workspace\":\"/tmp/fx\",\"model\":\"test-model\",\"auth\":\"AI_GATEWAY_API_KEY\",\"auth_refreshable\":false,\"permission_mode\":\"auto\",\"agent_step_limit\":42,\"checks\":[{\"name\":\"auth\",\"status\":\"ok\",\"detail\":\"AI_GATEWAY_API_KEY is configured\"},{\"name\":\"git\",\"status\":\"warn\",\"detail\":\"not a git repository; pr/issue workflows will be limited\"}]}\n",
         capture.stdout.written(),
     );
 }
