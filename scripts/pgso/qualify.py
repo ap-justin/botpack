@@ -104,48 +104,6 @@ BENCHMARK_PLANS = (
         training_argvs=(("100000", "500"),),
         workloads=(Workload("file-index-100k", ("100000", "500")),),
     ),
-    BenchmarkPlan(
-        selector="ui_activity",
-        profile_module="ui-activity-progress-bench",
-        function_prefixes=(
-            "core.output.activity_runtime.",
-            "core.output.worker_status.",
-            "ui.transcript.",
-            "ui.render_engine.",
-        ),
-        training_argvs=((),),
-        workloads=(Workload("ui-activity", ()),),
-        microbenchmark=True,
-    ),
-    BenchmarkPlan(
-        selector="approval_review",
-        profile_module="approval-review-bench",
-        function_prefixes=(
-            "core.output.diff.",
-            "core.permissions.approval_prompt.",
-            # The review rows spend most of their time measuring and encoding
-            # text, so the shared text helpers carry this workload's counts.
-            "core.shared.display_width.",
-            "core.shared.text_utils.",
-            "ui.approval_screen.",
-            "ui.footer.approval_ui.",
-            "ui.render_engine.transcript_blocks.",
-            "ui.render_engine.transcript_measure.",
-            "core.terminal.vt_emulator.",
-        ),
-        training_argvs=(
-            ("transcript", "3", "1"),
-            ("diff", "3", "1"),
-            ("combined", "3", "1"),
-            ("payload", "3", "1"),
-        ),
-        workloads=(
-            Workload("approval-transcript", ("transcript", "1", "1")),
-            Workload("approval-diff", ("diff", "1", "1")),
-            Workload("approval-combined", ("combined", "1", "1")),
-            Workload("approval-payload", ("payload", "1", "1")),
-        ),
-    ),
 )
 
 

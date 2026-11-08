@@ -48,7 +48,7 @@ pub const Key = struct {
     where: Where,
     kind: Kind,
     description: []const u8,
-    /// Fixed child keys of an object setting, such as `statusLine.context`.
+    /// Fixed child keys of an object setting, such as `sound.turn_end`.
     /// Empty for plain values and for maps. Every child is a switch.
     children: []const []const u8 = &.{},
     /// What each of `children` does, in the same order.
@@ -61,7 +61,7 @@ pub const Key = struct {
     maximum: ?i64 = null,
     /// The most items a `strings` key may hold.
     max_items: ?usize = null,
-    /// An object whose keys are free-form, such as `models.codex`.
+    /// An object whose keys are free-form, such as `models.gateway`.
     map: bool = false,
     /// The current name of a setting that was renamed. fx still reads the
     /// older name, writes only the current one, and the current one wins for
@@ -95,25 +95,19 @@ const sound_child_descriptions = [_][]const u8{
     "Play extra interaction sounds when sound is on",
     "Play a sound when a turn finishes",
 };
-const status_line_children = [_][]const u8{ "context", "session", "workspace" };
-const status_line_child_descriptions = [_][]const u8{
-    "Show context usage in the footer",
-    "Show the session title in the footer",
-    "Show the workspace path and Git branch in the footer",
-};
 const retired_description = "No longer used; fx ignores it";
 
 pub const keys = [_]Key{
     .{ .name = "$schema", .where = .editor, .kind = .string, .top_level_only = true, .description = "The JSON Schema editors use to check this file" },
     .{ .name = "additional_directories", .where = .profile, .kind = .strings, .workspace_only = true, .description = "Directories added to this workspace; manage them with fx workspace" },
     .{ .name = "auto_compact_percent", .where = .profile, .kind = .integer, .minimum = 10, .maximum = 80, .description = "Start automatic compaction at this percentage of usable input capacity" },
-    .{ .name = "auto_upgrade", .where = .profile, .kind = .boolean, .description = "Download and install updates in the background" },
+    .{ .name = "auto_upgrade", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "cache_warming", .where = .profile, .kind = .boolean, .description = "Keep a waiting Claude conversation's prompt cache alive for up to 30 minutes" },
-    .{ .name = "codex_model", .where = .profile, .kind = .string, .superseded_by = "models.codex", .description = "Older form of models.codex" },
-    .{ .name = "collapse_tool_calls", .where = .profile, .kind = .boolean, .description = "Show a summary for each group of tool calls" },
+    .{ .name = "codex_model", .where = .retired, .kind = .any, .description = retired_description },
+    .{ .name = "collapse_tool_calls", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "context", .where = .project_safe, .kind = .boolean, .description = "Load project instructions such as AGENTS.md" },
     .{ .name = "context_limits", .where = .profile, .kind = .object, .map = true, .description = "Context limits by name, in bytes or off, as --context-limit takes them" },
-    .{ .name = "credential_source", .where = .profile, .kind = .string, .values = &.{ "vercel_oidc_token", "ai_gateway_api_key", "fx_login", "stored_key", "chatgpt_subscription", "grok_subscription" }, .description = "The saved credential fx uses; fx login sets it" },
+    .{ .name = "credential_source", .where = .profile, .kind = .string, .values = &.{ "vercel_oidc_token", "ai_gateway_api_key", "fx_login", "stored_key" }, .description = "The saved credential fx uses; fx login sets it" },
     .{ .name = "disabledMcpjsonServers", .where = .profile, .kind = .strings, .workspace_only = true, .description = "Project MCP servers rejected in this workspace; manage them with fx mcp approve and reject" },
     .{ .name = "effort", .where = .profile, .kind = .string_or_null, .description = "Reasoning effort: auto or a name the model supports; null means auto" },
     .{ .name = "enableAllProjectMcpServers", .where = .profile, .kind = .boolean, .workspace_only = true, .description = "Approve every server in this workspace's .mcp.json; manage it with fx mcp approve and reject" },
@@ -121,7 +115,7 @@ pub const keys = [_]Key{
     .{ .name = "fast_mode", .where = .profile, .kind = .boolean, .description = "Use faster inference when the model supports it" },
     .{ .name = "fast_mode_model_bound", .where = .profile, .kind = .boolean, .description = "Managed by fx alongside fast_mode" },
     .{ .name = "first_call_tool_choice", .where = .profile, .kind = .string, .values = &.{ "auto", "none" }, .description = "Tool choice for the first request of a turn" },
-    .{ .name = "grok_model", .where = .profile, .kind = .string, .superseded_by = "models.grok", .description = "Older form of models.grok" },
+    .{ .name = "grok_model", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "input_appearance", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "max_agent_steps", .where = .project_safe, .kind = .integer, .minimum = 0, .description = "Most agent steps per turn; 0 means no limit" },
     .{ .name = "max_tool_result_bytes", .where = .project_safe, .kind = .integer, .minimum = 1024, .description = "Tool output budget in model context, in bytes" },
@@ -129,10 +123,10 @@ pub const keys = [_]Key{
     .{ .name = "model", .where = .profile, .kind = .string, .superseded_by = "models.gateway", .description = "Older form of models.gateway" },
     .{ .name = "models", .where = .profile, .kind = .string_map, .map = true, .description = "The saved model for each provider or connection, such as {\"gateway\": \"<model id>\"}" },
     .{ .name = "notifications", .where = .profile, .kind = .switches, .children = &sound_children, .child_descriptions = &sound_child_descriptions, .renamed_to = "sound", .description = "Renamed to sound" },
-    .{ .name = "permission", .where = .profile, .kind = .object, .map = true, .description = "Permission rules; manage them with /permissions" },
+    .{ .name = "permission", .where = .profile, .kind = .object, .map = true, .description = "Permission rules; fx permissions shows them" },
     .{ .name = "permission_mode", .where = .profile, .kind = .string, .values = &.{ "ask", "auto", "full-access", "yolo" }, .description = "How fx handles tool calls that need permission; yolo is an older name for full-access" },
     .{ .name = "prompt_history", .where = .profile, .kind = .switches, .children = &.{"enabled"}, .child_descriptions = &.{"Save prompts and slash commands for input history"}, .description = "Input history" },
-    .{ .name = "provider", .where = .profile, .kind = .string, .description = "The service for model requests: gateway, codex, grok, or a name under providers" },
+    .{ .name = "provider", .where = .profile, .kind = .string, .description = "The service for model requests: gateway or a name under providers" },
     .{ .name = "provider_order", .where = .project_safe, .kind = .strings, .max_items = 8, .description = "Preferred AI Gateway providers, in order; when unset, Anthropic models try Anthropic first" },
     .{ .name = "provider_strict", .where = .project_safe, .kind = .boolean, .description = "Send AI Gateway requests only to the providers in provider_order" },
     .{ .name = "providers", .where = .profile, .kind = .object, .map = true, .top_level_only = true, .description = "Named custom model connections" },
@@ -142,22 +136,33 @@ pub const keys = [_]Key{
     // Retired, but still read so that fx can explain the migration.
     .{ .name = "skill_match_fuzzy", .where = .profile, .kind = .refused, .description = "No longer supported; fx refuses a file that sets it, so remove it" },
     .{ .name = "skill_symlink_authorities", .where = .profile, .kind = .strings, .description = "Absolute directories that symlinked skills may resolve into" },
-    .{ .name = "slash_menu_categories", .where = .profile, .kind = .boolean, .description = "Show command categories and skill sources in slash menu results" },
+    .{ .name = "slash_menu_categories", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "sound", .where = .profile, .kind = .switches, .children = &sound_children, .child_descriptions = &sound_child_descriptions, .description = "Sounds" },
-    .{ .name = "startup_scrollback", .where = .profile, .kind = .boolean, .description = "Restore terminal output at startup" },
-    .{ .name = "statusLine", .where = .profile, .kind = .switches, .children = &status_line_children, .child_descriptions = &status_line_child_descriptions, .renamed_to = "status_line", .description = "Renamed to status_line" },
-    .{ .name = "status_line", .where = .profile, .kind = .switches, .children = &status_line_children, .child_descriptions = &status_line_child_descriptions, .description = "What the footer shows" },
+    .{ .name = "startup_scrollback", .where = .retired, .kind = .any, .description = retired_description },
+    .{ .name = "statusLine", .where = .retired, .kind = .any, .description = retired_description },
+    .{ .name = "status_line", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "theme", .where = .profile, .kind = .string, .description = "light, dark, or the name of a theme file in ~/.fx/themes" },
     .{ .name = "ultrafast_mode", .where = .profile, .kind = .boolean, .description = "Request the higher-priced Ultrafast tier for an eligible AI Gateway model" },
-    .{ .name = "update_channel", .where = .profile, .kind = .string, .values = &.{ "stable", "dev" }, .description = "Release channel for updates" },
+    .{ .name = "update_channel", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "web_fetch_worker_model", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "workspaces", .where = .profile, .kind = .workspaces, .map = true, .top_level_only = true, .description = "Overrides for each workspace, by absolute path" },
     .{ .name = "yolo_acknowledged", .where = .profile, .kind = .boolean, .description = "Managed by fx after you first confirm full-access mode" },
 };
 
+/// The keys a mistyped name may be suggested as. Retired keys are left out,
+/// so `startup_scrollback` isn't answered with "did you mean startup_scrollback?".
 const names = blk: {
-    var list: [keys.len][]const u8 = undefined;
-    for (keys, 0..) |key, index| list[index] = key.name;
+    var count: usize = 0;
+    for (keys) |key| {
+        if (key.where != .retired) count += 1;
+    }
+    var list: [count][]const u8 = undefined;
+    var index: usize = 0;
+    for (keys) |key| {
+        if (key.where == .retired) continue;
+        list[index] = key.name;
+        index += 1;
+    }
     break :blk list;
 };
 
@@ -176,7 +181,7 @@ pub fn ignoredInProject(name: []const u8) bool {
 }
 
 /// `path` under a renamed setting's current name, such as
-/// `status_line.context` for `statusLine.context`. Any other path comes back
+/// `sound.turn_end` for `notifications.turn_end`. Any other path comes back
 /// unchanged. The result is `path` or a string in the list.
 pub fn currentPath(path: []const u8) []const u8 {
     inline for (keys) |key| {
@@ -243,7 +248,7 @@ fn appendOlderNames(alloc: Allocator, found: *std.ArrayList(OlderName), object: 
 pub const UnknownKey = struct {
     /// The key, borrowed from the parsed settings.
     name: []const u8,
-    /// The object setting holding the key, such as `statusLine`, or null at
+    /// The object setting holding the key, such as `notifications`, or null at
     /// the top level.
     parent: ?[]const u8 = null,
     /// The workspace override holding the key, borrowed from the parsed
@@ -307,15 +312,15 @@ fn appendUnknown(
 pub const UnknownPart = struct {
     /// The part of the path that names no setting.
     name: []const u8,
-    /// The setting holding it, such as `statusLine`, or null at the top level.
+    /// The setting holding it, such as `sound`, or null at the top level.
     parent: ?[]const u8 = null,
     /// The known keys at the same level, for a "did you mean" suggestion.
     known: []const []const u8,
 };
 
 /// Null when a dotted `path` names a setting: a listed key, a fixed child
-/// such as `statusLine.context`, or any path into a map such as
-/// `models.codex`. Otherwise the part that isn't known. Retired keys aren't
+/// such as `notifications.max`, or any path into a map such as
+/// `models.gateway`. Otherwise the part that isn't known. Retired keys aren't
 /// settings. Slices borrow from `path` and the list.
 pub fn unknownPart(path: []const u8) ?UnknownPart {
     const dot = std.mem.findScalar(u8, path, '.');
@@ -351,17 +356,22 @@ test "every key says what it holds and what it does" {
 
 test "both spellings are reported only when fx would use the current one" {
     const alloc = std.testing.allocator;
-    const text =
-        \\{"notifications":{"turn_end":true},"sound":false,
-        \\ "statusLine":{"context":true},"status_line":{"context":false}}
-    ;
-    var parsed = try std.json.parseFromSlice(std.json.Value, alloc, text, .{});
-    defer parsed.deinit();
+    var unused = try std.json.parseFromSlice(std.json.Value, alloc,
+        \\{"notifications":{"turn_end":true},"sound":false}
+    , .{});
+    defer unused.deinit();
+    const none = try findOlderNames(alloc, unused.value, .profile);
+    defer alloc.free(none);
+    try std.testing.expectEqual(@as(usize, 0), none.len);
 
-    const found = try findOlderNames(alloc, parsed.value, .profile);
+    var used = try std.json.parseFromSlice(std.json.Value, alloc,
+        \\{"notifications":{"turn_end":true},"sound":{"turn_end":false}}
+    , .{});
+    defer used.deinit();
+    const found = try findOlderNames(alloc, used.value, .profile);
     defer alloc.free(found);
     try std.testing.expectEqual(@as(usize, 1), found.len);
-    try std.testing.expectEqualStrings("statusLine", found[0].older);
+    try std.testing.expectEqualStrings("notifications", found[0].older);
 }
 
 test "keys are unique and sorted so the list stays easy to scan" {
@@ -383,34 +393,40 @@ test "renamed settings point to a current key with the same children" {
 test "older names map to the current ones, in paths and in files" {
     const alloc = std.testing.allocator;
     const cases = [_]struct { path: []const u8, expected: []const u8 }{
-        .{ .path = "statusLine.context", .expected = "status_line.context" },
-        .{ .path = "statusLine", .expected = "status_line" },
         .{ .path = "notifications.max", .expected = "sound.max" },
-        .{ .path = "status_line.context", .expected = "status_line.context" },
-        .{ .path = "statusLine.contxt", .expected = "statusLine.contxt" },
+        .{ .path = "notifications", .expected = "sound" },
+        .{ .path = "sound.max", .expected = "sound.max" },
+        .{ .path = "notifications.mx", .expected = "notifications.mx" },
         .{ .path = "fast_mode", .expected = "fast_mode" },
     };
     for (cases) |case| try std.testing.expectEqualStrings(case.expected, currentPath(case.path));
     // A mistyped child of an older name is reported under the current one.
-    try std.testing.expectEqualStrings("status_line", unknownPart("statusLine.contxt").?.parent.?);
+    try std.testing.expectEqualStrings("sound", unknownPart("notifications.mx").?.parent.?);
 
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc,
-        \\{"statusLine":{"context":true},"status_line":{"context":false},"notifications":{"max":true},
+        \\{"notifications":{"max":true},"sound":{"max":false},
         \\ "workspaces":{"/w":{"notifications":{},"sound":{}},"/x":{"sound":{}}}}
     , .{});
     defer parsed.deinit();
     const twice = try findOlderNames(alloc, parsed.value, .profile);
     defer alloc.free(twice);
+    try std.testing.expectEqual(@as(usize, 2), twice.len);
+    try std.testing.expectEqualStrings("notifications", twice[0].older);
+    try std.testing.expectEqualStrings("sound", twice[0].current);
+    try std.testing.expect(twice[0].both and twice[0].workspace == null);
+    try std.testing.expectEqualStrings("notifications", twice[1].older);
+    try std.testing.expectEqualStrings("/w", twice[1].workspace.?);
+
     // A top-level older name is reported alone too, so fx doctor can say when
     // it stops working.
-    try std.testing.expectEqual(@as(usize, 3), twice.len);
-    try std.testing.expectEqualStrings("notifications", twice[0].older);
-    try std.testing.expect(!twice[0].both and twice[0].workspace == null);
-    try std.testing.expectEqualStrings("statusLine", twice[1].older);
-    try std.testing.expectEqualStrings("status_line", twice[1].current);
-    try std.testing.expect(twice[1].both and twice[1].workspace == null);
-    try std.testing.expectEqualStrings("notifications", twice[2].older);
-    try std.testing.expectEqualStrings("/w", twice[2].workspace.?);
+    var alone = try std.json.parseFromSlice(std.json.Value, alloc,
+        \\{"notifications":{"max":true}}
+    , .{});
+    defer alone.deinit();
+    const once = try findOlderNames(alloc, alone.value, .profile);
+    defer alloc.free(once);
+    try std.testing.expectEqual(@as(usize, 1), once.len);
+    try std.testing.expect(!once[0].both and once[0].workspace == null);
 }
 
 test "project files ignore profile keys but not project-safe or retired ones" {
@@ -423,14 +439,50 @@ test "project files ignore profile keys but not project-safe or retired ones" {
     try std.testing.expect(!ignoredInProject("not_a_setting"));
 }
 
+test "the ChatGPT and Grok model keys load as retired, not unknown" {
+    const alloc = std.testing.allocator;
+    var parsed = try std.json.parseFromSlice(std.json.Value, alloc,
+        \\{"codex_model":"gpt-5.4-mini","grok_model":"grok-4.20-0309-non-reasoning",
+        \\ "workspaces":{"/w":{"codex_model":"gpt-5.4-mini"}}}
+    , .{});
+    defer parsed.deinit();
+    const unknown = try findUnknown(alloc, parsed.value, .profile);
+    defer alloc.free(unknown);
+    try std.testing.expectEqual(@as(usize, 0), unknown.len);
+    try std.testing.expectEqual(Where.retired, find("codex_model").?.where);
+    try std.testing.expectEqual(Where.retired, find("grok_model").?.where);
+    try std.testing.expect(!ignoredInProject("codex_model"));
+}
+
+test "the terminal UI settings load as retired, not unknown" {
+    const alloc = std.testing.allocator;
+    var parsed = try std.json.parseFromSlice(std.json.Value, alloc,
+        \\{"collapse_tool_calls":true,"slash_menu_categories":false,"startup_scrollback":"off",
+        \\ "status_line":{"context":true,"sesion":true},"statusLine":7,
+        \\ "workspaces":{"/w":{"startup_scrollback":false,"statusLine":{"workspace":true}}}}
+    , .{});
+    defer parsed.deinit();
+    const unknown = try findUnknown(alloc, parsed.value, .profile);
+    defer alloc.free(unknown);
+    try std.testing.expectEqual(@as(usize, 0), unknown.len);
+    inline for (&.{ "collapse_tool_calls", "slash_menu_categories", "startup_scrollback", "status_line", "statusLine" }) |name| {
+        try std.testing.expectEqual(Where.retired, find(name).?.where);
+        try std.testing.expect(!ignoredInProject(name));
+        // `fx config` treats a retired key as no setting, as it does `auto_upgrade`.
+        try std.testing.expect(unknownPart(name) != null);
+    }
+    try std.testing.expect(unknownPart("status_line.context") != null);
+    try std.testing.expectEqualStrings("statusLine.context", currentPath("statusLine.context"));
+}
+
 test "unknown keys are found at the top level, in fixed objects, and in workspace overrides" {
     const alloc = std.testing.allocator;
     const text =
         \\{"fast_mdoe":true,"model":"m","maxxing_mode":1,"sandbox":"os",
-        \\ "statusLine":{"context":true,"contxt":false},
-        \\ "notifications":"off",
+        \\ "notifications":{"max":true,"mx":false},
+        \\ "sound":"off",
         \\ "models":{"anything":"m"},
-        \\ "workspaces":{"/w":{"effort":"high","efort":"low","statusLine":{"sesion":true}},"/bad":3}}
+        \\ "workspaces":{"/w":{"effort":"high","efort":"low","notifications":{"turnend":true}},"/bad":3}}
     ;
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, text, .{});
     defer parsed.deinit();
@@ -441,17 +493,17 @@ test "unknown keys are found at the top level, in fixed objects, and in workspac
 
     try std.testing.expectEqualStrings("fast_mdoe", unknown[0].name);
     try std.testing.expect(unknown[0].parent == null and unknown[0].workspace == null);
-    try std.testing.expectEqual(@as(usize, keys.len), unknown[0].known.len);
+    try std.testing.expectEqual(@as(usize, names.len), unknown[0].known.len);
 
-    try std.testing.expectEqualStrings("contxt", unknown[1].name);
-    try std.testing.expectEqualStrings("statusLine", unknown[1].parent.?);
+    try std.testing.expectEqualStrings("mx", unknown[1].name);
+    try std.testing.expectEqualStrings("notifications", unknown[1].parent.?);
     try std.testing.expectEqual(@as(usize, 3), unknown[1].known.len);
 
     try std.testing.expectEqualStrings("efort", unknown[2].name);
     try std.testing.expectEqualStrings("/w", unknown[2].workspace.?);
 
-    try std.testing.expectEqualStrings("sesion", unknown[3].name);
-    try std.testing.expectEqualStrings("statusLine", unknown[3].parent.?);
+    try std.testing.expectEqualStrings("turnend", unknown[3].name);
+    try std.testing.expectEqualStrings("notifications", unknown[3].parent.?);
     try std.testing.expectEqualStrings("/w", unknown[3].workspace.?);
 }
 
@@ -473,24 +525,25 @@ test "a project file is checked at its top level only" {
 }
 
 test "dotted paths name listed keys, fixed children, and paths into maps" {
-    for ([_][]const u8{ "fast_mode", "status_line", "status_line.context", "statusLine.context", "models", "models.codex", "providers.local.base_url" }) |path| {
+    for ([_][]const u8{ "fast_mode", "sound", "sound.max", "notifications.max", "models", "models.gateway", "providers.local.base_url" }) |path| {
         try std.testing.expect(unknownPart(path) == null);
     }
 
     const top = unknownPart("fast_mdoe").?;
     try std.testing.expectEqualStrings("fast_mdoe", top.name);
-    try std.testing.expect(top.parent == null and top.known.len == keys.len);
+    try std.testing.expect(top.parent == null and top.known.len == names.len);
+    for (top.known) |name| try std.testing.expect(find(name).?.where != .retired);
 
-    const child = unknownPart("status_line.contxt").?;
-    try std.testing.expectEqualStrings("contxt", child.name);
-    try std.testing.expectEqualStrings("status_line", child.parent.?);
+    const child = unknownPart("sound.mx").?;
+    try std.testing.expectEqualStrings("mx", child.name);
+    try std.testing.expectEqualStrings("sound", child.parent.?);
     try std.testing.expectEqual(@as(usize, 3), child.known.len);
 
     const under_value = unknownPart("fast_mode.on").?;
     try std.testing.expectEqualStrings("on", under_value.name);
     try std.testing.expectEqual(@as(usize, 0), under_value.known.len);
 
-    try std.testing.expect(unknownPart("statusLine.context.x") != null);
+    try std.testing.expect(unknownPart("notifications.max.x") != null);
     try std.testing.expect(unknownPart("maxxing_mode") != null);
 }
 

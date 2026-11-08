@@ -199,7 +199,8 @@ pub fn loadConversationPermissionState(
 }
 
 /// The checkpoint `recovery.json` holds for the log's last seq, or null when
-/// it names an earlier one (v1 drops it). Caller owns the result.
+/// it names an earlier one (v1 drops it) or a removed ChatGPT or Grok sign-in.
+/// Caller owns the result.
 pub fn loadConversationRecoveryCheckpoint(
     alloc: Allocator,
     dir: *io_mod.VerifiedDir,
@@ -229,6 +230,7 @@ pub fn loadConversationRecoveryCheckpoint(
     if (parsed.value.conversation_seq != conversation_seq) return error.InvalidRecoveryCheckpoint;
     return session_codec.parseRecoveryCheckpoint(alloc, parsed.value.checkpoint) catch |err| switch (err) {
         error.OutOfMemory => return err,
+        error.RemovedProvider => return null,
         else => return error.InvalidRecoveryCheckpoint,
     };
 }

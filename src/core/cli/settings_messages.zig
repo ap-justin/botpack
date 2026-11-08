@@ -16,8 +16,8 @@ pub fn closest(name: []const u8, known: []const []const u8) ?[]const u8 {
     return nearest.best;
 }
 
-/// `unknown setting statusLine.contxt in ~/.fx/settings.json (did you mean
-/// statusLine.context?)`, for a key found in a settings file. Caller owns the
+/// `unknown setting notifications.mx in ~/.fx/settings.json (did you mean
+/// notifications.max?)`, for a key found in a settings file. Caller owns the
 /// result.
 pub fn formatUnknownSetting(alloc: Allocator, key: settings_keys.UnknownKey, display_path: []const u8) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(alloc);
@@ -31,9 +31,8 @@ pub fn formatUnknownSetting(alloc: Allocator, key: settings_keys.UnknownKey, dis
     return out.toOwnedSlice();
 }
 
-/// `statusLine and status_line are both set in ~/.fx/settings.json; fx uses
-/// status_line where they differ, so remove statusLine`. Caller owns the
-/// result.
+/// `notifications and sound are both set in ~/.fx/settings.json; fx uses
+/// sound where they differ, so remove notifications`. Caller owns the result.
 pub fn formatOlderName(alloc: Allocator, twice: settings_keys.OlderName, display_path: []const u8) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(alloc);
     errdefer out.deinit();
@@ -99,9 +98,9 @@ test "unknown settings name the file, the workspace, and the closest key" {
             .expected = "unknown setting fast_mdoe in ~/.fx/settings.json (did you mean fast_mode?)",
         },
         .{
-            .key = .{ .name = "contxt", .parent = "statusLine", .workspace = "/w", .known = &.{ "context", "session" } },
+            .key = .{ .name = "mx", .parent = "notifications", .workspace = "/w", .known = &.{ "max", "turn_end" } },
             .file = "~/.fx/settings.json",
-            .expected = "unknown setting statusLine.contxt in ~/.fx/settings.json for workspace /w (did you mean statusLine.context?)",
+            .expected = "unknown setting notifications.mx in ~/.fx/settings.json for workspace /w (did you mean notifications.max?)",
         },
         .{
             .key = .{ .name = "colour", .known = &.{ "model", "theme" } },
@@ -118,9 +117,9 @@ test "unknown settings name the file, the workspace, and the closest key" {
 
 test "a setting under both its older and its current name names the one to remove" {
     const alloc = std.testing.allocator;
-    const top = try formatOlderName(alloc, .{ .older = "statusLine", .current = "status_line" }, "~/.fx/settings.json");
+    const top = try formatOlderName(alloc, .{ .older = "notifications", .current = "sound" }, "~/.fx/settings.json");
     defer alloc.free(top);
-    try std.testing.expectEqualStrings("statusLine and status_line are both set in ~/.fx/settings.json; fx uses status_line where they differ, so remove statusLine", top);
+    try std.testing.expectEqualStrings("notifications and sound are both set in ~/.fx/settings.json; fx uses sound where they differ, so remove notifications", top);
     const workspace = try formatOlderName(alloc, .{ .older = "notifications", .current = "sound", .workspace = "/w" }, "~/.fx/settings.json");
     defer alloc.free(workspace);
     try std.testing.expectEqualStrings("notifications and sound are both set in ~/.fx/settings.json for workspace /w; fx uses sound where they differ, so remove notifications", workspace);
@@ -128,9 +127,9 @@ test "a setting under both its older and its current name names the one to remov
 
 test "an older setting name or a saved yolo names the release that drops it" {
     const alloc = std.testing.allocator;
-    const older = try formatOlderName(alloc, .{ .older = "statusLine", .current = "status_line", .both = false }, "~/.fx/settings.json");
+    const older = try formatOlderName(alloc, .{ .older = "notifications", .current = "sound", .both = false }, "~/.fx/settings.json");
     defer alloc.free(older);
-    try std.testing.expectEqualStrings("statusLine in ~/.fx/settings.json is deprecated and stops working in fx 0.0.18; rename it to status_line", older);
+    try std.testing.expectEqualStrings("notifications in ~/.fx/settings.json is deprecated and stops working in fx 0.0.18; rename it to sound", older);
     const yolo = try formatOldYolo(alloc, "/w", "~/.fx/settings.json");
     defer alloc.free(yolo);
     try std.testing.expectEqualStrings("permission_mode yolo in ~/.fx/settings.json for workspace /w is deprecated and stops working in fx 0.0.18; use full-access", yolo);
@@ -140,9 +139,11 @@ test "a mistyped key on the command line gets the closest known key" {
     const alloc = std.testing.allocator;
     const cases = [_]struct { path: []const u8, expected: []const u8 }{
         .{ .path = "fast_mdoe", .expected = "unknown setting fast_mdoe (did you mean fast_mode?)" },
-        .{ .path = "status_line.sesion", .expected = "unknown setting status_line.sesion (did you mean status_line.session?)" },
-        .{ .path = "statusLine.sesion", .expected = "unknown setting status_line.sesion (did you mean status_line.session?)" },
+        .{ .path = "sound.trun_end", .expected = "unknown setting sound.trun_end (did you mean sound.turn_end?)" },
         .{ .path = "fast_mode.on", .expected = "unknown setting fast_mode.on" },
+        // A retired key is no setting, and isn't offered as its own match.
+        .{ .path = "startup_scrollback", .expected = "unknown setting startup_scrollback" },
+        .{ .path = "auto_upgrade", .expected = "unknown setting auto_upgrade" },
     };
     for (cases) |case| {
         const message = try formatUnknownPath(alloc, settings_keys.unknownPart(case.path).?);

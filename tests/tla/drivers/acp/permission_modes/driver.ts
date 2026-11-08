@@ -8,7 +8,7 @@
 //   bun tests/tla/drivers/acp/permission_modes/driver.ts --label main   # from the repository root, after zig build
 //
 // No model calls: completions and reviewer answers come from the fake
-// Gateway in tests/e2e/tmux-helpers.ts. --worktree runs another checkout's build.
+// Gateway in tests/e2e/fake-gateway.ts. --worktree runs another checkout's build.
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Fixture, NO_VIEW, type Observation, loadHelpers, viewOf } from "./harness";

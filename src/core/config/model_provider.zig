@@ -5,8 +5,6 @@ const configured_provider = @import("configured_provider.zig");
 
 pub const ProviderId = union(enum) {
     gateway,
-    codex,
-    grok,
     configured: struct {
         bytes: [configured_provider.max_id_bytes]u8 = @splat(0),
         len: u8,
@@ -17,8 +15,6 @@ pub const ProviderId = union(enum) {
     pub fn label(self: *const ProviderId) []const u8 {
         return switch (self.*) {
             .gateway => "gateway",
-            .codex => "codex",
-            .grok => "grok",
             .configured => |*value| value.bytes[0..value.len],
         };
     }
@@ -105,12 +101,26 @@ pub const ProviderSelection = struct {
 
 pub fn parse(value: []const u8) ?ProviderId {
     if (std.ascii.eqlIgnoreCase(value, "gateway")) return .gateway;
-    if (std.ascii.eqlIgnoreCase(value, "codex")) return .codex;
-    if (std.ascii.eqlIgnoreCase(value, "grok")) return .grok;
     configured_provider.validate_id(value) catch return null;
     var result: ProviderId = .{ .configured = .{ .len = @intCast(value.len) } };
     @memcpy(result.configured.bytes[0..value.len], value);
     return result;
+}
+
+/// The built-in labels of the ChatGPT ("codex") and Grok sign-ins, which older
+/// builds wrote to settings and sessions. Both are valid configured-connection
+/// names too, so only a caller that knows no connection defines the name may
+/// treat it as removed.
+pub fn isRemovedSignIn(name: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(name, "codex") or std.ascii.eqlIgnoreCase(name, "grok");
+}
+
+/// Like `parse_saved`, but a bare removed sign-in label is `RemovedProvider`.
+/// A saved configured connection is always `{name, binding}`, so a bare string
+/// naming one can only have come from an older build's built-in provider.
+pub fn parse_saved_or_removed(value: std.json.Value) error{ InvalidProviderBinding, RemovedProvider }!ProviderId {
+    if (value == .string and isRemovedSignIn(value.string)) return error.RemovedProvider;
+    return parse_saved(value);
 }
 
 pub fn parse_saved(value: std.json.Value) error{InvalidProviderBinding}!ProviderId {
@@ -135,23 +145,15 @@ pub fn authorizesCredential(provider: ProviderId, source: ?types.CredentialSourc
     const selected = source orelse return false;
     if (selected == .host_managed) return true;
     return switch (provider) {
-        .gateway => selected != .chatgpt_subscription and selected != .grok_subscription and selected != .configured,
+        .gateway => selected != .configured,
         .configured => selected == .configured,
-        .codex => selected == .chatgpt_subscription,
-        .grok => selected == .grok_subscription,
     };
 }
 
 test "explicit providers authorize only their own credential origins" {
     try std.testing.expect(authorizesCredential(.gateway, .ai_gateway_api_key));
     try std.testing.expect(authorizesCredential(.gateway, .fx_login));
-    try std.testing.expect(!authorizesCredential(.gateway, .chatgpt_subscription));
-    try std.testing.expect(authorizesCredential(.codex, .chatgpt_subscription));
-    try std.testing.expect(!authorizesCredential(.codex, .ai_gateway_api_key));
-    try std.testing.expect(!authorizesCredential(.codex, null));
-    try std.testing.expect(authorizesCredential(.grok, .grok_subscription));
-    try std.testing.expect(!authorizesCredential(.grok, .chatgpt_subscription));
-    try std.testing.expect(!authorizesCredential(.gateway, .grok_subscription));
+    try std.testing.expect(!authorizesCredential(.gateway, null));
 }
 
 test "configured provider identity serializes its binding and rejects rebinding" {
@@ -179,9 +181,7 @@ test "configured provider identity serializes its binding and rejects rebinding"
 
 test "provider equality compares tags before names and name keys stay name-only" {
     const gateway = parse("gateway").?;
-    const codex = parse("codex").?;
     try std.testing.expect(gateway.eql(parse("gateway").?));
-    try std.testing.expect(!gateway.eql(codex));
     try std.testing.expect(!gateway.eql(parse("local").?));
     const local = parse("local").?;
     try std.testing.expect(local.eql(parse("local").?));
@@ -197,11 +197,16 @@ test "provider equality compares tags before names and name keys stay name-only"
     try std.testing.expect(builtin_key.eqlProvider(gateway));
 }
 
+test "a bare saved ChatGPT or Grok label is removed, not an unbound connection" {
+    try std.testing.expectError(error.RemovedProvider, parse_saved_or_removed(.{ .string = "codex" }));
+    try std.testing.expectError(error.RemovedProvider, parse_saved_or_removed(.{ .string = "grok" }));
+    try std.testing.expectEqual(ProviderId.gateway, try parse_saved_or_removed(.{ .string = "gateway" }));
+    try std.testing.expectError(error.InvalidProviderBinding, parse_saved_or_removed(.{ .string = "local" }));
+    try std.testing.expect(!isRemovedSignIn("gateway"));
+}
+
 test "provider parsing recognizes builtins and validated configured names" {
     try std.testing.expectEqual(ProviderId.gateway, parse("gateway").?);
-    try std.testing.expectEqual(ProviderId.codex, parse("CODEX").?);
-    try std.testing.expectEqual(ProviderId.grok, parse("GROK").?);
-    try std.testing.expect(parse("openai-codex").? == .configured);
     try std.testing.expect(parse("bad/name") == null);
     try std.testing.expect(parse("") == null);
 }

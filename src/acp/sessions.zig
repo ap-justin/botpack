@@ -904,17 +904,15 @@ fn handleRestoreSession(
         durable.preferences.provider;
     const effective_model = if (state.process_model_override or state.process_provider_override)
         state.selected_model
+    else if (durable.preferences.provider_removed)
+        removedSignInReplacementModel(state)
     else
         durable.preferences.model;
     var staged_credential = server.prepareCredentialForProvider(state, effective_provider) catch |err| {
         if (err != error.ProviderCredentialUnavailable) return err;
         return state.writer.writeError(alloc, msg.id, .{
             .code = ErrorCode.invalid_request,
-            .message = if (effective_provider == .codex)
-                credentials.missing_chatgpt_credential_message
-            else if (effective_provider == .grok)
-                credentials.missing_grok_credential_message
-            else if (effective_provider == .configured)
+            .message = if (effective_provider == .configured)
                 "Configured provider authentication is unavailable"
             else
                 credentials.missing_credential_message,
@@ -1317,6 +1315,14 @@ const ConversionNotice = struct {
             debug_trace.logf("acp", "event=conversion_notice_dropped err={s}", .{@errorName(err)});
     }
 };
+
+/// The Gateway model a session saved under a removed ChatGPT or Grok sign-in
+/// opens with: that provider's model ids aren't Gateway ids, so the user's
+/// default replaces it. `selected_model` is that default only when the
+/// startup provider is Gateway.
+fn removedSignInReplacementModel(state: *const server.ServerState) []const u8 {
+    return if (state.provider == .gateway) state.selected_model else state.cfg.default_model;
+}
 
 fn handleLoadFailure(
     state: *server.ServerState,
@@ -2071,9 +2077,8 @@ pub fn writeProviderConfigOption(
 ) !void {
     try w.writeAll("{\"id\":\"provider\",\"name\":\"Provider\",\"category\":\"model\",\"type\":\"select\",\"currentValue\":");
     try writeJsonStr(current.label(), w);
-    try w.writeAll(",\"options\":[{\"value\":\"gateway\",\"name\":\"Vercel AI Gateway\"},{\"value\":\"codex\",\"name\":\"Codex subscription\"}");
+    try w.writeAll(",\"options\":[{\"value\":\"gateway\",\"name\":\"Vercel AI Gateway\"}");
     if (comptime !host_target.is_wasm) {
-        try w.writeAll(",{\"value\":\"grok\",\"name\":\"Grok subscription\"}");
         for (definitions) |definition| {
             try w.writeAll(",{\"value\":");
             try writeJsonStr(definition.id, w);

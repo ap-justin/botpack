@@ -13,7 +13,6 @@ const project_config = @import("../mcp/project_config.zig");
 const model_provider = @import("model_provider.zig");
 const model_preferences = @import("model_preferences.zig");
 const configured_provider = @import("configured_provider.zig");
-const update_target = @import("../upgrade/update_target.zig");
 pub const context_limits = @import("context_limits.zig");
 
 const Allocator = std.mem.Allocator;
@@ -61,20 +60,12 @@ pub const Settings = struct {
     /// to the gateway. Freed in deinit.
     provider_order: ?[][]const u8 = null,
     provider_strict: ?bool = null,
-    slash_menu_categories: ?bool = null,
-    collapse_tool_calls: ?bool = null,
-    auto_upgrade: ?bool = null,
-    update_channel: ?update_target.Channel = null,
     theme: ?[]const u8 = null,
-    startup_scrollback: ?bool = null,
     prompt_history_enabled: ?bool = null,
     effort: ?types.ReasoningEffort = null,
     /// Optional review-model override for automatic permission review. Owned by
     /// this Settings; freed in deinit. Null keeps the provider's default.
     review_model: ?[]const u8 = null,
-    statusline_context: ?bool = null,
-    statusline_session: ?bool = null,
-    statusline_workspace: ?bool = null,
     session_titles: ?bool = null,
     /// Ping a waiting Claude conversation's prompt cache so it stays alive.
     cache_warming: ?bool = null,
@@ -148,12 +139,7 @@ pub const ConfigSources = struct {
     fast_mode: ConfigSource = .compiled_default,
     ultrafast_mode: ConfigSource = .compiled_default,
     fast_mode_model_bound: ConfigSource = .compiled_default,
-    slash_menu_categories: ConfigSource = .compiled_default,
-    collapse_tool_calls: ConfigSource = .compiled_default,
-    startup_scrollback: ConfigSource = .compiled_default,
     prompt_history_enabled: ConfigSource = .compiled_default,
-    statusline_context: ConfigSource = .compiled_default,
-    statusline_session: ConfigSource = .compiled_default,
     session_titles: ConfigSource = .compiled_default,
     cache_warming: ConfigSource = .compiled_default,
     notification_turn_end: ConfigSource = .compiled_default,
@@ -221,6 +207,8 @@ pub const ConfigDiagnosticCause = enum {
     invalid_additional_directories,
     invalid_skill_symlink_authorities,
     invalid_ultrafast_mode_override,
+    removed_sign_in_provider,
+    removed_sign_in_credential_source,
 };
 
 pub const ConfigDiagnostic = struct {
@@ -238,6 +226,10 @@ pub const ConfigDiagnostic = struct {
         return switch (self.cause) {
             .private_state_permissions_tightened => profile_paths.displayText("Other users could write to ~/.fx, so fx took that access away. " ++
                 "If you didn't write ~/.fx/settings.json yourself, check it."),
+            .removed_sign_in_provider => "fx no longer supports ChatGPT or Grok sign-in, so it is using AI Gateway. " ++
+                "Run fx provider gateway to save that choice.",
+            .removed_sign_in_credential_source => "fx no longer supports ChatGPT or Grok sign-in, so it ignored the saved credential choice. " ++
+                "Run fx login to choose another.",
             else => null,
         };
     }
@@ -325,8 +317,6 @@ pub fn modelEnvOverride() ?[]const u8 {
 }
 
 pub const ModelSelectionError = error{
-    CodexModelNotSelected,
-    GrokModelNotSelected,
     ConfiguredModelNotSelected,
 };
 
@@ -343,8 +333,6 @@ pub fn selectProviderModel(
     const provider = provider_override orelse settings.provider orelse .gateway;
     const model = settings.models.get(provider) orelse switch (provider) {
         .gateway => default_model,
-        .codex => run_model orelse return error.CodexModelNotSelected,
-        .grok => run_model orelse return error.GrokModelNotSelected,
         .configured => run_model orelse return error.ConfiguredModelNotSelected,
     };
     return .{ .provider = provider, .model = model };
@@ -354,27 +342,63 @@ pub fn selectProviderModel(
 /// under "providers". `fx provider` and `fx ask --provider` both print it.
 pub fn unknownProviderMessage(alloc: Allocator, name: []const u8) ![]u8 {
     return alloc.print(
-        "unknown provider {s}; expected gateway, codex, grok, or a name under \"providers\" in {s}",
+        "unknown provider {s}; expected gateway or a name under \"providers\" in {s}",
         .{ name, profile_paths.displayText("~/.fx/settings.json") },
     );
+}
+
+/// The unbound provider name the profile saves for `workspace_root`, its
+/// workspace override first; null when none is saved. Caller owns the result.
+pub fn savedProviderNameAlloc(alloc: Allocator, workspace_root: []const u8) !?[]u8 {
+    var paths = try discoverPaths(alloc, workspace_root);
+    defer paths.deinit(alloc);
+    const bytes = (try readOptionalUserSettingsFile(alloc, paths)) orelse return null;
+    defer alloc.free(bytes);
+    var parsed = try std.json.parseFromSlice(std.json.Value, alloc, bytes, .{});
+    defer parsed.deinit();
+    if (parsed.value != .object) return null;
+    const workspace = if (parsed.value.object.get("workspaces")) |workspaces|
+        if (workspaces == .object) workspaces.object.get(paths.workspace_root) else null
+    else
+        null;
+    for ([_]?std.json.Value{ workspace, parsed.value }) |layer| {
+        const object = layer orelse continue;
+        if (object != .object) continue;
+        const name = object.object.get("provider") orelse continue;
+        if (name == .string) return try alloc.dupe(u8, name.string);
+    }
+    return null;
 }
 
 /// User-facing guidance for a `ModelSelectionError`, or null for any other error.
 pub fn modelNotSelectedMessage(err: anyerror) ?[]const u8 {
     const for_this_run = "or set a model for this run with --model or FX_MODEL";
     return switch (err) {
-        error.CodexModelNotSelected => "no Codex model is selected; run `fx provider codex` to choose one, " ++ for_this_run,
-        error.GrokModelNotSelected => "no Grok model is selected; run `fx provider grok` to choose one, " ++ for_this_run,
         error.ConfiguredModelNotSelected => profile_paths.displayText("no model is selected for this connection; save one under \"models\" in ~/.fx/settings.json, " ++ for_this_run),
         else => null,
     };
 }
 
-fn resolve_provider_selection(settings: *Settings) !void {
+/// Returns true when the saved provider was a removed sign-in label that no
+/// connection under "providers" defines; that selection is dropped, so the run
+/// falls back to Gateway unless FX_PROVIDER picks another.
+fn resolve_provider_selection(settings: *Settings) !bool {
+    const dropped = dropRemovedSignInProvider(settings);
     if (providerEnvOverride()) |raw| {
         settings.provider = model_provider.parse(raw) orelse return error.InvalidProviderValue;
     }
     if (settings.provider) |provider| settings.provider = try provider.bind(settings.providers orelse .{});
+    return dropped;
+}
+
+fn dropRemovedSignInProvider(settings: *Settings) bool {
+    const provider = settings.provider orelse return false;
+    if (provider != .configured or !model_provider.isRemovedSignIn(provider.label())) return false;
+    if (settings.providers) |registry| {
+        if (registry.get(provider.label()) != null) return false;
+    }
+    settings.provider = null;
+    return true;
 }
 
 /// Reads only profile-global connection definitions. Caller owns the registry.
@@ -574,7 +598,6 @@ fn loadMergedSettingsDetailedWithOptionalHome(
                     &detailed_merge_state,
                     parsed.value,
                     .project,
-                    false,
                     .project,
                     .project,
                     .none,
@@ -605,7 +628,6 @@ fn loadMergedSettingsDetailedWithOptionalHome(
             &detailed_merge_state,
             parsed.value,
             .profile,
-            false,
             .user,
             .user_global,
             .user,
@@ -645,7 +667,6 @@ fn loadMergedSettingsDetailedWithOptionalHome(
                         &detailed_merge_state,
                         workspace_value,
                         .profile,
-                        true,
                         .user,
                         .user_workspace,
                         .local,
@@ -655,7 +676,14 @@ fn loadMergedSettingsDetailedWithOptionalHome(
         }
     }
 
-    try resolve_provider_selection(&settings);
+    if (try resolve_provider_selection(&settings) and providerEnvOverride() == null) {
+        sources.provider = .compiled_default;
+        try diagnostics.append(alloc, .{
+            .layer = .user,
+            .cause = .removed_sign_in_provider,
+            .setting_key = try alloc.dupe(u8, "provider"),
+        });
+    }
     if (providerEnvOverride() != null) sources.provider = .process_override;
     if (modelEnvOverride() != null) {
         const override_provider = model_provider.NameKey.fromProvider(settings.provider orelse .gateway);
@@ -806,24 +834,11 @@ fn hasLegacyWorkspacePreferences(root: std.json.Value) bool {
             "fast_mode",
             "ultrafast_mode",
             "fast_mode_model_bound",
-            "slash_menu_categories",
-            "collapse_tool_calls",
-            "startup_scrollback",
         }) |key| {
             if (workspace.contains(key)) return true;
         }
         if (workspace.get("prompt_history")) |value| {
             if (value == .object and value.object.contains("enabled")) return true;
-        }
-        for ([_]?std.json.Value{ workspace.get("statusLine"), workspace.get("status_line") }) |group| {
-            if (group) |value| {
-                if (value == .object and
-                    (value.object.contains("context") or
-                        value.object.contains("session")))
-                {
-                    return true;
-                }
-            }
         }
     }
     return false;
@@ -863,7 +878,7 @@ fn salvageProviderRouting(alloc: Allocator, settings: *Settings, sources: *Confi
         routing_only.put(alloc, key, field) catch return error.OutOfMemory;
     }
     if (routing_only.count() == 0) return false;
-    var salvaged = parseSettingsValueForLayer(alloc, .{ .object = routing_only }, layer, false, false) catch |err| switch (err) {
+    var salvaged = parseSettingsValueForLayer(alloc, .{ .object = routing_only }, layer) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         else => return error.InvalidProviderRouting,
     };
@@ -897,14 +912,9 @@ fn updateConfigSources(sources: *ConfigSources, settings: Settings, source: Conf
     if (settings.fast_mode != null) sources.fast_mode = source;
     if (settings.ultrafast_mode != null) sources.ultrafast_mode = source;
     if (settings.fast_mode_model_bound != null) sources.fast_mode_model_bound = source;
-    if (settings.slash_menu_categories != null) sources.slash_menu_categories = source;
-    if (settings.collapse_tool_calls != null) sources.collapse_tool_calls = source;
     if (settings.session_titles != null) sources.session_titles = source;
     if (settings.cache_warming != null) sources.cache_warming = source;
-    if (settings.startup_scrollback != null) sources.startup_scrollback = source;
     if (settings.prompt_history_enabled != null) sources.prompt_history_enabled = source;
-    if (settings.statusline_context != null) sources.statusline_context = source;
-    if (settings.statusline_session != null) sources.statusline_session = source;
     if (settings.notification_turn_end != null) sources.notification_turn_end = source;
     if (settings.notification_attention_required != null) sources.notification_attention_required = source;
     if (settings.notification_max != null) sources.notification_max = source;
@@ -929,17 +939,21 @@ fn mergeDetailedSettingsLayer(
     state: *const DetailedSettingsMergeState,
     value: std.json.Value,
     settings_layer: SettingsLayer,
-    tolerate_non_object_user_containers: bool,
     diagnostic_layer: ConfigLayer,
     source: ConfigSource,
     permission_source: DetailedPermissionSource,
 ) !void {
+    if (diagnostic_layer == .user and savesRemovedCredentialSource(value)) {
+        try state.diagnostics.append(alloc, .{
+            .layer = .user,
+            .cause = .removed_sign_in_credential_source,
+            .setting_key = try alloc.dupe(u8, "credential_source"),
+        });
+    }
     if (parseSettingsValueForLayer(
         alloc,
         value,
         if (source == .user_workspace) .profile_workspace else settings_layer,
-        tolerate_non_object_user_containers,
-        source != .user_workspace,
     )) |layer_settings| {
         var incoming = layer_settings;
         defer incoming.deinit(alloc);
@@ -948,9 +962,7 @@ fn mergeDetailedSettingsLayer(
             .user_workspace => .user_workspace,
             else => .compiled_default,
         });
-        if (source == .user_workspace) {
-            incoming.update_channel = null;
-        }
+        if (source == .user_workspace) {}
         updateConfigSources(state.sources, incoming, source);
         if (incoming.has_permission_rules) {
             switch (permission_source) {
@@ -981,6 +993,12 @@ fn mergeDetailedSettingsLayer(
             .cause = diagnosticCauseForParseError(err),
         });
     }
+}
+
+fn savesRemovedCredentialSource(value: std.json.Value) bool {
+    if (value != .object) return false;
+    const source = value.object.get("credential_source") orelse return false;
+    return source == .string and types.isRemovedCredentialSource(source.string);
 }
 
 fn diagnosticCauseForParseError(err: anyerror) ConfigDiagnosticCause {
@@ -1056,7 +1074,6 @@ pub fn userSettingsPath(alloc: Allocator) !?[]u8 {
 pub const AllowlistResetScope = settings_store.AllowlistResetScope;
 pub const PermissionMutation = settings_store.PermissionMutation;
 pub const PermissionScope = settings_store.PermissionScope;
-pub const StatuslineItem = settings_store.StatuslineItem;
 pub const UserSettingsPatch = settings_store.UserSettingsPatch;
 pub const WorkspaceDirectoryMutation = settings_store.WorkspaceDirectoryMutation;
 pub const CommitOutcome = settings_store.CommitOutcome;
@@ -1255,18 +1272,18 @@ pub fn loadMergedSettingsFromPaths(alloc: Allocator, paths: Paths) !Settings {
 
         try mergeSettingsFile(&settings, alloc, paths.workspace_settings);
 
-        var user_settings = try parseSettingsValueForLayer(alloc, parsed.value, .profile, false, true);
+        var user_settings = try parseSettingsValueForLayer(alloc, parsed.value, .profile);
         defer user_settings.deinit(alloc);
         user_settings.context_limits.retag(.user_global);
         try mergeSettings(&settings, &user_settings, alloc);
 
         try mergeWorkspaceOverridesFromValue(&settings, alloc, parsed.value, paths.workspace_root);
-        try resolve_provider_selection(&settings);
+        _ = try resolve_provider_selection(&settings);
         return settings;
     }
 
     try mergeSettingsFile(&settings, alloc, paths.workspace_settings);
-    try resolve_provider_selection(&settings);
+    _ = try resolve_provider_selection(&settings);
     return settings;
 }
 
@@ -1357,9 +1374,8 @@ fn mergeWorkspaceOverridesFromValue(target: *Settings, alloc: Allocator, root_va
     const override_val = workspaces_val.object.get(workspace_root) orelse return;
     if (override_val != .object) return;
 
-    var override_settings = try parseSettingsValueForLayer(alloc, override_val, .profile_workspace, true, false);
+    var override_settings = try parseSettingsValueForLayer(alloc, override_val, .profile_workspace);
     defer override_settings.deinit(alloc);
-    override_settings.update_channel = null;
     override_settings.context_limits.retag(.user_workspace);
     try mergeSettings(target, &override_settings, alloc);
 }
@@ -1390,7 +1406,7 @@ fn readOptionalFile(alloc: Allocator, path: []const u8) !?[]u8 {
 }
 
 /// One `--config key=value` for a single run, with the value already checked
-/// and in settings-file form. The key is dotted, such as `statusLine.context`.
+/// and in settings-file form. The key is dotted, such as `sound.turn_end`.
 pub const SettingOverride = struct {
     key: []const u8,
     value: std.json.Value,
@@ -1457,7 +1473,7 @@ pub fn applySettingOverrides(alloc: Allocator, settings: *Settings, overrides: [
         try parent.value_ptr.object.put(scratch, override.key[dot + 1 ..], override.value);
     }
 
-    var incoming = try parseSettingsValueForLayer(alloc, .{ .object = root }, .profile, false, true);
+    var incoming = try parseSettingsValueForLayer(alloc, .{ .object = root }, .profile);
     defer incoming.deinit(alloc);
     try mergeSettings(settings, &incoming, alloc);
     // Like git's GIT_* variables over -c, an FX_* override still wins.
@@ -1480,7 +1496,7 @@ fn parseSettingsJson(alloc: Allocator, json_text: []const u8) !Settings {
 fn parseSettingsJsonForLayer(alloc: Allocator, json_text: []const u8, layer: SettingsLayer) !Settings {
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, json_text, .{});
     defer parsed.deinit();
-    return parseSettingsValueForLayer(alloc, parsed.value, layer, false, true);
+    return parseSettingsValueForLayer(alloc, parsed.value, layer);
 }
 
 const JsonStringToken = struct {
@@ -1657,8 +1673,6 @@ fn parseSettingsValueForLayer(
     alloc: Allocator,
     root: std.json.Value,
     layer: SettingsLayer,
-    tolerate_non_object_user_containers: bool,
-    parse_workspace_statusline: bool,
 ) !Settings {
     if (root != .object) return error.InvalidSettingsShape;
 
@@ -1668,13 +1682,7 @@ fn parseSettingsValueForLayer(
     if (layer == .profile) {
         if (root.object.get("providers")) |value| settings.providers = try configured_provider.Registry.parse(alloc, value);
     }
-    if (layer != .project) try parseProfileOnlyFields(
-        &settings,
-        alloc,
-        root,
-        tolerate_non_object_user_containers,
-        parse_workspace_statusline,
-    );
+    if (layer != .project) try parseProfileOnlyFields(&settings, alloc, root);
     try parseProjectSafeFields(&settings, alloc, root);
 
     return settings;
@@ -1684,8 +1692,6 @@ fn parseProfileOnlyFields(
     settings: *Settings,
     alloc: Allocator,
     root: std.json.Value,
-    tolerate_non_object_user_containers: bool,
-    parse_workspace_statusline: bool,
 ) !void {
     if (root.object.contains("skill_match_fuzzy")) return error.RetiredSkillMatchFuzzy;
     if (root.object.get("auto_compact_percent")) |value| {
@@ -1704,18 +1710,6 @@ fn parseProfileOnlyFields(
         if (provider_value != .string) return error.InvalidProviderType;
         settings.provider = model_provider.parse(provider_value.string) orelse
             return error.InvalidProviderValue;
-    }
-
-    if (root.object.get("codex_model")) |model_value| {
-        if (model_value != .string) return error.InvalidCodexModelType;
-        settings_store.validateModel(model_value.string) catch return error.InvalidCodexModelValue;
-        try settings.models.putCopy(alloc, .codex, model_value.string);
-    }
-
-    if (root.object.get("grok_model")) |model_value| {
-        if (model_value != .string) return error.InvalidGrokModelType;
-        settings_store.validateModel(model_value.string) catch return error.InvalidGrokModelValue;
-        try settings.models.putCopy(alloc, .grok, model_value.string);
     }
 
     if (root.object.get("models")) |models_value| {
@@ -1738,8 +1732,10 @@ fn parseProfileOnlyFields(
 
     if (root.object.get("credential_source")) |credential_source_value| {
         if (credential_source_value != .string) return error.InvalidCredentialSourceType;
-        settings.credential_source = types.parseCredentialSource(credential_source_value.string) orelse
-            return error.InvalidCredentialSource;
+        if (!types.isRemovedCredentialSource(credential_source_value.string)) {
+            settings.credential_source = types.parseCredentialSource(credential_source_value.string) orelse
+                return error.InvalidCredentialSource;
+        }
     }
 
     if (root.object.get("yolo_acknowledged")) |acknowledged_value| {
@@ -1792,18 +1788,6 @@ fn parseProfileOnlyFields(
         settings.fast_mode_model_bound = bound_value.bool;
     }
 
-    if (root.object.get("slash_menu_categories")) |slash_menu_categories_value| {
-        const value = slash_menu_categories_value;
-        if (value != .bool) return error.InvalidSlashMenuCategoriesType;
-        settings.slash_menu_categories = value.bool;
-    }
-
-    if (root.object.get("collapse_tool_calls")) |collapse_tool_calls_value| {
-        const value = collapse_tool_calls_value;
-        if (value != .bool) return error.InvalidCollapseToolCallsType;
-        settings.collapse_tool_calls = value.bool;
-    }
-
     if (root.object.get("session_titles")) |session_titles_value| {
         const value = session_titles_value;
         if (value != .bool) return error.InvalidSessionTitlesType;
@@ -1815,29 +1799,10 @@ fn parseProfileOnlyFields(
         settings.cache_warming = value.bool;
     }
 
-    if (root.object.get("auto_upgrade")) |auto_upgrade_value| {
-        const value = auto_upgrade_value;
-        if (value != .bool) return error.InvalidAutoUpgradeType;
-        settings.auto_upgrade = value.bool;
-    }
-
-    if (root.object.get("update_channel")) |update_channel_value| {
-        const value = update_channel_value;
-        if (value != .string) return error.InvalidUpdateChannelType;
-        settings.update_channel = update_target.Channel.parse(value.string) orelse
-            return error.InvalidUpdateChannelValue;
-    }
-
     if (root.object.get("theme")) |theme_value| {
         const value = theme_value;
         if (value != .string) return error.InvalidThemeType;
         if (value.string.len > 0) settings.theme = try alloc.dupe(u8, value.string);
-    }
-
-    if (root.object.get("startup_scrollback")) |startup_scrollback_value| {
-        const value = startup_scrollback_value;
-        if (value != .bool) return error.InvalidStartupScrollbackType;
-        settings.startup_scrollback = value.bool;
     }
 
     if (root.object.get("skill_symlink_authorities")) |value| {
@@ -1863,37 +1828,10 @@ fn parseProfileOnlyFields(
         }
     }
 
-    // `status_line` and `sound` were `statusLine` and `notifications`. The
-    // older name is read first, so the current one wins any value both set.
-    // The current names were unknown keys before, which startup ignores, so a
-    // value under one that isn't an object is still ignored.
-    for ([_]?std.json.Value{ root.object.get("statusLine"), root.object.get("status_line") }, 0..) |group, index| {
-        if (group) |value| {
-            if (value != .object) {
-                if (index == 1) {
-                    debug_trace.logf("config", "ignoring status_line: not an object", .{});
-                    continue;
-                }
-                if (!tolerate_non_object_user_containers) return error.InvalidStatusLineType;
-            } else {
-                if (value.object.get("context")) |v| {
-                    if (v != .bool) return error.InvalidStatusLineContextType;
-                    settings.statusline_context = v.bool;
-                }
-                if (value.object.get("session")) |v| {
-                    if (v != .bool) return error.InvalidStatusLineSessionType;
-                    settings.statusline_session = v.bool;
-                }
-                if (parse_workspace_statusline) {
-                    if (value.object.get("workspace")) |v| {
-                        if (v != .bool) return error.InvalidStatusLineWorkspaceType;
-                        settings.statusline_workspace = v.bool;
-                    }
-                }
-            }
-        }
-    }
-
+    // `sound` was `notifications`. The older name is read first, so the
+    // current one wins any value both set. The current name was an unknown
+    // key before, which startup ignores, so a value under it that isn't an
+    // object is still ignored.
     for ([_]?std.json.Value{ root.object.get("notifications"), root.object.get("sound") }, 0..) |group, index| {
         if (group) |sound_value| {
             if (sound_value != .object) {
@@ -2046,18 +1984,13 @@ fn mergeSettings(target: *Settings, incoming: *Settings, alloc: Allocator) !void
         incoming.provider_order = null;
     }
     if (incoming.provider_strict) |value| target.provider_strict = value;
-    if (incoming.slash_menu_categories) |value| target.slash_menu_categories = value;
-    if (incoming.collapse_tool_calls) |value| target.collapse_tool_calls = value;
     if (incoming.session_titles) |value| target.session_titles = value;
     if (incoming.cache_warming) |value| target.cache_warming = value;
-    if (incoming.auto_upgrade) |value| target.auto_upgrade = value;
-    if (incoming.update_channel) |value| target.update_channel = value;
     if (incoming.theme) |value| {
         if (target.theme) |old| alloc.free(old);
         target.theme = value;
         incoming.theme = null;
     }
-    if (incoming.startup_scrollback) |value| target.startup_scrollback = value;
     if (incoming.skill_symlink_authorities) |value| {
         if (target.skill_symlink_authorities) |old| freeStringSlice(alloc, old);
         target.skill_symlink_authorities = value;
@@ -2071,9 +2004,6 @@ fn mergeSettings(target: *Settings, incoming: *Settings, alloc: Allocator) !void
         incoming.review_model = null;
     }
 
-    if (incoming.statusline_context) |value| target.statusline_context = value;
-    if (incoming.statusline_session) |value| target.statusline_session = value;
-    if (incoming.statusline_workspace) |value| target.statusline_workspace = value;
     if (incoming.notification_turn_end) |value| target.notification_turn_end = value;
     if (incoming.notification_attention_required) |value| target.notification_attention_required = value;
     if (incoming.notification_max) |value| target.notification_max = value;
@@ -2662,7 +2592,7 @@ test "loadStartupStatusSettings merges project defaults before profile layers" {
     try std.testing.expectEqual(@as(usize, 8), settings.max_agent_steps.?);
 }
 
-test "loadMergedSettings applies startup scrollback precedence with normalized workspace root" {
+test "loadMergedSettings applies workspace precedence with normalized workspace root" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
@@ -2675,7 +2605,7 @@ test "loadMergedSettings applies startup scrollback precedence with normalized w
     defer std.testing.allocator.free(workspace_root);
 
     const user_settings = try std.testing.allocator.print(
-        "{{\"startup_scrollback\":false,\"workspaces\":{{\"{s}\":{{\"startup_scrollback\":false}}}}}}",
+        "{{\"session_titles\":false,\"workspaces\":{{\"{s}\":{{\"session_titles\":false}}}}}}",
         .{workspace_root},
     );
     defer std.testing.allocator.free(user_settings);
@@ -2684,12 +2614,12 @@ test "loadMergedSettings applies startup scrollback precedence with normalized w
     defer std.testing.allocator.free(workspace_with_slash);
 
     try writeFixtureFile(tmp.dir, "home/.fx/settings.json", user_settings);
-    try writeFixtureFile(tmp.dir, "workspace/.fx.json", "{\"startup_scrollback\":true}");
+    try writeFixtureFile(tmp.dir, "workspace/.fx.json", "{\"session_titles\":true}");
 
     var settings = try loadMergedSettingsFromHome(std.testing.allocator, home_root, workspace_with_slash);
     defer settings.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(false, settings.startup_scrollback.?);
+    try std.testing.expectEqual(false, settings.session_titles.?);
 }
 
 test "max_agent_steps absence and explicit values resolve distinctly" {
@@ -2707,27 +2637,6 @@ test "max_agent_steps absence and explicit values resolve distinctly" {
     defer positive.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 50), positive.max_agent_steps.?);
     try std.testing.expectEqual(@as(usize, 50), agent_steps.resolveMaxAgentSteps(positive.max_agent_steps, 25));
-}
-
-test "provider settings keep independent provider models" {
-    var settings = try parseSettingsJson(
-        std.testing.allocator,
-        "{\"provider\":\"grok\",\"model\":\"gateway/model\",\"codex_model\":\"gpt-5.4-mini\",\"grok_model\":\"grok-4.20-0309-non-reasoning\"}",
-    );
-    defer settings.deinit(std.testing.allocator);
-    try std.testing.expectEqual(model_provider.ProviderId.grok, settings.provider.?);
-    try std.testing.expectEqualStrings("gateway/model", settings.models.get(.gateway).?);
-    try std.testing.expectEqualStrings("gpt-5.4-mini", settings.models.get(.codex).?);
-    try std.testing.expectEqualStrings("grok-4.20-0309-non-reasoning", settings.models.get(.grok).?);
-
-    var current = try parseSettingsJson(
-        std.testing.allocator,
-        "{\"model\":\"legacy/gateway\",\"codex_model\":\"legacy-codex\",\"models\":{\"gateway\":\"current/gateway\",\"codex\":\"current-codex\",\"grok\":\"current-grok\"}}",
-    );
-    defer current.deinit(std.testing.allocator);
-    try std.testing.expectEqualStrings("current/gateway", current.models.get(.gateway).?);
-    try std.testing.expectEqualStrings("current-codex", current.models.get(.codex).?);
-    try std.testing.expectEqualStrings("current-grok", current.models.get(.grok).?);
 }
 
 test "max_agent_steps explicit zero survives serialization round trip" {
@@ -2788,27 +2697,16 @@ test "retired presentation settings are ignored regardless of type" {
     try std.testing.expectEqualStrings("openai/gpt-5.4", settings.models.get(.gateway).?);
 }
 
-test "startup_scrollback parses merges rejects invalid type and round trips" {
-    var absent = try parseSettingsJson(std.testing.allocator, "{}");
-    defer absent.deinit(std.testing.allocator);
-    try std.testing.expect(absent.startup_scrollback == null);
-
-    var first = try parseSettingsJson(std.testing.allocator, "{\"startup_scrollback\":true}");
-    defer first.deinit(std.testing.allocator);
-    try std.testing.expectEqual(true, first.startup_scrollback.?);
-
-    var second = try parseSettingsJson(std.testing.allocator, "{\"startup_scrollback\":false}");
-    defer second.deinit(std.testing.allocator);
-    try mergeSettings(&first, &second, std.testing.allocator);
-    try std.testing.expectEqual(false, first.startup_scrollback.?);
-
-    try std.testing.expectError(error.InvalidStartupScrollbackType, parseSettingsJson(std.testing.allocator, "{\"startup_scrollback\":\"off\"}"));
-
-    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"startup_scrollback\":false}", .{});
-    defer parsed.deinit();
-    const json = try serializeJsonObject(std.testing.allocator, parsed.value);
-    defer std.testing.allocator.free(json);
-    try std.testing.expect(std.mem.find(u8, json, "\"startup_scrollback\":false") != null);
+test "the terminal UI settings load as retired and are ignored regardless of type" {
+    const alloc = std.testing.allocator;
+    inline for (&.{
+        "{\"model\":\"openai/gpt-5.4\",\"collapse_tool_calls\":true,\"slash_menu_categories\":false,\"startup_scrollback\":false,\"status_line\":{\"context\":true,\"session\":true,\"workspace\":true},\"statusLine\":{\"context\":true}}",
+        "{\"model\":\"openai/gpt-5.4\",\"collapse_tool_calls\":\"off\",\"slash_menu_categories\":1,\"startup_scrollback\":\"off\",\"status_line\":7,\"statusLine\":\"on\"}",
+    }) |text| {
+        var settings = try parseSettingsJson(alloc, text);
+        defer settings.deinit(alloc);
+        try std.testing.expectEqualStrings("openai/gpt-5.4", settings.models.get(.gateway).?);
+    }
 }
 
 test "skill_symlink_authorities parses replaces on merge and rejects invalid entries" {
@@ -2908,46 +2806,6 @@ test "invalid skill_symlink_authorities reports a specific diagnostic" {
     try std.testing.expect(found);
 }
 
-test "collapse tool calls parses merges and rejects invalid types" {
-    var absent = try parseSettingsJson(std.testing.allocator, "{}");
-    defer absent.deinit(std.testing.allocator);
-    try std.testing.expect(absent.collapse_tool_calls == null);
-
-    var first = try parseSettingsJson(std.testing.allocator, "{\"collapse_tool_calls\":true}");
-    defer first.deinit(std.testing.allocator);
-    try std.testing.expect(first.collapse_tool_calls.?);
-
-    var second = try parseSettingsJson(std.testing.allocator, "{\"collapse_tool_calls\":false}");
-    defer second.deinit(std.testing.allocator);
-    try mergeSettings(&first, &second, std.testing.allocator);
-    try std.testing.expect(!first.collapse_tool_calls.?);
-
-    try std.testing.expectError(
-        error.InvalidCollapseToolCallsType,
-        parseSettingsJson(std.testing.allocator, "{\"collapse_tool_calls\":\"off\"}"),
-    );
-}
-
-test "slash menu categories parses merges and rejects invalid types" {
-    var absent = try parseSettingsJson(std.testing.allocator, "{}");
-    defer absent.deinit(std.testing.allocator);
-    try std.testing.expect(absent.slash_menu_categories == null);
-
-    var first = try parseSettingsJson(std.testing.allocator, "{\"slash_menu_categories\":true}");
-    defer first.deinit(std.testing.allocator);
-    try std.testing.expectEqual(true, first.slash_menu_categories.?);
-
-    var second = try parseSettingsJson(std.testing.allocator, "{\"slash_menu_categories\":false}");
-    defer second.deinit(std.testing.allocator);
-    try mergeSettings(&first, &second, std.testing.allocator);
-    try std.testing.expectEqual(false, first.slash_menu_categories.?);
-
-    try std.testing.expectError(
-        error.InvalidSlashMenuCategoriesType,
-        parseSettingsJson(std.testing.allocator, "{\"slash_menu_categories\":\"off\"}"),
-    );
-}
-
 test "first_call_tool_choice parses merges and round trips" {
     var absent = try parseSettingsJson(std.testing.allocator, "{}");
     defer absent.deinit(std.testing.allocator);
@@ -3017,24 +2875,20 @@ test "review_model parses, merges, and yields to FX_REVIEW_MODEL" {
 test "renamed groups read either spelling and the current one wins" {
     const alloc = std.testing.allocator;
     var both = try parseSettingsJson(alloc,
-        \\{"status_line":{"context":true},"statusLine":{"context":false,"session":true},
-        \\ "sound":{"max":true},"notifications":{"max":false,"turn_end":true}}
+        \\{"sound":{"max":true},"notifications":{"max":false,"turn_end":true}}
     );
     defer both.deinit(alloc);
-    try std.testing.expect(both.statusline_context.? and both.statusline_session.?);
     try std.testing.expect(both.notification_max.? and both.notification_turn_end.?);
 
-    var older = try parseSettingsJson(alloc, "{\"statusLine\":{\"session\":true},\"notifications\":{\"attention_required\":false}}");
+    var older = try parseSettingsJson(alloc, "{\"notifications\":{\"attention_required\":false}}");
     defer older.deinit(alloc);
-    try std.testing.expect(older.statusline_session.?);
     try std.testing.expect(!older.notification_attention_required.?);
 
-    // The current names were unknown keys before the rename, so a stray value
-    // of another type under one is ignored, not a startup failure.
-    var stray = try parseSettingsJson(alloc, "{\"sound\":false,\"status_line\":7,\"notifications\":{\"max\":true}}");
+    // The current name was an unknown key before the rename, so a stray value
+    // of another type under it is ignored, not a startup failure.
+    var stray = try parseSettingsJson(alloc, "{\"sound\":false,\"notifications\":{\"max\":true}}");
     defer stray.deinit(alloc);
     try std.testing.expect(stray.notification_max.?);
-    try std.testing.expect(stray.statusline_context == null);
     try std.testing.expectError(error.InvalidNotificationsType, parseSettingsJson(alloc, "{\"notifications\":\"on\"}"));
 }
 
@@ -3052,21 +2906,21 @@ test "an FX_* override beats a setting override for one run" {
 
 test "setting overrides sit above the files, nest dotted keys, and keep the last value" {
     const alloc = std.testing.allocator;
-    var settings = try parseSettingsJson(alloc, "{\"fast_mode\":false,\"effort\":\"low\",\"theme\":\"dark\",\"statusLine\":{\"session\":true}}");
+    var settings = try parseSettingsJson(alloc, "{\"fast_mode\":false,\"effort\":\"low\",\"theme\":\"dark\",\"sound\":{\"turn_end\":true}}");
     defer settings.deinit(alloc);
 
     try applySettingOverrides(alloc, &settings, &.{
         .{ .key = "fast_mode", .value = .{ .bool = true } },
         .{ .key = "effort", .value = .{ .string = "medium" } },
         .{ .key = "effort", .value = .{ .string = "high" } },
-        .{ .key = "statusLine.context", .value = .{ .bool = true } },
-        .{ .key = "statusLine.workspace", .value = .{ .bool = true } },
+        .{ .key = "sound.max", .value = .{ .bool = true } },
+        .{ .key = "sound.attention_required", .value = .{ .bool = true } },
         .{ .key = "theme", .value = .{ .string = "light" } },
     });
     try std.testing.expect(settings.fast_mode.?);
     try std.testing.expectEqualStrings("high", settings.effort.?.label());
-    try std.testing.expect(settings.statusline_context.? and settings.statusline_workspace.?);
-    try std.testing.expect(settings.statusline_session.?);
+    try std.testing.expect(settings.notification_max.? and settings.notification_attention_required.?);
+    try std.testing.expect(settings.notification_turn_end.?);
     try std.testing.expectEqualStrings("light", settings.theme.?);
 
     try applySettingOverrides(alloc, &settings, &.{});
@@ -3752,7 +3606,7 @@ test "user fast mode preference writes bool and preserves unrelated keys" {
     try std.testing.expect((try workspaceOverrideObject(&parsed.value, workspace_root)).get("fast_mode") == null);
 }
 
-test "user startup scrollback preference writes bool and preserves unrelated keys" {
+test "user session titles preference writes bool and preserves unrelated keys" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
@@ -3775,7 +3629,7 @@ test "user startup scrollback preference writes bool and preserves unrelated key
 
     var outcome = try setUserPreferences(
         std.testing.allocator,
-        .{ .startup_scrollback = false },
+        .{ .session_titles = false },
     );
     defer outcome.deinit(std.testing.allocator);
 
@@ -3783,14 +3637,14 @@ test "user startup scrollback preference writes bool and preserves unrelated key
     defer settings.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("my-model", settings.models.get(.gateway).?);
     try std.testing.expectEqual(types.PermissionMode.auto, settings.permission_mode.?);
-    try std.testing.expectEqual(false, settings.startup_scrollback.?);
+    try std.testing.expectEqual(false, settings.session_titles.?);
 
     const bytes = try readSettingsBytesForTest(std.testing.allocator, home_root);
     defer std.testing.allocator.free(bytes);
     var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, bytes, .{});
     defer parsed.deinit();
-    try std.testing.expectEqual(false, parsed.value.object.get("startup_scrollback").?.bool);
-    try std.testing.expect((try workspaceOverrideObject(&parsed.value, workspace_root)).get("startup_scrollback") == null);
+    try std.testing.expectEqual(false, parsed.value.object.get("session_titles").?.bool);
+    try std.testing.expect((try workspaceOverrideObject(&parsed.value, workspace_root)).get("session_titles") == null);
 }
 
 test "project profile-only settings are ignored and diagnosed by key" {
@@ -3821,34 +3675,25 @@ test "project profile-only settings are ignored and diagnosed by key" {
     try std.testing.expectEqual(types.PermissionMode.auto, result.settings.permission_mode.?);
     try std.testing.expectEqual(@as(usize, 17), result.settings.max_agent_steps.?);
     try std.testing.expectEqual(true, result.settings.prompt_history_enabled.?);
-    try std.testing.expectEqual(false, result.settings.statusline_context.?);
     try std.testing.expectEqual(types.ToolChoice.none, result.settings.first_call_tool_choice.?);
     try std.testing.expectEqualStrings("profile/review", result.settings.review_model.?);
-    try std.testing.expectEqual(false, result.settings.auto_upgrade.?);
-    try std.testing.expectEqual(update_target.Channel.dev, result.settings.update_channel.?);
     try std.testing.expectEqual(false, result.settings.fast_mode.?);
-    try std.testing.expectEqual(false, result.settings.slash_menu_categories.?);
     try std.testing.expectEqual(types.ReasoningEffort.literal("high"), result.settings.effort.?);
-    try std.testing.expectEqual(false, result.settings.startup_scrollback.?);
     try std.testing.expectEqual(@as(usize, 1), result.settings.permission_rules.rules.len);
     try expectPermissionRule(result.settings.permission_rules.rules[0], "bash", "profile *", .allow);
 
-    try std.testing.expectEqual(@as(usize, 14), result.diagnostics.len);
+    // Retired keys, such as statusLine and startup_scrollback, aren't diagnosed.
+    try std.testing.expectEqual(@as(usize, 9), result.diagnostics.len);
     inline for (&.{
         "model",
         "permission_mode",
         "permission",
         "prompt_history",
-        "statusLine",
         "skill_match_fuzzy",
         "first_call_tool_choice",
         "review_model",
-        "auto_upgrade",
-        "update_channel",
         "fast_mode",
-        "slash_menu_categories",
         "effort",
-        "startup_scrollback",
     }) |key| {
         try expectIgnoredProjectKey(result.diagnostics, key);
     }
@@ -3902,8 +3747,8 @@ test "malformed project profile-only settings are ignored before value parsing" 
     try std.testing.expectEqual(types.PermissionMode.ask, result.settings.permission_mode.?);
     try std.testing.expectEqual(false, result.settings.fast_mode.?);
     try std.testing.expectEqual(@as(usize, 12), result.settings.max_agent_steps.?);
-    try std.testing.expectEqual(@as(usize, 5), result.diagnostics.len);
-    inline for (&.{ "model", "permission_mode", "permission", "statusLine", "fast_mode" }) |key| {
+    try std.testing.expectEqual(@as(usize, 4), result.diagnostics.len);
+    inline for (&.{ "model", "permission_mode", "permission", "fast_mode" }) |key| {
         try expectIgnoredProjectKey(result.diagnostics, key);
     }
 
@@ -3918,68 +3763,16 @@ test "malformed project profile-only settings are ignored before value parsing" 
     );
 }
 
-test "global statusline fields parse and merge independently" {
-    var target = try parseSettingsJson(
-        std.testing.allocator,
-        "{\"statusLine\":{\"sandbox\":false,\"context\":true,\"session\":false,\"workspace\":false}}",
-    );
-    defer target.deinit(std.testing.allocator);
-    var incoming = try parseSettingsJson(
-        std.testing.allocator,
-        "{\"statusLine\":{\"session\":true,\"workspace\":true}}",
-    );
-    defer incoming.deinit(std.testing.allocator);
-
-    try mergeSettings(&target, &incoming, std.testing.allocator);
-
-    try std.testing.expectEqual(true, target.statusline_context.?);
-    try std.testing.expectEqual(true, target.statusline_session.?);
-    try std.testing.expectEqual(true, target.statusline_workspace.?);
-}
-
-test "global statusline rejects malformed containers and fields" {
-    try std.testing.expectError(
-        error.InvalidStatusLineType,
-        parseSettingsJson(std.testing.allocator, "{\"statusLine\":7}"),
-    );
-    var legacy = try parseSettingsJson(
-        std.testing.allocator,
-        "{\"statusLine\":{\"sandbox\":\"yes\"}}",
-    );
-    legacy.deinit(std.testing.allocator);
-    try std.testing.expectError(
-        error.InvalidStatusLineContextType,
-        parseSettingsJson(
-            std.testing.allocator,
-            "{\"statusLine\":{\"context\":1}}",
-        ),
-    );
-    try std.testing.expectError(
-        error.InvalidStatusLineSessionType,
-        parseSettingsJson(
-            std.testing.allocator,
-            "{\"statusLine\":{\"session\":1}}",
-        ),
-    );
-    try std.testing.expectError(
-        error.InvalidStatusLineWorkspaceType,
-        parseSettingsJson(
-            std.testing.allocator,
-            "{\"statusLine\":{\"workspace\":1}}",
-        ),
-    );
-}
-
 test "legacy sandbox keys are inert unknown data" {
     var settings = try parseSettingsJson(
         std.testing.allocator,
-        "{\"sandbox\":{\"legacy\":true},\"statusLine\":{\"sandbox\":\"legacy\",\"context\":true}}",
+        "{\"sandbox\":{\"legacy\":true},\"fast_mode\":true}",
     );
     defer settings.deinit(std.testing.allocator);
-    try std.testing.expectEqual(true, settings.statusline_context.?);
+    try std.testing.expectEqual(true, settings.fast_mode.?);
 }
 
-test "workspace statusline is global only in ordinary and detailed loads" {
+test "ordinary and detailed loads agree on workspace overrides beside a retired container" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
@@ -3991,53 +3784,25 @@ test "workspace statusline is global only in ordinary and detailed loads" {
     defer std.testing.allocator.free(workspace_root);
 
     const user_settings = try std.testing.allocator.print(
-        "{{\"statusLine\":{{\"workspace\":true}},\"workspaces\":{{\"{s}\":{{\"statusLine\":{{\"workspace\":\"ignored\"}}}}}}}}\n",
+        "{{\"effort\":\"high\",\"workspaces\":{{\"{s}\":{{\"statusLine\":7,\"effort\":\"low\"}}}}}}\n",
         .{workspace_root},
     );
     defer std.testing.allocator.free(user_settings);
     try writeFixtureFile(tmp.dir, "home/.fx/settings.json", user_settings);
+    try writeFixtureFile(tmp.dir, "workspace/.fx.json", "{\"effort\":\"high\",\"max_agent_steps\":42}\n");
 
     var ordinary = try loadMergedSettingsFromHome(std.testing.allocator, home_root, workspace_root);
     defer ordinary.deinit(std.testing.allocator);
-    try std.testing.expectEqual(true, ordinary.statusline_workspace.?);
-
-    var detailed = try loadMergedSettingsDetailedFromHome(std.testing.allocator, home_root, workspace_root);
-    defer detailed.deinit(std.testing.allocator);
-    try std.testing.expectEqual(true, detailed.settings.statusline_workspace.?);
-    try std.testing.expectEqual(@as(usize, 0), detailed.diagnostics.len);
-}
-
-test "ordinary and detailed loads agree on workspace overrides with legacy statusline containers" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
-    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
-
-    const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
-    defer std.testing.allocator.free(home_root);
-    const workspace_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "workspace");
-    defer std.testing.allocator.free(workspace_root);
-
-    const user_settings = try std.testing.allocator.print(
-        "{{\"startup_scrollback\":true,\"workspaces\":{{\"{s}\":{{\"statusLine\":7,\"startup_scrollback\":false}}}}}}\n",
-        .{workspace_root},
-    );
-    defer std.testing.allocator.free(user_settings);
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", user_settings);
-    try writeFixtureFile(tmp.dir, "workspace/.fx.json", "{\"startup_scrollback\":true,\"max_agent_steps\":42}\n");
-
-    var ordinary = try loadMergedSettingsFromHome(std.testing.allocator, home_root, workspace_root);
-    defer ordinary.deinit(std.testing.allocator);
-    try std.testing.expectEqual(false, ordinary.startup_scrollback.?);
+    try std.testing.expectEqual(types.ReasoningEffort.literal("low"), ordinary.effort.?);
     try std.testing.expectEqual(@as(usize, 42), ordinary.max_agent_steps.?);
 
     var detailed = try loadMergedSettingsDetailedFromHome(std.testing.allocator, home_root, workspace_root);
     defer detailed.deinit(std.testing.allocator);
-    try std.testing.expectEqual(false, detailed.settings.startup_scrollback.?);
+    try std.testing.expectEqual(types.ReasoningEffort.literal("low"), detailed.settings.effort.?);
     try std.testing.expectEqual(@as(usize, 42), detailed.settings.max_agent_steps.?);
-    try std.testing.expectEqual(ConfigSource.user_workspace, detailed.sources.startup_scrollback);
+    try std.testing.expectEqual(ConfigSource.user_workspace, detailed.sources.effort);
     try std.testing.expectEqual(@as(usize, 2), detailed.diagnostics.len);
-    try expectIgnoredProjectKey(detailed.diagnostics, "startup_scrollback");
+    try expectIgnoredProjectKey(detailed.diagnostics, "effort");
     try std.testing.expectEqual(
         ConfigDiagnosticCause.legacy_workspace_preferences,
         detailed.diagnostics[1].cause,
@@ -4138,7 +3903,7 @@ test "detailed settings diagnose legacy workspace preferences" {
     );
     defer std.testing.allocator.free(workspace_root);
     const fixture = try std.testing.allocator.print(
-        "{{\"model\":\"user/model\",\"workspaces\":{{\"{s}\":{{\"model\":\"legacy/model\",\"statusLine\":{{\"session\":true}}}}}}}}\n",
+        "{{\"model\":\"user/model\",\"workspaces\":{{\"{s}\":{{\"model\":\"legacy/model\",\"prompt_history\":{{\"enabled\":false}}}}}}}}\n",
         .{workspace_root},
     );
     defer std.testing.allocator.free(fixture);
@@ -4152,8 +3917,8 @@ test "detailed settings diagnose legacy workspace preferences" {
     defer result.deinit(std.testing.allocator);
 
     try std.testing.expectEqualStrings("legacy/model", result.settings.models.get(.gateway).?);
-    try std.testing.expectEqual(true, result.settings.statusline_session.?);
-    try std.testing.expectEqual(ConfigSource.user_workspace, result.sources.statusline_session);
+    try std.testing.expectEqual(false, result.settings.prompt_history_enabled.?);
+    try std.testing.expectEqual(ConfigSource.user_workspace, result.sources.prompt_history_enabled);
     try std.testing.expectEqual(
         ConfigDiagnosticCause.legacy_workspace_preferences,
         result.diagnostics[0].cause,
@@ -4217,11 +3982,7 @@ test "detailed settings expose target sources and permission views" {
     try std.testing.expectEqual(ConfigSource.user_workspace, result.sources.permission_mode);
     try std.testing.expectEqual(ConfigSource.compiled_default, result.sources.effort);
     try std.testing.expectEqual(ConfigSource.user_global, result.sources.fast_mode);
-    try std.testing.expectEqual(ConfigSource.user_global, result.sources.startup_scrollback);
     try std.testing.expectEqual(ConfigSource.user_global, result.sources.prompt_history_enabled);
-    try std.testing.expectEqual(ConfigSource.user_global, result.sources.statusline_context);
-    try std.testing.expectEqual(ConfigSource.user_global, result.sources.statusline_session);
-    try std.testing.expectEqual(true, result.settings.statusline_session.?);
     try std.testing.expectEqual(@as(usize, 33), result.settings.max_agent_steps.?);
 
     try std.testing.expectEqual(@as(usize, 1), result.permission_sources.user.rules.len);
@@ -4325,6 +4086,112 @@ test "provider routing stays fail-closed only when provider fields are broken" {
         if (diagnostic.layer == .user and diagnostic.cause == .malformed_settings) saw_user_diagnostic = true;
     }
     try std.testing.expect(saw_user_diagnostic);
+}
+
+test "a saved ChatGPT or Grok provider with no connection of that name loads as Gateway with a note" {
+    for ([_][]const u8{ "codex", "grok" }) |legacy| {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+        try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
+
+        const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
+        defer std.testing.allocator.free(home_root);
+        const workspace_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "workspace");
+        defer std.testing.allocator.free(workspace_root);
+        const user_settings = try std.testing.allocator.print(
+            "{{\"provider\":\"{s}\",\"models\":{{\"{s}\":\"old-model\"}},\"model\":\"user/model\"}}\n",
+            .{ legacy, legacy },
+        );
+        defer std.testing.allocator.free(user_settings);
+        try writeFixtureFile(tmp.dir, "home/.fx/settings.json", user_settings);
+
+        const home = try TestHome.install(std.testing.allocator, home_root);
+        defer home.deinit();
+
+        var result = try loadMergedSettingsDetailedFromHome(std.testing.allocator, home_root, workspace_root);
+        defer result.deinit(std.testing.allocator);
+        try std.testing.expect(result.settings.provider == null);
+        try std.testing.expectEqual(ConfigSource.compiled_default, result.sources.provider);
+        try std.testing.expectEqualStrings("user/model", result.settings.models.get(.gateway).?);
+        var notes: usize = 0;
+        for (result.diagnostics) |diagnostic| {
+            if (diagnostic.cause != .removed_sign_in_provider) continue;
+            notes += 1;
+            try std.testing.expect(!diagnostic.reportAtStartup());
+            try std.testing.expect(std.mem.find(u8, diagnostic.note().?, "fx provider gateway") != null);
+        }
+        try std.testing.expectEqual(@as(usize, 1), notes);
+
+        // The commands that repair settings load them through the plain loader.
+        var plain = try loadMergedSettingsFromHome(std.testing.allocator, home_root, workspace_root);
+        defer plain.deinit(std.testing.allocator);
+        try std.testing.expect(plain.provider == null);
+    }
+}
+
+test "a custom connection named codex or grok stays the selected provider" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
+
+    const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
+    defer std.testing.allocator.free(home_root);
+    const workspace_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "workspace");
+    defer std.testing.allocator.free(workspace_root);
+    try writeFixtureFile(
+        tmp.dir,
+        "home/.fx/settings.json",
+        "{\"providers\":{\"codex\":{\"protocol\":\"openai-chat-completions\",\"base_url\":\"http://localhost:11434/v1/\",\"auth\":{\"type\":\"none\"}}},\"provider\":\"codex\",\"models\":{\"codex\":\"local-model\"}}\n",
+    );
+
+    const home = try TestHome.install(std.testing.allocator, home_root);
+    defer home.deinit();
+
+    var result = try loadMergedSettingsDetailedFromHome(std.testing.allocator, home_root, workspace_root);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.settings.provider.? == .configured);
+    try std.testing.expectEqualStrings("codex", result.settings.provider.?.label());
+    try std.testing.expect(result.settings.provider.?.configured.binding != null);
+    for (result.diagnostics) |diagnostic| try std.testing.expect(diagnostic.cause != .removed_sign_in_provider);
+}
+
+test "a saved ChatGPT or Grok credential_source loads as no choice with a note" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
+
+    const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
+    defer std.testing.allocator.free(home_root);
+    const workspace_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "workspace");
+    defer std.testing.allocator.free(workspace_root);
+    try writeFixtureFile(
+        tmp.dir,
+        "home/.fx/settings.json",
+        "{\"credential_source\":\"chatgpt_subscription\",\"permission_mode\":\"ask\",\"codex_model\":\"gpt-5.4-mini\",\"grok_model\":\"grok-4\"}\n",
+    );
+
+    const home = try TestHome.install(std.testing.allocator, home_root);
+    defer home.deinit();
+
+    var result = try loadMergedSettingsDetailedFromHome(std.testing.allocator, home_root, workspace_root);
+    defer result.deinit(std.testing.allocator);
+    try std.testing.expect(result.settings.credential_source == null);
+    // The rest of the profile still loads.
+    try std.testing.expectEqual(types.PermissionMode.ask, result.settings.permission_mode.?);
+    var notes: usize = 0;
+    for (result.diagnostics) |diagnostic| {
+        try std.testing.expect(diagnostic.cause != .malformed_settings);
+        if (diagnostic.cause == .removed_sign_in_credential_source) notes += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), notes);
+
+    var parsed = try parseSettingsJson(std.testing.allocator, "{\"credential_source\":\"grok_subscription\"}");
+    defer parsed.deinit(std.testing.allocator);
+    try std.testing.expect(parsed.credential_source == null);
+    try std.testing.expectError(error.InvalidCredentialSource, parseSettingsJson(std.testing.allocator, "{\"credential_source\":\"keychain\"}"));
 }
 
 test "broken provider definitions in the profile still fail the load" {
@@ -4542,31 +4409,6 @@ test "invalid user settings report newest valid manual recovery backup" {
     try std.testing.expect(result.settings.models.get(.gateway) == null);
 }
 
-test "update channel resolves only from the global user profile" {
-    const alloc = std.testing.allocator;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
-    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
-
-    const home_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
-    defer alloc.free(home_root);
-    const workspace_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
-    defer alloc.free(workspace_root);
-    const user_settings = try alloc.print(
-        "{{\"update_channel\":\"dev\",\"workspaces\":{{\"{s}\":{{\"update_channel\":\"stable\"}}}}}}",
-        .{workspace_root},
-    );
-    defer alloc.free(user_settings);
-
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", user_settings);
-    try writeFixtureFile(tmp.dir, "workspace/.fx.json", "{\"update_channel\":\"stable\"}");
-
-    var settings = try loadMergedSettingsFromHome(alloc, home_root, workspace_root);
-    defer settings.deinit(alloc);
-    try std.testing.expectEqual(update_target.Channel.dev, settings.update_channel.?);
-}
-
 test "all currently parsed read-only settings survive detailed loading" {
     var parsed = try parseSettingsJson(
         std.testing.allocator,
@@ -4580,8 +4422,6 @@ test "all currently parsed read-only settings survive detailed loading" {
     try std.testing.expectEqual(@as(usize, 65536), parsed.max_tool_result_bytes.?);
     try std.testing.expectEqual(types.ToolChoice.none, parsed.first_call_tool_choice.?);
     try std.testing.expectEqual(false, parsed.context.?);
-    try std.testing.expectEqual(false, parsed.auto_upgrade.?);
-    try std.testing.expectEqual(update_target.Channel.dev, parsed.update_channel.?);
 }
 
 test "additional directories load only from the current profile workspace" {
@@ -4747,93 +4587,6 @@ test "auto compaction percent is a profile setting between 10 and 80" {
     try std.testing.expectEqual(@as(?u8, null), project.auto_compact_percent);
 }
 
-test "selectProviderModel chooses only its provider-scoped model" {
-    var gateway_settings = Settings{ .provider = .gateway };
-    defer gateway_settings.deinit(std.testing.allocator);
-    try gateway_settings.models.putCopy(std.testing.allocator, .gateway, "gateway/model");
-    try gateway_settings.models.putCopy(std.testing.allocator, .codex, "gpt-model");
-    const gateway = try selectProviderModel("default/model", &gateway_settings, null, null);
-    try std.testing.expectEqual(model_provider.ProviderId.gateway, gateway.provider);
-    try std.testing.expectEqualStrings("gateway/model", gateway.model);
-
-    var codex_settings = Settings{ .provider = .codex };
-    defer codex_settings.deinit(std.testing.allocator);
-    try codex_settings.models.putCopy(std.testing.allocator, .gateway, "gateway/model");
-    try codex_settings.models.putCopy(std.testing.allocator, .codex, "gpt-model");
-    const codex = try selectProviderModel("default/model", &codex_settings, null, null);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, codex.provider);
-    try std.testing.expectEqualStrings("gpt-model", codex.model);
-
-    const missing_codex = Settings{ .provider = .codex };
-    try std.testing.expectError(
-        error.CodexModelNotSelected,
-        selectProviderModel("default/model", &missing_codex, null, null),
-    );
-
-    var grok_settings = Settings{ .provider = .grok };
-    defer grok_settings.deinit(std.testing.allocator);
-    try grok_settings.models.putCopy(std.testing.allocator, .grok, "grok-model");
-    const grok = try selectProviderModel("default/model", &grok_settings, null, null);
-    try std.testing.expectEqual(model_provider.ProviderId.grok, grok.provider);
-    try std.testing.expectEqualStrings("grok-model", grok.model);
-
-    // A launch --provider override selects that provider and its saved model.
-    try gateway_settings.models.putCopy(std.testing.allocator, .grok, "grok-model");
-    const overridden = try selectProviderModel("default/model", &gateway_settings, .grok, null);
-    try std.testing.expectEqual(model_provider.ProviderId.grok, overridden.provider);
-    try std.testing.expectEqualStrings("grok-model", overridden.model);
-    try std.testing.expectError(
-        error.CodexModelNotSelected,
-        selectProviderModel("default/model", &grok_settings, .codex, null),
-    );
-    const overridden_gateway = try selectProviderModel("default/model", &codex_settings, .gateway, null);
-    try std.testing.expectEqualStrings("gateway/model", overridden_gateway.model);
-}
-
-test "selectProviderModel accepts the run model when the provider has none saved" {
-    // FX_PROVIDER=codex FX_MODEL=... in a profile that never saved a Codex model.
-    const missing_codex = Settings{ .provider = .codex };
-    const env_codex = try selectProviderModel("default/model", &missing_codex, null, "gpt-env");
-    try std.testing.expectEqual(model_provider.ProviderId.codex, env_codex.provider);
-    try std.testing.expectEqualStrings("gpt-env", env_codex.model);
-
-    const missing_grok = Settings{ .provider = .grok };
-    const env_grok = try selectProviderModel("default/model", &missing_grok, null, "grok-env");
-    try std.testing.expectEqualStrings("grok-env", env_grok.model);
-
-    // FX_PROVIDER=local names a custom connection, which has no default either.
-    const missing_local = Settings{ .provider = model_provider.parse("local").? };
-    try std.testing.expectError(error.ConfiguredModelNotSelected, selectProviderModel("default/model", &missing_local, null, null));
-    const env_local = try selectProviderModel("default/model", &missing_local, null, "local-env");
-    try std.testing.expectEqualStrings("local-env", env_local.model);
-
-    // --provider codex with FX_MODEL from a Gateway-only profile.
-    const gateway_only = Settings{ .provider = .gateway };
-    const launched = try selectProviderModel("default/model", &gateway_only, .codex, "gpt-env");
-    try std.testing.expectEqual(model_provider.ProviderId.codex, launched.provider);
-    try std.testing.expectEqualStrings("gpt-env", launched.model);
-
-    // A saved model remains the persisted preference; FX_MODEL applies on top of it later.
-    var saved_codex = Settings{ .provider = .codex };
-    defer saved_codex.deinit(std.testing.allocator);
-    try saved_codex.models.putCopy(std.testing.allocator, .codex, "gpt-saved");
-    const saved = try selectProviderModel("default/model", &saved_codex, null, "gpt-env");
-    try std.testing.expectEqualStrings("gpt-saved", saved.model);
-
-    // Gateway keeps its compiled default as the persisted preference.
-    const gateway = try selectProviderModel("default/model", &gateway_only, null, "gpt-env");
-    try std.testing.expectEqualStrings("default/model", gateway.model);
-}
-
-test "modelNotSelectedMessage names the provider and both ways to recover" {
-    const codex = modelNotSelectedMessage(error.CodexModelNotSelected).?;
-    try std.testing.expect(std.mem.find(u8, codex, "`fx provider codex`") != null);
-    try std.testing.expect(std.mem.find(u8, codex, "--model or FX_MODEL") != null);
-    try std.testing.expect(std.mem.find(u8, modelNotSelectedMessage(error.GrokModelNotSelected).?, "`fx provider grok`") != null);
-    try std.testing.expect(std.mem.find(u8, modelNotSelectedMessage(error.ConfiguredModelNotSelected).?, "\"models\" in ~/.fx/settings.json") != null);
-    try std.testing.expect(modelNotSelectedMessage(error.OutOfMemory) == null);
-}
-
 test "FX_ULTRAFAST overrides the profile and diagnoses malformed values" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4879,7 +4632,7 @@ fn settingsTextAcceptedForTest(layer: SettingsLayer, json: []const u8) !bool {
     const alloc = std.testing.allocator;
     const parsed = try std.json.parseFromSlice(std.json.Value, alloc, json, .{});
     defer parsed.deinit();
-    var settings = parseSettingsValueForLayer(alloc, parsed.value, layer, false, false) catch |err| {
+    var settings = parseSettingsValueForLayer(alloc, parsed.value, layer) catch |err| {
         if (err == error.OutOfMemory) return err;
         return false;
     };
@@ -4974,11 +4727,32 @@ test "the settings list names every value the settings enums accept" {
         }
     };
     for (std.meta.tags(types.PermissionMode)) |mode| try std.testing.expect(listed.has("permission_mode", mode.label()));
-    for (std.meta.tags(update_target.Channel)) |channel| try std.testing.expect(listed.has("update_channel", channel.label()));
     for (std.meta.tags(types.ToolChoice)) |choice| {
         if (types.ToolChoice.parse(@tagName(choice)) != null) try std.testing.expect(listed.has("first_call_tool_choice", @tagName(choice)));
     }
     for (std.meta.tags(types.CredentialSource)) |source| {
         if (types.parseCredentialSource(@tagName(source)) != null) try std.testing.expect(listed.has("credential_source", @tagName(source)));
     }
+}
+
+test "selectProviderModel accepts the run model when the provider has none saved" {
+    // FX_PROVIDER=local names a custom connection, which has no default model.
+    const missing_local = Settings{ .provider = model_provider.parse("local").? };
+    try std.testing.expectError(error.ConfiguredModelNotSelected, selectProviderModel("default/model", &missing_local, null, null));
+    const env_local = try selectProviderModel("default/model", &missing_local, null, "local-env");
+    try std.testing.expectEqualStrings("local-env", env_local.model);
+
+    // FX_MODEL in a Gateway-only profile.
+    const gateway_only = Settings{ .provider = .gateway };
+
+    // Gateway keeps its compiled default as the persisted preference.
+    const gateway = try selectProviderModel("default/model", &gateway_only, null, "gpt-env");
+    try std.testing.expectEqualStrings("default/model", gateway.model);
+}
+
+test "modelNotSelectedMessage names the provider and both ways to recover" {
+    const configured = modelNotSelectedMessage(error.ConfiguredModelNotSelected).?;
+    try std.testing.expect(std.mem.find(u8, configured, "\"models\" in ~/.fx/settings.json") != null);
+    try std.testing.expect(std.mem.find(u8, configured, "--model or FX_MODEL") != null);
+    try std.testing.expect(modelNotSelectedMessage(error.OutOfMemory) == null);
 }

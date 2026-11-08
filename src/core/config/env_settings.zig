@@ -44,12 +44,6 @@ pub fn soundPreset(raw: []const u8) ?SoundPreset {
     return if (off) .off else .on;
 }
 
-/// True when `FX_AUTO_UPGRADE` turns automatic upgrades off: `0` or `false`.
-/// No value turns them on.
-pub fn autoUpgradeOff(raw: []const u8) bool {
-    return std.mem.eql(u8, raw, "0") or std.ascii.eqlIgnoreCase(raw, "false");
-}
-
 /// Every documented `FX_*` setting override set in this process, in a fixed
 /// order, with the value fx uses. A value fx ignores or rejects, such as
 /// `FX_MAX_AGENT_STEPS=many`, is left out. `FX_MODEL` overrides the model of
@@ -125,20 +119,7 @@ pub fn collect(arena: Allocator, provider: model_provider.ProviderId) ![]Overrid
             for (values) |entry| try list.append(arena, .{ .variable = "FX_SOUND", .key = entry.key, .value = .{ .bool = entry.on } });
         }
     }
-    if (getenv("FX_AUTO_UPGRADE")) |raw| {
-        if (autoUpgradeOff(raw)) try list.append(arena, .{ .variable = "FX_AUTO_UPGRADE", .key = "auto_upgrade", .value = .{ .bool = false } });
-    }
     return list.toOwnedSlice(arena);
-}
-
-test "FX_SOUND presets and FX_AUTO_UPGRADE read the words fx accepts" {
-    try std.testing.expectEqual(SoundPreset.max, soundPreset(" MAX\n").?);
-    try std.testing.expectEqual(SoundPreset.off, soundPreset("0").?);
-    try std.testing.expectEqual(SoundPreset.off, soundPreset("Off").?);
-    try std.testing.expectEqual(SoundPreset.on, soundPreset("yes").?);
-    try std.testing.expect(soundPreset("  ") == null);
-    try std.testing.expect(autoUpgradeOff("0") and autoUpgradeOff("FALSE"));
-    try std.testing.expect(!autoUpgradeOff("1") and !autoUpgradeOff("no"));
 }
 
 var test_empty_environ: ?*std.process.Environ.Map = null;
@@ -160,15 +141,13 @@ test "collect shows each set override as the setting fx uses, and skips ignored 
     var env: std.process.Environ.Map = .init(std.testing.allocator);
     defer env.deinit();
     for ([_][2][]const u8{
-        .{ "FX_PROVIDER", "codex" },
+        .{ "FX_PROVIDER", "gateway" },
         .{ "FX_MODEL", " gpt-test " },
         .{ "FX_MAX_AGENT_STEPS", "12" },
         // Out of range, so fx ignores it.
         .{ "FX_AUTO_COMPACT_PERCENT", "5" },
         .{ "FX_PERMISSION_MODE", "yolo" },
         .{ "FX_SOUND", "max" },
-        // Only `0` and `false` mean anything.
-        .{ "FX_AUTO_UPGRADE", "1" },
     }) |entry| try env.put(entry[0], entry[1]);
     io_mod.setEnvironMap(&env);
     defer io_mod.setEnvironMap(restore);
@@ -176,7 +155,7 @@ test "collect shows each set override as the setting fx uses, and skips ignored 
     const found = try collect(arena.allocator(), .gateway);
     const expected = [_]struct { variable: []const u8, key: []const u8 }{
         .{ .variable = "FX_PROVIDER", .key = "provider" },
-        .{ .variable = "FX_MODEL", .key = "models.codex" },
+        .{ .variable = "FX_MODEL", .key = "models.gateway" },
         .{ .variable = "FX_PERMISSION_MODE", .key = "permission_mode" },
         .{ .variable = "FX_MAX_AGENT_STEPS", .key = "max_agent_steps" },
         .{ .variable = "FX_SOUND", .key = "sound.turn_end" },

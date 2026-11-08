@@ -194,10 +194,11 @@ test "the settings.json schema lists every key fx reads there and nothing else" 
     try std.testing.expectEqual(@as(usize, 4), mode.get("enum").?.array.items.len);
     const percent = properties.get("auto_compact_percent").?.object;
     try std.testing.expectEqual(@as(i64, 80), percent.get("maximum").?.integer);
-    const status_line = properties.get("status_line").?.object;
-    try std.testing.expectEqualStrings("boolean", status_line.get("properties").?.object.get("context").?.object.get("type").?.string);
-    try std.testing.expect(!status_line.contains("deprecated"));
-    try std.testing.expect(properties.get("statusLine").?.object.get("deprecated").?.bool);
+    const sound = properties.get("sound").?.object;
+    try std.testing.expectEqualStrings("boolean", sound.get("properties").?.object.get("turn_end").?.object.get("type").?.string);
+    try std.testing.expect(!sound.contains("deprecated"));
+    try std.testing.expect(properties.get("notifications").?.object.get("deprecated").?.bool);
+    try std.testing.expect(properties.get("status_line").?.object.get("deprecated").?.bool);
     try std.testing.expect(properties.get("model").?.object.get("deprecated").?.bool);
     try std.testing.expect(properties.get("skill_match_fuzzy").?.object.contains("not"));
 }

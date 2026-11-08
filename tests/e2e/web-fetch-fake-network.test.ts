@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FX_BIN, runFx } from "../evals/eval-helpers";
 import { savedText } from "./saved-sessions";
-import { fakeGatewayTitleDefault, TITLE_GENERATION_MARKER } from "./tmux-helpers";
+import { fakeGatewayTitleDefault, TITLE_GENERATION_MARKER } from "./fake-gateway";
 
 const TIMEOUT = 20_000;
 const FETCH_URL = "https://example.com/docs";

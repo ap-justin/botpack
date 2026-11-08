@@ -101,7 +101,6 @@ pub fn collect(
         try appendConfigLoadFailureCheck(&checks, alloc, "startup", "failed to resolve startup settings", err);
         try appendStateChecks(&checks, alloc);
         try appendGitCheck(&checks, alloc, snapshot.workspace_root);
-        try appendGhCheck(&checks, alloc);
 
         snapshot.checks = try checks.toOwnedSlice(alloc);
         return snapshot;
@@ -133,7 +132,6 @@ pub fn collect(
     }, default_agent_step_limit);
     try appendStateChecks(&checks, alloc);
     try appendGitCheck(&checks, alloc, snapshot.workspace_root);
-    try appendGhCheck(&checks, alloc);
 
     snapshot.checks = try checks.toOwnedSlice(alloc);
     return snapshot;
@@ -255,6 +253,8 @@ fn configLayerRejected(
             .legacy_workspace_preferences,
             .manual_backup_available,
             .private_state_permissions_tightened,
+            .removed_sign_in_provider,
+            .removed_sign_in_credential_source,
             => {},
         }
     }
@@ -262,7 +262,7 @@ fn configLayerRejected(
 }
 
 fn appendAuthCheck(checks: *std.ArrayList(Check), alloc: Allocator, auth: auth_runtime.StatusSnapshot) !void {
-    if (auth.missingHelp(.cli)) |help| {
+    if (auth.missingHelp()) |help| {
         try appendCheck(checks, alloc, "auth", .fail, help);
         return;
     }
@@ -414,14 +414,6 @@ fn appendGitCheck(checks: *std.ArrayList(Check), alloc: Allocator, workspace_roo
     try appendCheck(checks, alloc, "git", .warn, "not a git repository; pr/issue workflows will be limited");
 }
 
-fn appendGhCheck(checks: *std.ArrayList(Check), alloc: Allocator) !void {
-    if (try commandInPath(alloc, "gh")) {
-        try appendCheck(checks, alloc, "gh", .ok, "GitHub CLI found in PATH");
-        return;
-    }
-    try appendCheck(checks, alloc, "gh", .warn, "GitHub CLI not found in PATH; publish workflows unavailable");
-}
-
 fn resolvePermissionMode(configured: ?types.PermissionMode) !types.PermissionMode {
     const fallback = configured orelse config_runtime.default_permission_mode;
     const raw = io_mod.getenv("FX_PERMISSION_MODE") orelse return fallback;
@@ -530,47 +522,6 @@ fn hasGitMetadata(alloc: Allocator, workspace_root: []const u8) !bool {
         return try fileExists(owned);
     };
     return try fileExists(git_path);
-}
-
-fn commandInPath(alloc: Allocator, command_name: []const u8) !bool {
-    const path_env = io_mod.getenv("PATH") orelse return false;
-
-    return commandInPathValue(alloc, command_name, path_env);
-}
-
-fn commandInPathValue(alloc: Allocator, command_name: []const u8, path_env: []const u8) !bool {
-    var it = std.mem.splitScalar(u8, path_env, std.Io.Dir.path.delimiter);
-    while (it.next()) |entry| {
-        if (entry.len == 0) continue;
-
-        var candidate_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        const candidate = std.mem.print(&candidate_buf, "{s}" ++ std.Io.Dir.path.sep_str ++ "{s}", .{ entry, command_name }) catch {
-            const owned = try std.Io.Dir.path.join(alloc, &.{ entry, command_name });
-            defer alloc.free(owned);
-            if (pathExists(owned)) return true;
-            continue;
-        };
-
-        if (pathExists(candidate)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-fn pathExists(path: []const u8) bool {
-    if (comptime @import("builtin").target.os.tag != .windows) {
-        return accessPath(path) catch false;
-    }
-
-    if (std.Io.Dir.path.isAbsolute(path)) {
-        std.Io.Dir.accessAbsolute(io_mod.getIo(), path, .{}) catch return false;
-        return true;
-    }
-
-    std.Io.Dir.cwd().access(io_mod.getIo(), path, .{}) catch return false;
-    return true;
 }
 
 fn accessPath(path: []const u8) !bool {
@@ -730,16 +681,10 @@ test "doctor startup check fails when the provider has no model to run" {
         .checks = &.{},
     };
 
-    try appendResolvedStartupCheck(&snapshot, &checks, alloc, error.CodexModelNotSelected, .{ .max_agent_steps = 7 }, 25);
-    try std.testing.expectEqualStrings("", snapshot.model);
-    try std.testing.expectEqual(@as(usize, 7), snapshot.agent_step_limit);
-    try std.testing.expectEqual(CheckStatus.fail, checks.items[0].status);
-    try std.testing.expect(std.mem.startsWith(u8, checks.items[0].detail, "no Codex model is selected;"));
-
-    try appendResolvedStartupCheck(&snapshot, &checks, alloc, .{ .provider = .codex, .model = "gpt-saved" }, .{}, 25);
+    try appendResolvedStartupCheck(&snapshot, &checks, alloc, .{ .provider = .gateway, .model = "gpt-saved" }, .{}, 25);
     defer if (snapshot.owned_model) |model| alloc.free(model);
     try std.testing.expectEqualStrings("gpt-saved", snapshot.model);
-    try std.testing.expectEqual(CheckStatus.ok, checks.items[1].status);
+    try std.testing.expectEqual(CheckStatus.ok, checks.items[0].status);
 }
 
 test "bounded doctor warnings use existing check stream" {
@@ -779,20 +724,33 @@ test "has git metadata detects .git file or directory" {
     try std.testing.expect(try hasGitMetadata(std.testing.allocator, workspace_root));
 }
 
-test "command in path checks explicit path entries" {
+test "doctor has no GitHub CLI check, with or without gh on PATH" {
+    const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
     try tmp.dir.createDirPath(io_mod.getIo(), "bin");
-    var file = try tmp.dir.createFile(std.testing.io, "bin/gh", .{});
-    file.close(io_mod.getIo());
+    try writeDoctorFixtureFile(tmp.dir, "bin/gh", "");
+    const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
+    defer alloc.free(home);
+    const bin = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "bin");
+    defer alloc.free(bin);
 
-    const bin_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "bin");
-    defer std.testing.allocator.free(bin_root);
+    const restore = io_mod.environMap() orelse try @import("../config/env_settings.zig").emptyTestEnviron();
+    defer io_mod.setEnvironMap(restore);
+    for ([_][]const u8{ bin, "/nonexistent" }) |path| {
+        var env: std.process.Environ.Map = .init(alloc);
+        defer env.deinit();
+        try env.put("HOME", home);
+        try env.put("PATH", path);
+        io_mod.setEnvironMap(&env);
 
-    const path_env = try std.testing.allocator.print("{s}", .{bin_root});
-    defer std.testing.allocator.free(path_env);
-
-    try std.testing.expect(try commandInPathValue(std.testing.allocator, "gh", path_env));
-    try std.testing.expect(!(try commandInPathValue(std.testing.allocator, "missing-command", path_env)));
+        var snapshot = try collect(alloc, host.unavailable_secret_store, "default-model", 25, .clear);
+        defer snapshot.deinit(alloc);
+        try std.testing.expect(snapshot.checks.len > 0);
+        for (snapshot.checks) |check| {
+            try std.testing.expect(!std.mem.eql(u8, check.name, "gh"));
+            try std.testing.expect(std.mem.find(u8, check.detail, "GitHub CLI") == null);
+        }
+    }
 }

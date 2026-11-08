@@ -9,9 +9,6 @@
 # simulate-*.cfg configs run random behaviors in ideal and non-ideal
 # conditions; SIM_RUNS sets how many (default 20000).
 #
-# Run the real binary through every modeled scenario and have TLC replay it:
-#   bun test ../drivers/cli/
-#
 # Needs Java 11+ and tla2tools.jar, as ../README.md describes.
 set -eu
 

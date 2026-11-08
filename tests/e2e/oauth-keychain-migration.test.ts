@@ -18,7 +18,7 @@ import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText,
   startFakeGateway,
-} from "./tmux-helpers";
+} from "./fake-gateway";
 
 const TIMEOUT = 30_000;
 const OAUTH_SERVICE = "FX_OAUTH_SESSION_V1";

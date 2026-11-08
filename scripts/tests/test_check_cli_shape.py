@@ -103,13 +103,6 @@ fn handleSetConfigOption() void {
 }
 """
 
-LIBFX_TYPES = """\
-export interface FxModelOptions {
-  /** Model ID. */
-  id: string;
-}
-"""
-
 ENV = """\
 const model = io_mod.getenv("FX_MODEL");
 const home = io_mod.getenv("HOME");
@@ -130,7 +123,7 @@ def registry() -> dict:
         "external_env": ["HOME"],
         "hand_parsed_flags": {"--json": "picks the error format"},
         "run_options": {
-            "model": {"flag": "--model", "setting": "model", "env": "FX_MODEL", "acp": "model", "libfx": "model.id"},
+            "model": {"flag": "--model", "setting": "model", "env": "FX_MODEL", "acp": "model"},
         },
         "exceptions": {"flag_names": {}, "setting_keys": {}},
     }
@@ -151,7 +144,6 @@ class CheckCliShapeTests(unittest.TestCase):
             check_cli_shape.ACP_SERVER: ACP_SERVER,
             check_cli_shape.MAIN: MAIN,
             check_cli_shape.COMMAND_SPECS: COMMAND_SPECS,
-            check_cli_shape.LIBFX_TYPES: LIBFX_TYPES,
             "src/env.zig": ENV,
         }
         self.registry = registry()
@@ -376,16 +368,6 @@ class CheckCliShapeTests(unittest.TestCase):
     def test_acp_set_config_option_id_needs_a_run_options_row(self) -> None:
         self.edit(check_cli_shape.ACP_SERVER, '"model")) {}\n', '"model")) {}\n    if (std.mem.eql(u8, config_id, "fast")) {}\n')
         self.assertOnly(self.run_check(), "names", 'ACP set_config_option takes "fast"')
-
-    def test_libfx_options_are_read_from_their_own_interface(self) -> None:
-        text = "export interface FxEvent {\n  provider?: string;\n}\ninterface FxGatewayProvider<T> {\n  apiKey?: string;\n}\n"
-        self.assertEqual({"apiKey"}, check_cli_shape.interface_fields(text, "FxGatewayProvider"))
-        self.assertEqual({"provider"}, check_cli_shape.interface_fields(text, "FxEvent"))
-        self.assertIsNone(check_cli_shape.interface_fields(text, "FxCustomProvider"))
-
-    def test_libfx_model_option_needs_a_run_options_row(self) -> None:
-        self.edit(check_cli_shape.LIBFX_TYPES, "  id: string;\n", "  id: string;\n  fast?: boolean;\n")
-        self.assertOnly(self.run_check(), "names", 'libfx model option "fast" needs a run_options row')
 
     def test_run_options_row_must_name_a_listed_flag(self) -> None:
         self.registry["run_options"]["model"]["flag"] = "--modle"

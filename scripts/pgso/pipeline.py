@@ -26,8 +26,8 @@ from scripts.pgso.toolchain import DEFAULT_TARGET, Toolchain
 # folds into single loads. Instrumentation runs before loop unrolling, so it
 # would count every element. Unroll constant-trip loops first, in both the
 # generation and use pipelines, so their CFG hashes keep matching. Unrolling
-# without the surrounding instcombine and simplifycfg left the ui-activity
-# benchmark about 11% slower than a plain O2 build.
+# without the surrounding instcombine and simplifycfg left a benchmark about
+# 11% slower than a plain O2 build.
 PROFILE_PREPARATION_PASSES = (
     "function(sroa,instcombine<no-verify-fixpoint>,loop-unroll-full,"
     "instcombine<no-verify-fixpoint>,simplifycfg)"
@@ -99,16 +99,6 @@ FX_CODEGEN_FLAGS = (
 ARTIFACT_LAYOUTS = {
     "fx": (None, "fx", "fx.bc"),
     "file_index": ("bench-file-index", "file-index-bench", "file-index.bc"),
-    "ui_activity": (
-        "bench-ui-activity",
-        "ui-activity-progress-bench",
-        "ui-activity.bc",
-    ),
-    "approval_review": (
-        "bench-approval-review",
-        "approval-review-bench",
-        "approval-review.bc",
-    ),
     # Linux only: scripts/pgso/unit_tests.py runs the unit tests on
     # transformed code.
     "unit_tests": ("install-test", "fx-test", "unit-tests.bc"),

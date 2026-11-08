@@ -87,8 +87,6 @@ fn isRetryableAgentNetworkError(err: anyerror) bool {
 /// not a lost connection, but the reply was damaged on the way.
 fn isUnreadableReply(err: anyerror) bool {
     return err == error.MalformedGatewaySseEvent or
-        err == error.MalformedOpenAICodexSseEvent or
-        err == error.MalformedXaiGrokSseEvent or
         err == error.MalformedChatCompletionsChunk;
 }
 
@@ -282,10 +280,6 @@ const usage_request_timeout_ms: i64 = 15_000;
 /// expects.
 pub const UsageAccount = union(enum) {
     none,
-    /// ChatGPT, for Codex: `chatgpt-account-id`.
-    chatgpt: []const u8,
-    /// The Grok CLI proxy: `x-userid`.
-    grok: []const u8,
 };
 
 /// One bounded GET for usage. `gateway_team` sends the AI Gateway team
@@ -355,50 +349,10 @@ pub fn fetchUsageGetThroughHost(
 }
 
 /// The headers a usage GET sends besides `authorization`: the AI Gateway
-/// team, or the provider account. Borrows from the arguments.
+/// team. Borrows from the arguments.
 fn usageExtraHeaders(buf: *[4]std.http.Header, gateway_team: ?[]const u8, account: UsageAccount) []const std.http.Header {
-    var count = gatewayModelCatalogExtraHeaders(buf, gateway_team).len;
-    switch (account) {
-        .none => {},
-        .chatgpt => |id| {
-            buf[count] = .{ .name = "chatgpt-account-id", .value = id };
-            buf[count + 1] = .{ .name = "originator", .value = "fx" };
-            count += 2;
-        },
-        // The proxy reads a subscription token only with the Grok CLI's
-        // token-auth marker, the same one fx's Grok requests send.
-        .grok => |id| {
-            buf[count] = .{ .name = "X-XAI-Token-Auth", .value = "xai-grok-cli" };
-            buf[count + 1] = .{ .name = "x-userid", .value = id };
-            buf[count + 2] = .{ .name = "x-grok-client-identifier", .value = "fx" };
-            count += 3;
-        },
-    }
-    return buf[0..count];
-}
-
-test "usage GETs send the team or provider account headers, whichever transport carries them" {
-    var buf: [4]std.http.Header = undefined;
-    try std.testing.expectEqual(@as(usize, 0), usageExtraHeaders(&buf, null, .none).len);
-    try std.testing.expectEqual(@as(usize, 0), usageExtraHeaders(&buf, "", .none).len);
-
-    const team = usageExtraHeaders(&buf, "team_example", .none);
-    try std.testing.expectEqual(@as(usize, 1), team.len);
-    try std.testing.expectEqualStrings(vercel_ai_gateway_team_header, team[0].name);
-    try std.testing.expectEqualStrings("team_example", team[0].value);
-
-    const chatgpt = usageExtraHeaders(&buf, null, .{ .chatgpt = "account-example" });
-    try std.testing.expectEqual(@as(usize, 2), chatgpt.len);
-    try std.testing.expectEqualStrings("chatgpt-account-id", chatgpt[0].name);
-    try std.testing.expectEqualStrings("account-example", chatgpt[0].value);
-    try std.testing.expectEqualStrings("originator", chatgpt[1].name);
-
-    const grok = usageExtraHeaders(&buf, null, .{ .grok = "user-example" });
-    try std.testing.expectEqual(@as(usize, 3), grok.len);
-    try std.testing.expectEqualStrings("X-XAI-Token-Auth", grok[0].name);
-    try std.testing.expectEqualStrings("x-userid", grok[1].name);
-    try std.testing.expectEqualStrings("user-example", grok[1].value);
-    try std.testing.expectEqualStrings("x-grok-client-identifier", grok[2].name);
+    _ = account;
+    return gatewayModelCatalogExtraHeaders(buf, gateway_team);
 }
 
 const UsageGetOperation = struct {
@@ -11345,8 +11299,6 @@ test "a stream event that is not JSON is an unreadable reply, and a too-deep or 
 test "an unreadable stream event from any provider is an unreadable reply" {
     for ([_]anyerror{
         error.MalformedGatewaySseEvent,
-        error.MalformedOpenAICodexSseEvent,
-        error.MalformedXaiGrokSseEvent,
         error.MalformedChatCompletionsChunk,
     }) |err| {
         const evidence = networkFailureEvidence(err, .possibly_sent) orelse return error.TestExpectedNetworkFailureEvidence;
@@ -12051,4 +12003,15 @@ test "two hundred Esc presses during stuck unpooled lookups leave no job, client
         try waitForOwnClientOpenJobs();
         _ = try fixture.lateConnection(0);
     }
+}
+
+test "usage GETs send the team or provider account headers, whichever transport carries them" {
+    var buf: [4]std.http.Header = undefined;
+    try std.testing.expectEqual(@as(usize, 0), usageExtraHeaders(&buf, null, .none).len);
+    try std.testing.expectEqual(@as(usize, 0), usageExtraHeaders(&buf, "", .none).len);
+
+    const team = usageExtraHeaders(&buf, "team_example", .none);
+    try std.testing.expectEqual(@as(usize, 1), team.len);
+    try std.testing.expectEqualStrings(vercel_ai_gateway_team_header, team[0].name);
+    try std.testing.expectEqualStrings("team_example", team[0].value);
 }

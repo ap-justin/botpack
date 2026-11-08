@@ -12,9 +12,6 @@ test {
     _ = @import("core/agent/runtime/vision_contracts.zig");
     _ = @import("core/agent/worker_runtime.zig");
     _ = @import("core/cli/cli_flags.zig");
-    _ = @import("core/app/app_agents_runtime.zig");
-    _ = @import("core/app/app_session_runtime.zig");
-    _ = @import("core/app/host_record.zig");
     _ = @import("core/images/image_attachments.zig");
     _ = @import("core/images/image_data.zig");
     _ = @import("core/images/image_route.zig");
@@ -41,13 +38,9 @@ test {
     _ = @import("core/workspace/file_index.zig");
     _ = @import("gateway/chat_completions_protocol.zig");
     _ = @import("gateway/client.zig");
-    _ = @import("gateway/openai_codex.zig");
     _ = @import("gateway/responses_protocol.zig");
     _ = @import("gateway/sse.zig");
     _ = @import("tools/agent/ask_user_question.zig");
     _ = @import("tools/web/http_fetch.zig");
     _ = @import("tools/web/url_policy.zig");
-    _ = @import("ui/resize_tests.zig");
-    _ = @import("ui/transcript/frozen_prefix_tests.zig");
-    _ = @import("ui/transcript/transcript_window_fuzz.zig");
 }

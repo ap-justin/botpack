@@ -22,6 +22,10 @@ pub const DurableSessionPreferences = struct {
     effort: types.ReasoningEffort,
     fast_mode: bool,
     ultrafast_mode: bool = false,
+    /// The saved provider was a ChatGPT or Grok sign-in. `provider` then reads
+    /// as Gateway and `model` is that provider's id, which a loader replaces
+    /// with the user's default. Never written; the next save stores Gateway.
+    provider_removed: bool = false,
 
     pub fn deinit(self: *DurableSessionPreferences, alloc: Allocator) void {
         alloc.free(self.model);
@@ -35,9 +39,25 @@ pub const DurableSessionPreferences = struct {
             .effort = self.effort,
             .fast_mode = self.fast_mode,
             .ultrafast_mode = self.ultrafast_mode,
+            .provider_removed = self.provider_removed,
         };
     }
 };
+
+pub const SessionProvider = struct {
+    provider: model_provider.ProviderId = .gateway,
+    removed: bool = false,
+};
+
+/// Decodes a saved session provider. A removed sign-in reads as Gateway with
+/// `removed` set; anything else unreadable is `InvalidDurableField`.
+pub fn parseSessionProvider(value: std.json.Value) error{InvalidDurableField}!SessionProvider {
+    const provider = model_provider.parse_saved_or_removed(value) catch |err| switch (err) {
+        error.RemovedProvider => return .{ .removed = true },
+        error.InvalidProviderBinding => return error.InvalidDurableField,
+    };
+    return .{ .provider = provider };
+}
 
 /// Decodes persisted preferences; the caller owns the returned model.
 pub fn parse_preferences(alloc: Allocator, value: std.json.Value) !DurableSessionPreferences {
@@ -58,19 +78,26 @@ pub fn parse_preferences(alloc: Allocator, value: std.json.Value) !DurableSessio
         try exactObject(value, &.{ "model", "effort", "fast_mode", "ultrafast_mode" })
     else
         try exactObject(value, &.{ "model", "effort", "fast_mode" });
-    const provider: model_provider.ProviderId = if (legacy) blk: {
+    const saved_provider: SessionProvider = if (legacy) blk: {
         if (!std.mem.eql(u8, try requireString(object, "connection_id"), "vercel")) return error.InvalidDurableField;
-        break :blk .gateway;
+        break :blk .{};
     } else if (object.contains("provider"))
-        model_provider.parse_saved(object.get("provider").?) catch return error.InvalidDurableField
+        try parseSessionProvider(object.get("provider").?)
     else
-        .gateway;
+        .{};
     const model = try requireString(object, if (legacy) "model_id" else "model");
     try validateModel(model);
     const effort = types.ReasoningEffort.parse(try requireString(object, "effort")) orelse return error.InvalidDurableField;
     const fast_mode = try requireBool(object, "fast_mode");
     const ultrafast_mode = if (has_ultrafast_mode) try requireBool(object, "ultrafast_mode") else false;
-    return .{ .provider = provider, .model = try alloc.dupe(u8, model), .effort = effort, .fast_mode = fast_mode, .ultrafast_mode = ultrafast_mode };
+    return .{
+        .provider = saved_provider.provider,
+        .model = try alloc.dupe(u8, model),
+        .effort = effort,
+        .fast_mode = fast_mode,
+        .ultrafast_mode = ultrafast_mode,
+        .provider_removed = saved_provider.removed,
+    };
 }
 
 test "legacy connection preferences decode through the shared state codec" {
@@ -93,7 +120,7 @@ test "legacy connection preferences reject unknown identities and mixed fields" 
     for ([_][]const u8{
         "{\"connection_id\":\"custom\",\"model_id\":\"test\",\"effort\":\"auto\",\"fast_mode\":false}",
         "{\"connection_id\":\"vercel\",\"model_id\":\"test\",\"model\":\"other\",\"effort\":\"auto\",\"fast_mode\":false}",
-        "{\"connection_id\":\"vercel\",\"model_id\":\"test\",\"provider\":\"codex\",\"effort\":\"auto\",\"fast_mode\":false}",
+        "{\"connection_id\":\"vercel\",\"model_id\":\"test\",\"provider\":\"gateway\",\"effort\":\"auto\",\"fast_mode\":false}",
         "{\"connection_id\":\"vercel\",\"model_id\":\"\",\"effort\":\"auto\",\"fast_mode\":false}",
     }) |bytes| {
         var parsed = try std.json.parseFromSlice(std.json.Value, alloc, bytes, .{});
@@ -1485,7 +1512,10 @@ fn decodeStateTail(
                 .allocate = .alloc_always,
                 .parse_numbers = false,
             });
-            recovery_checkpoint = try parseRecoveryCheckpoint(alloc, value);
+            recovery_checkpoint = parseRecoveryCheckpoint(alloc, value) catch |err| switch (err) {
+                error.RemovedProvider => null,
+                else => return err,
+            };
         } else return error.InvalidSessionFormat;
     }
     try expectToken(try json_reader.next(), .object_end);
@@ -1609,6 +1639,7 @@ pub fn parseRecoveryCheckpointWithImages(alloc: Allocator, value: std.json.Value
             }),
         else => return error.InvalidDurableField,
     };
+    if (checkpointUsesRemovedSignIn(object)) return error.RemovedProvider;
     const user = try parseUserTurn(alloc, object.get("user") orelse return error.InvalidSessionFormat, sources);
     errdefer session.freeUserTurn(alloc, user);
     const assistant_source = try parseDurableBytes(alloc, object.get("assistant_source") orelse return error.InvalidSessionFormat);
@@ -1658,6 +1689,21 @@ pub fn parseRecoveryCheckpointWithImages(alloc: Allocator, value: std.json.Value
         .consumed_provider_attempts = consumed_provider_attempts,
         .outstanding_reservation = try requireBool(object, "outstanding_reservation"),
     };
+}
+
+/// A checkpoint written under a ChatGPT or Grok sign-in. Its turn can't be
+/// resumed anywhere, so callers drop it rather than fail the session.
+fn checkpointUsesRemovedSignIn(object: std.json.ObjectMap) bool {
+    if (object.get("route_provider")) |provider| {
+        if (provider == .string and model_provider.isRemovedSignIn(provider.string)) return true;
+    }
+    const authority = object.get("authority") orelse return false;
+    if (authority != .object) return false;
+    if (authority.object.get("provider")) |provider| {
+        if (provider == .string and model_provider.isRemovedSignIn(provider.string)) return true;
+    }
+    const source = authority.object.get("credential_source") orelse return false;
+    return source == .string and types.isRemovedCredentialSource(source.string);
 }
 
 /// Checkpoints from before fx stopped closing connections when the Mac wakes
@@ -2828,6 +2874,9 @@ fn parseToolSteps(
 
 fn parseProviderReplay(alloc: Allocator, value: std.json.Value) !?types.ProviderReplay {
     if (value == .null) return null;
+    // Replay is only ever sent back to the provider that wrote it, so a turn
+    // from a removed sign-in keeps its text and loses only the replay.
+    if (replayNamesRemovedProvider(value)) return null;
     const parsed = std.json.parseFromValue(types.ProviderReplay, alloc, value, .{}) catch |err| switch (err) {
         error.OutOfMemory => return err,
         else => return error.InvalidSessionFormat,
@@ -2838,6 +2887,15 @@ fn parseProviderReplay(alloc: Allocator, value: std.json.Value) !?types.Provider
         replay.parts_json.len == 0 or replay.parts_json.len > types.ProviderReplay.max_bytes or
         !std.unicode.utf8ValidateSlice(replay.parts_json)) return error.InvalidSessionFormat;
     return try types.dupeProviderReplay(alloc, replay);
+}
+
+/// Stored provider replay whose source is a removed ChatGPT or Grok sign-in.
+pub fn replayNamesRemovedProvider(value: std.json.Value) bool {
+    if (value != .object) return false;
+    const source = value.object.get("source") orelse return false;
+    if (source != .object) return false;
+    const provider = source.object.get("provider") orelse return false;
+    return provider == .string and model_provider.isRemovedSignIn(provider.string);
 }
 
 /// Writes `calls` as the JSON array durable history stores them in.
@@ -6082,6 +6140,101 @@ test "default ultrafast state writes the legacy-compatible preference shape" {
     try std.testing.expect(!decoded.preferences.ultrafast_mode);
 }
 
+test "a ChatGPT session with a Grok replay turn and checkpoint loads as Gateway with its history" {
+    const alloc = std.testing.allocator;
+    const replay = types.ProviderReplay{ .source = .{ .provider = .gateway, .model = "grok-4" }, .parts_json = "[{\"type\":\"reasoning\",\"text\":\"sealed\"}]" };
+    var turns = [_]session.HistoryTurn{.{ .assistant = .{
+        .user = .{ .text = @constCast("write a note") },
+        .assistant = @constCast("done"),
+        .execution = .{},
+        .provider_replay = replay,
+    } }};
+    const state = DurableSessionState{
+        .id = @constCast("legacy-signin"),
+        .origin_workspace_root = @constCast("/workspace"),
+        .workspace_root = @constCast("/workspace"),
+        .created_at_ms = 1,
+        .updated_at_ms = 2,
+        .conversation_language = session.ConversationLanguage.literal("en"),
+        .preferences = .{ .model = @constCast("gpt-5.4-mini"), .effort = .literal("high"), .fast_mode = false },
+        .history = turns[0..],
+        .total_input_tokens = 0,
+        .total_output_tokens = 0,
+        .recovery_checkpoint = .{
+            .turn_id = 2,
+            .user = .{ .text = @constCast("next") },
+            .assistant_source = @constCast(""),
+            .cause = .network_interrupted,
+            .action = .retrying_request,
+            .authority = .{ .provider = .gateway, .model = @constCast("gpt-5.4-mini") },
+            .requested_fast_mode = false,
+            .fast_mode = false,
+            .max_provider_attempts = 3,
+            .consumed_provider_attempts = 0,
+        },
+    };
+    var encoded: std.Io.Writer.Allocating = .init(alloc);
+    defer encoded.deinit();
+    _ = try encodeState(state, &encoded.writer);
+
+    // As the build with ChatGPT and Grok sign-in saved it: the preferences
+    // name codex, and the replay and checkpoint name grok.
+    const all_grok = try std.mem.replaceOwned(u8, alloc, encoded.written(), "\"provider\":\"gateway\"", "\"provider\":\"grok\"");
+    defer alloc.free(all_grok);
+    const first = std.mem.find(u8, all_grok, "\"provider\":\"grok\"").?;
+    const saved = try alloc.print("{s}\"provider\":\"codex\"{s}", .{ all_grok[0..first], all_grok[first + "\"provider\":\"grok\"".len ..] });
+    defer alloc.free(saved);
+    try std.testing.expect(std.mem.find(u8, saved, "\"provider\":\"gateway\"") == null);
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, saved, "\"provider\":\"grok\""));
+
+    var source = std.Io.Reader.fixed(saved);
+    var decoded = try decodeState(alloc, &source, .{});
+    defer decoded.deinit(alloc);
+    try std.testing.expectEqual(model_provider.ProviderId.gateway, decoded.preferences.provider);
+    try std.testing.expect(decoded.preferences.provider_removed);
+    try std.testing.expectEqualStrings("gpt-5.4-mini", decoded.preferences.model);
+    try std.testing.expectEqualStrings("high", decoded.preferences.effort.label());
+    try std.testing.expectEqual(@as(usize, 1), decoded.history.len);
+    try std.testing.expectEqualStrings("write a note", decoded.history[0].assistant.user.text);
+    try std.testing.expectEqualStrings("done", decoded.history[0].assistant.assistant);
+    try std.testing.expect(decoded.history[0].assistant.provider_replay == null);
+    try std.testing.expect(decoded.recovery_checkpoint == null);
+
+    // Saved again, it is a plain Gateway session.
+    var resaved: std.Io.Writer.Allocating = .init(alloc);
+    defer resaved.deinit();
+    _ = try encodeState(decoded, &resaved.writer);
+    var resaved_source = std.Io.Reader.fixed(resaved.written());
+    var reloaded = try decodeState(alloc, &resaved_source, .{});
+    defer reloaded.deinit(alloc);
+    try std.testing.expect(!reloaded.preferences.provider_removed);
+}
+
+test "a v1 or v2 checkpoint from a removed sign-in is dropped, not bound as a connection" {
+    const alloc = std.testing.allocator;
+    const fields = "\"turn_id\":1,\"user\":{\"text\":\"saved request\",\"images\":[]},\"assistant_source\":\"saved partial\",\"execution\":{\"schema_version\":3,\"tool_steps\":[],\"files\":[]},\"cause\":\"response_interrupted\",\"action\":\"continuing_response\",\"tool_state\":\"uncertain\",\"requested_fast_mode\":false,\"fast_mode\":false,\"max_provider_attempts\":3,\"consumed_provider_attempts\":0,\"outstanding_reservation\":false";
+    for ([_][]const u8{
+        "{\"version\":1,\"route_model\":\"gpt-5.4-mini\",\"route_provider\":\"codex\",",
+        "{\"version\":2,\"authority\":{\"provider\":\"grok\",\"model\":\"grok-4\",\"credential_source\":null,\"credential_identity\":null},",
+        "{\"version\":2,\"authority\":{\"provider\":\"gateway\",\"model\":\"m/m\",\"credential_source\":\"chatgpt_subscription\",\"credential_identity\":null},",
+    }) |head| {
+        const bytes = try alloc.print("{s}{s}}}", .{ head, fields });
+        defer alloc.free(bytes);
+        var parsed = try std.json.parseFromSlice(std.json.Value, alloc, bytes, .{});
+        defer parsed.deinit();
+        try std.testing.expectError(error.RemovedProvider, parseRecoveryCheckpoint(alloc, parsed.value));
+    }
+
+    // A connection the user named "local" still binds as before.
+    const local = try alloc.print("{{\"version\":1,\"route_model\":\"m\",\"route_provider\":\"local\",{s}}}", .{fields});
+    defer alloc.free(local);
+    var parsed_local = try std.json.parseFromSlice(std.json.Value, alloc, local, .{});
+    defer parsed_local.deinit();
+    var checkpoint = try parseRecoveryCheckpoint(alloc, parsed_local.value);
+    defer checkpoint.deinit(alloc);
+    try std.testing.expectEqualStrings("local", checkpoint.authority.provider.label());
+}
+
 test "recovery checkpoint round trips while legacy state stays absent" {
     const alloc = std.testing.allocator;
     const checkpoint = RecoveryCheckpoint{
@@ -6092,13 +6245,10 @@ test "recovery checkpoint round trips while legacy state stays absent" {
         .action = .continuing_response,
         .tool_state = .confirmed,
         .authority = .{
-            .provider = .codex,
-            .model = @constCast("gpt-5.4-mini"),
-            .credential_source = .chatgpt_subscription,
-            .credential_identity = credential_authority.derive(
-                .chatgpt_subscription,
-                "acct_1",
-            ),
+            .provider = .gateway,
+            .model = @constCast("openai/gpt-6-sol"),
+            .credential_source = .ai_gateway_api_key,
+            .credential_identity = credential_authority.derive(.ai_gateway_api_key, null),
         },
         .requested_fast_mode = true,
         .fast_mode = true,
@@ -6116,8 +6266,8 @@ test "recovery checkpoint round trips while legacy state stays absent" {
         .updated_at_ms = 2,
         .conversation_language = session.ConversationLanguage.literal("en"),
         .preferences = .{
-            .provider = .codex,
-            .model = @constCast("gpt-5.4-mini"),
+            .provider = .gateway,
+            .model = @constCast("openai/gpt-6-sol"),
             .effort = .auto,
             .fast_mode = false,
             .ultrafast_mode = true,
@@ -6144,11 +6294,11 @@ test "recovery checkpoint round trips while legacy state stays absent" {
     try std.testing.expectEqual(types.ModelRecoveryCause.response_interrupted, restored.cause);
     try std.testing.expectEqual(types.ModelRecoveryAction.continuing_response, restored.action);
     try std.testing.expectEqual(RecoveryToolState.confirmed, restored.tool_state);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, restored.authority.provider);
-    try std.testing.expectEqualStrings("gpt-5.4-mini", restored.authority.model);
-    try std.testing.expectEqual(types.CredentialSource.chatgpt_subscription, restored.authority.credential_source.?);
-    try std.testing.expect(restored.authority.credential_identity != null);
-    try std.testing.expectEqual(model_provider.ProviderId.codex, decoded.preferences.provider);
+    try std.testing.expectEqual(model_provider.ProviderId.gateway, restored.authority.provider);
+    try std.testing.expectEqualStrings("openai/gpt-6-sol", restored.authority.model);
+    try std.testing.expectEqual(types.CredentialSource.ai_gateway_api_key, restored.authority.credential_source.?);
+    try std.testing.expect(restored.authority.credential_identity.?.eql(checkpoint.authority.credential_identity.?));
+    try std.testing.expectEqual(model_provider.ProviderId.gateway, decoded.preferences.provider);
     try std.testing.expect(restored.requested_fast_mode);
     try std.testing.expect(restored.fast_mode);
     try std.testing.expect(restored.requested_ultrafast_mode);
@@ -6163,6 +6313,7 @@ test "recovery checkpoint round trips while legacy state stays absent" {
     var legacy_state = try decodeState(alloc, &legacy_source, .{});
     defer legacy_state.deinit(alloc);
     try std.testing.expectEqual(model_provider.ProviderId.gateway, legacy_state.preferences.provider);
+    try std.testing.expect(!legacy_state.preferences.provider_removed);
     try std.testing.expect(!legacy_state.preferences.ultrafast_mode);
     try std.testing.expectEqual(@as(?RecoveryCheckpoint, null), legacy_state.recovery_checkpoint);
 }

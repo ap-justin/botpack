@@ -43,7 +43,6 @@ ENV_SETTINGS = "src/core/config/env_settings.zig"
 SETTINGS_KEYS = "src/core/config/settings_keys.zig"
 ACP_SESSIONS = "src/acp/sessions.zig"
 ACP_SERVER = "src/acp/server.zig"
-LIBFX_TYPES = "sdk/types/libfx.d.cts"
 
 JOBS = {
     "setting-override",
@@ -71,9 +70,6 @@ VERSION = re.compile(r'^pub const version = "(\d+)\.(\d+)\.(\d+)";', re.M)
 OLD_SPELLING_REMOVAL = re.compile(r'^pub const old_spelling_removal = "(\d+)\.(\d+)\.(\d+)";', re.M)
 # A config option ID that session/set_config_option accepts.
 ACP_SET_ID = re.compile(r'std\.mem\.eql\(u8, config_id, "([a-z_]+)"\)')
-LIBFX_MODEL_FIELD = re.compile(r"^\s+([a-z][A-Za-z]*)\??:")
-# The libfx types a non-model run option is a field of: each provider config.
-LIBFX_PROVIDER_TYPES = ("FxGatewayProvider", "FxSubscriptionProvider", "FxCustomProvider")
 TOP_LEVEL_KEY_READ = re.compile(r'\broot\.object\.(?:get|getPtr|contains)\("([^"]+)"\)')
 SETTING_ENTRY = re.compile(r'\.name = "([^"]+)", \.where = \.([a-z_]+)')
 TEST_START = re.compile(r"^\s*test\b")
@@ -416,7 +412,7 @@ class Checker:
 
     def check_run_options(self) -> None:
         """Each option a run can set has one row naming it on every surface,
-        so an ACP config option or a libfx model option can't drift from the
+        so an ACP config option can't drift from the
         flag, setting, and variable it stands for."""
         rows = {name: row for name, row in self.registry.get("run_options", {}).items() if not name.startswith("_")}
         if not rows:
@@ -425,7 +421,6 @@ class Checker:
         commands = "\n".join(line.text for line in self.lines(COMMANDS))
         settings = {match.group(1) for line in self.lines(SETTINGS_KEYS) if (match := SETTING_ENTRY.search(line.text))}
         env = self.registry.get("env", {})
-        libfx = (self.root / LIBFX_TYPES).read_text()
         for name, row in sorted(rows.items()):
             if not re.search(rf'"{re.escape(str(row.get("flag")))}(?=[ ",])', commands):
                 self.report(None, "names", f'run_options "{name}" names flag {row.get("flag")}, which {COMMANDS} doesn\'t list')
@@ -434,13 +429,8 @@ class Checker:
             # check_env reports a malformed entry; this reports only a
             # variable that is missing or does another job.
             job = env.get(row.get("env"), {}).get("job")
-            if job != "setting-override" and (job is None or job in JOBS):
+            if "env" in row and job != "setting-override" and (job is None or job in JOBS):
                 self.report(None, "names", f'run_options "{name}" names {row.get("env")}, which the registry doesn\'t list as a setting-override')
-            option = row.get("libfx")
-            if option and not option.startswith("model."):
-                for type_name in LIBFX_PROVIDER_TYPES:
-                    if option not in (interface_fields(libfx, type_name) or set()):
-                        self.report(None, "names", f'run_options "{name}" names libfx option {option}, which {type_name} in {LIBFX_TYPES} doesn\'t declare')
 
         acp_ids: dict[str, Line] = {}
         for line in self.lines(ACP_SESSIONS):
@@ -461,15 +451,6 @@ class Checker:
                 self.report(line, "names", f'ACP set_config_option takes "{config_id}", which needs a run_options row in {REGISTRY}')
         for config_id in sorted(named_acp - set_ids.keys()):
             self.report(None, "names", f'run_options names ACP config option "{config_id}", which set_config_option in {ACP_SERVER} doesn\'t take')
-
-        fields = libfx_model_fields(libfx)
-        if fields is None:
-            raise ShapeSourceError(f"cannot find FxModelOptions in {LIBFX_TYPES}")
-        named_fields = {row["libfx"].removeprefix("model.") for row in rows.values() if row.get("libfx", "").startswith("model.")}
-        for field in sorted(fields - named_fields):
-            self.report(None, "names", f'libfx model option "{field}" needs a run_options row in {REGISTRY}', LIBFX_TYPES)
-        for field in sorted(named_fields - fields):
-            self.report(None, "names", f'run_options names libfx model option "{field}", which FxModelOptions doesn\'t declare')
 
     def check_removal(self) -> None:
         """Old spellings, such as `fx setup`, keep working with a warning until
@@ -493,22 +474,6 @@ def version_tuple(pattern: re.Pattern[str], text: str, path: str) -> tuple[int, 
         raise ShapeSourceError(f"cannot find {pattern.pattern} in {path}")
     major, minor, patch = (int(part) for part in match.groups())
     return (major, minor, patch)
-
-
-def libfx_model_fields(text: str) -> set[str] | None:
-    """The fields of `FxModelOptions`, or None when the interface is missing."""
-    return interface_fields(text, "FxModelOptions")
-
-
-def interface_fields(text: str, name: str) -> set[str] | None:
-    """The top-level fields of TypeScript interface `name`, or None when the
-    interface is missing. A field of another interface doesn't count."""
-    match = re.search(rf"^(?:export )?interface {re.escape(name)}\b[^{{\n]*\{{", text, re.M)
-    if match is None:
-        return None
-    end = text.find("\n}", match.end())
-    body = text[match.end():end].splitlines()
-    return {field.group(1) for line in body if (field := LIBFX_MODEL_FIELD.match(line))}
 
 
 def main(argv: list[str] | None = None) -> int:

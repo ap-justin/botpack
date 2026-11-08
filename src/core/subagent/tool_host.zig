@@ -3090,38 +3090,6 @@ test "unknown and ambiguous model overrides reject before any child session" {
     try std.testing.expectEqual(@as(usize, 0), registry.children.len);
 }
 
-test "model override passes through for non-gateway providers" {
-    const alloc = std.testing.allocator;
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-    var parent: child_state.TestParent = undefined;
-    try parent.init(alloc);
-    defer parent.deinit();
-    var fixture = OverrideResolverFixture{};
-    defer if (fixture.observed_model) |model| alloc.free(model);
-    const runtime = try overrideResolverFixtureRuntime(alloc, &fixture, &parent);
-    defer runtime.deinit();
-
-    var request = try model_contract.validateRequest(alloc, .{ .message = .{ .agent = "probe", .message = "probe", .model = "unknown-model" } });
-    defer request.deinit(alloc);
-    const result = try runtime.executeManaged(arena, &request, .{
-        .caller_id = parent.parent.id(),
-        .invocation_id = "override-non-gateway",
-        .defaults = .{ .provider = .codex, .model = "parent-model", .effort = .auto, .conversation_language = session.ConversationLanguage.literal("en") },
-        .max_result_bytes = 4096,
-        .timestamp_ms = 1,
-        .model_override_resolver = .{ .context = &fixture, .resolve_fn = OverrideResolverFixture.resolveModel },
-    });
-
-    // The configured provider accepts arbitrary model IDs, so the raw override
-    // reaches the child even though the gateway catalog lacks it.
-    try std.testing.expect(result.success);
-    try waitUntilQuiet(runtime);
-    try std.testing.expectEqual(@as(usize, 1), fixture.runs);
-    try std.testing.expectEqualStrings("unknown-model", fixture.observed_model.?);
-}
-
 fn formatFailedResult(alloc: Allocator, failure: ?[]const u8, partial: ?[]const u8) ![]u8 {
     const reason = failure orelse "failure reason unavailable";
     const text = partial orelse "";

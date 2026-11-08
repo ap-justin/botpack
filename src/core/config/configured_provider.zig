@@ -293,7 +293,7 @@ pub fn validate_id(id: []const u8) error{ LimitExceeded, InvalidProviderId, Rese
     for (id) |byte| {
         if (!std.ascii.isAlphanumeric(byte) and byte != '_' and byte != '-') return error.InvalidProviderId;
     }
-    for ([_][]const u8{ "gateway", "codex", "grok" }) |reserved| {
+    for ([_][]const u8{"gateway"}) |reserved| {
         if (std.ascii.eqlIgnoreCase(id, reserved)) return error.ReservedProviderId;
     }
 }
@@ -488,8 +488,6 @@ test "configured provider invalid schemas fail explicitly" {
         .{ .json = "{\"local/host\":{}}", .err = error.InvalidProviderId },
         .{ .json = "{\" local\":{}}", .err = error.InvalidProviderId },
         .{ .json = "{\"GATEWAY\":{}}", .err = error.ReservedProviderId },
-        .{ .json = "{\"codex\":{}}", .err = error.ReservedProviderId },
-        .{ .json = "{\"Grok\":{}}", .err = error.ReservedProviderId },
         .{ .json = "{\"local\":null}", .err = error.InvalidObject },
         .{ .json = "{\"local\":{}}", .err = error.MissingField },
         .{ .json = "{\"local\":{\"protocol\":\"responses\"}}", .err = error.InvalidProtocol },

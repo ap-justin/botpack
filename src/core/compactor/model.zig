@@ -225,12 +225,23 @@ test "a failed or empty summary falls back to another family at its lowest reaso
         try std.testing.expect(scripted.calls.items[1].reasoning.?.eql(types.ReasoningEffort.literal("none")));
     }
     // Only the gateway can reach another family.
-    var direct: ScriptedCaller = .{ .replies = &.{null} };
-    defer direct.calls.deinit(std.testing.allocator);
-    var summarizer: Summarizer = .{ .caller = direct.caller(.codex), .cancel_flag = &cancel, .trace_ctx = .{} };
-    const summary_model = summarizer.model();
-    try std.testing.expectError(error.ModelFailed, summary_model.summarize_fn(summary_model.context, std.testing.allocator, prompt));
-    try std.testing.expectEqual(@as(usize, 1), direct.calls.items.len);
+    const configured = model_provider.parse("local").?;
+    var failed: ScriptedCaller = .{ .replies = &.{null} };
+    defer failed.calls.deinit(std.testing.allocator);
+    var failed_summarizer: Summarizer = .{ .caller = failed.caller(configured), .cancel_flag = &cancel, .trace_ctx = .{} };
+    const failed_model = failed_summarizer.model();
+    try std.testing.expectError(error.ModelFailed, failed_model.summarize_fn(failed_model.context, std.testing.allocator, prompt));
+    try std.testing.expectEqual(@as(usize, 1), failed.calls.items.len);
+    try std.testing.expect(failed_summarizer.fallback_used == null);
+
+    var empty: ScriptedCaller = .{ .replies = &.{" \n"} };
+    defer empty.calls.deinit(std.testing.allocator);
+    var empty_summarizer: Summarizer = .{ .caller = empty.caller(configured), .cancel_flag = &cancel, .trace_ctx = .{} };
+    const empty_model = empty_summarizer.model();
+    const empty_text = try empty_model.summarize_fn(empty_model.context, std.testing.allocator, prompt);
+    defer std.testing.allocator.free(empty_text);
+    try std.testing.expectEqualStrings("", empty_text);
+    try std.testing.expectEqual(@as(usize, 1), empty.calls.items.len);
 }
 
 test "a request after the conversation goes to its own model only, with the agent's settings" {

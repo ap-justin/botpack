@@ -469,6 +469,13 @@ fn credentialReadyAt(
     return true;
 }
 
+test "ACP credential readiness rejects refresh-due access tokens" {
+    try std.testing.expect(credentialReadyAt(.fx_login, "token", 11, 10));
+    try std.testing.expect(!credentialReadyAt(.fx_login, "token", 10, 10));
+    try std.testing.expect(credentialReadyAt(.ai_gateway_api_key, "token", null, 10));
+    try std.testing.expect(!credentialReadyAt(.ai_gateway_api_key, "", null, 10));
+}
+
 /// Transfers credential storage after the caller has stopped its prior borrowers.
 pub fn adoptServerCredential(state: *ServerState, credential: *credentials.Credential) void {
     if (state.active_session) |*active| active.api_key = &.{};
@@ -608,12 +615,14 @@ test "ACP provider routes are host-managed only when configured and never leak i
     state.account_id = null;
     state.gateway_team = null;
 
-    // A Codex turn leaves the process host-managed with no token.
-    var codex = (try prepareCredentialForProvider(&state, .codex)).?;
-    try std.testing.expectEqual(types.CredentialSource.host_managed, codex.source);
-    try std.testing.expectEqual(@as(usize, 0), codex.token.len);
-    adoptServerCredential(&state, &codex);
-    codex.deinit(alloc);
+    // A configured provider's turn leaves the process host-managed with no
+    // token: the host adds its API key, if any.
+    const configured = model_provider.parse("local").?;
+    var custom = (try prepareCredentialForProvider(&state, configured)).?;
+    try std.testing.expectEqual(types.CredentialSource.host_managed, custom.source);
+    try std.testing.expectEqual(@as(usize, 0), custom.token.len);
+    adoptServerCredential(&state, &custom);
+    custom.deinit(alloc);
     try std.testing.expectEqual(types.CredentialSource.host_managed, state.credential_source.?);
 
     // The next Gateway turn gets its own key, not the host-managed source.
@@ -621,24 +630,10 @@ test "ACP provider routes are host-managed only when configured and never leak i
     defer gateway.deinit(alloc);
     try std.testing.expectEqual(types.CredentialSource.ai_gateway_api_key, gateway.source);
     try std.testing.expectEqualStrings("gateway-key", gateway.token);
-
-    // A Grok turn is host-managed the same way.
-    var grok = (try prepareCredentialForProvider(&state, .grok)).?;
-    defer grok.deinit(alloc);
-    try std.testing.expectEqual(types.CredentialSource.host_managed, grok.source);
-    try std.testing.expectEqual(@as(usize, 0), grok.token.len);
-
-    // So is a configured provider: the host adds its API key, if any.
-    const configured = model_provider.parse("local").?;
-    var custom = (try prepareCredentialForProvider(&state, configured)).?;
-    defer custom.deinit(alloc);
-    try std.testing.expectEqual(types.CredentialSource.host_managed, custom.source);
-    try std.testing.expectEqual(@as(usize, 0), custom.token.len);
+    try std.testing.expect(!hostManagesRoute(state.cfg, .gateway));
 
     // Without the policy each provider needs its own credential.
     state.cfg.provider_auth_mode = .local;
-    try std.testing.expect(!hostManagesRoute(state.cfg, .codex));
-    try std.testing.expect(!hostManagesRoute(state.cfg, .grok));
     try std.testing.expect(!hostManagesRoute(state.cfg, configured));
     try std.testing.expect(!hostManagesRoute(state.cfg, .gateway));
 }
@@ -702,19 +697,19 @@ fn publishRefreshedCredential(
     if (expected_account_id) |expected| {
         const refreshed_account = refreshed.accountId() orelse {
             debug_trace.logf("auth", "ACP credential publication rejected stage=refreshed_account_missing", .{});
-            return error.ChatGptAccountChanged;
+            return error.CredentialAccountChanged;
         };
         const state_account = state.account_id orelse {
             debug_trace.logf("auth", "ACP credential publication rejected stage=state_account_missing", .{});
-            return error.ChatGptAccountChanged;
+            return error.CredentialAccountChanged;
         };
         if (!std.mem.eql(u8, expected, refreshed_account)) {
             debug_trace.logf("auth", "ACP credential publication rejected stage=refreshed_account_changed", .{});
-            return error.ChatGptAccountChanged;
+            return error.CredentialAccountChanged;
         }
         if (!std.mem.eql(u8, expected, state_account)) {
             debug_trace.logf("auth", "ACP credential publication rejected stage=state_account_changed", .{});
-            return error.ChatGptAccountChanged;
+            return error.CredentialAccountChanged;
         }
     }
     if (expected_team) |expected| {
@@ -731,11 +726,11 @@ fn publishRefreshedCredential(
         if (expected_account_id) |expected| {
             const active_account = active.account_id orelse {
                 debug_trace.logf("auth", "ACP credential publication rejected stage=active_account_missing", .{});
-                return error.ChatGptAccountChanged;
+                return error.CredentialAccountChanged;
             };
             if (!std.mem.eql(u8, expected, active_account)) {
                 debug_trace.logf("auth", "ACP credential publication rejected stage=active_account_changed", .{});
-                return error.ChatGptAccountChanged;
+                return error.CredentialAccountChanged;
             }
         }
     }
@@ -3464,16 +3459,6 @@ fn ultrafastOverrideRejection(
     return try alloc.print("Ultrafast mode is not available for model \"{s}\"", .{model});
 }
 
-test "ultrafastOverrideRejection accepts only Gateway models with the catalog capability" {
-    const alloc = std.testing.allocator;
-    try std.testing.expectEqual(@as(?[]u8, null), try ultrafastOverrideRejection(alloc, .gateway, .{ .supports_ultrafast_mode = true }, "openai/model"));
-    const rejection = (try ultrafastOverrideRejection(alloc, .codex, .{ .supports_ultrafast_mode = true }, "openai/model")).?;
-    defer alloc.free(rejection);
-    try std.testing.expect(std.mem.find(u8, rejection, "openai/model") != null);
-    const unavailable = (try ultrafastOverrideRejection(alloc, .gateway, .{}, "openai/model")).?;
-    defer alloc.free(unavailable);
-}
-
 test "ACP answers an ultrafast override without waiting out a model catalog that cannot connect" {
     // A Gateway catalog on a dead network: its request never connects, and
     // it fails only when cancelled or once a stalled DNS lookup would give up.
@@ -3824,12 +3809,7 @@ fn handleSetConfigOption(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Me
                 if (!try selectCredentialForProvider(state, session.provider)) {
                     return state.writer.writeError(alloc, msg.id, .{
                         .code = ErrorCode.invalid_request,
-                        .message = if (session.provider == .codex)
-                            credentials.missing_chatgpt_credential_message
-                        else if (session.provider == .grok)
-                            credentials.missing_grok_credential_message
-                        else
-                            "Configured provider authentication is unavailable",
+                        .message = "Configured provider authentication is unavailable",
                     });
                 }
             }
@@ -3906,12 +3886,7 @@ fn handleSetConfigOption(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Me
                 )) orelse
                     return state.writer.writeError(alloc, msg.id, .{
                         .code = ErrorCode.invalid_request,
-                        .message = if (target == .codex)
-                            credentials.missing_chatgpt_credential_message
-                        else if (target == .grok)
-                            credentials.missing_grok_credential_message
-                        else
-                            credentials.missing_credential_message,
+                        .message = credentials.missing_credential_message,
                     });
             };
             defer if (staged_credential) |*credential| credential.deinit(alloc);
@@ -4362,22 +4337,8 @@ fn speedSupportedBy(
     };
 }
 
-test "speedSupportedBy keeps only the lanes the new model offers" {
-    const both = model_capabilities.Capabilities{ .supports_fast_mode = true, .supports_ultrafast_mode = true };
-    const fast_only = model_capabilities.Capabilities{ .supports_fast_mode = true };
-    const plain = model_capabilities.Capabilities{};
-    const on: SessionSpeed = .{ .fast = true, .ultrafast = true };
-
-    try std.testing.expectEqual(on, speedSupportedBy(on, .gateway, both));
-    try std.testing.expectEqual(SessionSpeed{ .fast = true, .ultrafast = false }, speedSupportedBy(on, .gateway, fast_only));
-    try std.testing.expectEqual(SessionSpeed{ .fast = false, .ultrafast = false }, speedSupportedBy(on, .gateway, plain));
-    try std.testing.expectEqual(SessionSpeed{ .fast = true, .ultrafast = false }, speedSupportedBy(on, .codex, both));
-    const standard: SessionSpeed = .{ .fast = false, .ultrafast = false };
-    try std.testing.expectEqual(standard, speedSupportedBy(standard, .gateway, both));
-}
-
-/// After a model or provider switch, turns off any lane the new model lacks,
-/// like the CLI model picker. A hidden lane would otherwise stay on: Ultrafast
+/// After a model or provider switch, turns off any lane the new model lacks.
+/// A hidden lane would otherwise stay on: Ultrafast
 /// would fail the next prompt and Fast would return on a later switch back.
 /// Returns false after writing the error response.
 fn dropUnsupportedSpeeds(
@@ -4665,27 +4626,21 @@ test "ACP authenticate accepts the agent and terminal method ids" {
 
 test "ACP AUTH_REQUIRED carries the initialize auth methods for the provider" {
     const alloc = std.testing.allocator;
-    const cases = [_]struct { provider: model_provider.ProviderId, terminal_auth: bool, message: []const u8 }{
-        .{ .provider = .gateway, .terminal_auth = false, .message = credentials.missing_credential_message },
-        .{ .provider = .gateway, .terminal_auth = true, .message = credentials.missing_credential_message },
-        .{ .provider = .codex, .terminal_auth = true, .message = credentials.missing_chatgpt_credential_message },
-        .{ .provider = .grok, .terminal_auth = true, .message = credentials.missing_grok_credential_message },
-    };
-    for (cases) |case| {
+    for ([_]bool{ false, true }) |terminal_auth| {
         var capture = LastFrame{};
         var state = ServerState{
             .alloc = alloc,
             .cfg = undefined,
             .writer = jsonrpc.Writer.initCallback(&capture, LastFrame.write),
-            .provider = case.provider,
-            .client_terminal_auth = case.terminal_auth,
+            .provider = .gateway,
+            .client_terminal_auth = terminal_auth,
         };
         try writeAuthRequired(&state, alloc, .{ .integer = 3 });
         const parsed = try std.json.parseFromSlice(std.json.Value, alloc, capture.bytes(), .{});
         defer parsed.deinit();
         const err = parsed.value.object.get("error").?.object;
         try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), err.get("code").?.integer);
-        try std.testing.expectEqualStrings(case.message, err.get("message").?.string);
+        try std.testing.expectEqualStrings(credentials.missing_credential_message, err.get("message").?.string);
 
         var from_error: std.Io.Writer.Allocating = .init(alloc);
         defer from_error.deinit();
@@ -4701,9 +4656,6 @@ test "ACP AUTH_REQUIRED carries the initialize auth methods for the provider" {
         try std.json.Stringify.value(init_parsed.value.object.get("authMethods").?, .{}, &from_initialize.writer);
 
         try std.testing.expectEqualStrings(from_initialize.written(), from_error.written());
-        if (case.provider != .gateway) {
-            try std.testing.expect(std.mem.find(u8, from_error.written(), "\"vercel\"") == null);
-        }
     }
 }
 
@@ -5142,14 +5094,14 @@ test "ACP ultrafast writes preserve v2 baselines across other preference changes
     try std.testing.expect(active.ultrafast_mode);
     active.ultrafast_mode = false;
     try commitActiveSessionModel(alloc, &active, "new-model");
-    try commitActiveSessionProvider(alloc, &active, .codex, "child-model");
+    try commitActiveSessionProvider(alloc, &active, .gateway, "child-model");
     try commitActiveSessionEffort(alloc, &active, .literal("high"));
     {
         var preferences = try v2.currentPreferences(alloc);
         defer preferences.deinit(alloc);
         try std.testing.expect(preferences.ultrafast_mode);
         try std.testing.expectEqualStrings("child-model", preferences.model);
-        try std.testing.expectEqual(model_provider.ProviderId.codex, preferences.provider);
+        try std.testing.expectEqual(model_provider.ProviderId.gateway, preferences.provider);
         try std.testing.expectEqualStrings("high", preferences.effort.label());
     }
     var failing = std.testing.FailingAllocator.init(alloc, .{ .fail_index = 0 });
@@ -5214,81 +5166,22 @@ test "ACP model commits honor the active session write boundary" {
     );
 }
 
-test "ACP publishes an account-bound refreshed Codex token for later prompts" {
+test "ultrafastOverrideRejection accepts only Gateway models with the catalog capability" {
     const alloc = std.testing.allocator;
-    var state: ServerState = undefined;
-    state.alloc = alloc;
-    state.api_key = try alloc.dupe(u8, "stale-token");
-    state.account_id = try alloc.dupe(u8, "acct-1");
-    state.credential_source = .chatgpt_subscription;
-    state.credential_refresh_after_ms = 1;
-    state.gateway_team = null;
-    var active: ActiveSessionState = undefined;
-    active.v2 = null;
-    active.api_key = state.api_key;
-    active.account_id = state.account_id;
-    active.credential_source = .chatgpt_subscription;
-    active.credential_refresh_after_ms = 1;
-    active.session_rt = .{ .max_history_turns = 8 };
-    state.active_session = active;
-    defer {
-        state.active_session.?.session_rt.deinit(alloc);
-        secret.zeroAndFree(alloc, state.api_key);
-        alloc.free(state.account_id.?);
-    }
-
-    var refreshed = credentials.Credential{
-        .token = try alloc.dupe(u8, "fresh-token"),
-        .source = .chatgpt_subscription,
-        .account_id = try alloc.dupe(u8, "acct-1"),
-        .refresh_after_ms = 100,
-    };
-    defer refreshed.deinit(alloc);
-    try publishRefreshedCredential(&state, &refreshed, "acct-1", null);
-
-    try std.testing.expectEqualStrings("fresh-token", state.api_key);
-    try std.testing.expectEqualStrings("fresh-token", state.active_session.?.api_key);
-    try std.testing.expectEqualStrings("acct-1", state.account_id.?);
-    try std.testing.expectEqualStrings("acct-1", state.active_session.?.account_id.?);
-    try std.testing.expectEqual(@as(?i64, 100), state.credential_refresh_after_ms);
-    try std.testing.expectEqual(@as(?i64, 100), state.active_session.?.credential_refresh_after_ms);
+    try std.testing.expectEqual(@as(?[]u8, null), try ultrafastOverrideRejection(alloc, .gateway, .{ .supports_ultrafast_mode = true }, "openai/model"));
+    const unavailable = (try ultrafastOverrideRejection(alloc, .gateway, .{}, "openai/model")).?;
+    defer alloc.free(unavailable);
 }
 
-test "ACP credential readiness rejects refresh-due access tokens" {
-    try std.testing.expect(credentialReadyAt(.chatgpt_subscription, "token", 11, 10));
-    try std.testing.expect(!credentialReadyAt(.chatgpt_subscription, "token", 10, 10));
-    try std.testing.expect(!credentialReadyAt(.grok_subscription, "token", 1, 10));
-    try std.testing.expect(credentialReadyAt(.ai_gateway_api_key, "token", null, 10));
-    try std.testing.expect(!credentialReadyAt(.ai_gateway_api_key, "", null, 10));
-}
+test "speedSupportedBy keeps only the lanes the new model offers" {
+    const both = model_capabilities.Capabilities{ .supports_fast_mode = true, .supports_ultrafast_mode = true };
+    const fast_only = model_capabilities.Capabilities{ .supports_fast_mode = true };
+    const plain = model_capabilities.Capabilities{};
+    const on: SessionSpeed = .{ .fast = true, .ultrafast = true };
 
-test "ACP rejects refreshed Codex tokens for another account" {
-    const alloc = std.testing.allocator;
-    var state: ServerState = undefined;
-    state.alloc = alloc;
-    state.api_key = try alloc.dupe(u8, "stale-token");
-    state.account_id = try alloc.dupe(u8, "acct-1");
-    state.credential_source = .chatgpt_subscription;
-    state.credential_refresh_after_ms = 1;
-    state.gateway_team = null;
-    state.active_session = null;
-    defer {
-        secret.zeroAndFree(alloc, state.api_key);
-        alloc.free(state.account_id.?);
-    }
-
-    var refreshed = credentials.Credential{
-        .token = try alloc.dupe(u8, "wrong-token"),
-        .source = .chatgpt_subscription,
-        .account_id = try alloc.dupe(u8, "acct-2"),
-        .refresh_after_ms = 100,
-    };
-    defer refreshed.deinit(alloc);
-    try std.testing.expectError(error.ChatGptAccountChanged, publishRefreshedCredential(
-        &state,
-        &refreshed,
-        "acct-2",
-        null,
-    ));
-    try std.testing.expectEqualStrings("stale-token", state.api_key);
+    try std.testing.expectEqual(on, speedSupportedBy(on, .gateway, both));
+    try std.testing.expectEqual(SessionSpeed{ .fast = true, .ultrafast = false }, speedSupportedBy(on, .gateway, fast_only));
+    try std.testing.expectEqual(SessionSpeed{ .fast = false, .ultrafast = false }, speedSupportedBy(on, .gateway, plain));
+    const standard: SessionSpeed = .{ .fast = false, .ultrafast = false };
+    try std.testing.expectEqual(standard, speedSupportedBy(standard, .gateway, both));
 }

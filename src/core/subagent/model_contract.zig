@@ -3,7 +3,7 @@ const domain = @import("domain.zig");
 const types = @import("../shared/types.zig");
 const profiles = @import("../profiles/profiles.zig");
 const reports = @import("reports.zig");
-const session_commands = @import("../session/session_commands.zig");
+const fuzzy_model_score = @import("../shared/fuzzy_model_score.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -50,7 +50,7 @@ pub fn matchCatalogModel(
     var confident_id: ?[]const u8 = null;
     var weak_best: i32 = 0;
     for (ids) |id| {
-        const score = session_commands.fuzzyModelScore(id, query);
+        const score = fuzzy_model_score.fuzzyModelScore(id, query);
         if (containsIgnoreCase(id, query)) {
             if (confident_id == null or score > confident_best) {
                 confident_best = score;
@@ -98,7 +98,7 @@ fn collectScoredMatches(
     for (ids) |id| {
         if (out.items.len == max_model_match_candidates) break;
         if (require_substring and !containsIgnoreCase(id, query)) continue;
-        if (session_commands.fuzzyModelScore(id, query) != target_score) continue;
+        if (fuzzy_model_score.fuzzyModelScore(id, query) != target_score) continue;
         try out.append(alloc, try alloc.dupe(u8, id));
     }
     return out.toOwnedSlice(alloc);

@@ -285,8 +285,8 @@ pub const AgentCapabilities = struct {
 /// is the entry that keeps `authMethods` non-empty.
 pub const agent_auth_method_id = "fx-login";
 /// The Terminal Auth method, advertised only to a client that sent
-/// `clientCapabilities.auth.terminal: true`. One id for every provider's
-/// terminal login: clients already send this one.
+/// `clientCapabilities.auth.terminal: true`. It runs
+/// `fx login vercel --api-key`.
 pub const terminal_auth_method_id = "fx-login-api-key";
 
 /// Whether `authenticate` accepts `method_id`. The terminal id is accepted
@@ -299,14 +299,10 @@ pub fn isAuthMethodId(method_id: []const u8) bool {
 /// The fx login that yields a credential for the selected provider.
 pub const AuthLogin = enum {
     vercel,
-    codex,
-    grok,
 
     pub fn forProvider(provider: model_provider.ProviderId) AuthLogin {
         return switch (provider) {
             .gateway, .configured => .vercel,
-            .codex => .codex,
-            .grok => .grok,
         };
     }
 
@@ -314,8 +310,6 @@ pub const AuthLogin = enum {
     pub fn instruction(self: AuthLogin) []const u8 {
         return switch (self) {
             .vercel => credentials.missing_credential_message,
-            .codex => credentials.missing_chatgpt_credential_message,
-            .grok => credentials.missing_grok_credential_message,
         };
     }
 
@@ -324,23 +318,18 @@ pub const AuthLogin = enum {
     fn terminalArgs(self: AuthLogin) []const []const u8 {
         return switch (self) {
             .vercel => &.{ "login", "vercel", "--api-key" },
-            .codex => &.{ "login", "codex" },
-            .grok => &.{ "login", "grok" },
         };
     }
 
     fn terminalName(self: AuthLogin) []const u8 {
         return switch (self) {
             .vercel => "Sign in with an AI Gateway API key",
-            .codex => "Sign in with a Codex subscription",
-            .grok => "Sign in with a Grok subscription",
         };
     }
 
     fn terminalDescription(self: AuthLogin) []const u8 {
         return switch (self) {
             .vercel => "Paste a Vercel AI Gateway API key in a terminal. fx saves it for later sessions.",
-            .codex, .grok => self.instruction(),
         };
     }
 };
@@ -781,37 +770,11 @@ test "initialize adds the terminal auth method only with auth.terminal" {
     try std.testing.expectEqualStrings("--api-key", args[2].string);
 }
 
-test "auth methods follow the provider's login" {
-    const alloc = std.testing.allocator;
-    const cases = [_]struct { login: AuthLogin, help: []const u8, provider_arg: []const u8 }{
-        .{ .login = .codex, .help = "fx needs a Codex subscription login for this model. Run fx login codex.", .provider_arg = "codex" },
-        .{ .login = .grok, .help = "fx needs a Grok subscription login for this model. Run fx login grok.", .provider_arg = "grok" },
-    };
-    for (cases) |case| {
-        const parsed = try initializeAuthMethodsAlloc(alloc, .{ .login = case.login, .client_terminal_auth = true });
-        defer parsed.deinit();
-        const methods = parsed.value.object.get("authMethods").?.array.items;
-        try std.testing.expectEqual(@as(usize, 2), methods.len);
-        try std.testing.expectEqualStrings(case.help, methods[0].object.get("name").?.string);
-        try std.testing.expectEqualStrings(case.help, methods[0].object.get("description").?.string);
-        const args = methods[1].object.get("args").?.array.items;
-        try std.testing.expectEqual(@as(usize, 2), args.len);
-        try std.testing.expectEqualStrings("login", args[0].string);
-        try std.testing.expectEqualStrings(case.provider_arg, args[1].string);
-        try std.testing.expectEqualStrings(case.help, case.login.instruction());
-    }
-    try std.testing.expectEqual(AuthLogin.vercel, AuthLogin.forProvider(.gateway));
-    try std.testing.expectEqual(AuthLogin.codex, AuthLogin.forProvider(.codex));
-    try std.testing.expectEqual(AuthLogin.grok, AuthLogin.forProvider(.grok));
-}
-
 test "AUTH_REQUIRED data carries the same auth methods" {
     const alloc = std.testing.allocator;
     const offers = [_]AuthOffer{
         .{},
         .{ .client_terminal_auth = true },
-        .{ .login = .codex, .client_terminal_auth = true },
-        .{ .login = .grok },
     };
     for (offers) |offer| {
         var data: std.Io.Writer.Allocating = .init(alloc);

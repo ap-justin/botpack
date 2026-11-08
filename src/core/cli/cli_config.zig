@@ -17,7 +17,6 @@ const settings_store = @import("../config/settings_store.zig");
 const text_utils = @import("../shared/text_utils.zig");
 const theme = @import("../shared/theme.zig");
 const types = @import("../shared/types.zig");
-const update_target = @import("../upgrade/update_target.zig");
 const compactor = @import("../compactor/compactor.zig");
 const tool_result_limits = @import("../tooling/tool_result_limits.zig");
 
@@ -124,9 +123,7 @@ pub fn parseArgs(
 /// permissions or swap the model behind permission reviews.
 const Writable = enum {
     auto_compact_percent,
-    auto_upgrade,
     cache_warming,
-    collapse_tool_calls,
     context,
     effort,
     fast_mode,
@@ -135,17 +132,11 @@ const Writable = enum {
     @"prompt_history.enabled",
     provider_strict,
     session_titles,
-    slash_menu_categories,
     @"sound.attention_required",
     @"sound.max",
     @"sound.turn_end",
-    startup_scrollback,
-    @"status_line.context",
-    @"status_line.session",
-    @"status_line.workspace",
     theme,
     ultrafast_mode,
-    update_channel,
 };
 
 pub const Change = struct {
@@ -181,10 +172,6 @@ pub fn change(options: Options, problem: *WriteProblem) error{ RefusedConfigSett
                 return invalid(problem, "auto or an effort name such as high");
             return .{ .patch = patch, .value = .{ .string = raw } };
         },
-        .update_channel => {
-            patch.update_channel = update_target.Channel.parse(raw) orelse return invalid(problem, "stable or dev");
-            return .{ .patch = patch, .value = .{ .string = patch.update_channel.?.label() } };
-        },
         .theme => {
             const saved: []const u8 = switch (theme.classifyValue(raw) orelse return invalid(problem, profile_paths.displayText(theme_values))) {
                 .pin_light => "light",
@@ -219,24 +206,17 @@ pub fn change(options: Options, problem: *WriteProblem) error{ RefusedConfigSett
 
     const enabled = parseSwitch(raw) orelse return invalid(problem, "true or false");
     switch (writable) {
-        .auto_upgrade => patch.auto_upgrade = enabled,
         .cache_warming => patch.cache_warming = enabled,
-        .collapse_tool_calls => patch.collapse_tool_calls = enabled,
         .context => patch.context = enabled,
         .fast_mode => patch.fast_mode = enabled,
         .@"prompt_history.enabled" => patch.prompt_history_enabled = enabled,
         .provider_strict => patch.provider_strict = enabled,
         .session_titles => patch.session_titles = enabled,
-        .slash_menu_categories => patch.slash_menu_categories = enabled,
         .@"sound.attention_required" => patch.notification_attention_required = enabled,
         .@"sound.max" => patch.notification_max = enabled,
         .@"sound.turn_end" => patch.notification_turn_end = enabled,
-        .startup_scrollback => patch.startup_scrollback = enabled,
-        .@"status_line.context" => patch.statusline_item = .{ .item = .context, .enabled = enabled },
-        .@"status_line.session" => patch.statusline_item = .{ .item = .session, .enabled = enabled },
-        .@"status_line.workspace" => patch.statusline_item = .{ .item = .workspace, .enabled = enabled },
         .ultrafast_mode => patch.ultrafast_mode = enabled,
-        .effort, .update_channel, .theme, .max_agent_steps, .max_tool_result_bytes, .auto_compact_percent => unreachable,
+        .effort, .theme, .max_agent_steps, .max_tool_result_bytes, .auto_compact_percent => unreachable,
     }
     return .{ .patch = patch, .value = .{ .bool = enabled } };
 }
@@ -268,10 +248,9 @@ pub fn settable(key: []const u8) bool {
 fn ownerHint(key: []const u8) []const u8 {
     const head = key[0 .. std.mem.findScalar(u8, key, '.') orelse key.len];
     const hints = [_]struct { keys: []const []const u8, hint: []const u8 }{
-        .{ .keys = &.{ "model", "models", "codex_model", "grok_model" }, .hint = "use /model in a session" },
+        .{ .keys = &.{ "model", "models" }, .hint = profile_paths.displayText("use --model for one run, or edit ~/.fx/settings.json") },
         .{ .keys = &.{"provider"}, .hint = "use fx provider <name>" },
-        .{ .keys = &.{"permission_mode"}, .hint = "use /permissions in a session, or --permission-mode for one run" },
-        .{ .keys = &.{"permission"}, .hint = "use /permissions in a session" },
+        .{ .keys = &.{"permission_mode"}, .hint = profile_paths.displayText("use --permission-mode for one run, or edit ~/.fx/settings.json") },
         .{ .keys = &.{"credential_source"}, .hint = "use fx login" },
         .{ .keys = &.{"review_model"}, .hint = profile_paths.displayText("edit ~/.fx/settings.json, or set FX_REVIEW_MODEL for one run") },
         .{ .keys = &.{ "workspaces", "additional_directories" }, .hint = "use fx workspace" },
@@ -279,7 +258,6 @@ fn ownerHint(key: []const u8) []const u8 {
         .{ .keys = &.{"context_limits"}, .hint = profile_paths.displayText("use --context-limit for one run, or edit ~/.fx/settings.json") },
         .{ .keys = &.{"provider_order"}, .hint = profile_paths.displayText("use --provider-order for one run, or edit ~/.fx/settings.json") },
         .{ .keys = &.{ "yolo_acknowledged", "fast_mode_model_bound", "skill_match_fuzzy" }, .hint = "fx manages it" },
-        .{ .keys = &.{"status_line"}, .hint = "set status_line.context, status_line.session, or status_line.workspace" },
         .{ .keys = &.{"sound"}, .hint = "set sound.turn_end, sound.attention_required, or sound.max" },
         .{ .keys = &.{"prompt_history"}, .hint = "set prompt_history.enabled" },
     };
@@ -291,7 +269,7 @@ fn ownerHint(key: []const u8) []const u8 {
     return profile_paths.displayText("edit ~/.fx/settings.json");
 }
 
-/// `can't change permission_mode with fx config; use /permissions ...` or
+/// `can't change permission_mode with fx config; use --permission-mode ...` or
 /// `invalid value for fast_mode: maybe (use true or false)`, where `via` names
 /// the surface, such as `fx config` or `--config`. Caller owns the result.
 pub fn formatWriteProblem(alloc: Allocator, key: []const u8, value: ?[]const u8, problem: WriteProblem, via: []const u8) ![]u8 {
@@ -440,27 +418,29 @@ pub const Effective = union(enum) {
 /// The keys `fx config` reads from the resolved state instead of the files.
 /// A test checks that each plain key is here or in `files_only_keys`.
 pub const resolved_keys = [_][]const u8{
-    "auto_compact_percent",     "auto_upgrade",           "cache_warming",
-    "collapse_tool_calls",      "context",                "effort",
-    "fast_mode",                "first_call_tool_choice", "max_agent_steps",
-    "max_tool_result_bytes",    "permission_mode",        "prompt_history.enabled",
-    "provider",                 "provider_order",         "provider_strict",
-    "review_model",             "session_titles",         "slash_menu_categories",
-    "sound.attention_required", "sound.max",              "sound.turn_end",
-    "startup_scrollback",       "status_line.context",    "status_line.session",
-    "status_line.workspace",    "theme",                  "ultrafast_mode",
-    "update_channel",
+    "auto_compact_percent", "cache_warming",
+    "context",              "effort",
+    "fast_mode",            "first_call_tool_choice",
+    "max_agent_steps",      "max_tool_result_bytes",
+    "permission_mode",      "prompt_history.enabled",
+    "provider",             "provider_order",
+    "provider_strict",      "review_model",
+    "session_titles",       "sound.attention_required",
+    "sound.max",            "sound.turn_end",
+    "theme",                "ultrafast_mode",
 };
 
 /// Keys `fx config` shows as the files set them: objects fx checks with its
 /// own rules, model choices, editor hints, and values fx manages itself.
 const files_only_keys = [_][]const u8{
-    "$schema",                    "additional_directories", "codex_model",
-    "context_limits",             "credential_source",      "disabledMcpjsonServers",
-    "enableAllProjectMcpServers", "enabledMcpjsonServers",  "fast_mode_model_bound",
-    "grok_model",                 "model",                  "models",
-    "permission",                 "providers",              "skill_symlink_authorities",
-    "workspaces",                 "yolo_acknowledged",
+    "$schema",                   "additional_directories",
+    "context_limits",            "credential_source",
+    "disabledMcpjsonServers",    "enableAllProjectMcpServers",
+    "enabledMcpjsonServers",     "fast_mode_model_bound",
+    "model",                     "models",
+    "permission",                "providers",
+    "skill_symlink_authorities", "workspaces",
+    "yolo_acknowledged",
 };
 
 /// The value a run uses for `key`, read from a state that
@@ -474,8 +454,6 @@ pub fn effectiveValue(
 ) Allocator.Error!Effective {
     const eql = std.mem.eql;
     if (eql(u8, key, "auto_compact_percent")) return integer(arena, state.auto_compact_percent);
-    if (eql(u8, key, "auto_upgrade")) return boolean(state.auto_upgrade);
-    if (eql(u8, key, "collapse_tool_calls")) return boolean(state.collapse_tool_calls);
     if (eql(u8, key, "context")) return boolean(state.context_enabled);
     if (eql(u8, key, "effort")) return string(state.effort.label());
     if (eql(u8, key, "fast_mode")) return boolean(state.fast_mode);
@@ -495,20 +473,14 @@ pub fn effectiveValue(
     if (eql(u8, key, "review_model")) return if (state.review_model.len == 0) .none else string(state.review_model);
     if (eql(u8, key, "session_titles")) return boolean(state.session_title_generation);
     if (eql(u8, key, "cache_warming")) return boolean(state.cache_warming);
-    if (eql(u8, key, "slash_menu_categories")) return boolean(state.slash_menu_categories);
     if (eql(u8, key, "sound.attention_required")) return boolean(state.notification_attention_required);
     if (eql(u8, key, "sound.max")) return boolean(state.notification_max);
     if (eql(u8, key, "sound.turn_end")) return boolean(state.notification_turn_end);
-    if (eql(u8, key, "startup_scrollback")) return boolean(state.startup_scrollback);
-    if (eql(u8, key, "status_line.context")) return boolean(state.statusline_context);
-    if (eql(u8, key, "status_line.session")) return boolean(state.statusline_session);
-    if (eql(u8, key, "status_line.workspace")) return boolean(state.statusline_workspace);
     if (eql(u8, key, "theme")) {
         if (app_lifecycle.themeEnvOverride()) |value| return string(value);
         return if (state.theme) |value| string(value) else .none;
     }
     if (eql(u8, key, "ultrafast_mode")) return boolean(state.ultrafast_mode);
-    if (eql(u8, key, "update_channel")) return string(state.update_channel.label());
     return .unresolved;
 }
 
@@ -691,8 +663,8 @@ test "config args default to list and take scope, origin, and json flags" {
     try std.testing.expectEqual(output_contracts.OutputFormat.json, listed.format);
 
     // An older name means its current one.
-    const got = try parseForTest(&.{ "get", "statusLine.context", "--global" });
-    try std.testing.expectEqualStrings("status_line.context", got.key.?);
+    const got = try parseForTest(&.{ "get", "notifications.max", "--global" });
+    try std.testing.expectEqualStrings("sound.max", got.key.?);
     try std.testing.expectEqual(settings_entries.Scope.global, got.scope);
 }
 
@@ -714,7 +686,7 @@ test "config set and unset take a key, and set takes a value" {
     try std.testing.expectEqualStrings("fast_mode", set.key.?);
     try std.testing.expectEqualStrings("on", set.value.?);
 
-    const unset = try parseForTest(&.{ "unset", "statusLine.context", "--json" });
+    const unset = try parseForTest(&.{ "unset", "notifications.max", "--json" });
     try std.testing.expectEqual(Action.unset, unset.action);
     try std.testing.expect(unset.value == null);
 
@@ -735,17 +707,14 @@ test "config set turns each value into the patch the save path writes" {
     try std.testing.expectEqual(false, fast.patch.fast_mode.?);
     try std.testing.expect(!fast.value.?.bool);
 
-    const status = try changeForTest(&.{ "set", "statusLine.workspace", "true" }, &problem);
-    try std.testing.expectEqual(settings_store.StatuslineItem.workspace, status.patch.statusline_item.?.item);
+    const sound = try changeForTest(&.{ "set", "notifications.max", "true" }, &problem);
+    try std.testing.expect(sound.patch.notification_max.?);
 
     const steps = try changeForTest(&.{ "set", "max_agent_steps", "0" }, &problem);
     try std.testing.expectEqual(@as(u32, 0), steps.patch.max_agent_steps.?);
 
     const pinned = try changeForTest(&.{ "set", "theme", "LIGHT" }, &problem);
     try std.testing.expectEqualStrings("light", pinned.patch.theme.?);
-
-    const channel = try changeForTest(&.{ "set", "update_channel", "dev" }, &problem);
-    try std.testing.expectEqualStrings("dev", channel.value.?.string);
 
     const removed = try changeForTest(&.{ "unset", "notifications.max" }, &problem);
     try std.testing.expectEqualStrings("sound.max", removed.patch.remove.?);
@@ -757,9 +726,11 @@ test "config set explains a bad value or a key it doesn't change" {
     const cases = [_]struct { args: []const [:0]const u8, err: anyerror, message: []const u8 }{
         .{ .args = &.{ "set", "fast_mode", "maybe" }, .err = error.InvalidConfigValue, .message = "invalid value for fast_mode: maybe (use true or false)" },
         .{ .args = &.{ "set", "max_tool_result_bytes", "12" }, .err = error.InvalidConfigValue, .message = "invalid value for max_tool_result_bytes: 12 (use a whole number of bytes, at least 1024)" },
-        .{ .args = &.{ "set", "permission_mode", "full-access" }, .err = error.RefusedConfigSetting, .message = "can't change permission_mode with fx config; use /permissions in a session, or --permission-mode for one run" },
+        .{ .args = &.{ "set", "permission_mode", "full-access" }, .err = error.RefusedConfigSetting, .message = "can't change permission_mode with fx config; use --permission-mode for one run, or edit ~/.fx/settings.json" },
+        .{ .args = &.{ "set", "permission.bash", "allow" }, .err = error.RefusedConfigSetting, .message = "can't change permission.bash with fx config; edit ~/.fx/settings.json" },
         .{ .args = &.{ "unset", "review_model" }, .err = error.RefusedConfigSetting, .message = "can't change review_model with fx config; edit ~/.fx/settings.json, or set FX_REVIEW_MODEL for one run" },
-        .{ .args = &.{ "set", "models.codex", "gpt" }, .err = error.RefusedConfigSetting, .message = "can't change models.codex with fx config; use /model in a session" },
+        .{ .args = &.{ "set", "models.gateway", "gpt" }, .err = error.RefusedConfigSetting, .message = "can't change models.gateway with fx config; use --model for one run, or edit ~/.fx/settings.json" },
+        .{ .args = &.{ "set", "model", "gpt" }, .err = error.RefusedConfigSetting, .message = "can't change model with fx config; use --model for one run, or edit ~/.fx/settings.json" },
         .{ .args = &.{ "set", "yolo_acknowledged", "true" }, .err = error.RefusedConfigSetting, .message = "can't change yolo_acknowledged with fx config; fx manages it" },
     };
     for (cases) |case| {
@@ -778,15 +749,15 @@ test "--config takes key=value with the keys and checks of config set" {
     const fast = try parseOverride("fast_mode=on", &problem);
     try std.testing.expectEqualStrings("fast_mode", fast.key);
     try std.testing.expect(fast.value.bool);
-    const status = try parseOverride("statusLine.context=false", &problem);
-    try std.testing.expectEqualStrings("status_line.context", status.key);
+    const sound = try parseOverride("notifications.max=false", &problem);
+    try std.testing.expectEqualStrings("sound.max", sound.key);
 
     const cases = [_]struct { text: []const u8, message: []const u8 }{
         .{ .text = "fast_mode", .message = "--config needs key=value, such as --config fast_mode=on" },
         .{ .text = "=on", .message = "--config needs key=value, such as --config fast_mode=on" },
         .{ .text = "fast_mdoe=on", .message = "unknown setting fast_mdoe (did you mean fast_mode?)" },
         .{ .text = "fast_mode=maybe", .message = "invalid value for fast_mode: maybe (use true or false)" },
-        .{ .text = "permission_mode=full-access", .message = "can't change permission_mode with --config; use /permissions in a session, or --permission-mode for one run" },
+        .{ .text = "permission_mode=full-access", .message = "can't change permission_mode with --config; use --permission-mode for one run, or edit ~/.fx/settings.json" },
     };
     for (cases) |case| {
         problem = .none;
@@ -809,9 +780,29 @@ test "every key config set writes is a plain setting in the list" {
 test "config get names the part of a key that isn't a setting" {
     var unknown: ?settings_keys.UnknownPart = null;
     var problem: ?[]const u8 = null;
-    try std.testing.expectError(error.UnknownConfigSetting, parseArgs(&.{ "get", "statusLine.contxt" }, &unknown, &problem));
-    try std.testing.expectEqualStrings("contxt", unknown.?.name);
-    try std.testing.expectEqualStrings("status_line", unknown.?.parent.?);
+    try std.testing.expectError(error.UnknownConfigSetting, parseArgs(&.{ "get", "notifications.mx" }, &unknown, &problem));
+    try std.testing.expectEqualStrings("mx", unknown.?.name);
+    try std.testing.expectEqualStrings("sound", unknown.?.parent.?);
+}
+
+test "config set treats the terminal UI settings as retired, as it does auto_upgrade" {
+    const cases = [_]struct { key: [:0]const u8, name: []const u8 }{
+        .{ .key = "auto_upgrade", .name = "auto_upgrade" },
+        .{ .key = "collapse_tool_calls", .name = "collapse_tool_calls" },
+        .{ .key = "slash_menu_categories", .name = "slash_menu_categories" },
+        .{ .key = "startup_scrollback", .name = "startup_scrollback" },
+        .{ .key = "status_line.context", .name = "status_line" },
+        .{ .key = "statusLine.session", .name = "statusLine" },
+    };
+    for (cases) |case| {
+        var unknown: ?settings_keys.UnknownPart = null;
+        var problem: ?[]const u8 = null;
+        const args = [_][:0]const u8{ "set", case.key, "false" };
+        try std.testing.expectError(error.UnknownConfigSetting, parseArgs(&args, &unknown, &problem));
+        try std.testing.expectEqualStrings(case.name, unknown.?.name);
+        try std.testing.expect(unknown.?.parent == null);
+        try std.testing.expect(!settable(case.key));
+    }
 }
 
 test "load reads both files and keeps unknown keys for the scope" {
@@ -854,7 +845,7 @@ test "load ends with the FX_* overrides fx applies, only without a scope" {
     const io_mod = @import("../shared/io.zig");
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "settings.json", .data = "{\"provider\":\"codex\",\"max_agent_steps\":3}" });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "settings.json", .data = "{\"provider\":\"gateway\",\"max_agent_steps\":3}" });
     const dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
     defer alloc.free(dir);
     var paths: config_runtime.Paths = .{
@@ -881,7 +872,7 @@ test "load ends with the FX_* overrides fx applies, only without a scope" {
     try std.testing.expectEqualStrings("FX_MAX_AGENT_STEPS", steps[0].variable.?);
     try std.testing.expectEqual(@as(i64, 9), steps[0].value.integer);
     // The saved provider decides which model FX_MODEL replaces.
-    const models = try settings_entries.lookup(alloc, all.entries.items, "models.codex");
+    const models = try settings_entries.lookup(alloc, all.entries.items, "models.gateway");
     defer alloc.free(models);
     try std.testing.expectEqualStrings("gpt-env", models[0].value.string);
 
@@ -1014,7 +1005,7 @@ test "effective entries show the value in use and the layer that set it" {
         .{ .key = "max_agent_steps", .value = .{ .integer = -3 }, .origin = .global },
         // An older spelling of the value in use.
         .{ .key = "permission_mode", .value = .{ .string = "yolo" }, .origin = .global },
-        .{ .key = "models.codex", .value = .{ .string = "m" }, .origin = .global },
+        .{ .key = "models.gateway", .value = .{ .string = "m" }, .origin = .global },
     };
     const all = try effectiveEntries(arena, &state, .gateway, &set);
     // The keys something sets come first, in order.

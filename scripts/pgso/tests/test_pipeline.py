@@ -393,7 +393,7 @@ with pathlib.Path({str(actions)!r}).open('a') as stream:
     stream.write('opt ' + ' '.join(sys.argv[1:]) + '\\n')
 pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_bytes(b'bitcode')""",
         )
-        paths = PipelinePaths.create(self.root / "run-bench", selector="ui_activity")
+        paths = PipelinePaths.create(self.root / "run-bench", selector="file_index")
         toolchain = dataclasses.replace(
             self.toolchain,
             opt=opt,
@@ -450,7 +450,7 @@ if 'check-outlined' in sys.argv:
 pathlib.Path(sys.argv[-1]).write_bytes(b'BC\\xc0\\xdestaged')
 print('{{}}')""",
         )
-        paths = PipelinePaths.create(self.root / "run-folded", selector="ui_activity")
+        paths = PipelinePaths.create(self.root / "run-folded", selector="file_index")
         toolchain = dataclasses.replace(self.toolchain, opt=opt, ir_size=ir_size)
         paths.bitcode.write_bytes(b"same bitcode")
         paths.merged_profile.write_bytes(b"profile")
@@ -641,7 +641,7 @@ print('{{}}')""",
         )
         benchmark_paths = PipelinePaths.create(
             self.root / "benchmark-run",
-            selector="ui_activity",
+            selector="file_index",
         )
         self.assertEqual(
             (
@@ -743,18 +743,6 @@ print('{{}}')""",
     def test_benchmark_artifacts_use_their_existing_build_owners_and_names(self) -> None:
         cases = (
             ("file_index", "bench-file-index", "file-index-bench", "file-index.bc"),
-            (
-                "ui_activity",
-                "bench-ui-activity",
-                "ui-activity-progress-bench",
-                "ui-activity.bc",
-            ),
-            (
-                "approval_review",
-                "bench-approval-review",
-                "approval-review-bench",
-                "approval-review.bc",
-            ),
             ("unit_tests", "install-test", "fx-test", "unit-tests.bc"),
         )
         for selector, build_step, binary_name, bitcode_name in cases:
@@ -996,7 +984,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_bytes(b'artifact')""",
         self.assertEqual(["prepare", "tool -S", "tool -filetype=obj", "link"], actions.read_text().splitlines())
 
     def test_benchmark_candidate_keeps_the_zig_linker(self) -> None:
-        paths = PipelinePaths.create(self.root / "benchmark-link", selector="ui_activity")
+        paths = PipelinePaths.create(self.root / "benchmark-link", selector="file_index")
         artifact = self.write_executable(
             "benchmark-tool",
             """import pathlib,sys

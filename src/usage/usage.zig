@@ -1,8 +1,7 @@
-//! `/usage`: the module's front door. fx hands in a `Host` (HTTP, clock,
-//! home directory) and a `Credential` for the provider in use; the TUI and
-//! CLI call the `Dashboard` and render its `Snapshot`. AI Gateway sign-ins
-//! read usage reports; a ChatGPT plan through Codex reads its limits, and a
-//! Grok plan its allowance and credits. All usage logic lives here.
+//! `fx usage`: the module's front door. fx hands in a `Host` (HTTP, clock,
+//! home directory) and a `Credential` for the provider in use; the CLI calls
+//! the `Dashboard` and renders its `Snapshot`. AI Gateway sign-ins read usage
+//! reports. All usage logic lives here.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -10,8 +9,6 @@ pub const report = @import("report.zig");
 pub const policy = @import("policy.zig");
 pub const cache = @import("cache.zig");
 pub const view = @import("view.zig");
-pub const codex = @import("codex.zig");
-pub const grok = @import("grok.zig");
 
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -26,10 +23,6 @@ pub const Service = enum {
     gateway,
     /// `api.vercel.com` (`/ai-gateway/usage-report`).
     vercel_api,
-    /// `chatgpt.com` (`/backend-api/wham/usage`).
-    chatgpt,
-    /// The Grok CLI proxy, `cli-chat-proxy.grok.com/v1` (`/billing`).
-    grok,
 };
 
 pub const Request = struct {
@@ -38,8 +31,7 @@ pub const Request = struct {
     bearer: []const u8,
     /// Sent as `x-vercel-ai-gateway-team` when set.
     team: ?[]const u8,
-    /// The provider account: `chatgpt-account-id` for ChatGPT, `x-userid`
-    /// for Grok.
+    /// The provider account the request is for, when it has one.
     account_id: ?[]const u8 = null,
 };
 
@@ -72,10 +64,9 @@ pub const Credential = struct {
     bearer: []const u8,
     /// Required for `.member`.
     team: ?[]const u8,
-    /// Stable per person: the fx login account, the ChatGPT account, or the
-    /// API key itself.
+    /// Stable per person: the fx login account or the API key itself.
     subject: []const u8,
-    /// For `.codex` and `.grok`: the provider account the plan belongs to.
+    /// The provider account the numbers belong to, when it has one.
     account_id: ?[]const u8 = null,
     /// Who the numbers belong to, shown in the heading, e.g.
     /// `acme-design-tools-platform (fx login)`. Never a secret.
@@ -126,12 +117,6 @@ pub const Snapshot = struct {
     now_ms: i64,
     /// Whose usage this is; null when there is no usable sign-in.
     scope: ?Scope = null,
-    /// For `.codex`: the ChatGPT plan's limits, when fetched.
-    codex_usage: ?codex.Usage = null,
-    codex_at_ms: ?i64 = null,
-    /// For `.grok`: the Grok plan's allowance and credits, when fetched.
-    grok_usage: ?grok.Usage = null,
-    grok_at_ms: ?i64 = null,
 
     pub fn of(self: *const Snapshot, period: Period) *const View {
         return &self.views[@backingInt(period)];
@@ -148,47 +133,6 @@ pub const Snapshot = struct {
         return report.budgetResetDay(b.period, report.utcDay(self.now_ms));
     }
 
-    /// Codex tokens for `period` from ChatGPT's daily activity, when known.
-    pub fn codexTokens(self: *const Snapshot, period: Period) ?u64 {
-        const u = self.codex_usage orelse return null;
-        const profile = u.profile orelse return null;
-        const range = self.days(period);
-        return profile.tokensBetween(range[0], range[1]);
-    }
-
-    /// Each Codex model and speed's share of `period`, largest first.
-    pub fn codexModelShares(self: *const Snapshot, period: Period, out: *[codex.max_shares]codex.Share) []codex.Share {
-        const b = self.codexBreakdown() orelse return out[0..0];
-        const range = self.days(period);
-        return b.modelShares(range[0], range[1], out);
-    }
-
-    /// Each surface's share of `period` (cli, desktop app, ...), largest first.
-    pub fn codexSurfaceShares(self: *const Snapshot, period: Period, out: *[codex.max_shares]codex.Share) []codex.Share {
-        const b = self.codexBreakdown() orelse return out[0..0];
-        const range = self.days(period);
-        return b.surfaceShares(range[0], range[1], out);
-    }
-
-    /// Every Codex model and speed over all the breakdown's days: the names
-    /// the model table makes room for in every period.
-    pub fn codexModelsAll(self: *const Snapshot, out: *[codex.max_shares]codex.Share) []codex.Share {
-        const b = self.codexBreakdown() orelse return out[0..0];
-        return b.modelShares(std.math.minInt(i64), std.math.maxInt(i64), out);
-    }
-
-    /// Every surface over all the breakdown's days, largest first: the
-    /// surface table's columns in every period.
-    pub fn codexSurfacesAll(self: *const Snapshot, out: *[codex.max_shares]codex.Share) []codex.Share {
-        const b = self.codexBreakdown() orelse return out[0..0];
-        return b.surfaceShares(std.math.minInt(i64), std.math.maxInt(i64), out);
-    }
-
-    pub fn codexBreakdown(self: *const Snapshot) ?codex.Breakdown {
-        const u = self.codex_usage orelse return null;
-        return u.breakdown;
-    }
-
     /// The first and last UTC day of `period`, ending today.
     fn days(self: *const Snapshot, period: Period) [2]i64 {
         const today = report.utcDay(self.now_ms);
@@ -201,8 +145,6 @@ pub const Snapshot = struct {
 
     /// When the numbers on screen were fetched, if any are shown.
     pub fn fetchedAtMs(self: *const Snapshot) ?i64 {
-        if (self.scope == .codex) return self.codex_at_ms;
-        if (self.scope == .grok) return self.grok_at_ms;
         return self.views[0].fetched_at_ms;
     }
 
@@ -363,11 +305,6 @@ pub const Dashboard = struct {
             .{ .failed = f }
         else
             .ready;
-        const codex_entry: ?cache.Codex = if (entry) |e| e.codex else null;
-        // Allocate before the arena is copied into the result.
-        const codex_usage: ?codex.Usage = if (codex_entry) |c| try c.value.clone(arena.allocator()) else null;
-        const grok_entry: ?cache.Grok = if (entry) |e| e.grok else null;
-        const grok_usage: ?grok.Usage = if (grok_entry) |g| try g.value.clone(arena.allocator()) else null;
         return .{
             .arena = arena,
             .views = views,
@@ -375,10 +312,6 @@ pub const Dashboard = struct {
             .label = label,
             .now_ms = now,
             .scope = if (self.session) |s| s.scope else null,
-            .codex_usage = codex_usage,
-            .codex_at_ms = if (codex_entry) |c| c.at_ms else null,
-            .grok_usage = grok_usage,
-            .grok_at_ms = if (grok_entry) |g| g.at_ms else null,
         };
     }
 
@@ -670,20 +603,10 @@ const Run = struct {
     job: *const Job,
     stop: Outcome = .cancelled,
     parts: std.ArrayList(report.Rows) = .empty,
-    codex_part: ?codex.Owned = null,
-    profile_part: ?codex.ProfileOwned = null,
-    breakdown_part: ?codex.BreakdownOwned = null,
-    grok_part: ?grok.Owned = null,
-    settings_part: ?grok.SettingsOwned = null,
 
     fn deinit(self: *Run) void {
         for (self.parts.items) |*p| p.deinit();
         self.parts.deinit(self.dashboard.gpa);
-        if (self.codex_part) |*c| c.deinit();
-        if (self.profile_part) |*p| p.deinit();
-        if (self.breakdown_part) |*b| b.deinit();
-        if (self.grok_part) |*g| g.deinit();
-        if (self.settings_part) |*s| s.deinit();
     }
 
     fn fail(self: *Run, outcome: Outcome) error{Stop} {
@@ -727,8 +650,6 @@ fn unsaved(dashboard: *Dashboard, job: *const Job, fetched: cache.Entry, now: i6
 
 fn collect(run: *Run) error{Stop}!cache.Entry {
     const job = run.job;
-    if (job.scope == .codex) return .{ .codex = .{ .at_ms = job.started_ms, .value = try fetchCodex(run) } };
-    if (job.scope == .grok) return .{ .grok = .{ .at_ms = job.started_ms, .value = try fetchGrok(run) } };
     var fetched: cache.Entry = .{
         .today = .{ .day = job.plan.day, .at_ms = job.started_ms, .models = try fetchRows(run, job.plan.todayRange()) },
     };
@@ -769,104 +690,6 @@ fn fetchRows(run: *Run, range: [2]i64) error{Stop}![]const report.ModelRow {
     return rows.models;
 }
 
-/// A ChatGPT plan's limits, then its token activity and its usage by model
-/// and surface. Borrows from `run`.
-fn fetchCodex(run: *Run) error{Stop}!codex.Usage {
-    const job = run.job;
-    const dashboard = run.dashboard;
-    const body = try get(run, .{
-        .service = .chatgpt,
-        .path = codex.path,
-        .bearer = job.bearer,
-        .team = null,
-        .account_id = job.account_id,
-    });
-    defer dashboard.gpa.free(body);
-    const owned = codex.parse(dashboard.gpa, body, dashboard.host.now_fn(dashboard.host.ctx)) catch return run.fail(.{ .failed = .bad_response });
-    run.codex_part = owned;
-    var value = owned.usage;
-    // The activity and breakdown are extra: a failure keeps the limits, and
-    // the cache keeps what it already has.
-    if (fetchProfile(run)) |profile| value.profile = profile else |_| {}
-    if (fetchBreakdown(run)) |breakdown| value.breakdown = breakdown else |_| {}
-    return value;
-}
-
-/// From the earlier of the month's first day and six days ago, so one
-/// request covers today, 7d and the month.
-fn fetchBreakdown(run: *Run) error{Stop}!codex.Breakdown {
-    const job = run.job;
-    const gpa = run.dashboard.gpa;
-    const today = report.utcDay(job.started_ms);
-    var path_buf: [160]u8 = undefined;
-    const path = codex.breakdownPath(&path_buf, @min(report.monthStart(today), today - 6)) catch return run.fail(.{ .failed = .bad_response });
-    const body = try get(run, .{
-        .service = .chatgpt,
-        .path = path,
-        .bearer = job.bearer,
-        .team = null,
-        .account_id = job.account_id,
-    });
-    defer gpa.free(body);
-    const owned = codex.parseBreakdown(gpa, body) catch return run.fail(.{ .failed = .bad_response });
-    run.breakdown_part = owned;
-    return owned.breakdown;
-}
-
-fn fetchProfile(run: *Run) error{Stop}!codex.Profile {
-    const job = run.job;
-    const gpa = run.dashboard.gpa;
-    const body = try get(run, .{
-        .service = .chatgpt,
-        .path = codex.profile_path,
-        .bearer = job.bearer,
-        .team = null,
-        .account_id = job.account_id,
-    });
-    defer gpa.free(body);
-    const owned = codex.parseProfile(gpa, body) catch return run.fail(.{ .failed = .bad_response });
-    run.profile_part = owned;
-    return owned.profile;
-}
-
-/// A Grok plan's billing, then its settings for the plan's name. Borrows
-/// from `run`.
-fn fetchGrok(run: *Run) error{Stop}!grok.Usage {
-    const job = run.job;
-    const gpa = run.dashboard.gpa;
-    const body = try get(run, .{
-        .service = .grok,
-        .path = grok.billing_path,
-        .bearer = job.bearer,
-        .team = null,
-        .account_id = job.account_id,
-    });
-    defer gpa.free(body);
-    const owned = grok.parseBilling(gpa, body) catch return run.fail(.{ .failed = .bad_response });
-    run.grok_part = owned;
-    var value = owned.usage;
-    // The plan's name is extra: a failure keeps the billing, and the cache
-    // keeps the name it already has.
-    if (fetchGrokSettings(run)) |settings| value.settings = settings else |_| {}
-    return value;
-}
-
-fn fetchGrokSettings(run: *Run) error{Stop}!grok.Settings {
-    const job = run.job;
-    const gpa = run.dashboard.gpa;
-    const body = try get(run, .{
-        .service = .grok,
-        .path = grok.settings_path,
-        .bearer = job.bearer,
-        .team = null,
-        .account_id = job.account_id,
-    });
-    defer gpa.free(body);
-    const owned = grok.parseSettings(gpa, body) catch return run.fail(.{ .failed = .bad_response });
-    run.settings_part = owned;
-    return owned.settings;
-}
-
 fn fetchBudget(run: *Run) error{Stop}!?report.Budget {
     const job = run.job;
     const team = job.team orelse return null;
@@ -902,7 +725,6 @@ test {
     _ = report;
     _ = policy;
     _ = cache;
-    _ = codex;
     _ = view;
 }
 
@@ -915,10 +737,6 @@ const FakeGateway = struct {
     mutex: Io.Mutex = .init,
     now_ms: i64 = 20737 * std.time.ms_per_day + 3 * std.time.ms_per_hour,
     status: u16 = 200,
-    /// For `wham/profiles/me` only.
-    profile_status: u16 = 200,
-    /// For Grok's `/settings` only.
-    settings_status: u16 = 200,
     paths: [16][160]u8 = undefined,
     path_lens: [16]usize = undefined,
     teams: [16]bool = undefined,
@@ -934,7 +752,6 @@ const FakeGateway = struct {
     const today_body = "{\"results\":[{\"model\":\"anthropic/claude-opus-5.5\",\"request_count\":10,\"input_tokens\":5,\"total_cost\":2.5}]}";
     const window_body = "{\"results\":[{\"model\":\"anthropic/claude-opus-5.5\",\"request_count\":90,\"total_cost\":40},{\"model\":\"openai/gpt-5.6-luna\",\"request_count\":7,\"total_cost\":0.5}]}";
     const budget_body = "{\"users\":[{\"budget\":{\"limitAmount\":31600,\"currentSpend\":6596.55,\"refreshPeriod\":\"monthly\"}}]}";
-    const codex_body = "{\"plan_type\":\"plus\",\"rate_limit\":{\"allowed\":true,\"limit_reached\":false,\"primary_window\":{\"used_percent\":42,\"limit_window_seconds\":18000,\"reset_after_seconds\":600,\"reset_at\":null}},\"credits\":{\"has_credits\":false,\"unlimited\":false,\"balance\":null}}";
 
     const profile_body = "{\"profile\":{\"display_name\":\"samdoe\"},\"stats\":{\"lifetime_tokens\":1000," ++
         "\"daily_usage_buckets\":[{\"start_date\":\"2026-10-11\",\"tokens\":40},{\"start_date\":\"2026-10-06\",\"tokens\":2}]," ++
@@ -944,10 +761,6 @@ const FakeGateway = struct {
         "{\"date\":\"2026-10-05\",\"product_surface_usage_values\":{\"desktop_app\":4},\"models\":[{\"model\":\"gpt-6-astra\",\"speed\":\"fast\",\"credits\":4}]}," ++
         "{\"date\":\"2026-10-11\",\"product_surface_usage_values\":{\"cli\":4},\"models\":[{\"model\":\"gpt-6.1-sol\",\"speed\":\"fast\",\"credits\":3},{\"model\":\"gpt-6.1-sol\",\"speed\":\"standard\",\"credits\":1}]}]," ++
         "\"units\":\"percent\",\"group_by\":\"day\"}";
-
-    const grok_billing_body = "{\"config\":{\"creditUsagePercent\":42.5,\"currentPeriod\":{\"type\":\"USAGE_PERIOD_TYPE_WEEKLY\",\"end\":\"2026-10-15T00:00:00Z\"}," ++
-        "\"productUsage\":[{\"product\":\"PRODUCT_GROK_BUILD\",\"usagePercent\":61.2}],\"prepaidBalance\":{\"val\":1250},\"onDemandCap\":{\"val\":10000},\"onDemandUsed\":{}}}";
-    const grok_settings_body = "{\"subscription_tier_display\":\"SuperGrok\",\"on_demand_enabled\":true}";
 
     fn host(self: *FakeGateway, home: []const u8) Host {
         return .{ .ctx = self, .fetch_fn = fetch, .now_fn = now, .io_fn = testIo, .home = home };
@@ -979,17 +792,7 @@ const FakeGateway = struct {
         self.path_lens[i] = request.path.len;
         self.teams[i] = request.team != null;
         self.accounts[i] = request.account_id != null;
-        if (std.mem.eql(u8, request.path, codex.profile_path))
-            return .{ .status = self.profile_status, .body = try alloc.dupe(u8, profile_body) };
-        if (std.mem.startsWith(u8, request.path, codex.breakdown_path))
-            return .{ .status = 200, .body = try alloc.dupe(u8, breakdown_body) };
-        if (request.service == .grok) return if (std.mem.eql(u8, request.path, grok.settings_path))
-            .{ .status = self.settings_status, .body = try alloc.dupe(u8, grok_settings_body) }
-        else
-            .{ .status = self.status, .body = try alloc.dupe(u8, grok_billing_body) };
-        const body = if (request.service == .chatgpt)
-            codex_body
-        else if (request.service == .vercel_api)
+        const body = if (request.service == .vercel_api)
             budget_body
         else if (std.mem.find(u8, request.path, "start_date=2026-10-11") != null)
             today_body
@@ -1182,155 +985,6 @@ test "a first fetch creates a private ~/.fx for its cache" {
     const stat = try tmp.dir.statFile(testing.io, ".fx", .{});
     try testing.expectEqual(std.Io.File.Kind.directory, stat.kind);
     try testing.expectEqual(@as(u32, 0o700), @as(u32, @intCast(stat.permissions.toMode() & 0o777)));
-}
-
-test "a Codex sign-in reads its plan's limits from ChatGPT" {
-    var tmp = testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const home = try testHome(&tmp);
-    defer testing.allocator.free(home);
-    var gateway: FakeGateway = .{};
-    var dashboard = Dashboard.init(testing.allocator, gateway.host(home));
-    defer dashboard.deinit();
-    const chatgpt: Credential = .{ .scope = .codex, .bearer = "chatgpt_token", .team = null, .subject = "acct_9", .account_id = "acct_9", .label = "codex (ChatGPT)" };
-
-    dashboard.open(chatgpt);
-    dashboard.waitForFetch();
-    // Limits, activity and the breakdown from the month's first day, all to
-    // ChatGPT with the account and no team.
-    try testing.expectEqual(@as(usize, 3), gateway.count);
-    try testing.expectEqualStrings("/backend-api/wham/usage", gateway.path(0));
-    try testing.expectEqualStrings("/backend-api/wham/profiles/me", gateway.path(1));
-    try testing.expectEqualStrings("/backend-api/wham/usage/daily-token-usage-breakdown?start_date=2026-10-01", gateway.path(2));
-    for (0..3) |i| try testing.expect(gateway.accounts[i] and !gateway.teams[i]);
-
-    var snap = try dashboard.snapshot(testing.allocator);
-    defer snap.deinit();
-    try testing.expectEqual(@as(?Scope, .codex), snap.scope);
-    try testing.expect(snap.status == .ready);
-    const limits = snap.codex_usage.?;
-    try testing.expectEqualStrings("plus", limits.plan);
-    try testing.expectEqual(@as(f64, 42), limits.limits[0].primary.?.used_percent);
-    try testing.expectEqual(@as(?i64, gateway.now_ms + 600_000), limits.limits[0].primary.?.resets_at_ms);
-    try testing.expectEqual(snap.codex_at_ms, snap.fetchedAtMs());
-    try testing.expectEqual(@as(usize, 0), snap.of(.month).models.len);
-    const profile = limits.profile.?;
-    try testing.expectEqualStrings("samdoe", profile.name.?);
-    try testing.expectEqual(@as(?u64, 1000), profile.lifetime_tokens);
-    try testing.expectEqual(@as(?u64, 40), snap.codexTokens(.today));
-    try testing.expectEqual(@as(?u64, 42), snap.codexTokens(.days_7));
-    try testing.expectEqual(@as(?u64, 42), snap.codexTokens(.month));
-    var shares_buf: [codex.max_shares]codex.Share = undefined;
-    const today_models = snap.codexModelShares(.today, &shares_buf);
-    try testing.expectEqual(@as(usize, 2), today_models.len);
-    try testing.expectApproxEqAbs(@as(f64, 75), today_models[0].percent, 1e-9);
-    const week_models = snap.codexModelShares(.days_7, &shares_buf);
-    try testing.expectEqualStrings("gpt-6-astra", week_models[0].name);
-    try testing.expectApproxEqAbs(@as(f64, 50), week_models[0].percent, 1e-9);
-    const surfaces = snap.codexSurfaceShares(.month, &shares_buf);
-    try testing.expectEqualStrings("cli", surfaces[0].name);
-    try testing.expectEqualStrings("desktop app", surfaces[1].name);
-
-    // Another process opens instantly from the shared cache.
-    var other_gateway: FakeGateway = .{ .now_ms = gateway.now_ms + 1000 };
-    var other = Dashboard.init(testing.allocator, other_gateway.host(home));
-    defer other.deinit();
-    other.open(chatgpt);
-    var instant = try other.snapshot(testing.allocator);
-    defer instant.deinit();
-    try testing.expectEqualStrings("plus", instant.codex_usage.?.plan);
-    other.waitForFetch();
-
-    // The AI Gateway sign-in never sees the Codex numbers, and back.
-    dashboard.close();
-    dashboard.open(member);
-    var gateway_snap = try dashboard.snapshot(testing.allocator);
-    defer gateway_snap.deinit();
-    try testing.expect(gateway_snap.codex_usage == null);
-    try testing.expectEqual(@as(?Scope, .member), gateway_snap.scope);
-    dashboard.waitForFetch();
-}
-
-test "a failed Codex activity request keeps the limits and the stored activity" {
-    var tmp = testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const home = try testHome(&tmp);
-    defer testing.allocator.free(home);
-    var gateway: FakeGateway = .{};
-    var dashboard = Dashboard.init(testing.allocator, gateway.host(home));
-    defer dashboard.deinit();
-    const chatgpt: Credential = .{ .scope = .codex, .bearer = "chatgpt_token", .team = null, .subject = "acct_9", .account_id = "acct_9" };
-
-    dashboard.open(chatgpt);
-    dashboard.waitForFetch();
-    gateway.profile_status = 500;
-    gateway.now_ms += policy.floor_ms;
-    try testing.expect(dashboard.refresh());
-    dashboard.waitForFetch();
-    try testing.expectEqual(@as(usize, 6), gateway.count);
-
-    var snap = try dashboard.snapshot(testing.allocator);
-    defer snap.deinit();
-    // The refresh counts as fresh: the limits came back.
-    try testing.expect(snap.status == .ready);
-    try testing.expectEqual(@as(?i64, gateway.now_ms), snap.codex_at_ms);
-    try testing.expectEqual(@as(?u64, 1000), snap.codex_usage.?.profile.?.lifetime_tokens);
-}
-
-test "a Grok sign-in reads its plan's billing and name from the Grok proxy" {
-    var tmp = testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const home = try testHome(&tmp);
-    defer testing.allocator.free(home);
-    var gateway: FakeGateway = .{};
-    var dashboard = Dashboard.init(testing.allocator, gateway.host(home));
-    defer dashboard.deinit();
-    const xai: Credential = .{ .scope = .grok, .bearer = "grok_token", .team = null, .subject = "user_7", .account_id = "user_7", .label = "grok (xAI)" };
-
-    dashboard.open(xai);
-    dashboard.waitForFetch();
-    // Billing, then settings, both with the user and no team.
-    try testing.expectEqual(@as(usize, 2), gateway.count);
-    try testing.expectEqualStrings("/billing?format=credits", gateway.path(0));
-    try testing.expectEqualStrings("/settings", gateway.path(1));
-    for (0..2) |i| try testing.expect(gateway.accounts[i] and !gateway.teams[i]);
-
-    var snap = try dashboard.snapshot(testing.allocator);
-    defer snap.deinit();
-    try testing.expectEqual(@as(?Scope, .grok), snap.scope);
-    try testing.expect(snap.status == .ready);
-    const u = snap.grok_usage.?;
-    try testing.expectEqual(@as(?f64, 42.5), u.used_percent);
-    try testing.expectEqual(@as(?grok.PeriodKind, .weekly), u.period);
-    try testing.expectEqual(@as(?i64, 20741 * std.time.ms_per_day), u.resets_at_ms);
-    try testing.expectEqualStrings("grok build", u.products[0].name);
-    try testing.expectEqual(@as(?i64, 0), u.on_demand_used_cents);
-    try testing.expectEqualStrings("SuperGrok", u.plan().?);
-    try testing.expectEqual(snap.grok_at_ms, snap.fetchedAtMs());
-    try testing.expect(snap.codex_usage == null);
-    try testing.expectEqual(@as(usize, 0), snap.of(.month).models.len);
-
-    // A failed settings request keeps the new billing and the stored name.
-    gateway.settings_status = 500;
-    gateway.now_ms += policy.floor_ms;
-    try testing.expect(dashboard.refresh());
-    dashboard.waitForFetch();
-    try testing.expectEqual(@as(usize, 4), gateway.count);
-    var again = try dashboard.snapshot(testing.allocator);
-    defer again.deinit();
-    try testing.expect(again.status == .ready);
-    try testing.expectEqual(@as(?i64, gateway.now_ms), again.grok_at_ms);
-    try testing.expectEqualStrings("SuperGrok", again.grok_usage.?.plan().?);
-
-    // A refused sign-in fails the refresh and keeps the numbers on screen.
-    gateway.status = 401;
-    gateway.now_ms += policy.floor_ms;
-    try testing.expect(dashboard.refresh());
-    dashboard.waitForFetch();
-    var refused = try dashboard.snapshot(testing.allocator);
-    defer refused.deinit();
-    try testing.expectEqual(Status{ .failed = .refused }, refused.status);
-    try testing.expectEqual(@as(?f64, 42.5), refused.grok_usage.?.used_percent);
 }
 
 test "the floor holds open and the 15-minute timer, never r" {
@@ -1561,35 +1215,17 @@ test "a dashboard never shows less than it had when the file goes back" {
     try testing.expect(shown.of(.days_7).finished_current);
 }
 
-test "a provider switch fetches the new sign-in at once, and r works for it" {
-    var tmp = testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const home = try testHome(&tmp);
-    defer testing.allocator.free(home);
-    var gateway: FakeGateway = .{};
-    var dashboard = Dashboard.init(testing.allocator, gateway.host(home));
-    defer dashboard.deinit();
-    dashboard.open(member);
-    dashboard.waitForFetch();
-
-    // Seconds later the provider changes and /usage opens again.
-    dashboard.close();
-    gateway.now_ms += 5 * std.time.ms_per_s;
-    const chatgpt: Credential = .{ .scope = .codex, .bearer = "chatgpt_token", .team = null, .subject = "acct_9", .account_id = "acct_9", .label = "codex (ChatGPT)" };
-    const before_switch = gateway.count;
-    dashboard.open(chatgpt);
-    dashboard.waitForFetch();
-    try testing.expect(gateway.count > before_switch);
-    var shown = try dashboard.snapshot(testing.allocator);
-    defer shown.deinit();
-    try testing.expectEqual(@as(?i64, gateway.now_ms), shown.codex_at_ms);
-
-    // r fetches for it at once too.
-    gateway.now_ms += 5 * std.time.ms_per_s;
-    const before_r = gateway.count;
-    try testing.expect(dashboard.refresh());
-    dashboard.waitForFetch();
-    try testing.expect(gateway.count > before_r);
+test "an empty or relative home is no home, and a fetch still shows" {
+    for ([_][]const u8{ "", "relative/home" }) |home| {
+        var gateway: FakeGateway = .{};
+        var dashboard = Dashboard.init(testing.allocator, gateway.host(home));
+        defer dashboard.deinit();
+        dashboard.open(api_key);
+        dashboard.waitForFetch();
+        var shown = try dashboard.snapshot(testing.allocator);
+        defer shown.deinit();
+        try testing.expectEqual(@as(?i64, gateway.now_ms), shown.of(.today).fetched_at_ms);
+    }
 }
 
 test "a sign-in that arrives during another's fetch gets its fetch when that one ends" {
@@ -1603,37 +1239,26 @@ test "a sign-in that arrives during another's fetch gets its fetch when that one
     gateway.held.store(true, .release);
     dashboard.open(member);
 
-    const chatgpt: Credential = .{ .scope = .codex, .bearer = "chatgpt_token", .team = null, .subject = "acct_9", .account_id = "acct_9", .label = "codex (ChatGPT)" };
     dashboard.close();
-    dashboard.open(chatgpt);
+    dashboard.open(api_key);
     gateway.held.store(false, .release);
     dashboard.waitForFetch();
     var before = try dashboard.snapshot(testing.allocator);
     defer before.deinit();
-    try testing.expect(before.codex_at_ms == null);
+    // The member's numbers are cached for the member, not shown to the key.
+    try testing.expectEqual(@as(?Scope, .api_key), before.scope);
+    try testing.expect(before.of(.today).fetched_at_ms == null);
 
     // The next event-loop pass starts it, without waiting out any floor.
     dashboard.tick();
     dashboard.waitForFetch();
     var after = try dashboard.snapshot(testing.allocator);
     defer after.deinit();
-    try testing.expectEqual(@as(?i64, gateway.now_ms), after.codex_at_ms);
+    try testing.expectEqual(@as(?Scope, .api_key), after.scope);
+    try testing.expectEqual(@as(?i64, gateway.now_ms), after.of(.today).fetched_at_ms);
     // Owed once: later passes wait for the 15-minute timer.
     const fetched = gateway.count;
     dashboard.tick();
     dashboard.waitForFetch();
     try testing.expectEqual(fetched, gateway.count);
-}
-
-test "an empty or relative home is no home, and a fetch still shows" {
-    for ([_][]const u8{ "", "relative/home" }) |home| {
-        var gateway: FakeGateway = .{};
-        var dashboard = Dashboard.init(testing.allocator, gateway.host(home));
-        defer dashboard.deinit();
-        dashboard.open(api_key);
-        dashboard.waitForFetch();
-        var shown = try dashboard.snapshot(testing.allocator);
-        defer shown.deinit();
-        try testing.expectEqual(@as(?i64, gateway.now_ms), shown.of(.today).fetched_at_ms);
-    }
 }

@@ -244,122 +244,6 @@ test "Responses request projects long call ids with matching outputs" {
     }
 }
 
-test "Responses request preserves opaque tool-call identity" {
-    const state = "[{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"opaque\",\"summary\":[]}]";
-    const calls = [_]types.ToolCall{.{ .id = "signed:0", .name = "read_file", .arguments_json = "{}" }};
-    const messages = [_]types.ChatMessage{
-        .{ .role = .assistant, .tool_calls = &calls, .provider_replay = .{ .source = .{ .provider = .codex, .model = "test" }, .parts_json = state } },
-        .{ .role = .tool, .tool_call_id = "signed:0", .tool_name = "read_file", .content = "result" },
-    };
-    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
-    defer out.deinit();
-    try out.writer.writeByte('[');
-    try writeInput(&out.writer, std.testing.allocator, &messages, null, .{ .tool_calls = 128, .tool_identity_bytes = 256, .tool_arguments_bytes = 4096, .provider_state_bytes = 4096 }, .{});
-    try out.writer.writeByte(']');
-    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, out.written(), .{});
-    defer parsed.deinit();
-    const items = parsed.value.array.items;
-    try std.testing.expectEqualStrings("opaque", items[0].object.get("encrypted_content").?.string);
-    try std.testing.expectEqualStrings("signed:0", items[1].object.get("call_id").?.string);
-    try std.testing.expectEqualStrings("signed:0", items[2].object.get("call_id").?.string);
-    try std.testing.expectEqualStrings(state, messages[0].provider_replay.?.parts_json);
-}
-
-test "Responses replay retains phase through storage and projection" {
-    const alloc = std.testing.allocator;
-    const source: types.ProviderReplay = .{
-        .source = .{ .provider = .codex, .model = "test" },
-        .parts_json = "[{\"type\":\"reasoning\",\"encrypted_content\":\"cipher\"},{\"type\":\"message\",\"phase\":\"commentary\"}]",
-    };
-    const stored = try types.dupeProviderReplay(alloc, source);
-    defer types.freeProviderReplay(alloc, stored);
-    const messages = [_]types.ChatMessage{.{ .role = .assistant, .content = "original", .provider_replay = stored }};
-    var out: std.Io.Writer.Allocating = .init(alloc);
-    defer out.deinit();
-    try out.writer.writeByte('[');
-    try writeInput(&out.writer, alloc, &messages, null, .{ .tool_calls = 4, .tool_identity_bytes = 256, .tool_arguments_bytes = 4096, .provider_state_bytes = 4096 }, .{});
-    try out.writer.writeByte(']');
-    var parsed = try std.json.parseFromSlice(std.json.Value, alloc, out.written(), .{});
-    defer parsed.deinit();
-    try std.testing.expectEqual(@as(usize, 2), parsed.value.array.items.len);
-    try std.testing.expectEqualStrings("cipher", parsed.value.array.items[0].object.get("encrypted_content").?.string);
-    try std.testing.expectEqualStrings("commentary", parsed.value.array.items[1].object.get("phase").?.string);
-    try std.testing.expectEqualStrings("original", parsed.value.array.items[1].object.get("content").?.array.items[0].object.get("text").?.string);
-    const phase_only = (try selectReplayParts(alloc, stored, &.{}, true, false)).?;
-    defer alloc.free(phase_only.parts_json);
-    try std.testing.expectEqualStrings("[{\"type\":\"message\",\"phase\":\"commentary\"}]", phase_only.parts_json);
-    const reasoning_only = (try selectReplayParts(alloc, stored, &.{}, false, true)).?;
-    defer alloc.free(reasoning_only.parts_json);
-    try std.testing.expectEqualStrings("[{\"type\":\"reasoning\",\"encrypted_content\":\"cipher\"}]", reasoning_only.parts_json);
-}
-
-test "Responses replay filtering cleans up allocation failures" {
-    const Probe = struct {
-        fn run(alloc: std.mem.Allocator) !void {
-            const source: types.ProviderReplay = .{
-                .source = .{ .provider = .codex, .model = "test" },
-                .parts_json = "[{\"type\":\"reasoning\",\"encrypted_content\":\"cipher\"},{\"type\":\"message\",\"phase\":\"commentary\"}]",
-            };
-            const selected = (try selectReplayParts(alloc, source, &.{}, true, false)).?;
-            defer alloc.free(selected.parts_json);
-        }
-    };
-    try std.testing.checkAllAllocationFailures(testing_allocator.no_resize, Probe.run, .{});
-}
-
-test "Responses unchanged replay projection borrows reasoning state" {
-    const source: types.ProviderReplay = .{
-        .source = .{ .provider = .codex, .model = "fixture-model" },
-        .parts_json = "[ {\"type\":\"reasoning\",\"encrypted_content\":\"kept\"} ]",
-    };
-    const selected = (try selectReplayParts(std.testing.allocator, source, &.{}, false, true)).?;
-    try std.testing.expectEqual(source.parts_json.ptr, selected.parts_json.ptr);
-    try std.testing.expectEqualStrings(source.parts_json, selected.parts_json);
-}
-
-test "Responses request preserves assistant commentary phase" {
-    const calls = [_]types.ToolCall{.{
-        .id = "call_1",
-        .name = "read_file",
-        .arguments_json = "{}",
-    }};
-    const messages = [_]types.ChatMessage{
-        .{
-            .role = .assistant,
-            .content = "I will inspect the file first.",
-            .tool_calls = &calls,
-            .provider_replay = .{ .source = .{ .provider = .codex, .model = "fixture-model" }, .parts_json = "[{\"type\":\"message\",\"phase\":\"commentary\"}]" },
-        },
-        .{
-            .role = .tool,
-            .tool_call_id = "call_1",
-            .tool_name = "read_file",
-            .content = "contents",
-        },
-    };
-    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
-    defer out.deinit();
-    try out.writer.writeByte('[');
-    try writeInput(&out.writer, std.testing.allocator, &messages, null, .{
-        .tool_calls = 128,
-        .tool_identity_bytes = 256,
-        .tool_arguments_bytes = 4096,
-        .provider_state_bytes = 4096,
-    }, .{});
-    try out.writer.writeByte(']');
-
-    const parsed = try std.json.parseFromSlice(
-        std.json.Value,
-        std.testing.allocator,
-        out.written(),
-        .{},
-    );
-    defer parsed.deinit();
-    const item = parsed.value.array.items[0].object;
-    try std.testing.expectEqualStrings("message", item.get("type").?.string);
-    try std.testing.expectEqualStrings("commentary", item.get("phase").?.string);
-}
-
 test "non-object provider-owned arguments retain their Responses representation" {
     const calls = [_]types.ToolCall{.{ .id = "native", .name = "native_tool", .arguments_json = "[]", .provenance = .provider_executed, .provider_result = "native result" }};
     const messages = [_]types.ChatMessage{.{ .role = .assistant, .tool_calls = &calls }};
@@ -1547,35 +1431,6 @@ test "Responses null snapshot preserves separate item kinds without extra replay
     try std.testing.checkAllAllocationFailures(testing_allocator.no_resize, Probe.run, .{});
 }
 
-test "Responses message replay preserves separate commentary and final text" {
-    var stream = ToolRecordTest.init(std.testing.allocator);
-    defer stream.deinit();
-    try stream.apply(
-        \\{"type":"response.completed","response":{"status":"completed","output":[{"type":"message","id":"msg_progress","phase":"commentary","content":[{"type":"output_text","text":"Checking."}]},{"type":"message","id":"msg_final","phase":"final_answer","content":[{"type":"output_text","text":"42"}]}]}}
-    );
-    const completion = try stream.finish();
-    defer stream.freeCompletion(completion);
-    try std.testing.expectEqualStrings("Checking.\n\n42", completion.content.?);
-    var out: std.Io.Writer.Allocating = .init(stream.alloc);
-    defer out.deinit();
-    const messages = [_]types.ChatMessage{.{
-        .role = .assistant,
-        .content = completion.content,
-        .provider_replay = .{ .source = .{ .provider = .codex, .model = "fixture-model" }, .parts_json = completion.provider_state_json orelse "[]" },
-    }};
-    try out.writer.writeByte('[');
-    try writeInput(&out.writer, stream.alloc, &messages, null, .{ .tool_calls = 4, .tool_identity_bytes = 1024, .tool_arguments_bytes = 4096, .provider_state_bytes = 4096 }, .{});
-    try out.writer.writeByte(']');
-    const parsed = try std.json.parseFromSlice(std.json.Value, stream.alloc, out.written(), .{});
-    defer parsed.deinit();
-    const items = parsed.value.array.items;
-    try std.testing.expectEqual(@as(usize, 2), items.len);
-    try std.testing.expectEqualStrings("commentary", items[0].object.get("phase").?.string);
-    try std.testing.expectEqualStrings("Checking.", items[0].object.get("content").?.array.items[0].object.get("text").?.string);
-    try std.testing.expectEqualStrings("final_answer", items[1].object.get("phase").?.string);
-    try std.testing.expectEqualStrings("42", items[1].object.get("content").?.array.items[0].object.get("text").?.string);
-}
-
 test "Responses reasoning replay retains terminal-only context" {
     var stream = ToolRecordTest.init(std.testing.allocator);
     defer stream.deinit();
@@ -1583,81 +1438,6 @@ test "Responses reasoning replay retains terminal-only context" {
     const completion = try stream.finish();
     defer stream.freeCompletion(completion);
     try std.testing.expectEqualStrings("[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[],\"encrypted_content\":\"opaque\"}]", completion.provider_state_json orelse "");
-}
-
-test "Responses message replay rejects ambiguous or invalid spans" {
-    const cases = [_][]const u8{
-        \\[{"type":"message","offset":-1,"length":1}]
-        ,
-        \\[{"type":"message","offset":0,"length":6}]
-        ,
-        \\[{"type":"message","offset":6,"length":1}]
-        ,
-        \\[{"type":"message","offset":0,"length":0}]
-        ,
-        \\[{"type":"message","offset":0}]
-        ,
-        \\[{"type":"message","length":1}]
-        ,
-        \\[{"type":"message","offset":"0","length":1}]
-        ,
-        \\[{"type":"message","offset":0,"length":1,"phase":42}]
-        ,
-        \\[{"type":"message","offset":1,"length":4}]
-        ,
-        \\[{"type":"message","offset":0,"length":4},{"type":"message","offset":3,"length":2}]
-        ,
-        \\[{"type":"message","offset":0,"length":1},{"type":"message","offset":4,"length":1}]
-        ,
-        \\[{"type":"message","offset":0,"length":1}]
-        ,
-        \\[{"type":"message","phase":"commentary"},{"type":"message","offset":0,"length":5}]
-        ,
-        \\[{"type":"message","offset":0,"length":5},{"type":"message","phase":"commentary"}]
-        ,
-    };
-    for (cases) |parts_json| {
-        var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
-        defer out.deinit();
-        const messages = [_]types.ChatMessage{.{ .role = .assistant, .content = "a\n\nbc", .provider_replay = .{ .source = .{ .provider = .codex, .model = "fixture-model" }, .parts_json = parts_json } }};
-        try std.testing.expectError(error.InvalidProviderState, ImageInputTest.write(std.testing.allocator, &out.writer, &messages, null));
-    }
-}
-
-test "Responses message replay excludes separators and uncaptured bytes" {
-    for (0..6) |capture_limit| {
-        var stream = TextRecordTest.init(std.testing.allocator);
-        defer stream.deinit();
-        stream.capture_limit = capture_limit;
-        try stream.delta(0, 0, "a");
-        try stream.apply(
-            \\{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"first","phase":"commentary","content":[{"type":"output_text","text":"a"}]}}
-        );
-        try stream.apply(
-            \\{"type":"response.completed","response":{"status":"completed","output":[{"type":"message","id":"first","phase":"commentary","content":[{"type":"output_text","text":"a"}]},{"type":"message","content":[]},{"type":"message","id":"last","phase":"final_answer","content":[{"type":"output_text","text":"bc"}]}]}}
-        );
-        try stream.expect_emitted("a\n\nbc");
-        var result = stream_provider.Result{ .completed = .{ .completion = try stream.reducer.finish(stream.alloc, &stream.cancelled, stream.limits), .ownership = .owned } };
-        defer result.deinit(stream.alloc);
-        const completion = result.completed.completion;
-        try std.testing.expectEqualStrings("a\n\nbc"[0..capture_limit], completion.content orelse "");
-        const messages = [_]types.ChatMessage{.{ .role = .assistant, .content = completion.content, .provider_replay = if (completion.provider_state_json) |parts| .{ .source = .{ .provider = .codex, .model = "fixture-model" }, .parts_json = parts } else null }};
-        var out: std.Io.Writer.Allocating = .init(stream.alloc);
-        defer out.deinit();
-        try ImageInputTest.write(stream.alloc, &out.writer, &messages, null);
-        const parsed = try std.json.parseFromSlice(std.json.Value, stream.alloc, out.written(), .{});
-        defer parsed.deinit();
-        const items = parsed.value.array.items;
-        try std.testing.expectEqual(@as(usize, if (capture_limit == 0) 0 else if (capture_limit <= 3) 1 else 2), items.len);
-        if (items.len > 0) {
-            try std.testing.expectEqualStrings("a", items[0].object.get("content").?.array.items[0].object.get("text").?.string);
-            try std.testing.expectEqualStrings("commentary", items[0].object.get("phase").?.string);
-        }
-        if (items.len > 1) {
-            try std.testing.expectEqualStrings("bc"[0 .. capture_limit - 3], items[1].object.get("content").?.array.items[0].object.get("text").?.string);
-            try std.testing.expectEqualStrings("final_answer", items[1].object.get("phase").?.string);
-        }
-    }
 }
 
 test "Responses message replay binds item identity before text and across content parts" {
@@ -1686,20 +1466,6 @@ test "Responses message replay binds item identity before text and across conten
         \\{"type":"response.output_text.delta","output_index":0,"content_index":1,"item_id":"changed","delta":"b"}
     ));
     try stream.expect_emitted("a");
-}
-
-test "Responses message replay releases request scratch on allocation failure" {
-    const Probe = struct {
-        fn run(alloc: std.mem.Allocator) !void {
-            const messages = [_]types.ChatMessage{.{ .role = .assistant, .content = "a\n\nb", .provider_replay = .{ .source = .{ .provider = .codex, .model = "fixture-model" }, .parts_json = "[{\"type\":\"message\",\"offset\":0,\"length\":1},{\"type\":\"message\",\"offset\":3,\"length\":1}]" } }};
-            // Output storage is separate from the scratch allocator under test.
-            var wire: std.Io.Writer.Allocating = .init(std.testing.allocator);
-            defer wire.deinit();
-            try ImageInputTest.write(alloc, &wire.writer, &messages, null);
-            try std.testing.expect(std.mem.find(u8, wire.written(), "phase") == null);
-        }
-    };
-    try std.testing.checkAllAllocationFailures(testing_allocator.no_resize, Probe.run, .{});
 }
 
 test "Responses reasoning replay retains terminal enrichment without duplicates" {
