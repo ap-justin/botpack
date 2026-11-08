@@ -353,15 +353,17 @@ describe("cli: help", () => {
       expect(stdout).toContain("fx is a command-line coding agent.");
       expect(stdout).toContain("Commands:\n");
       expect(stdout).toContain("Run one noninteractive request");
-      expect(stdout).toContain("Sign in to a model provider");
-      expect(stdout).toContain("Sign out of a model provider");
-      expect(stdout).toContain("Choose the active model provider");
+      expect(stdout).toContain("Sign in to Vercel AI Gateway");
+      expect(stdout).toContain("Sign out of Vercel AI Gateway");
+      expect(stdout).toContain("Choose AI Gateway or a configured connection");
       // `fx setup` is deprecated and hidden; `fx login --api-key` replaces it.
       expect(stdout).not.toContain("Configure a Vercel AI Gateway API key");
       expect(stdout).toContain("login [vercel] [--api-key]");
       expect(stdout).toContain("Choose a Vercel AI Gateway team");
       expect(stdout).toContain("Show Vercel AI Gateway credits");
-      expect(stdout).not.toContain("Sign in to Vercel or a selected provider");
+      expect(stdout).not.toContain("Sign in to a model provider");
+      expect(stdout).not.toContain("Sign out of a model provider");
+      expect(stdout).not.toContain("Choose the active model provider");
       expect(stdout).toContain("credits|balance");
       expect(stdout).toContain("Flags:\n");
       expect(stdout).toContain("--context-limit <spec>");
@@ -889,11 +891,12 @@ describe("cli: status", () => {
           .map((check: { detail: string }) => check.detail);
         expect(warnings).toEqual([
           "unknown setting fast_mdoe in ~/.fx/settings.json (did you mean fast_mode?)",
-          "unknown setting statusLine.contxt in ~/.fx/settings.json (did you mean statusLine.context?)",
           `unknown setting efort in ~/.fx/settings.json for workspace ${cwd} (did you mean effort?)`,
-          "statusLine and status_line are both set in ~/.fx/settings.json; fx uses status_line where they differ, so remove statusLine",
           "unknown setting max_agent_step in .fx.json (did you mean max_agent_steps?)",
         ]);
+        // statusLine and status_line are retired: loaded and ignored, never diagnosed.
+        expect(doctor.stdout).not.toContain("statusLine");
+        expect(doctor.stdout).not.toContain("status_line");
 
         const status = await runFx(["status"], { cwd, env });
         expect(status.code).toBe(0);
@@ -982,7 +985,6 @@ describe("cli: status", () => {
           [
             "file:.fx.json\tmax_agent_steps=7",
             "file:~/.fx/settings.json\tfast_mode=true",
-            "file:~/.fx/settings.json\tstatus_line.context=true",
             "file:~/.fx/settings.json\tmodels.gateway=openai/gpt-5.5",
             'file:~/.fx/settings.json\tprovider_order=["a","b"]',
             `workspace:${cwd}\tfast_mode=false`,
@@ -990,6 +992,13 @@ describe("cli: status", () => {
           ].join("\n"),
         );
         expect(list.stderr).toBe("fx config: unknown setting fast_mdoe in ~/.fx/settings.json (did you mean fast_mode?)\n");
+
+        // The retired statusLine in the file is ignored, and fx config refuses it as unknown.
+        for (const key of ["statusLine.context", "status_line.context"]) {
+          const retired = await runFx(["config", "get", key], { cwd, env });
+          expect([retired.code, retired.stdout]).toEqual([2, ""]);
+          expect(retired.stderr).toStartWith(`fx config: unknown setting ${key.split(".")[0]}\nusage: fx config`);
+        }
 
         // get reads the settings the runtime resolves, so it gives the same
         // warnings a run does: this .fx.json sets a profile-only key.
@@ -1068,9 +1077,13 @@ describe("cli: status", () => {
           changed: true,
           file: "~/.fx/settings.json",
         });
-        const unset = await runFx(["config", "unset", "statusLine.session"], { cwd, env });
-        expect([unset.code, unset.stdout]).toEqual([0, "status_line.session removed from ~/.fx/settings.json.\n"]);
+        // Saving drops the retired statusLine the file started with.
         expect(settings()).toEqual({ fast_mode: true, max_agent_steps: 40 });
+        for (const [verb, key] of [["unset", "statusLine.session"], ["set", "status_line.context"], ["set", "startup_scrollback"]]) {
+          const retired = await runFx(["config", verb!, key!, ...(verb === "set" ? ["false"] : [])], { cwd, env });
+          expect([retired.code, retired.stdout]).toEqual([2, ""]);
+          expect(retired.stderr).toStartWith(`fx config: unknown setting ${key!.split(".")[0]}\nusage: fx config`);
+        }
         const get = await runFx(["config", "get", "max_agent_steps"], { cwd, env });
         expect([get.code, get.stdout]).toEqual([0, "40\n"]);
 
@@ -1078,10 +1091,10 @@ describe("cli: status", () => {
         const refusals: Array<[string[], string]> = [
           [
             ["config", "set", "permission_mode", "full-access"],
-            "fx config: can't change permission_mode with fx config; use /permissions in a session, or --permission-mode for one run\n",
+            "fx config: can't change permission_mode with fx config; use --permission-mode for one run, or edit ~/.fx/settings.json\n",
           ],
           [["config", "set", "fast_mode", "maybe"], "fx config: invalid value for fast_mode: maybe (use true or false)\n"],
-          [["config", "set", "models.gateway", "openai/gpt-5.5"], "fx config: can't change models.gateway with fx config; use /model in a session\n"],
+          [["config", "set", "models.gateway", "openai/gpt-5.5"], "fx config: can't change models.gateway with fx config; use --model for one run, or edit ~/.fx/settings.json\n"],
         ];
         for (const [args, stderr] of refusals) {
           const result = await runFx(args, { cwd, env });
@@ -1144,7 +1157,7 @@ describe("cli: status", () => {
     { name: "an exact Gateway login", provider: "gateway", source: "fx_login", help: "fx login is selected but unavailable. Run fx login to reconnect; no other credential was selected." },
     { name: "an exact OIDC token", provider: "gateway", source: "vercel_oidc_token", help: "VERCEL_OIDC_TOKEN is selected but unavailable. Set VERCEL_OIDC_TOKEN before starting fx; no other credential was selected." },
     { name: "an exact environment key", provider: "gateway", source: "ai_gateway_api_key", help: "AI_GATEWAY_API_KEY is selected but unavailable. Set AI_GATEWAY_API_KEY before starting fx; no other credential was selected." },
-    { name: "an exact stored key", provider: "gateway", source: "stored_key", help: "A stored API key is selected but unavailable. Start fx and open /provider to choose an available credential; no other credential was selected." },
+    { name: "an exact stored key", provider: "gateway", source: "stored_key", help: "A stored API key is selected but unavailable. Run fx login vercel --api-key to save a key again, or fx login to sign in instead; no other credential was selected." },
   ]) {
     test(
       `status and doctor respect ${scenario.name} when credentials are missing`,
@@ -1480,6 +1493,12 @@ describe("cli: status", () => {
       expect(json).toHaveProperty("history_turns");
       expect(json).toHaveProperty("agent_step_limit");
       expect(json.build_revision).toMatch(/^[0-9a-f]{12}$/);
+      expect(typeof json.update_channel).toBe("string");
+      expect(typeof json.build_channel).toBe("string");
+      const keys = Object.keys(json);
+      expect(keys.indexOf("update_channel")).toBeGreaterThan(-1);
+      expect(keys.indexOf("build_channel")).toBe(keys.indexOf("update_channel") + 1);
+      expect(keys.indexOf("build_revision")).toBe(keys.indexOf("build_channel") + 1);
     },
     TIMEOUT,
   );
@@ -1702,9 +1721,8 @@ describe("cli: status", () => {
         expect(status.stderr).toContain(
           "fx: config project: ignored_project_user_only_setting; key=permission",
         );
-        expect(status.stderr).toContain(
-          "fx: config project: ignored_project_user_only_setting; key=statusLine",
-        );
+        // statusLine is retired, so a project file's copy is ignored without a warning.
+        expect(status.stderr).not.toContain("key=statusLine");
         expect(status.stderr).not.toContain("danger");
 
         writeFileSync(
@@ -6139,7 +6157,9 @@ describe("cli: completion", () => {
     [["fx", "con"], "config"],
     [["fx", "config", ""], "list get set unset schema"],
     [["fx", "config", "schema", "--p"], "--project"],
-    [["fx", "config", "get", "status_line.c"], "status_line.context"],
+    [["fx", "config", "get", "sound.t"], "sound.turn_end"],
+    [["fx", "config", "get", "status_line.c"], ""],
+    [["fx", "config", "get", "startup_s"], ""],
     [["fx", "config", "get", "theme", ""], ""],
     [["fx", "ask", "--permission-mode", ""], "ask auto full-access"],
     [["fx", "--model", "gpt-5", "ask", "--permission-m"], "--permission-mode"],
