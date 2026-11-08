@@ -1,0 +1,108 @@
+name: Release
+
+# A tag `vX.Y.Z` matching `pub const version` in src/main.zig publishes a
+# GitHub release with Linux archives and SHA-256 files. Manual runs and pull
+# requests that change this file build the same archives as artifacts only.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            runner: ubuntu-24.04
+            arch: x86_64
+          - name: linux-aarch64
+            runner: ubuntu-24.04-arm
+            arch: aarch64
+    env:
+      ARCHIVE: fx-${{ matrix.name }}.tar.gz
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: "0.17.0"
+
+      - name: Require native host
+        run: test "$(uname -m)" = "${{ matrix.arch }}"
+
+      - name: Check the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(sed -n 's/^pub const version = "\(.*\)";$/\1/p' src/main.zig)
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME does not match version $version"; exit 1; }
+
+      - name: Build
+        # glibc 2.28 keeps the binary running on Debian 10+, Ubuntu 20.04+ and RHEL 8+.
+        run: zig build -Doptimize=ReleaseSafe -Dcpu=baseline -Dtarget=${{ matrix.arch }}-linux-gnu.2.28
+
+      - name: Smoke-test
+        shell: bash
+        env:
+          FX_AUTO_UPGRADE: "0"
+        run: |
+          # An empty HOME is what the ACP registry's check starts the agent with.
+          export HOME="$RUNNER_TEMP/smoke-home"
+          mkdir -p "$HOME"
+          timeout 10 ./zig-out/bin/fx --version
+          timeout 10 ./zig-out/bin/fx --help >/dev/null
+          # fx acp exits at end of input, so a timeout (exit 124) fails the step.
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{}}}' \
+            | timeout 10 ./zig-out/bin/fx acp > "$RUNNER_TEMP/initialize.out"
+          head -c 400 "$RUNNER_TEMP/initialize.out"; echo
+          grep -E '"id": ?1[,}]' "$RUNNER_TEMP/initialize.out" | grep -q '"result"' \
+            || { echo "::error::fx acp did not answer initialize with a result"; exit 1; }
+
+      - name: Package
+        run: |
+          dir="$RUNNER_TEMP/package"
+          mkdir -p "$dir"
+          cp zig-out/bin/fx LICENSE THIRD_PARTY_NOTICES.md "$dir/"
+          tar -czf "$RUNNER_TEMP/$ARCHIVE" -C "$dir" fx LICENSE THIRD_PARTY_NOTICES.md
+          cd "$RUNNER_TEMP" && sha256sum "$ARCHIVE" > "$ARCHIVE.sha256" && cat "$ARCHIVE.sha256"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            ${{ runner.temp }}/${{ env.ARCHIVE }}
+            ${{ runner.temp }}/${{ env.ARCHIVE }}.sha256
+          retention-days: 14
+
+  publish:
+    name: Publish release
+    needs: build
+    # A manual run on a tag has a tag ref too; only a tag push publishes.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create the release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true

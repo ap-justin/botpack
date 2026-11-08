@@ -69,6 +69,7 @@ const libfx_provider_tool_registry = tool_dispatch.Registry{ .tools = &libfx_pro
 const AcpMethod = enum {
     request_cancel,
     initialize,
+    authenticate,
     session_cancel,
     session_new,
     session_load,
@@ -95,6 +96,7 @@ const AcpMethod = enum {
     fn parse(method: []const u8) AcpMethod {
         if (std.mem.eql(u8, method, "$/cancel_request")) return .request_cancel;
         if (std.mem.eql(u8, method, "initialize")) return .initialize;
+        if (std.mem.eql(u8, method, "authenticate")) return .authenticate;
         if (std.mem.eql(u8, method, "session/cancel")) return .session_cancel;
         if (std.mem.eql(u8, method, "session/new")) return .session_new;
         if (std.mem.eql(u8, method, "session/load")) return .session_load;
@@ -122,6 +124,7 @@ const AcpMethod = enum {
     fn waitsForActivePrompt(self: AcpMethod) bool {
         return switch (self) {
             .initialize,
+            .authenticate,
             .request_cancel,
             .session_cancel,
             .session_set_mode,
@@ -320,6 +323,8 @@ pub const ServerState = struct {
     client_fs_read: bool = false,
     client_fs_write: bool = false,
     client_terminal: bool = false,
+    /// The client can run a Terminal Auth method (`auth.terminal`).
+    client_terminal_auth: bool = false,
     /// The client shows ACP v1 Session Notices (`session.notices`).
     client_notices: bool = false,
     client_elicitation: elicitation.Capabilities = .{},
@@ -327,6 +332,14 @@ pub const ServerState = struct {
     workspace_access: workspace_access.WorkspaceAccess = .{},
     api_key: []u8 = &.{},
     credential_source: ?types.CredentialSource = null,
+    /// `initialize` found no credential for the selected model. Calls that need
+    /// one re-read the credentials and answer `AUTH_REQUIRED` until they exist.
+    auth_pending: bool = false,
+    /// `initialize` kept the effort, fast and ultrafast overrides unvalidated
+    /// because auth was pending. `session/new`, `session/load` and
+    /// `session/resume` validate them against the catalog and fail until they
+    /// pass, as `initialize` would have.
+    startup_overrides_held: bool = false,
     gateway_source_preference: ?types.CredentialSource = null,
     credential_refresh_after_ms: ?i64 = null,
     account_id: ?[]u8 = null,
@@ -1492,6 +1505,15 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
         });
     }
 
+    if (method == .authenticate) return handleAuthenticate(state, alloc, msg);
+
+    if (state.auth_pending and (method == .session_new or method == .session_load or method == .session_resume)) {
+        if (!try refreshPendingAuth(state)) return writeAuthRequired(state, alloc, msg.id);
+    }
+    if (method == .session_new or method == .session_load or method == .session_resume) {
+        if (!try validateHeldStartupOverrides(state, alloc, msg)) return;
+    }
+
     if (method == .session_prompt and state.active_prompt != null) {
         return handleSteeringPrompt(state, alloc, msg);
     }
@@ -1546,6 +1568,7 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
         .libfx_journal_open => handleKernelJournalOpen(state, alloc, msg),
         .libfx_journal_images => handleKernelJournalImages(state, alloc, msg),
         .initialize,
+        .authenticate,
         .request_cancel,
         .session_cancel,
         .session_remove,
@@ -1556,6 +1579,72 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
             .message = "Method not found",
         }),
     };
+}
+
+/// The auth methods this connection is offered, in `initialize` and in
+/// `AUTH_REQUIRED` alike.
+fn authOffer(state: *const ServerState) acp_types.AuthOffer {
+    return .{
+        .login = .forProvider(state.provider),
+        .client_terminal_auth = state.client_terminal_auth,
+    };
+}
+
+/// Answers with `AUTH_REQUIRED` and the auth methods the client can offer.
+fn writeAuthRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId) !void {
+    const offer = authOffer(state);
+    var data: std.Io.Writer.Allocating = .init(alloc);
+    defer data.deinit();
+    try acp_types.writeAuthRequiredData(&data.writer, offer);
+    return state.writer.writeError(alloc, id, .{
+        .code = ErrorCode.auth_required,
+        .message = offer.login.instruction(),
+        .data_json = data.written(),
+    });
+}
+
+/// Re-reads the credentials for the selected provider and ends the pending
+/// state when one is now available. Returns false while there is none.
+fn refreshPendingAuth(state: *ServerState) !bool {
+    if (!state.auth_pending) return true;
+    if (!try selectCredentialForProvider(state, state.provider)) return false;
+    state.auth_pending = false;
+    return true;
+}
+
+/// `authenticate`: the person ran the login an advertised method names, so
+/// re-read the credentials. Succeeds once one is available.
+fn handleAuthenticate(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
+    const method_id = authenticateMethodId(alloc, msg.params_raw) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return state.writer.writeError(alloc, msg.id, .{
+            .code = ErrorCode.invalid_params,
+            .message = "Invalid authenticate params",
+        }),
+    };
+    defer alloc.free(method_id);
+    if (!acp_types.isAuthMethodId(method_id)) {
+        return state.writer.writeError(alloc, msg.id, .{
+            .code = ErrorCode.invalid_params,
+            .message = "Unknown authentication method",
+        });
+    }
+    if (!try refreshPendingAuth(state)) return writeAuthRequired(state, alloc, msg.id);
+    return state.writer.writeResponse(alloc, msg.id, "{}");
+}
+
+/// The `methodId` of an `authenticate` request. The caller owns the result.
+fn authenticateMethodId(alloc: Allocator, params: ?[]const u8) ![]u8 {
+    const raw = params orelse return error.InvalidParams;
+    const parsed = std.json.parseFromSlice(std.json.Value, alloc, raw, .{}) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidParams,
+    };
+    defer parsed.deinit();
+    if (parsed.value != .object) return error.InvalidParams;
+    const id = parsed.value.object.get("methodId") orelse return error.InvalidParams;
+    if (id != .string) return error.InvalidParams;
+    return alloc.dupe(u8, id.string);
 }
 
 fn requestIdsEqual(lhs: jsonrpc.RequestId, rhs: jsonrpc.RequestId) bool {
@@ -2678,6 +2767,8 @@ const InitializeRequest = struct {
     client_fs_read: bool = false,
     client_fs_write: bool = false,
     client_terminal: bool = false,
+    /// The client can run a Terminal Auth method (`auth.terminal`).
+    client_terminal_auth: bool = false,
     /// The client shows ACP v1 Session Notices (`session.notices`).
     client_notices: bool = false,
     client_elicitation: elicitation.Capabilities = .{},
@@ -2733,6 +2824,11 @@ fn parseInitializeRequest(
     }
     if (capabilities.object.get("terminal")) |value| {
         request.client_terminal = value == .bool and value.bool;
+    }
+    if (capabilities.object.get("auth")) |auth| {
+        if (auth == .object) if (auth.object.get("terminal")) |value| {
+            request.client_terminal_auth = value == .bool and value.bool;
+        };
     }
     request.client_elicitation = elicitation.parseAcpCapabilities(capabilities);
     if (allow_libfx) {
@@ -2942,7 +3038,7 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
             false;
         const startup_credential_is_final = startup_matches_model and
             !credentials.sourceRefreshable(startup_credential.?.source);
-        const credential: *credentials.Credential = if (state.provider == .gateway and state.cfg.credential_override != null) override: {
+        const credential_or_null: ?*credentials.Credential = if (state.provider == .gateway and state.cfg.credential_override != null) override: {
             routed_credential = .{
                 .token = try alloc.dupe(u8, state.cfg.credential_override.?),
                 .source = .ai_gateway_api_key,
@@ -2958,21 +3054,17 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
                 state.provider,
                 if (state.provider == .gateway) startup.credential_source_preference else null,
             );
-            if (routed_credential == null) {
-                return state.writer.writeError(alloc, msg.id, .{
-                    .code = ErrorCode.invalid_request,
-                    .message = credentials.missing_credential_message,
-                });
-            }
-            break :routed &routed_credential.?;
+            break :routed if (routed_credential != null) &routed_credential.? else null;
         };
-        if (credential.token.len == 0 and credential.source != .configured) {
-            return state.writer.writeError(alloc, msg.id, .{
-                .code = ErrorCode.invalid_request,
-                .message = credentials.missing_credential_message,
-            });
-        }
-        adoptServerCredential(state, credential);
+        // Without a credential, initialize still succeeds; the calls that need
+        // one answer AUTH_REQUIRED until the client has authenticated.
+        if (credential_or_null) |credential| {
+            if (credential.token.len == 0 and credential.source != .configured) {
+                state.auth_pending = true;
+            } else {
+                adoptServerCredential(state, credential);
+            }
+        } else state.auth_pending = true;
     }
 
     state.permission_mode = startup.permission_mode;
@@ -3001,33 +3093,18 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
         }
     }
 
-    if (!state.cfg.minimal_kernel) {
-        const startup_catalog = catalogProviderFor(state, state.provider) orelse
-            return state.writer.writeError(alloc, msg.id, .{
-                .code = ErrorCode.invalid_request,
-                .message = "Selected provider is unavailable in this host",
-            });
-        _ = try resolveSelectedModelCapabilities(state, startup_catalog);
-    }
-
-    if (state.cfg.effort_override) |raw| {
-        const effort = types.ReasoningEffort.parse(raw) orelse
-            return state.writer.writeError(alloc, msg.id, .{
-                .code = ErrorCode.invalid_params,
-                .message = "Invalid reasoning effort",
-            });
-        if (!try applyEffortOverride(state, alloc, msg, effort)) return;
-    }
-
-    if (state.cfg.fast_override) |fast| {
-        if (!try applyFastOverride(state, alloc, msg, fast)) return;
-    }
-    if (!try applyUltrafastOverride(state, alloc, msg, state.ultrafast_mode)) return;
+    // The model catalog needs a credential, so initialize skips it while auth
+    // is pending and the overrides wait for the first session call to validate
+    // them.
+    if (!state.auth_pending and !try resolveStartupCatalog(state, alloc, msg)) return;
+    if (!try applyStartupOverrides(state, alloc, msg)) return;
+    state.startup_overrides_held = state.auth_pending;
 
     state.terminal_ui = request.terminal_ui;
     state.client_fs_read = request.client_fs_read;
     state.client_fs_write = request.client_fs_write;
     state.client_terminal = request.client_terminal;
+    state.client_terminal_auth = request.client_terminal_auth;
     state.client_notices = request.client_notices;
     state.client_elicitation = request.client_elicitation;
     state.host_tools.deinit();
@@ -3053,8 +3130,57 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
         // HTTP.
         .mcp_over_acp = false,
         .mcp_sse = false,
-    });
+    }, authOffer(state));
     try state.writer.writeResponse(alloc, msg.id, out.writer.buffered());
+}
+
+/// Loads the selected provider's catalog before the overrides are validated
+/// against it; libfx cores skip it. Returns false after writing the error
+/// response.
+fn resolveStartupCatalog(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !bool {
+    if (state.cfg.minimal_kernel) return true;
+    const startup_catalog = catalogProviderFor(state, state.provider) orelse {
+        try state.writer.writeError(alloc, msg.id, .{
+            .code = ErrorCode.invalid_request,
+            .message = "Selected provider is unavailable in this host",
+        });
+        return false;
+    };
+    _ = try resolveSelectedModelCapabilities(state, startup_catalog);
+    return true;
+}
+
+/// Applies the process's effort, fast and ultrafast overrides. Returns false
+/// after writing the rejection response.
+fn applyStartupOverrides(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !bool {
+    if (state.cfg.effort_override) |raw| {
+        const effort = types.ReasoningEffort.parse(raw) orelse {
+            try state.writer.writeError(alloc, msg.id, .{
+                .code = ErrorCode.invalid_params,
+                .message = "Invalid reasoning effort",
+            });
+            return false;
+        };
+        if (!try applyEffortOverride(state, alloc, msg, effort)) return false;
+    }
+    if (state.cfg.fast_override) |fast| {
+        if (!try applyFastOverride(state, alloc, msg, fast)) return false;
+    }
+    return applyUltrafastOverride(state, alloc, msg, state.ultrafast_mode);
+}
+
+/// Validates the overrides `initialize` held while auth was pending, against
+/// the catalog the now-adopted credential loads, with the rejection
+/// `initialize` gives when a credential is present. They stay held after a
+/// rejection, so every session call fails until they pass. Returns false after
+/// writing the error response.
+fn validateHeldStartupOverrides(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !bool {
+    if (!state.startup_overrides_held) return true;
+    std.debug.assert(!state.auth_pending);
+    if (!try resolveStartupCatalog(state, alloc, msg)) return false;
+    if (!try applyStartupOverrides(state, alloc, msg)) return false;
+    state.startup_overrides_held = false;
+    return true;
 }
 
 /// The selected model's capabilities from `provider`'s catalog, loading it
@@ -3097,6 +3223,8 @@ fn resolveSelectedModelCapabilities(
 fn applyEffortOverride(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message, effort: types.ReasoningEffort) !bool {
     state.effort = effort;
     if (effort.isDefault()) return true;
+    // Without a credential there is no catalog to check against yet.
+    if (state.auth_pending) return true;
 
     const bundle = state.cfg.provider_set.select(state.provider);
     const fallback = bundle.fallbackModelCapabilities(state.selected_model);
@@ -3203,6 +3331,7 @@ test "effortOverrideRejection reports models without advertised efforts" {
 fn applyFastOverride(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message, fast: bool) !bool {
     state.fast_mode = fast;
     if (!fast) return true;
+    if (state.auth_pending) return true;
 
     const bundle = state.cfg.provider_set.select(state.provider);
     const fallback = bundle.fallbackModelCapabilities(state.selected_model);
@@ -3274,6 +3403,10 @@ test "fastOverrideRejection names models without a fast path" {
 fn applyUltrafastOverride(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message, ultrafast: bool) !bool {
     if (!ultrafast) {
         state.ultrafast_mode = false;
+        return true;
+    }
+    if (state.auth_pending) {
+        state.ultrafast_mode = true;
         return true;
     }
     if (state.provider != .gateway) {
@@ -3373,6 +3506,96 @@ test "ACP answers an ultrafast override without waiting out a model catalog that
     try std.testing.expect(elapsed_ms < 5_000);
     try std.testing.expect(capture.saw_catalog_failure);
     try std.testing.expect(!state.ultrafast_mode);
+}
+
+/// A Gateway catalog listing `openai/gpt-5.5` with no effort, fast or
+/// ultrafast capability, counting the requests it answers.
+const PlainModelCatalog = struct {
+    fetches: usize = 0,
+
+    fn fetch(raw: ?*anyopaque, alloc: Allocator, input: model_catalog.FetchInput) Allocator.Error!model_catalog.ProviderResult {
+        const self: *@This() = @ptrCast(@alignCast(raw.?));
+        self.fetches += 1;
+        if (input.connected) |connected| connected.store(true, .release);
+        var entries: std.ArrayList(model_catalog.ModelCatalogEntry) = .empty;
+        errdefer model_catalog.freeModelCatalog(alloc, &entries);
+        const id = try alloc.dupe(u8, "openai/gpt-5.5");
+        errdefer alloc.free(id);
+        const model_type = try alloc.dupe(u8, "language");
+        errdefer alloc.free(model_type);
+        try entries.append(alloc, .{ .id = id, .model_type = model_type });
+        return .{ .catalog = entries };
+    }
+};
+
+test "ACP holds effort, fast and ultrafast overrides unvalidated while auth is pending" {
+    var catalog = PlainModelCatalog{};
+    var model = "openai/gpt-5.5".*;
+    var state = ServerState{
+        .alloc = std.testing.allocator,
+        .cfg = undefined,
+        .writer = jsonrpc.Writer.init(),
+        .selected_model = &model,
+        .auth_pending = true,
+    };
+    defer state.capability_resolver.deinit(state.alloc);
+    state.cfg.minimal_kernel = false;
+    state.cfg.auth_mode = .host_managed;
+    state.cfg.gateway_models_path = "/v1/models";
+    state.cfg.provider_set = @import("../core/gateway/provider_set.zig").gateway_only(.{
+        .model_catalog = .{ .context = &catalog, .fetch_fn = PlainModelCatalog.fetch },
+    });
+    var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "initialize" };
+
+    try std.testing.expect(try applyEffortOverride(&state, std.testing.allocator, &msg, .literal("high")));
+    try std.testing.expect(try applyFastOverride(&state, std.testing.allocator, &msg, true));
+    try std.testing.expect(try applyUltrafastOverride(&state, std.testing.allocator, &msg, true));
+
+    try std.testing.expectEqualStrings("high", state.effort.label());
+    try std.testing.expect(state.fast_mode);
+    try std.testing.expect(state.ultrafast_mode);
+    // Neither validated against fallback capabilities nor loaded without a credential.
+    try std.testing.expectEqual(@as(usize, 0), catalog.fetches);
+    try std.testing.expect(state.capability_resolver.state == .idle);
+}
+
+test "ACP rejects a held override at each session call after a credential arrives" {
+    const Capture = struct {
+        rejections: usize = 0,
+
+        fn write(raw: ?*anyopaque, frame: []const u8) !void {
+            const self: *@This() = @ptrCast(@alignCast(raw.?));
+            if (std.mem.find(u8, frame, "LIBFX_MODEL_UNSUPPORTED_EFFORT") != null) self.rejections += 1;
+        }
+    };
+    var catalog = PlainModelCatalog{};
+    var capture = Capture{};
+    var model = "openai/gpt-5.5".*;
+    var state = ServerState{
+        .alloc = std.testing.allocator,
+        .cfg = undefined,
+        .writer = jsonrpc.Writer.initCallback(&capture, Capture.write),
+        .selected_model = &model,
+        .startup_overrides_held = true,
+    };
+    defer state.capability_resolver.deinit(state.alloc);
+    state.cfg.minimal_kernel = false;
+    state.cfg.auth_mode = .host_managed;
+    state.cfg.gateway_models_path = "/v1/models";
+    state.cfg.effort_override = "high";
+    state.cfg.fast_override = null;
+    state.cfg.provider_set = @import("../core/gateway/provider_set.zig").gateway_only(.{
+        .model_catalog = .{ .context = &catalog, .fetch_fn = PlainModelCatalog.fetch },
+    });
+    var msg = jsonrpc.Message{ .id = .{ .integer = 2 }, .method = "session/new" };
+
+    try std.testing.expect(!try validateHeldStartupOverrides(&state, std.testing.allocator, &msg));
+    try std.testing.expectEqual(@as(usize, 1), capture.rejections);
+    try std.testing.expectEqual(@as(usize, 1), catalog.fetches);
+    // Still held, so the next session/new is rejected the same way.
+    try std.testing.expect(state.startup_overrides_held);
+    try std.testing.expect(!try validateHeldStartupOverrides(&state, std.testing.allocator, &msg));
+    try std.testing.expectEqual(@as(usize, 2), capture.rejections);
 }
 
 test "ACP keeps its model catalog when a due refresh cannot connect" {
@@ -4345,6 +4568,116 @@ test "ACP notifications with absent id are not response targets" {
     );
     defer jsonrpc.freeMessage(alloc, &null_id_request);
     try std.testing.expect(shouldRespondToMessage(&null_id_request));
+}
+
+test "ACP authenticate reads the method id" {
+    const alloc = std.testing.allocator;
+    const id = try authenticateMethodId(alloc, "{\"methodId\":\"fx-login-api-key\"}");
+    defer alloc.free(id);
+    try std.testing.expectEqualStrings("fx-login-api-key", id);
+    try std.testing.expectError(error.InvalidParams, authenticateMethodId(alloc, null));
+    try std.testing.expectError(error.InvalidParams, authenticateMethodId(alloc, "{}"));
+    try std.testing.expectError(error.InvalidParams, authenticateMethodId(alloc, "{\"methodId\":1}"));
+    try std.testing.expectEqual(AcpMethod.authenticate, AcpMethod.parse("authenticate"));
+}
+
+const LastFrame = struct {
+    buf: [4096]u8 = undefined,
+    len: usize = 0,
+
+    fn write(raw: ?*anyopaque, frame: []const u8) !void {
+        const self: *LastFrame = @ptrCast(@alignCast(raw.?));
+        if (frame.len > self.buf.len) return error.NoSpaceLeft;
+        @memcpy(self.buf[0..frame.len], frame);
+        self.len = frame.len;
+    }
+
+    fn bytes(self: *const LastFrame) []const u8 {
+        return self.buf[0..self.len];
+    }
+};
+
+test "ACP authenticate accepts the agent and terminal method ids" {
+    const alloc = std.testing.allocator;
+    var capture = LastFrame{};
+    var state = ServerState{
+        .alloc = alloc,
+        .cfg = undefined,
+        .writer = jsonrpc.Writer.initCallback(&capture, LastFrame.write),
+    };
+    for ([_][]const u8{ "fx-login", "fx-login-api-key" }) |method_id| {
+        const params = try alloc.print("{{\"methodId\":\"{s}\"}}", .{method_id});
+        defer alloc.free(params);
+        var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "authenticate", .params_raw = params };
+        try handleAuthenticate(&state, alloc, &msg);
+        try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n", capture.bytes());
+    }
+    var unknown = jsonrpc.Message{ .id = .{ .integer = 2 }, .method = "authenticate", .params_raw = "{\"methodId\":\"fx-login-codex\"}" };
+    try handleAuthenticate(&state, alloc, &unknown);
+    try std.testing.expect(std.mem.find(u8, capture.bytes(), "\"code\":-32602") != null);
+}
+
+test "ACP AUTH_REQUIRED carries the initialize auth methods for the provider" {
+    const alloc = std.testing.allocator;
+    const cases = [_]struct { provider: model_provider.ProviderId, terminal_auth: bool, message: []const u8 }{
+        .{ .provider = .gateway, .terminal_auth = false, .message = credentials.missing_credential_message },
+        .{ .provider = .gateway, .terminal_auth = true, .message = credentials.missing_credential_message },
+    };
+    for (cases) |case| {
+        var capture = LastFrame{};
+        var state = ServerState{
+            .alloc = alloc,
+            .cfg = undefined,
+            .writer = jsonrpc.Writer.initCallback(&capture, LastFrame.write),
+            .provider = case.provider,
+            .client_terminal_auth = case.terminal_auth,
+        };
+        try writeAuthRequired(&state, alloc, .{ .integer = 3 });
+        const parsed = try std.json.parseFromSlice(std.json.Value, alloc, capture.bytes(), .{});
+        defer parsed.deinit();
+        const err = parsed.value.object.get("error").?.object;
+        try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), err.get("code").?.integer);
+        try std.testing.expectEqualStrings(case.message, err.get("message").?.string);
+
+        var from_error: std.Io.Writer.Allocating = .init(alloc);
+        defer from_error.deinit();
+        try std.json.Stringify.value(err.get("data").?.object.get("authMethods").?, .{}, &from_error.writer);
+
+        var init_out: std.Io.Writer.Allocating = .init(alloc);
+        defer init_out.deinit();
+        try acp_types.writeInitializeResponse(&init_out.writer, .{ .image_prompts = false }, authOffer(&state));
+        const init_parsed = try std.json.parseFromSlice(std.json.Value, alloc, init_out.written(), .{});
+        defer init_parsed.deinit();
+        var from_initialize: std.Io.Writer.Allocating = .init(alloc);
+        defer from_initialize.deinit();
+        try std.json.Stringify.value(init_parsed.value.object.get("authMethods").?, .{}, &from_initialize.writer);
+
+        try std.testing.expectEqualStrings(from_initialize.written(), from_error.written());
+        if (case.provider != .gateway) {
+            try std.testing.expect(std.mem.find(u8, from_error.written(), "\"vercel\"") == null);
+        }
+    }
+}
+
+test "ACP initialize reads auth.terminal only as a true boolean" {
+    const alloc = std.testing.allocator;
+    const cases = [_]struct { capabilities: []const u8, terminal_auth: bool }{
+        .{ .capabilities = "{\"auth\":{\"terminal\":true}}", .terminal_auth = true },
+        .{ .capabilities = "{}", .terminal_auth = false },
+        .{ .capabilities = "{\"terminal\":true,\"_meta\":{\"terminal-auth\":true}}", .terminal_auth = false },
+        .{ .capabilities = "{\"auth\":{\"terminal\":false}}", .terminal_auth = false },
+        .{ .capabilities = "{\"auth\":{\"terminal\":\"yes\"}}", .terminal_auth = false },
+        .{ .capabilities = "{\"auth\":true}", .terminal_auth = false },
+    };
+    for (cases) |case| {
+        const params = try alloc.print("{{\"protocolVersion\":1,\"clientCapabilities\":{s}}}", .{case.capabilities});
+        defer alloc.free(params);
+        const request = try parseInitializeRequest(alloc, params, false);
+        std.testing.expectEqual(case.terminal_auth, request.client_terminal_auth) catch |err| {
+            std.debug.print("capabilities: {s}\n", .{case.capabilities});
+            return err;
+        };
+    }
 }
 
 test "ACP method parser classifies request dispatch methods" {

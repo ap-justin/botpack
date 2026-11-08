@@ -1272,6 +1272,356 @@ describe("acp: model-independent", () => {
     TIMEOUT,
   );
 
+  const noCredentialEnv = (root: ReturnType<typeof createIsolatedRoot>, gateway: ReturnType<typeof startFakeGateway>) => ({
+    ...fakeGatewayEnv(root, gateway),
+    AI_GATEWAY_API_KEY: undefined,
+    VERCEL_OIDC_TOKEN: undefined,
+    FX_DISABLE_KEYCHAIN: "1",
+  });
+
+  test(
+    "ACP initialize without a credential advertises only the agent auth method",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-auth-methods-agent-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      try {
+        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
+        const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+        expect(initialized.error).toBeUndefined();
+        const methods = initialized.result.authMethods;
+        expect(methods).toHaveLength(1);
+        expect(methods[0].id).toBe("fx-login");
+        expect(methods[0].type).toBeUndefined();
+        expect(methods[0].name).toContain("fx login vercel --api-key");
+        expect(methods[0].description).toBe(methods[0].name);
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP initialize adds the terminal auth method for a client that sends auth.terminal",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-auth-methods-terminal-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      try {
+        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
+        const initialized = await client.request(
+          "initialize",
+          { protocolVersion: 1, clientCapabilities: { auth: { terminal: true } } },
+          1,
+        ) as any;
+        expect(initialized.error).toBeUndefined();
+        const methods = initialized.result.authMethods;
+        expect(methods).toHaveLength(2);
+        expect(methods[0].id).toBe("fx-login");
+        expect(methods[0].type).toBeUndefined();
+        expect(methods[1].id).toBe("fx-login-api-key");
+        expect(methods[1].type).toBe("terminal");
+        expect(methods[1].args).toEqual(["login", "vercel", "--api-key"]);
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  for (const method of ["session/new", "session/load", "session/resume"]) {
+    test(
+      `ACP ${method} without a credential answers AUTH_REQUIRED with the initialize auth methods`,
+      async () => {
+        const root = createIsolatedRoot("fx-acp-auth-required-");
+        const gateway = startFakeGateway([finalText("unused")]);
+        try {
+          client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
+          const initialized = await client.request(
+            "initialize",
+            { protocolVersion: 1, clientCapabilities: { auth: { terminal: true } } },
+            1,
+          ) as any;
+          const methods = initialized.result.authMethods;
+          expect(methods).toHaveLength(2);
+
+          const params = method === "session/new"
+            ? { cwd: root.workspace, mcpServers: [] }
+            : { sessionId: "sess_missing", cwd: root.workspace, mcpServers: [] };
+          const rejected = await client.request(method, params, 2) as any;
+          expect(rejected.error.code).toBe(-32000);
+          expect(rejected.error.data.authMethods).toEqual(methods);
+        } finally {
+          await client?.close();
+          gateway.stop();
+          rmSync(root.root, { recursive: true, force: true });
+        }
+      },
+      TIMEOUT,
+    );
+  }
+
+  test(
+    "ACP makes no gateway model request while no credential exists",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-auth-no-model-requests-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      try {
+        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
+        const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+        expect(initialized.error).toBeUndefined();
+        expect(gateway.modelRequests).toHaveLength(0);
+
+        const rejected = await client.request("session/new", { mcpServers: [] }, 2) as any;
+        expect(rejected.error.code).toBe(-32000);
+        expect(gateway.modelRequests).toHaveLength(0);
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP authenticate succeeds and session/new loads the model catalog once a login is saved",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-auth-recovery-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      try {
+        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
+        const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+        const methodId = initialized.result.authMethods[0].id;
+
+        const stillPending = await client.request("authenticate", { methodId }, 2) as any;
+        expect(stillPending.error.code).toBe(-32000);
+        expect(stillPending.error.data.authMethods).toEqual(initialized.result.authMethods);
+
+        writeSeededFxAuth(root.home, "team_123");
+
+        const authenticated = await client.request("authenticate", { methodId }, 3) as any;
+        expect(authenticated.error).toBeUndefined();
+        expect(authenticated.result).toEqual({});
+
+        const created = await client.request("session/new", { mcpServers: [] }, 4) as any;
+        expect(created.error).toBeUndefined();
+        expect(typeof created.result.sessionId).toBe("string");
+        expect(created.result.configOptions.find((option: any) => option.id === "model")).toBeDefined();
+        expect(gateway.modelRequests).toHaveLength(1);
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  const heldOverrides = [
+    { flag: ["--effort", "high"], code: "LIBFX_MODEL_UNSUPPORTED_EFFORT" },
+    { flag: ["--fast"], code: "LIBFX_MODEL_UNSUPPORTED_FAST" },
+    { flag: ["--ultrafast"], code: "LIBFX_MODEL_UNSUPPORTED_ULTRAFAST" },
+  ];
+
+  for (const { flag } of heldOverrides) {
+    test(
+      `fx acp ${flag.join(" ")} initializes without a credential and loads no model catalog`,
+      async () => {
+        const root = createIsolatedRoot("fx-acp-held-override-init-");
+        const gateway = startFakeGateway([finalText("unused")]);
+        try {
+          client = await AcpClient.create({
+            cwd: root.workspace,
+            env: noCredentialEnv(root, gateway),
+            args: ["acp", ...flag],
+          });
+          const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+          expect(initialized.error).toBeUndefined();
+          expect(initialized.result.authMethods).toHaveLength(1);
+          expect(gateway.modelRequests).toHaveLength(0);
+        } finally {
+          await client?.close();
+          gateway.stop();
+          rmSync(root.root, { recursive: true, force: true });
+        }
+      },
+      TIMEOUT,
+    );
+  }
+
+  for (const { flag, code } of heldOverrides) {
+    test(
+      `fx acp ${flag.join(" ")} is rejected on the first session/new after login when the model lacks it`,
+      async () => {
+        const root = createIsolatedRoot("fx-acp-held-override-reject-");
+        const gateway = startFakeGateway([finalText("unused")], {
+          models: [{ id: FAKE_GATEWAY_MODEL, type: "language", tags: ["tool-use"], context_window: 128_000 }],
+        });
+        try {
+          client = await AcpClient.create({
+            cwd: root.workspace,
+            env: noCredentialEnv(root, gateway),
+            args: ["acp", ...flag],
+          });
+          const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+          expect(initialized.error).toBeUndefined();
+
+          writeSeededFxAuth(root.home, "team_123");
+
+          const rejected = await client.request("session/new", { mcpServers: [] }, 2) as any;
+          expect(rejected.result).toBeUndefined();
+          expect(rejected.error.code).toBe(-32602);
+          expect(rejected.error.data.code).toBe(code);
+          expect(gateway.modelRequests).toHaveLength(1);
+
+          // The override stays held, so the next session call fails the same way.
+          const again = await client.request("session/new", { mcpServers: [] }, 3) as any;
+          expect(again.error.code).toBe(-32602);
+          expect(again.error.data.code).toBe(code);
+        } finally {
+          await client?.close();
+          gateway.stop();
+          rmSync(root.root, { recursive: true, force: true });
+        }
+      },
+      TIMEOUT,
+    );
+  }
+
+  test(
+    "fx acp --effort high creates a session after login when the model supports it",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-held-override-accept-");
+      const gateway = startFakeGateway([finalText("unused")], {
+        models: [{
+          id: FAKE_GATEWAY_MODEL,
+          type: "language",
+          tags: ["tool-use"],
+          context_window: 128_000,
+          reasoning_options: [{ type: "effort", values: ["low", "high"] }],
+        }],
+      });
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: noCredentialEnv(root, gateway),
+          args: ["acp", "--effort", "high"],
+        });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+
+        writeSeededFxAuth(root.home, "team_123");
+
+        const created = await client.request("session/new", { mcpServers: [] }, 2) as any;
+        expect(created.error).toBeUndefined();
+        const effort = created.result.configOptions.find((option: any) => option.id === "effort");
+        expect(effort.currentValue).toBe("high");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP authenticate returns {} when a credential exists from the start",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-auth-present-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: { ...fakeGatewayEnv(root, gateway), AI_GATEWAY_API_KEY: "dummy" },
+        });
+        const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+        const authenticated = await client.request(
+          "authenticate",
+          { methodId: initialized.result.authMethods[0].id },
+          2,
+        ) as any;
+        expect(authenticated.error).toBeUndefined();
+        expect(authenticated.result).toEqual({});
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  for (const methodId of ["fx-login", "fx-login-api-key"]) {
+    test(
+      `ACP authenticate accepts the ${methodId} method id and stays AUTH_REQUIRED without a credential`,
+      async () => {
+        const root = createIsolatedRoot("fx-acp-auth-method-ids-");
+        const gateway = startFakeGateway([finalText("unused")]);
+        try {
+          client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
+          await client.request("initialize", { protocolVersion: 1 }, 1);
+          const retry = await client.request("authenticate", { methodId }, 2) as any;
+          expect(retry.error.code).toBe(-32000);
+        } finally {
+          await client?.close();
+          gateway.stop();
+          rmSync(root.root, { recursive: true, force: true });
+        }
+      },
+      TIMEOUT,
+    );
+  }
+
+  test(
+    "ACP authenticate rejects an unknown, missing or non-string methodId with invalid params",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-auth-bad-method-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      try {
+        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const badParams: unknown[] = [{ methodId: "nope" }, {}, { methodId: 7 }, { methodId: null }];
+        let id = 2;
+        for (const params of badParams) {
+          const rejected = await client.request("authenticate", params, id++) as any;
+          expect(rejected.error.code).toBe(-32602);
+        }
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP initialize fails when a saved login cannot be loaded",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-auth-unreadable-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      try {
+        const fxDir = join(root.home, ".fx");
+        mkdirSync(fxDir, { recursive: true, mode: 0o700 });
+        writeFileSync(join(fxDir, "auth.json"), "not-json", { mode: 0o600 });
+        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
+        const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+        expect(initialized.error).toBeDefined();
+        expect(initialized.error.code).not.toBe(-32000);
+        expect(initialized.error.data?.authMethods).toBeUndefined();
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
   test(
     "ACP session adopts a generated title from the first prompt",
     async () => {
@@ -7639,7 +7989,7 @@ describe("acp: model-independent", () => {
   );
 
   test(
-    "missing API key returns JSON-RPC error on initialize",
+    "missing API key returns AUTH_REQUIRED on session/new",
     async () => {
       const root = createIsolatedRoot("fx-acp-missing-auth-");
       try {
@@ -7652,8 +8002,10 @@ describe("acp: model-independent", () => {
             FX_DISABLE_KEYCHAIN: "1",
           },
         });
-        const resp = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-        expect(resp.error).toBeDefined();
+        const init = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+        expect(init.error).toBeUndefined();
+        const resp = await client.request("session/new", { mcpServers: [] }, 2) as any;
+        expect(resp.error.code).toBe(-32000);
         expect(resp.error.message).toContain("fx login");
         expect(resp.error.message).toContain("fx login vercel --api-key");
         expect(resp.error.message).not.toContain("fx setup");
@@ -9712,15 +10064,15 @@ describe("acp: model catalog authentication", () => {
       expectedAuthorization: `Bearer ${SEEDED_GATEWAY_TOKEN}`,
       expectedTeamId: "team_123",
       expectPrivate: true,
-      expectInitializeFailure: false,
+      expectAuthRequired: false,
     },
     {
-      name: "rejects seeded login without a selected team",
+      name: "answers AUTH_REQUIRED for a seeded login without a selected team",
       teamId: undefined,
       expectedAuthorization: null,
       expectedTeamId: null,
       expectPrivate: false,
-      expectInitializeFailure: true,
+      expectAuthRequired: true,
     },
   ]) {
     test(
@@ -9753,9 +10105,13 @@ describe("acp: model catalog authentication", () => {
             },
           });
           const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-          if (scenario.expectInitializeFailure) {
-            expect(initialized.error).toBeDefined();
-            expect(initialized.error.message).toContain("fx login");
+          if (scenario.expectAuthRequired) {
+            expect(initialized.error).toBeUndefined();
+            const rejected = await client.request("session/new", {}, 2) as any;
+            expect(rejected.error.code).toBe(-32000);
+            expect(rejected.error.message).toContain("fx login");
+            const retry = await client.request("authenticate", { methodId: initialized.result.authMethods[0].id }, 3) as any;
+            expect(retry.error.code).toBe(-32000);
             expect(gateway.modelRequests).toHaveLength(0);
             return;
           }
