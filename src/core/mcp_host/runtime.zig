@@ -2044,7 +2044,7 @@ pub const Runtime = struct {
         const tail = r.engine.stderrTail(k, &tail_buf);
         var out: std.Io.Writer.Allocating = .init(alloc);
         errdefer out.deinit();
-        writeFailure(&out.writer, why, st.exit, st.stray_line, tail) catch return error.OutOfMemory;
+        writeFailure(&out.writer, why, st.versions_said, st.exit, st.stray_line, tail) catch return error.OutOfMemory;
         return try out.toOwnedSlice();
     }
 
@@ -2286,8 +2286,11 @@ test "a failed sign-in says why in words, with the server's own" {
     try std.testing.expect(said.len < 340);
 }
 
-fn writeFailure(w: *std.Io.Writer, why: []const u8, exit: ?mcp.stdio.Exit, stray: ?[]const u8, tail: ?[]const u8) std.Io.Writer.Error!void {
+fn writeFailure(w: *std.Io.Writer, why: []const u8, said: ?[]const u8, exit: ?mcp.stdio.Exit, stray: ?[]const u8, tail: ?[]const u8) std.Io.Writer.Error!void {
     try w.writeAll(describeFailure(why));
+    if (isOneOf(why, &version_failures) or (said != null and isOneOf(why, &refusals))) {
+        try w.print(" (fx speaks {s}; the server {s}{s})", .{ fx_versions, if (said != null) "named " else "named no version", said orelse "" });
+    }
     // "its process exited" says how; another failure adds it.
     const own = std.mem.eql(u8, why, "process");
     if (exit) |e| switch (e) {
@@ -2298,6 +2301,26 @@ fn writeFailure(w: *std.Io.Writer, why: []const u8, exit: ?mcp.stdio.Exit, stray
     if (tail) |t| try w.print("; its last stderr lines: \"{s}\"", .{t});
 }
 
+/// The failures that mean fx and the server found no MCP version in common.
+const version_failures = [_][]const u8{ "no_shared_version", "unsupported_version" };
+/// Failures that are about versions only when the server named some: each
+/// also covers a timeout, a crash, or a refusal for another reason
+/// (-32020, -32021).
+const refusals = [_][]const u8{ "rejected", "initialize_failed" };
+
+fn isOneOf(why: []const u8, names: []const []const u8) bool {
+    for (names) |name| if (std.mem.eql(u8, why, name)) return true;
+    return false;
+}
+
+/// The MCP versions fx speaks, most preferred first.
+const fx_versions = blk: {
+    const defaults: mcp.core.era.Config = .{};
+    var list: []const u8 = "";
+    for (defaults.preferred ++ defaults.legacy) |version| list = list ++ (if (list.len == 0) "" else ", ") ++ version;
+    break :blk list;
+};
+
 /// The engine names why a server is down; fx says it in words. Anything else,
 /// such as an HTTP failure's own text, is shown as it is.
 fn describeFailure(why: []const u8) []const u8 {
@@ -2305,7 +2328,7 @@ fn describeFailure(why: []const u8) []const u8 {
         .{ "no_shared_version", "it supports no MCP version fx speaks" },
         .{ "rejected", "it refused fx's MCP version" },
         .{ "went_quiet", "it stopped answering while starting" },
-        .{ "unsupported_version", "it answered with an MCP version fx doesn't support (fx speaks 2025-03-26 and newer)" },
+        .{ "unsupported_version", "it answered with an MCP version fx doesn't support" },
         .{ "initialize_failed", "it refused or never answered fx's initialize request" },
         .{ "session", "its session ended" },
         .{ "initialized_timed_out", "it never answered fx's initialized notification" },
@@ -2398,7 +2421,8 @@ test {
 
 const testing = std.testing;
 
-const Fixture = @import("fake_server.zig").Fixture;
+const fake_server = @import("fake_server.zig");
+const Fixture = fake_server.Fixture;
 
 test "tools and calls go through the owner thread, from several threads at once" {
     var f: Fixture = undefined;
@@ -2432,6 +2456,97 @@ test "tools and calls go through the owner thread, from several threads at once"
     for (&threads) |*t| t.* = try std.Thread.spawn(.{}, Caller.run, .{ &r, &ok });
     for (threads) |t| t.join();
     try testing.expectEqual(@as(u32, 4), ok.load(.acquire));
+}
+
+/// Starts the fake server in `mode`, lists its tools, and returns its status.
+fn connectFake(comptime mode: fake_server.Mode, arena: Allocator, expected_tools: usize) !Status {
+    var f: Fixture = undefined;
+    try f.initMode(mode);
+    defer f.deinit();
+    const configs = [_]mcp_contract.McpServerConfig{.{ .name = "fake", .command = f.server }};
+    var r: Runtime = undefined;
+    try r.start(testing.allocator, testing.io, &configs, &f.inherited, f.options());
+    defer r.deinit();
+    const listed = try r.tools(arena, "fake", null);
+    try testing.expect(listed == .tools);
+    try testing.expectEqual(expected_tools, listed.tools.len);
+    return (try r.statuses(arena))[0];
+}
+
+test "a server that accepts only an older legacy version connects and lists its tools" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const status = try connectFake(.older, arena.allocator(), 1);
+    try testing.expectEqual(State.ready, status.state);
+    try testing.expectEqualStrings("2025-03-26", status.version.?);
+}
+
+test "a server that refuses initialize and lists the version it speaks gets that version offered" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const status = try connectFake(.older_error, arena.allocator(), 1);
+    try testing.expectEqual(State.ready, status.state);
+    try testing.expectEqualStrings("2025-06-18", status.version.?);
+}
+
+test "a server that accepts only the newest legacy version connects and lists its tools" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const status = try connectFake(.newest, arena.allocator(), 1);
+    try testing.expectEqual(State.ready, status.state);
+    try testing.expectEqualStrings("2025-11-25", status.version.?);
+}
+
+test "a server in the per-request era connects and lists its tools" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const status = try connectFake(.per_request, arena.allocator(), 1);
+    try testing.expectEqual(State.ready, status.state);
+    try testing.expectEqualStrings("2026-07-28", status.version.?);
+}
+
+/// Starts the fake server in `mode` and returns why listing its tools
+/// failed, in `arena`. That answer is written when the start fails; a
+/// status read later may find the server started again after its backoff.
+fn refusedFake(comptime mode: fake_server.Mode, arena: Allocator) ![]const u8 {
+    var f: Fixture = undefined;
+    try f.initMode(mode);
+    defer f.deinit();
+    const configs = [_]mcp_contract.McpServerConfig{.{ .name = "fake", .command = f.server }};
+    var r: Runtime = undefined;
+    try r.start(testing.allocator, testing.io, &configs, &f.inherited, f.options());
+    defer r.deinit();
+    const listed = try r.tools(arena, "fake", null);
+    try testing.expect(listed == .failed);
+    return listed.failed;
+}
+
+test "a server that lists no version fx speaks fails, naming both sides' versions" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const said = try refusedFake(.unsupported_discover, arena.allocator());
+    try testing.expectEqualStrings("it supports no MCP version fx speaks (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2027-01-01)", said);
+}
+
+test "a server that answers initialize with a version fx doesn't speak fails, naming both sides' versions" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const said = try refusedFake(.unsupported_initialize, arena.allocator());
+    try testing.expectEqualStrings("it answered with an MCP version fx doesn't support (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2024-11-05)", said);
+}
+
+test "a server that refuses initialize listing only versions fx doesn't speak fails, naming both sides' versions" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const said = try refusedFake(.unsupported_initialize_error, arena.allocator());
+    try testing.expectEqualStrings("it refused or never answered fx's initialize request (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2024-11-05)", said);
+}
+
+test "a server that refuses even the version it lists is offered it once, then fails naming it" {
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const said = try refusedFake(.older_error_stuck, arena.allocator());
+    try testing.expectEqualStrings("it refused or never answered fx's initialize request (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2025-06-18)", said);
 }
 
 test "a cancelled call ends, and stopping ends a call that never answers" {
@@ -2804,14 +2919,40 @@ test "an answer to a withdrawn 2025 question reaches no one, and the next questi
 test "a failure says how the process ended, what it wrote instead of MCP, and its last stderr lines" {
     var buf: [512]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
-    try writeFailure(&w, "process", .{ .code = 7 }, null, "npm error code E401 / npm error Incorrect or missing password.");
+    try writeFailure(&w, "process", null, .{ .code = 7 }, null, "npm error code E401 / npm error Incorrect or missing password.");
     try testing.expectEqualStrings("its process exited with code 7; its last stderr lines: \"npm error code E401 / npm error Incorrect or missing password.\"", w.buffered());
     w = .fixed(&buf);
-    try writeFailure(&w, "initialize_failed", .{ .signal = 15 }, "not json", null);
+    try writeFailure(&w, "initialize_failed", null, .{ .signal = 15 }, "not json", null);
     try testing.expectEqualStrings("it refused or never answered fx's initialize request; its process exited on signal 15; it wrote \"not json\" instead of MCP", w.buffered());
     w = .fixed(&buf);
-    try writeFailure(&w, "FileNotFound", null, null, null);
+    try writeFailure(&w, "FileNotFound", null, null, null, null);
     try testing.expectEqualStrings("its command was not found", w.buffered());
+}
+
+test "a version failure names the versions fx speaks and the ones the server named" {
+    var buf: [512]u8 = undefined;
+    var w: std.Io.Writer = .fixed(&buf);
+    try writeFailure(&w, "rejected", "2025-06-18, 2024-11-05", null, null, null);
+    try testing.expectEqualStrings("it refused fx's MCP version (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2025-06-18, 2024-11-05)", w.buffered());
+    w = .fixed(&buf);
+    try writeFailure(&w, "initialize_failed", "2024-11-05", null, null, null);
+    try testing.expectEqualStrings("it refused or never answered fx's initialize request (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2024-11-05)", w.buffered());
+    w = .fixed(&buf);
+    try writeFailure(&w, "no_shared_version", null, null, null, null);
+    try testing.expectEqualStrings("it supports no MCP version fx speaks (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named no version)", w.buffered());
+    w = .fixed(&buf);
+    try writeFailure(&w, "process", "2025-06-18", null, null, null);
+    try testing.expectEqualStrings("its process exited", w.buffered());
+}
+
+test "a refusal that names no version says nothing about versions, since it may not be about one" {
+    var buf: [512]u8 = undefined;
+    var w: std.Io.Writer = .fixed(&buf);
+    try writeFailure(&w, "rejected", null, null, null, null);
+    try testing.expectEqualStrings("it refused fx's MCP version", w.buffered());
+    w = .fixed(&buf);
+    try writeFailure(&w, "initialize_failed", null, null, null, null);
+    try testing.expectEqualStrings("it refused or never answered fx's initialize request", w.buffered());
 }
 
 test "a question no call can show is answered cancel, and the server goes on" {
