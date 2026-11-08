@@ -248,8 +248,7 @@ fn onStart(state: *State, start: Start, now_ms: u64) Plan {
 /// one left while waiting, since the downtime already served as the wait
 /// (`tests/tla/recovery/Recovery.tla` ResumesAfterClose). Only abrupt deaths
 /// with a send in flight count toward asking once (CrashLoopAsks), and a
-/// record more than a day old asks first (`tests/tla/recovery/Resume.tla`
-/// OldAsks).
+/// record more than a day old asks first.
 fn resumeFrom(state: *State, saved: State, start: Start, now_ms: u64) Plan {
     state.* = saved;
     state.fast = start.fast;

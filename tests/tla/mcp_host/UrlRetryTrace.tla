@@ -1,8 +1,7 @@
 ---- MODULE UrlRetryTrace ----
-\* Trace wrapper for UrlRetry.tla. trace.ts generates TraceObs from a real
-\* `fx ask` in a terminal against tests/e2e/fixtures/mcp-legacy-stdio.mjs, a
-\* 2025-11-25 server that answers the first tools/call with -32042
-\* (tests/tla/drivers/mcp_host/url-retry.test.ts).
+\* Trace wrapper for UrlRetry.tla. trace.ts generates TraceObs from records
+\* of a client against a 2025-11-25 server that answers the first tools/call
+\* with -32042 (tests/tla/drivers/mcp_host/models.test.ts).
 \*   call {n}          the fixture has had n tools/call requests
 \*   required {}       fx shows the first URL, so the -32042 answer came
 \*   consent_shown {}  fx's terminal asks to open a URL

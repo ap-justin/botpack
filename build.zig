@@ -2,23 +2,10 @@ const std = @import("std");
 
 const UpdateChannel = enum { stable, dev };
 
-const WasmSurface = enum {
-    none,
-    core,
-    term,
-};
-
 const PgsoArtifact = enum {
     fx,
     file_index,
-    ui_activity,
-    approval_review,
     unit_tests,
-};
-
-const NapiSurface = enum {
-    none,
-    core,
 };
 
 pub fn build(b: *std.Build) void {
@@ -29,17 +16,6 @@ pub fn build(b: *std.Build) void {
         "pgso-artifact",
         "Emit ReleaseSafe LLVM bitcode for one PGO/PGSO artifact",
     );
-    const wasm_surface = b.option(
-        WasmSurface,
-        "wasm-surface",
-        "Build a WASI WebAssembly surface for JavaScript hosts (core or term)",
-    ) orelse .none;
-    const napi_surface = b.option(
-        NapiSurface,
-        "napi-surface",
-        "Build a Node-API addon surface (core)",
-    ) orelse .none;
-
     const sanitize_thread = b.option(
         bool,
         "sanitize-thread",
@@ -48,13 +24,13 @@ pub fn build(b: *std.Build) void {
 
     const git_commit = readGitCommit(b);
     const app_version = readAppVersion(b);
+    // Only `fx status --json` reads this, as update_channel and build_channel.
     const update_channel = b.option(UpdateChannel, "update-channel", "Build update channel (stable or dev)") orelse .stable;
 
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "git_commit", git_commit);
     build_options.addOption([]const u8, "app_version", app_version);
     build_options.addOption([]const u8, "update_channel", @tagName(update_channel));
-    build_options.addOption(WasmSurface, "wasm_surface", .none);
     // Whether this is a libfx artifact, which leaves out what only the fx
     // binary uses, such as its E2E test controls.
     build_options.addOption(bool, "libfx", false);
@@ -188,13 +164,6 @@ pub fn build(b: *std.Build) void {
         .session_manager = session_manager,
     });
 
-    if (wasm_surface != .none) {
-        addWasmArtifact(b, wasm_surface, git_commit, app_version, update_channel);
-    }
-    if (napi_surface != .none) {
-        addNapiArtifact(b, napi_surface, target, git_commit, app_version, update_channel);
-    }
-
     // --- file_index search benchmark ---
     const benchmark_exports_mod = b.createModule(.{
         .root_source_file = b.path("src/benchmark_exports.zig"),
@@ -222,110 +191,6 @@ pub fn build(b: *std.Build) void {
     const run_bench_step = b.step("run-bench-file-index", "Build and run file_index search benchmark");
     run_bench_step.dependOn(&run_bench.step);
 
-    // --- UI activity progress benchmark ---
-    const ui_activity_bench = b.addExecutable(.{
-        .name = "ui-activity-progress-bench",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("benchmarks/activity_progress.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
-    });
-    ui_activity_bench.root_module.addImport(
-        "benchmark_exports",
-        benchmark_exports_mod,
-    );
-    const install_ui_activity_bench = b.addInstallArtifact(ui_activity_bench, .{});
-    const ui_activity_bench_step = b.step(
-        "bench-ui-activity",
-        "Build the UI activity progress benchmark",
-    );
-    ui_activity_bench_step.dependOn(&install_ui_activity_bench.step);
-
-    const run_ui_activity_bench = b.addRunArtifact(ui_activity_bench);
-    run_ui_activity_bench.step.dependOn(&install_ui_activity_bench.step);
-    const run_ui_activity_bench_step = b.step(
-        "run-bench-ui-activity",
-        "Build and run the UI activity progress benchmark",
-    );
-    run_ui_activity_bench_step.dependOn(&run_ui_activity_bench.step);
-
-    const ui_activity_bench_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("benchmarks/activity_progress.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    ui_activity_bench_tests.root_module.addImport(
-        "benchmark_exports",
-        benchmark_exports_mod,
-    );
-    const run_ui_activity_bench_tests = b.addRunArtifact(ui_activity_bench_tests);
-    test_step.dependOn(&run_ui_activity_bench_tests.step);
-    const test_ui_activity_bench_step = b.step(
-        "test-ui-activity-benchmark",
-        "Run UI activity benchmark policy tests",
-    );
-    test_ui_activity_bench_step.dependOn(&run_ui_activity_bench_tests.step);
-
-    // --- file-diff approval review benchmark ---
-    const approval_review_bench = b.addExecutable(.{
-        .name = "approval-review-bench",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("benchmarks/approval_review.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
-    });
-    approval_review_bench.root_module.addImport(
-        "benchmark_exports",
-        benchmark_exports_mod,
-    );
-    const install_approval_review_bench = b.addInstallArtifact(
-        approval_review_bench,
-        .{},
-    );
-    const approval_review_bench_step = b.step(
-        "bench-approval-review",
-        "Build the file-diff approval review benchmark",
-    );
-    approval_review_bench_step.dependOn(&install_approval_review_bench.step);
-
-    const run_approval_review_bench = b.addRunArtifact(approval_review_bench);
-    run_approval_review_bench.step.dependOn(&install_approval_review_bench.step);
-    run_approval_review_bench.addPassthruArgs();
-    const run_approval_review_bench_step = b.step(
-        "run-bench-approval-review",
-        "Build and run the file-diff approval review benchmark",
-    );
-    run_approval_review_bench_step.dependOn(&run_approval_review_bench.step);
-
-    const approval_review_bench_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("benchmarks/approval_review.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    approval_review_bench_tests.root_module.addImport(
-        "benchmark_exports",
-        benchmark_exports_mod,
-    );
-    const run_approval_review_bench_tests = b.addRunArtifact(
-        approval_review_bench_tests,
-    );
-    test_step.dependOn(&run_approval_review_bench_tests.step);
-    const test_approval_review_bench_step = b.step(
-        "test-approval-review-benchmark",
-        "Run file-diff approval review benchmark qualification tests",
-    );
-    test_approval_review_bench_step.dependOn(
-        &run_approval_review_bench_tests.step,
-    );
-
     const pgso_ir_step = b.step(
         "pgso-ir",
         "Emit selected ReleaseSafe LLVM bitcode for PGO/PGSO qualification",
@@ -334,15 +199,11 @@ pub fn build(b: *std.Build) void {
         const selected: *std.Build.Step.Compile = switch (artifact) {
             .fx => exe,
             .file_index => file_index_bench,
-            .ui_activity => ui_activity_bench,
-            .approval_review => approval_review_bench,
             .unit_tests => pgso_tests,
         };
         const output_name = switch (artifact) {
             .fx => "pgso/fx.bc",
             .file_index => "pgso/file-index.bc",
-            .ui_activity => "pgso/ui-activity.bc",
-            .approval_review => "pgso/approval-review.bc",
             .unit_tests => "pgso/unit-tests.bc",
         };
         const install_ir = b.addInstallFile(
@@ -358,145 +219,6 @@ pub fn build(b: *std.Build) void {
         );
         pgso_ir_step.dependOn(&missing_artifact.step);
     }
-}
-
-fn addWasmArtifact(
-    b: *std.Build,
-    surface: WasmSurface,
-    git_commit: []const u8,
-    app_version: []const u8,
-    update_channel: UpdateChannel,
-) void {
-    const wasm_target = b.resolveTargetQuery(.{
-        .cpu_arch = .wasm32,
-        .os_tag = .wasi,
-    });
-    const name = switch (surface) {
-        .core => "fx-core",
-        .term => "fx-term",
-        .none => unreachable,
-    };
-    const description = switch (surface) {
-        .core => "Build the headless fx WebAssembly artifact",
-        .term => "Build the terminal fx WebAssembly artifact",
-        .none => unreachable,
-    };
-
-    const wasm_options = b.addOptions();
-    wasm_options.addOption([]const u8, "git_commit", git_commit);
-    wasm_options.addOption([]const u8, "app_version", app_version);
-    wasm_options.addOption([]const u8, "update_channel", @tagName(update_channel));
-    wasm_options.addOption(WasmSurface, "wasm_surface", surface);
-    wasm_options.addOption(bool, "libfx", true);
-    wasm_options.addOption(bool, "builtin_tools", true);
-
-    const wasm_root = switch (surface) {
-        .core => "src/wasm_core_main.zig",
-        .term => "src/wasm_term_main.zig",
-        .none => unreachable,
-    };
-    const wasm_exe = b.addExecutable(.{
-        .name = name,
-        .root_module = b.createModule(.{
-            .root_source_file = b.path(wasm_root),
-            .target = wasm_target,
-            .optimize = .small,
-            .single_threaded = true,
-            .link_libc = true,
-            .stack_check = false,
-            .stack_protector = false,
-            .omit_frame_pointer = true,
-            .unwind_tables = .none,
-            .error_tracing = false,
-            .strip = true,
-        }),
-    });
-    if (surface == .core) wasm_exe.stack_size = 1024 * 1024;
-    wasm_exe.root_module.addImport("build_options", wasm_options.createModule());
-    _ = addSessionManager(b, wasm_exe.root_module, wasm_target, .small, true, &.{});
-
-    const install_wasm = b.addInstallArtifact(wasm_exe, .{});
-    const wasm_step = b.step(name ++ "-wasm", description);
-    wasm_step.dependOn(&install_wasm.step);
-    b.getInstallStep().dependOn(&install_wasm.step);
-}
-
-fn addNapiArtifact(
-    b: *std.Build,
-    surface: NapiSurface,
-    target: std.Build.ResolvedTarget,
-    git_commit: []const u8,
-    app_version: []const u8,
-    update_channel: UpdateChannel,
-) void {
-    const napi_options = b.addOptions();
-    napi_options.addOption([]const u8, "git_commit", git_commit);
-    napi_options.addOption([]const u8, "app_version", app_version);
-    napi_options.addOption([]const u8, "update_channel", @tagName(update_channel));
-    napi_options.addOption(NapiSurface, "napi_surface", surface);
-    napi_options.addOption(bool, "libfx", true);
-    // libfx agents run only the host's tools, so the addon leaves fx's out.
-    napi_options.addOption(bool, "builtin_tools", false);
-
-    const root = switch (surface) {
-        .core => "src/napi_core_main.zig",
-        .none => unreachable,
-    };
-    const lib = b.addLibrary(.{
-        .name = "libfx",
-        .linkage = .dynamic,
-        .root_module = b.createModule(.{
-            .root_source_file = b.path(root),
-            .target = target,
-            .optimize = .safe,
-            .link_libc = true,
-            // Node never unwinds C++ exceptions through the addon, and its Zig
-            // code already bounds-checks in ReleaseSafe, so unwind tables and
-            // stack canaries only add size. Unlike the fx executable, the
-            // addon keeps frame pointers: Apple's arm64 ABI requires them,
-            // crash reports and profilers of the app walk them through the
-            // addon, and on x86-64 they make it about 0.2 MB smaller.
-            .stack_check = false,
-            .stack_protector = false,
-            .omit_frame_pointer = false,
-            .unwind_tables = .none,
-            .error_tracing = false,
-            .strip = true,
-        }),
-    });
-    lib.root_module.addImport("build_options", napi_options.createModule());
-    _ = addSessionManager(b, lib.root_module, target, .safe, null, &.{});
-    const node_include = b.option(
-        []const u8,
-        "node-include-dir",
-        "Directory containing node_api.h for the N-API addon",
-    ) orelse discoverNodeIncludeDir(b);
-    const node_api = b.addTranslateC(.{
-        .root_source_file = .{ .cwd_relative = b.pathJoin(&.{ node_include, "node_api.h" }) },
-        .target = target,
-        .optimize = .safe,
-    });
-    node_api.addSystemIncludePath(.{ .cwd_relative = node_include });
-    lib.root_module.addImport("node_api", node_api.createModule());
-    lib.linker_allow_shlib_undefined = true;
-
-    const install = b.addInstallArtifact(lib, .{ .dest_sub_path = "libfx.node" });
-    const step = b.step("libfx-napi", "Build the libfx Node-API core addon");
-    step.dependOn(&install.step);
-    b.getInstallStep().dependOn(&install.step);
-}
-
-fn discoverNodeIncludeDir(b: *std.Build) []const u8 {
-    const out = switch (b.runFallible(
-        &.{ "node", "-p", "require('node:path').join(require('node:path').dirname(process.execPath), '..', 'include', 'node')" },
-        .{ .stderr_behavior = .ignore },
-    )) {
-        .success => |stdout| stdout,
-        .spawn_failed, .crashed => std.process.fatal("Node.js is required to locate node_api.h; pass -Dnode-include-dir=<path>", .{}),
-        .bad_exit_code => std.process.fatal("could not locate node_api.h; pass -Dnode-include-dir=<path>", .{}),
-    };
-    const trimmed = std.mem.trim(u8, out, " \t\r\n");
-    return b.allocator.dupe(u8, trimmed) catch std.process.fatal("could not allocate Node include path", .{});
 }
 
 fn readGitCommit(b: *std.Build) []const u8 {

@@ -31,22 +31,15 @@ import {
   fakeGatewayFinalText,
   fakeGatewaySse,
   startFakeGateway,
-} from "./tmux-helpers";
+} from "./fake-gateway";
 import { onlySessionId, savedSession, savedText, sessionDir } from "./saved-sessions";
 import {
-  codexBreakdownBody,
-  codexProfileBody,
-  codexUsageBody,
   DAY_MS,
-  grokBillingBody,
-  grokSettingsBody,
   type ReportRow,
   USAGE_NOW_MS,
   usageEnv,
   usageFake,
   utcDate,
-  writeChatGptLogin,
-  writeGrokLogin,
   writeUsageClock,
 } from "./usage-fakes";
 
@@ -357,37 +350,41 @@ describe("cli: help", () => {
         `𝒇x v${sourceVersion()}\nFast, native coding agent for the terminal.\n`,
       );
       expect(stdout.match(/𝒇x/g) ?? []).toHaveLength(1);
-      expect(stdout).toContain("fx starts an interactive session by default.");
+      expect(stdout).toContain("fx is a command-line coding agent.");
       expect(stdout).toContain("Commands:\n");
       expect(stdout).toContain("Run one noninteractive request");
-      expect(stdout).toContain("Sign in to a model provider");
-      expect(stdout).toContain("Sign out of a model provider");
-      expect(stdout).toContain("Choose the active model provider");
+      expect(stdout).toContain("Sign in to Vercel AI Gateway");
+      expect(stdout).toContain("Sign out of Vercel AI Gateway");
+      // runFx inherits COLUMNS, and at the 80-column default the summary wraps
+      // "connection" onto the next line, so accept it on either line.
+      const providerRow = stdout.indexOf("  provider <name>");
+      expect(providerRow).toBeGreaterThanOrEqual(0);
+      const providerLine = stdout.slice(providerRow, stdout.indexOf("\n", providerRow));
+      const summaryStart = providerLine.indexOf("Choose AI Gateway or a configured");
+      expect(summaryStart).toBeGreaterThanOrEqual(0);
+      expect(stdout.indexOf("connection", providerRow)).toBeGreaterThan(providerRow + summaryStart);
       // `fx setup` is deprecated and hidden; `fx login --api-key` replaces it.
       expect(stdout).not.toContain("Configure a Vercel AI Gateway API key");
-      expect(stdout).toContain("login [vercel|codex|grok] [--api-key]");
+      expect(stdout).toContain("login [vercel] [--api-key]");
       expect(stdout).toContain("Choose a Vercel AI Gateway team");
       expect(stdout).toContain("Show Vercel AI Gateway credits");
-      expect(stdout).not.toContain("Sign in to Vercel or a selected provider");
+      expect(stdout).not.toContain("Sign in to a model provider");
+      expect(stdout).not.toContain("Sign out of a model provider");
+      expect(stdout).not.toContain("Choose the active model provider");
       expect(stdout).toContain("credits|balance");
       expect(stdout).toContain("Flags:\n");
       expect(stdout).toContain("--context-limit <spec>");
       expect(stdout).toContain("Set name=bytes|off; repeatable");
       expect(stdout).toContain("--add-dir <path>");
-      expect(stdout).toContain("-c, --continue");
-      expect(stdout).toContain("-r, --resume [last|<id>]");
-      expect(stdout).toContain("Pick a saved session, or resume");
-      expect(stdout).not.toContain("-c, -r, --continue");
-      expect(stdout).toContain('fx [flags] "<prompt>"');
+      expect(stdout).not.toContain("--continue");
       expect(stdout).not.toContain("--resume-last");
       expect(stdout).not.toContain("--resume-<id>");
-      expect(stdout).toContain("session resume [last|id]");
+      expect(stdout).not.toContain("session resume");
       expect(stdout).toContain("-v, --version");
       expect(stdout).toContain("Print the fx version and exit");
       expect(stdout).not.toContain("Must appear before the command");
       expect(stdout).toContain("Examples:\n");
       expect(stdout).toContain("https://fx.sh/docs");
-      expect(stdout).toContain("run `/feedback` inside fx");
       expect(stdout).toContain(
         "Run `fx <command> --help` for command-specific usage and options.",
       );
@@ -418,7 +415,7 @@ Options:
   --auto                      Automatically review unresolved permission requests
   --full-access               Disable fx permission checks
   --yolo                      Alias for --full-access
-  --provider <name>           Override the model provider for this request (gateway, codex, grok, or a configured name)
+  --provider <name>           Override the model provider for this request (gateway or a configured name)
   --model <id>                Override the model for this request
   --effort <level>            Override the reasoning effort for this request
   --fast                      Enable Fast mode for this request when the model supports it
@@ -436,12 +433,12 @@ Options:
   --timeout <seconds>         Time limit for each shell command the agent runs
   --config <key=value>        Override a setting for this request, with the keys fx config set takes; repeatable
   --no-save                   Do not save the session; incompatible with --resume
-  --no-color                  Render TTY output without colors or hyperlinks; NO_COLOR or TERM=dumb also turns color off
+  --no-color                  Print the full-access warning on stderr without color; NO_COLOR or TERM=dumb also turns color off
   --resume <last|<id>>        Continue the last session or a session by id
   --                          Treat every following argument as prompt text
 
 The prompt may be passed as arguments or piped on stdin when no prompt args are given.
-TTY stdout uses the Minimal transcript presentation; redirected stdout emits raw assistant Markdown.
+Assistant output is raw Markdown on stdout.
 Operational progress and diagnostics are written to stderr. JSON \`output\` keeps accumulated assistant Markdown; \`final_output\` contains only the completed final response, or an empty string when absent.
 JSON usage sums reported main-agent input_tokens and output_tokens, including with --no-save; unreported counts are null. cache_read_tokens and cache_write_tokens appear only when the provider reports them. Nested usage and dollar spend are excluded.
 --system replaces only the built-in base prompt for this request; tool, skill, project, and runtime context still apply.
@@ -459,18 +456,15 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
   );
 
   test(
-    "fx session help documents inspect resume and recover",
+    "fx session help documents inspect and recover",
     async () => {
-      for (const args of [
-        ["session", "--help"],
-        ["session", "resume", "--help"],
-      ]) {
+      for (const args of [["session", "--help"]]) {
         const r = await runFx(args);
         expect(r.code).toBe(0);
         expect(r.stderr).toBe("");
-        expect(r.stdout).toContain("Inspect, resume, or recover saved sessions");
+        expect(r.stdout).toContain("Inspect or recover saved sessions");
         expect(r.stdout).toContain("session <last|id>|--id <id>");
-        expect(r.stdout).toContain("session resume [last|<id>]");
+        expect(r.stdout).not.toContain("session resume");
         expect(r.stdout).toContain("session recover <id>|--id <id>");
         // Sessions convert on open; there is nothing to migrate by hand.
         expect(r.stdout).not.toContain("migrate");
@@ -495,20 +489,6 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
         expect(r.stdout).toContain("--no-ultrafast");
         expect(r.stdout).toContain("--log-file <path>");
       }
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "fx replay help describes golden output",
-    async () => {
-      const r = await runFx(["replay", "--help"]);
-      expect(r.code).toBe(0);
-      expect(r.stderr).toBe("");
-      expect(r.stdout).toContain("--golden <path>");
-      expect(r.stdout).toContain("Write the final rendered grid to a file");
-      expect(r.stdout).toContain("Developer tool for reproducing terminal rendering bugs");
-      expect(r.stdout).not.toContain("Compare output against a golden file");
     },
     TIMEOUT,
   );
@@ -581,26 +561,6 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
     },
     TIMEOUT,
   );
-});
-
-describe("cli: launch flags", () => {
-  test("--instances says it applies only to interactive sessions", async () => {
-    for (const args of [["--instances", "2", "ask", "hi"], ["--instances=1", "ask", "hi"]]) {
-      const result = await runFx(args);
-      expect(result.code).toBe(2);
-      expect(result.stderr).toBe("fx: --instances applies to interactive sessions\n");
-      expect(result.stdout).toBe("");
-    }
-  });
-
-  test("--profile says it applies only to interactive sessions", async () => {
-    for (const args of [["--profile", "reviewer", "ask", "hi"], ["--profile=reviewer", "status"]]) {
-      const result = await runFx(args);
-      expect(result.code).toBe(2);
-      expect(result.stderr).toBe("fx: --profile applies to interactive sessions\n");
-      expect(result.stdout).toBe("");
-    }
-  });
 });
 
 describe("cli: version", () => {
@@ -938,11 +898,12 @@ describe("cli: status", () => {
           .map((check: { detail: string }) => check.detail);
         expect(warnings).toEqual([
           "unknown setting fast_mdoe in ~/.fx/settings.json (did you mean fast_mode?)",
-          "unknown setting statusLine.contxt in ~/.fx/settings.json (did you mean statusLine.context?)",
           `unknown setting efort in ~/.fx/settings.json for workspace ${cwd} (did you mean effort?)`,
-          "statusLine and status_line are both set in ~/.fx/settings.json; fx uses status_line where they differ, so remove statusLine",
           "unknown setting max_agent_step in .fx.json (did you mean max_agent_steps?)",
         ]);
+        // statusLine and status_line are retired: loaded and ignored, never diagnosed.
+        expect(doctor.stdout).not.toContain("statusLine");
+        expect(doctor.stdout).not.toContain("status_line");
 
         const status = await runFx(["status"], { cwd, env });
         expect(status.code).toBe(0);
@@ -1015,7 +976,7 @@ describe("cli: status", () => {
             fast_mode: true,
             fast_mdoe: 1,
             statusLine: { context: true },
-            models: { codex: "gpt-5.5" },
+            models: { gateway: "openai/gpt-5.5" },
             provider_order: ["a", "b"],
             workspaces: { [cwd]: { fast_mode: false } },
           }) + "\n",
@@ -1031,14 +992,20 @@ describe("cli: status", () => {
           [
             "file:.fx.json\tmax_agent_steps=7",
             "file:~/.fx/settings.json\tfast_mode=true",
-            "file:~/.fx/settings.json\tstatus_line.context=true",
-            "file:~/.fx/settings.json\tmodels.codex=gpt-5.5",
+            "file:~/.fx/settings.json\tmodels.gateway=openai/gpt-5.5",
             'file:~/.fx/settings.json\tprovider_order=["a","b"]',
             `workspace:${cwd}\tfast_mode=false`,
             "",
           ].join("\n"),
         );
         expect(list.stderr).toBe("fx config: unknown setting fast_mdoe in ~/.fx/settings.json (did you mean fast_mode?)\n");
+
+        // The retired statusLine in the file is ignored, and fx config refuses it as unknown.
+        for (const key of ["statusLine.context", "status_line.context"]) {
+          const retired = await runFx(["config", "get", key], { cwd, env });
+          expect([retired.code, retired.stdout]).toEqual([2, ""]);
+          expect(retired.stderr).toStartWith(`fx config: unknown setting ${key.split(".")[0]}\nusage: fx config`);
+        }
 
         // get reads the settings the runtime resolves, so it gives the same
         // warnings a run does: this .fx.json sets a profile-only key.
@@ -1117,9 +1084,13 @@ describe("cli: status", () => {
           changed: true,
           file: "~/.fx/settings.json",
         });
-        const unset = await runFx(["config", "unset", "statusLine.session"], { cwd, env });
-        expect([unset.code, unset.stdout]).toEqual([0, "status_line.session removed from ~/.fx/settings.json.\n"]);
+        // Saving drops the retired statusLine the file started with.
         expect(settings()).toEqual({ fast_mode: true, max_agent_steps: 40 });
+        for (const [verb, key] of [["unset", "statusLine.session"], ["set", "status_line.context"], ["set", "startup_scrollback"]]) {
+          const retired = await runFx(["config", verb!, key!, ...(verb === "set" ? ["false"] : [])], { cwd, env });
+          expect([retired.code, retired.stdout]).toEqual([2, ""]);
+          expect(retired.stderr).toStartWith(`fx config: unknown setting ${key!.split(".")[0]}\nusage: fx config`);
+        }
         const get = await runFx(["config", "get", "max_agent_steps"], { cwd, env });
         expect([get.code, get.stdout]).toEqual([0, "40\n"]);
 
@@ -1127,10 +1098,10 @@ describe("cli: status", () => {
         const refusals: Array<[string[], string]> = [
           [
             ["config", "set", "permission_mode", "full-access"],
-            "fx config: can't change permission_mode with fx config; use /permissions in a session, or --permission-mode for one run\n",
+            "fx config: can't change permission_mode with fx config; use --permission-mode for one run, or edit ~/.fx/settings.json\n",
           ],
           [["config", "set", "fast_mode", "maybe"], "fx config: invalid value for fast_mode: maybe (use true or false)\n"],
-          [["config", "set", "models.codex", "gpt-5.5"], "fx config: can't change models.codex with fx config; use /model in a session\n"],
+          [["config", "set", "models.gateway", "openai/gpt-5.5"], "fx config: can't change models.gateway with fx config; use --model for one run, or edit ~/.fx/settings.json\n"],
         ];
         for (const [args, stderr] of refusals) {
           const result = await runFx(args, { cwd, env });
@@ -1190,14 +1161,10 @@ describe("cli: status", () => {
 
   for (const scenario of [
     { name: "automatic Gateway", provider: "gateway", source: undefined, help: MISSING_AUTH_MESSAGE },
-    { name: "Gateway with a stale Codex preference", provider: "gateway", source: "chatgpt_subscription", help: MISSING_AUTH_MESSAGE },
-    { name: "Gateway with a stale Grok preference", provider: "gateway", source: "grok_subscription", help: MISSING_AUTH_MESSAGE },
     { name: "an exact Gateway login", provider: "gateway", source: "fx_login", help: "fx login is selected but unavailable. Run fx login to reconnect; no other credential was selected." },
     { name: "an exact OIDC token", provider: "gateway", source: "vercel_oidc_token", help: "VERCEL_OIDC_TOKEN is selected but unavailable. Set VERCEL_OIDC_TOKEN before starting fx; no other credential was selected." },
     { name: "an exact environment key", provider: "gateway", source: "ai_gateway_api_key", help: "AI_GATEWAY_API_KEY is selected but unavailable. Set AI_GATEWAY_API_KEY before starting fx; no other credential was selected." },
-    { name: "an exact stored key", provider: "gateway", source: "stored_key", help: "A stored API key is selected but unavailable. Start fx and open /provider to choose an available credential; no other credential was selected." },
-    { name: "Codex", provider: "codex", source: undefined, help: "fx needs a Codex subscription login for this model. Run fx login codex." },
-    { name: "Grok", provider: "grok", source: undefined, help: "fx needs a Grok subscription login for this model. Run fx login grok." },
+    { name: "an exact stored key", provider: "gateway", source: "stored_key", help: "A stored API key is selected but unavailable. Run fx login vercel --api-key to save a key again, or fx login to sign in instead; no other credential was selected." },
   ]) {
     test(
       `status and doctor respect ${scenario.name} when credentials are missing`,
@@ -1532,41 +1499,13 @@ describe("cli: status", () => {
       expect(json).toHaveProperty("permission_mode");
       expect(json).toHaveProperty("history_turns");
       expect(json).toHaveProperty("agent_step_limit");
-      expect(json.update_channel).toBe("stable");
-      expect(json.build_channel).toBe("stable");
       expect(json.build_revision).toMatch(/^[0-9a-f]{12}$/);
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "fx status reports a persisted dev update channel",
-    async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-update-channel-"));
-      try {
-        const home = join(root, "home");
-        const workspace = join(root, "workspace");
-        mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
-        mkdirSync(workspace);
-        writeFileSync(
-          join(home, ".fx", "settings.json"),
-          '{"update_channel":"dev"}\n',
-          { mode: 0o600 },
-        );
-
-        const result = await runFx(["status", "--json"], {
-          cwd: realpathSync(workspace),
-          env: { ...NO_GATEWAY_AUTH, HOME: home },
-        });
-        expect(result.code).toBe(0);
-        expect(JSON.parse(result.stdout.trim())).toMatchObject({
-          kind: "status",
-          update_channel: "dev",
-          build_channel: "stable",
-        });
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
+      expect(typeof json.update_channel).toBe("string");
+      expect(typeof json.build_channel).toBe("string");
+      const keys = Object.keys(json);
+      expect(keys.indexOf("update_channel")).toBeGreaterThan(-1);
+      expect(keys.indexOf("build_channel")).toBe(keys.indexOf("update_channel") + 1);
+      expect(keys.indexOf("build_revision")).toBe(keys.indexOf("build_channel") + 1);
     },
     TIMEOUT,
   );
@@ -1611,12 +1550,26 @@ describe("cli: status", () => {
   );
 
   test(
-    "fx upgrade help documents release channels",
+    "fx status loads settings left by the retired auto_upgrade and update_channel keys without a warning",
     async () => {
-      const result = await runFx(["upgrade", "--help"]);
-      expect(result.code).toBe(0);
-      expect(result.stdout).toContain("--channel <stable|dev>");
-      expect(result.stdout).toContain("Select and remember the release channel");
+      const root = mkdtempSync(join(tmpdir(), "fx-e2e-status-retired-update-keys-"));
+      try {
+        const home = join(root, "home");
+        mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+        writeFileSync(
+          join(home, ".fx", "settings.json"),
+          JSON.stringify({ auto_upgrade: false, update_channel: "dev", effort: "low" }) + "\n",
+          { mode: 0o600 },
+        );
+
+        const result = await runFx(["status", "--json"], { env: { ...NO_GATEWAY_AUTH, HOME: home } });
+        expect(result.code).toBe(0);
+        expect(result.stderr).toBe("");
+        // The same file's live key still applies, so the file was read, not skipped.
+        expect(JSON.parse(result.stdout.trim()).effort).toBe("low");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     },
     TIMEOUT,
   );
@@ -1644,28 +1597,6 @@ describe("cli: status", () => {
         expect(text.code).toBe(2);
         expect(text.stdout).toBe("");
         expect(text.stderr).toStartWith("fx mcp list: unknown flag --bogus\nusage: fx mcp list");
-      } finally {
-        rmSync(home, { recursive: true, force: true });
-      }
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "fx upgrade names a channel that does not exist and saves nothing",
-    async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-upgrade-channel-"));
-      try {
-        for (const args of [["upgrade", "--channel=nightly"], ["upgrade", "--channel", "nightly"]]) {
-          const result = await runFx(args, { env: { HOME: home } });
-          expect(result.code).toBe(2);
-          expect(result.stdout).toBe("");
-          expect(result.stderr).toStartWith("fx upgrade: invalid value for --channel: nightly\nusage: fx upgrade");
-        }
-        const json = await runFx(["upgrade", "--json", "--channel=nightly"], { env: { HOME: home } });
-        expect(json.code).toBe(2);
-        expect(JSON.parse(json.stdout)).toEqual({ kind: "upgrade", error: "invalid arguments", code: "InvalidUpgradeArgs" });
-        expect(existsSync(join(home, ".fx", "settings.json"))).toBe(false);
       } finally {
         rmSync(home, { recursive: true, force: true });
       }
@@ -1797,9 +1728,8 @@ describe("cli: status", () => {
         expect(status.stderr).toContain(
           "fx: config project: ignored_project_user_only_setting; key=permission",
         );
-        expect(status.stderr).toContain(
-          "fx: config project: ignored_project_user_only_setting; key=statusLine",
-        );
+        // statusLine is retired, so a project file's copy is ignored without a warning.
+        expect(status.stderr).not.toContain("key=statusLine");
         expect(status.stderr).not.toContain("danger");
 
         writeFileSync(
@@ -2092,89 +2022,6 @@ describe("cli: usage", () => {
         const text = await runFx(["usage"], { env });
         expect(text.stdout).toContain("Refresh failed: AI Gateway refused this sign-in.");
         expect(text.stdout).toContain("Requests      7");
-      } finally {
-        fixture.stop();
-      }
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "fx usage with Codex reads the ChatGPT plan's limits and activity",
-    async () => {
-      const fixture = usageFixture("fx-e2e-usage-codex-", {
-        codex: {
-          usage: codexUsageBody(),
-          profile: codexProfileBody(),
-          breakdown: codexBreakdownBody(),
-        },
-      });
-      writeChatGptLogin(fixture.home, "acct_e2e");
-      // Times show in the local zone, fixed here at five and a half hours east of UTC.
-      const env = { ...fixture.env, FX_PROVIDER: "codex", FX_MODEL: "codex-e2e-model", TZ: "IST-5:30" };
-      try {
-        const text = await runFx(["usage", "--period", "today"], { env });
-        expect(text.code).toBe(0);
-        expect(text.stderr).toBe("");
-        expect(text.stdout).toContain("Codex usage from ChatGPT for samdoe, updated 21:00 IST");
-        expect(text.stdout).toContain("Tokens        40000 today, 100000 7d, 100000 month, 9000000 lifetime");
-        expect(text.stdout).toContain("Share by model (today): gpt-e2e-large fast 70.0%, gpt-e2e-small standard 30.0%");
-        expect(text.stdout).toContain("Plan          pro");
-        expect(text.stdout).toContain("Credits       12.40");
-        expect(text.stdout).toContain("- codex (5h window): 42% used, resets 23:00 IST");
-        expect(text.stdout).toContain("- codex (168h window): 18% used");
-        const paths = fixture.fake.requests.map((request) => request.path).sort();
-        expect(paths).toEqual([
-          "/backend-api/wham/profiles/me",
-          "/backend-api/wham/usage",
-          "/backend-api/wham/usage/daily-token-usage-breakdown",
-        ]);
-        for (const request of fixture.fake.requests) {
-          expect(request.chatgptAccount).toBe("acct_e2e");
-          expect(request.authorization?.startsWith("Bearer header.")).toBe(true);
-        }
-        expect(fixture.fake.reportRanges()).toEqual([]);
-
-        const json = await runFx(["usage", "--json"], { env });
-        expect(JSON.parse(json.stdout)).toMatchObject({
-          source: "chatgpt",
-          status: "ready",
-          codex: { plan: "pro" },
-        });
-      } finally {
-        fixture.stop();
-      }
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "fx usage with Grok reads the plan's allowance and credits",
-    async () => {
-      const fixture = usageFixture("fx-e2e-usage-grok-", {
-        grok: { billing: grokBillingBody(), settings: grokSettingsBody() },
-      });
-      writeGrokLogin(fixture.home, "acct_grok_e2e");
-      // Times show in the local zone; five and a half hours east, the reset moves to the next day.
-      const env = { ...fixture.env, FX_PROVIDER: "grok", FX_MODEL: "grok-4.20", TZ: "IST-5:30" };
-      try {
-        const text = await runFx(["usage"], { env });
-        expect(text.code).toBe(0);
-        expect(text.stderr).toBe("");
-        expect(text.stdout).toContain("Grok usage from xAI, updated 21:00 IST");
-        expect(text.stdout).toContain("Plan          SuperGrok Heavy");
-        expect(text.stdout).toContain("Used          63% of the weekly allowance, resets Oct 15, 2026 02:00 IST");
-        expect(text.stdout).toContain("Credits       $12.50");
-        expect(text.stdout).toContain("Pay as you go $3.00 of $100.00 this month");
-        expect(fixture.fake.requests.map((request) => request.path).sort()).toEqual(["/billing", "/settings"]);
-        for (const request of fixture.fake.requests) {
-          expect(request.grokUser).toBe("acct_grok_e2e");
-        }
-        expect(fixture.fake.requests.find((request) => request.path === "/billing")?.query.get("format"))
-          .toBe("credits");
-
-        const json = await runFx(["usage", "--json"], { env });
-        expect(JSON.parse(json.stdout)).toMatchObject({ source: "grok", status: "ready" });
       } finally {
         fixture.stop();
       }
@@ -2751,11 +2598,10 @@ describe("cli: setup", () => {
       expect(noTerminal.code).toBe(1);
       expect(noTerminal.stderr).toBe("fx login: an interactive terminal is required to paste an API key\n");
 
-      const usage = "usage: fx login [vercel|codex|grok] [--api-key]\n";
+      const usage = "usage: fx login [vercel] [--api-key]\n";
       const cases: [string[], string][] = [
-        [["login", "codex", "--api-key"], "fx login: --api-key works only with vercel\n"],
         [["login", "--bogus"], "fx login: unknown flag --bogus\n" + usage],
-        [["login", "vercel", "codex"], usage],
+        [["login", "vercel", "extra"], usage],
       ];
       for (const [args, stderr] of cases) {
         const r = await runFx(args, { env: { ...NO_GATEWAY_AUTH } });
@@ -3797,7 +3643,7 @@ describe("cli: removed task and background commands", () => {
       // A word that isn't close to a command is a first prompt for a session.
       const background = await runFx(["background"], { env: NO_GATEWAY_AUTH });
       expect(background.code).toBe(1);
-      expect(background.stderr).toContain("fx requires an interactive terminal (TTY).");
+      expect(background.stderr).toContain("fx: this build has no interactive terminal UI; use fx ask or fx acp");
     },
     TIMEOUT,
   );
@@ -4069,13 +3915,16 @@ describe("cli: models", () => {
         // the same way, and a failed switch keeps the saved provider.
         const settingsPath = join(home, ".fx", "settings.json");
         mkdirSync(join(home, ".fx"), { recursive: true });
-        writeFileSync(settingsPath, JSON.stringify({ provider: "codex" }));
+        writeFileSync(settingsPath, JSON.stringify({
+          provider: "local",
+          providers: { local: { protocol: "openai-chat-completions", base_url: "http://127.0.0.1:1/v1", auth: { type: "none" } } },
+        }));
         const selection = await runFx(["provider", "gateway"], { env });
         expect(selection.code).not.toBe(0);
         expect(selection.stderr).toBe(
           "fx provider: couldn't connect to AI Gateway to load the target model catalog; check your network connection or firewall\n",
         );
-        expect(JSON.parse(readFileSync(settingsPath, "utf8")).provider).toBe("codex");
+        expect(JSON.parse(readFileSync(settingsPath, "utf8")).provider).toBe("local");
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
         cleanupIsolatedTestHome(home);
@@ -4502,36 +4351,6 @@ describe("cli: credits", () => {
   );
 });
 
-describe("cli: replay failures", () => {
-  test(
-    "fx replay --json preserves structured failures for missing and malformed tapes",
-    async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-replay-json-errors-"));
-      try {
-        const missing = await runFx(["replay", join(root, "missing.fxtape"), "--json"]);
-        expect(missing.code).toBe(1);
-        expect(missing.stderr).toBe("");
-        expect(JSON.parse(missing.stdout.trim())).toMatchObject({
-          kind: "replay",
-          code: "FileNotFound",
-        });
-
-        const malformedPath = join(root, "malformed.fxtape");
-        writeFileSync(malformedPath, "not a tape");
-        const malformed = await runFx(["replay", malformedPath, "--json"]);
-        expect(malformed.code).toBe(1);
-        expect(malformed.stderr).toBe("");
-        expect(JSON.parse(malformed.stdout.trim())).toMatchObject({
-          kind: "replay",
-        });
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
-    },
-    TIMEOUT,
-  );
-});
-
 describe("cli: ask input validation", () => {
   test(
     "fx ask rejects invalid UTF-8 stdin before Gateway or session effects",
@@ -4691,11 +4510,6 @@ describe("cli: interactive startup", () => {
     async () => {
       const cases = [
         [],
-        ["--resume", "last"],
-        ["--resume"],
-        ["-r", "last"],
-        ["session", "resume", "last"],
-        ["session", "resume", "session.v3"],
         ["fix the login bug"],
         ["fix the login bug", "--model", "x"],
       ];
@@ -4706,7 +4520,7 @@ describe("cli: interactive startup", () => {
           const r = await runFx(args, { env: { HOME: home } });
           expect(r.code).toBe(1);
           expect(r.stdout).toBe("");
-          expect(r.stderr).toBe("fx requires an interactive terminal (TTY).\n");
+          expect(r.stderr).toBe("fx: this build has no interactive terminal UI; use fx ask or fx acp\n");
           expect(readdirSync(home)).toEqual([]);
         } finally {
           rmSync(home, { recursive: true, force: true });
@@ -4749,32 +4563,6 @@ describe("cli: interactive startup", () => {
     TIMEOUT,
   );
 
-  test(
-    "removed resume spellings exit two and name the replacement",
-    async () => {
-      const cases: [string[], string][] = [
-        [["--resume-last"], "fx: --resume-last was removed; use fx --resume last\n"],
-        [["--resume-session.v3"], "fx: --resume-<id> was removed; use fx --resume <id>\n"],
-        [["resume", "last"], "fx: fx resume was removed; use fx --resume [last|<id>] or fx session resume [last|<id>]\n"],
-        [["session", "resume", "--id", "session.v3"], "fx session resume: --id was removed; use fx session resume <id>\n"],
-        [["session", "resume", "--resume", "--last"], "fx session resume: --resume --last was removed; use fx session resume last\n"],
-      ];
-
-      for (const [args, stderr] of cases) {
-        const home = realpathSync(mkdtempSync(join(tmpdir(), "fx-e2e-removed-resume-")));
-        try {
-          const r = await runFx(args, { env: { HOME: home } });
-          expect(r.code).toBe(2);
-          expect(r.stdout).toBe("");
-          expect(r.stderr).toBe(stderr);
-          expect(readdirSync(home)).toEqual([]);
-        } finally {
-          rmSync(home, { recursive: true, force: true });
-        }
-      }
-    },
-    TIMEOUT,
-  );
 });
 
 describe("cli: pr", () => {
@@ -5830,7 +5618,7 @@ describe("cli: workspace access", () => {
         { env: enabled },
       );
       expect(duplicate.code).toBe(1);
-      expect(duplicate.stderr).toBe("fx requires an interactive terminal (TTY).\n");
+      expect(duplicate.stderr).toBe("fx: this build has no interactive terminal UI; use fx ask or fx acp\n");
 
       const badMode = await runFx(["--permission-mode", "never"], { env: enabled });
       expect(badMode.code).toBe(2);
@@ -6376,16 +6164,17 @@ describe("cli: completion", () => {
     [["fx", "con"], "config"],
     [["fx", "config", ""], "list get set unset schema"],
     [["fx", "config", "schema", "--p"], "--project"],
-    [["fx", "config", "get", "status_line.c"], "status_line.context"],
+    [["fx", "config", "get", "sound.t"], "sound.turn_end"],
+    [["fx", "config", "get", "status_line.c"], ""],
+    [["fx", "config", "get", "startup_s"], ""],
     [["fx", "config", "get", "theme", ""], ""],
     [["fx", "ask", "--permission-mode", ""], "ask auto full-access"],
     [["fx", "--model", "gpt-5", "ask", "--permission-m"], "--permission-mode"],
     [["fx", "mcp", ""], "list show add remove login logout approve reject call"],
     [["fx", "mcp", "add", "--g"], "--global"],
     [["fx", "usage", "--period", ""], "today 7d month"],
-    [["fx", "login", ""], "vercel codex grok"],
+    [["fx", "login", ""], "vercel"],
     [["fx", "completion", ""], "bash zsh fish"],
-    [["fx", "-r", ""], "last"],
   ];
 
   async function writeScript(shell: string, dir: string): Promise<string> {

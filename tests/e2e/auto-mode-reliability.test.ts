@@ -13,7 +13,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FX_BIN, runFx } from "../evals/eval-helpers";
-import { readPermissionsPanel } from "./info-panel";
 import { logLines, rootSessionIds } from "./saved-sessions";
 import {
   fakeGatewayFinalText,
@@ -23,9 +22,7 @@ import {
   fakeGatewayToolCall,
   reviewedActionEvidence,
   startFakeGateway,
-  TmuxSession,
-  tmuxAvailable,
-} from "./tmux-helpers";
+} from "./fake-gateway";
 
 const TIMEOUT = 30_000;
 const MODEL = "openai/gpt-5";
@@ -39,13 +36,8 @@ type IsolatedRoot = {
 
 const roots: string[] = [];
 const gateways: Array<{ stop(): void }> = [];
-let activeSession: TmuxSession | null = null;
 
 afterEach(async () => {
-  if (activeSession) {
-    await activeSession.kill();
-    activeSession = null;
-  }
   for (const gateway of gateways.splice(0)) gateway.stop();
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
@@ -180,21 +172,6 @@ function startGateway(
   const gateway = startFakeGateway(responses, { classifierResponses });
   gateways.push(gateway);
   return gateway;
-}
-
-async function waitForEither(
-  session: TmuxSession,
-  expected: string[],
-  timeoutMs: number,
-): Promise<string> {
-  const deadline = Date.now() + timeoutMs;
-  let scrollback = "";
-  while (Date.now() < deadline) {
-    scrollback = await session.captureFullScrollback();
-    if (expected.some((value) => scrollback.includes(value))) return scrollback;
-    await Bun.sleep(25);
-  }
-  throw new Error(`Timed out waiting for ${expected.map(JSON.stringify).join(" or ")}`);
 }
 
 describe("lean auto mode reliability", () => {
@@ -2434,131 +2411,6 @@ describe("lean auto mode reliability", () => {
     TIMEOUT,
   );
 
-  test.skipIf(!tmuxAvailable())(
-    "a prompt-capable host also lets the agent recover before asking the user",
-    async () => {
-      const root = createIsolatedRoot();
-      writeFileSync(
-        join(root.home, ".fx", "settings.json"),
-        JSON.stringify({
-          sandbox: "none",
-          permission: { bash: { pwd: "allow" } },
-        }),
-      );
-      const rejectedMarker = join(root.workspace, "tui-rejected-action-must-not-run");
-      const stderrPath = join(root.root, "stderr.log");
-      writeFileSync(stderrPath, "");
-      const gateway = startGateway(
-        [
-          commandCall(`touch ${JSON.stringify(rejectedMarker)}`, "tui_rejected_action"),
-          (body) => {
-            expect(body).toContain("review_caution");
-            return commandCall("pwd", "tui_safe_replan");
-          },
-          fakeGatewayFinalText("TUI safe replan complete"),
-        ],
-        [fakeGatewayHeldDecision("tui_reject_first_action")],
-      );
-
-      activeSession = await TmuxSession.create({
-        cmd: FX_BIN,
-        cwd: root.workspace,
-        env: gatewayEnv(root, gateway),
-        stderrPath,
-        width: 120,
-        height: 40,
-      });
-      await activeSession.waitForComposer(TIMEOUT);
-      await activeSession.sendText("Complete the task safely.");
-      const scrollback = await waitForEither(
-        activeSession,
-        ["TUI safe replan complete", COMMAND_APPROVAL_PROMPT],
-        TIMEOUT,
-      );
-
-      expect(scrollback).toContain("TUI safe replan complete");
-      expect(scrollback).not.toContain(COMMAND_APPROVAL_PROMPT);
-      expect(existsSync(rejectedMarker)).toBe(false);
-      expect(gateway.requests).toHaveLength(3);
-      expect(gateway.classifierRequests).toHaveLength(1);
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-
-      await activeSession.sendText("/quit");
-      expect(await activeSession.waitForSessionEnd()).toBe(true);
-      await activeSession.kill();
-      activeSession = null;
-    },
-    TIMEOUT,
-  );
-
-  test.skipIf(!tmuxAvailable())(
-    "saved-session allow survives restart and bypasses automatic review",
-    async () => {
-      const root = createIsolatedRoot();
-      const allowedMarker = join(root.workspace, "saved-allow-ran");
-      const allowedCommand = `touch ${JSON.stringify(allowedMarker)}`;
-      writeFileSync(
-        join(root.home, ".fx", "settings.json"),
-        JSON.stringify({
-          sandbox: "none",
-          permission: { bash: { [allowedCommand]: "ask" } },
-        }),
-      );
-      const gateway = startGateway([
-        fakeGatewayFinalText("allow session initialized"),
-        commandCall(allowedCommand, "saved_allow_action"),
-        fakeGatewayFinalText("saved allow complete"),
-      ]);
-      const stderrPath = join(root.root, "saved-allow-stderr.log");
-      writeFileSync(stderrPath, "");
-      activeSession = await TmuxSession.create({
-        cmd: FX_BIN,
-        cwd: root.workspace,
-        env: gatewayEnv(root, gateway),
-        stderrPath,
-        width: 140,
-        height: 42,
-      });
-      await activeSession.waitForComposer(TIMEOUT);
-      await activeSession.sendText("Initialize the saved allow session.");
-      await activeSession.waitForText("allow session initialized", TIMEOUT);
-      await activeSession.sendText(
-        `/permissions remember allow shell ${JSON.stringify({ action: "run", timeout_ms: 600_000, command: allowedCommand })}`,
-      );
-      await activeSession.waitForText("Remember allow for this saved session", TIMEOUT);
-      await activeSession.sendKeys("1");
-      await activeSession.waitForText("saved-session permission rule updated", TIMEOUT);
-      await activeSession.sendText("/quit");
-      expect(await activeSession.waitForSessionEnd()).toBe(true);
-      await activeSession.kill();
-      activeSession = null;
-
-      const sessionIds = rootSessionIds(root.home);
-      expect(sessionIds).toHaveLength(1);
-      const result = await runFx(
-        [
-          "ask",
-          "--json",
-          "--resume",
-          sessionIds[0]!,
-          "Run the exact saved action.",
-        ],
-        {
-          cwd: root.workspace,
-          env: gatewayEnv(root, gateway),
-          timeoutMs: TIMEOUT,
-        },
-      );
-
-      expect(result.code).toBe(0);
-      expect(existsSync(allowedMarker)).toBe(true);
-      expect(gateway.classifierRequests).toHaveLength(0);
-      expect(gateway.requests).toHaveLength(3);
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-    },
-    TIMEOUT,
-  );
-
   test(
     "a noninteractive caution stays inside the agent loop and effect free",
     async () => {
@@ -2596,74 +2448,6 @@ describe("lean auto mode reliability", () => {
       expect(result.stdout).not.toContain("approval_request_id");
       expect(gateway.classifierRequests).toHaveLength(1);
       expect(existsSync(marker)).toBe(false);
-    },
-    TIMEOUT,
-  );
-
-  test.skipIf(!tmuxAvailable())(
-    "saved-session deny is confirmed, enforced over configured allow, listed, and revoked by id",
-    async () => {
-      const root = createIsolatedRoot();
-      const blockedMarker = join(root.workspace, "saved-deny-must-not-run");
-      const blockedCommand = `touch ${JSON.stringify(blockedMarker)}`;
-      writeFileSync(
-        join(root.home, ".fx", "settings.json"),
-        JSON.stringify({
-          sandbox: "none",
-          permission: { bash: { [blockedCommand]: "allow", pwd: "allow" } },
-        }),
-      );
-      const gateway = startGateway([
-        fakeGatewayFinalText("session initialized"),
-        commandCall(blockedCommand, "saved_deny_blocked"),
-        (body) => {
-          expect(body).toContain("policy_denied");
-          return commandCall("pwd", "saved_deny_replan");
-        },
-        fakeGatewayFinalText("saved deny replan complete"),
-      ]);
-      const stderrPath = join(root.root, "saved-deny-stderr.log");
-      writeFileSync(stderrPath, "");
-      activeSession = await TmuxSession.create({
-        cmd: FX_BIN,
-        cwd: root.workspace,
-        env: gatewayEnv(root, gateway),
-        stderrPath,
-        width: 140,
-        height: 42,
-      });
-      await activeSession.waitForComposer(TIMEOUT);
-      await activeSession.sendText("Initialize this saved session.");
-      await activeSession.waitForText("session initialized", TIMEOUT);
-      await activeSession.sendText(
-        `/permissions remember deny shell ${JSON.stringify({ action: "run", timeout_ms: 600_000, command: blockedCommand })}`,
-      );
-      await activeSession.waitForText("Remember deny for this saved session", TIMEOUT);
-      await activeSession.sendKeys("1");
-      await activeSession.waitForText("saved-session permission rule updated", TIMEOUT);
-
-      const listed = await readPermissionsPanel(activeSession, TIMEOUT, (panel) => panel.fields["Saved rules"] === "1");
-      const idMatch = /^(\d+) deny /.exec(listed.items["Saved rules"]?.[0] ?? "");
-      expect(idMatch).not.toBeNull();
-      const ruleId = idMatch![1];
-
-      await activeSession.sendText("Complete the configured action safely.");
-      await activeSession.waitForText("saved deny replan complete", TIMEOUT);
-      expect(existsSync(blockedMarker)).toBe(false);
-      expect(gateway.classifierRequests).toHaveLength(0);
-
-      await activeSession.waitForComposer(TIMEOUT);
-      await activeSession.sendText(`/permissions revoke ${ruleId}`);
-      await activeSession.waitForText("Revoke this saved-session permission rule?", TIMEOUT);
-      await activeSession.sendKeys("1");
-      await activeSession.waitForComposer(TIMEOUT);
-      await readPermissionsPanel(activeSession, TIMEOUT, (panel) => panel.fields["Saved rules"] === "none");
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-
-      await activeSession.sendText("/quit");
-      expect(await activeSession.waitForSessionEnd()).toBe(true);
-      await activeSession.kill();
-      activeSession = null;
     },
     TIMEOUT,
   );

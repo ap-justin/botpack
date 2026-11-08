@@ -17,9 +17,7 @@ import {
   fakeGatewayFinalText,
   fakeGatewayToolCall,
   startFakeGateway,
-  TmuxSession,
-  tmuxAvailable,
-} from "./tmux-helpers";
+} from "./fake-gateway";
 
 // A repository's own git config can name programs: fsmonitor, hooks, clean
 // and smudge filters, diff drivers and the pager. Opening a repository in fx
@@ -29,7 +27,6 @@ import {
 
 const TIMEOUT = 60_000;
 const MODEL = "openai/gpt-5";
-const tmuxTest = test.skipIf(!tmuxAvailable());
 
 type Fixture = {
   base: string;
@@ -42,11 +39,8 @@ type Gateway = ReturnType<typeof startFakeGateway>;
 
 const fixtures: Fixture[] = [];
 const gateways: Gateway[] = [];
-let session: TmuxSession | null = null;
 
 afterEach(async () => {
-  await session?.kill();
-  session = null;
   for (const gateway of gateways.splice(0)) gateway.stop();
   for (const fixture of fixtures.splice(0)) {
     rmSync(fixture.base, { recursive: true, force: true });
@@ -150,37 +144,6 @@ describe("poisoned repository", () => {
     git(fixture, ["status", "--short"]);
     expect(sentinelRuns(fixture).length).toBeGreaterThan(0);
   });
-
-  tmuxTest(
-    "interactive startup and @ completion run none of the repository's programs",
-    async () => {
-      const fixture = poisonedRepository();
-      const gateway = startFakeGateway([], { classifierResponses: [] });
-      gateways.push(gateway);
-      const stderrPath = join(fixture.base, "stderr.log");
-      session = await TmuxSession.create({
-        cwd: fixture.workspace,
-        env: fxEnv(fixture, gateway),
-        stderrPath,
-      });
-      await session.waitForComposer(TIMEOUT);
-      await session.sendLiteral("@alpha");
-      await session.waitForPane(
-        (pane) => pane.includes("alpha-tracked.txt") && pane.includes("alpha-untracked.txt"),
-        TIMEOUT,
-      );
-      await session.sendKeys("Escape");
-      await session.sendKeys("C-u");
-      await session.sendText("/quit");
-      expect(await session.waitForSessionEnd(TIMEOUT)).toBe(true);
-      session = null;
-
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-      expect(sentinelRuns(fixture)).toEqual([]);
-      expect(gateway.requests).toHaveLength(0);
-    },
-    TIMEOUT,
-  );
 
   test(
     "glob, grep and auto-run git status answer without running the repository's programs",

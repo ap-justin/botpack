@@ -134,7 +134,7 @@ fn addOptions(model: *Model, arena: Allocator, target: *Node, options: []const O
 const help_flag: Entry = .{ .name = "--help", .description = "Show help for this command" };
 
 /// A word offers only the flags it declares, plus `--help`: a parent's flags
-/// may not apply, as `--api-key` doesn't after `fx login codex`.
+/// may not apply to it.
 fn addSubcommands(model: *Model, arena: Allocator, parent_path: []const u8, subcommands: []const SubcommandDoc) !void {
     for (subcommands) |sub| {
         const name = sub.name();
@@ -802,8 +802,11 @@ test "the model follows subcommands, keeps parent flags, and marks setting-key p
     try std.testing.expectEqualStrings("--help", reset.?.flags.items[0].name);
     try std.testing.expect(contains(model.value_flags.items, "--permission-mode"));
     try std.testing.expectEqualStrings("auto", model.values.items[0].values[1]);
-    try std.testing.expect(contains(model.setting_keys.items, "status_line.context"));
+    try std.testing.expect(contains(model.setting_keys.items, "sound.turn_end"));
     try std.testing.expect(!contains(model.setting_keys.items, "notifications.turn_end"));
+    // Retired keys, such as the terminal UI's, aren't offered.
+    try std.testing.expect(!contains(model.setting_keys.items, "status_line.context"));
+    try std.testing.expect(!contains(model.setting_keys.items, "startup_scrollback"));
     try std.testing.expect(!contains(model.setting_keys.items, "models"));
     try std.testing.expect(contains(model.settable_keys.items, "fast_mode"));
     try std.testing.expect(contains(model.setting_keys.items, "permission_mode"));

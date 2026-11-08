@@ -22,20 +22,6 @@
 #   frozen-countdown    the countdown stops changing every second          StatusFresh
 #   no-handoff          a retry status left over a model thinking quietly  HandsOff
 #
-# Resume.tla models the app around the module across process exits.
-# resume.cfg and resume-deep.cfg are the design and must pass;
-# resume-today.cfg is fx before it, which leaves an interrupted request for
-# the user (AutoResumes). Each resume-mutation-*.cfg plants one defect:
-#
-#   no-closing          a closed window counted as a crash                 NoFalseCrashQuestion
-#   no-clear            a finished request's record left behind            NoFalseCrashQuestion
-#   send-before-save    a send on the wire before its record is saved      CrashLoopAsks
-#   reset-on-resume     a resumed request saves a fresh death count        CrashLoopAsks
-#   resume-answered     a turn whose final answer was saved sent again     DoneNeverResent
-#   resume-cancelled    a turn the user cancelled sent again               CancelNeverResumes
-#   ignore-age          a day-old request sent again without asking        OldAsks
-#   no-lock             a second fx resuming a session another holds       OneWorker
-#
 # Needs Java 11+ and tla2tools.jar, as ../README.md describes.
 #
 # Usage:
@@ -63,15 +49,4 @@ RecoveryTimed recovery-timed -
 RecoveryTimed recovery-mutation-unbounded-wait WaitBounded
 RecoveryTimed recovery-mutation-frozen-countdown StatusFresh
 RecoveryTimed recovery-mutation-no-handoff HandsOff
-Resume resume -
-Resume resume-deep -
-Resume resume-today AutoResumes
-Resume resume-mutation-no-closing NoFalseCrashQuestion
-Resume resume-mutation-no-clear NoFalseCrashQuestion
-Resume resume-mutation-send-before-save CrashLoopAsks
-Resume resume-mutation-reset-on-resume CrashLoopAsks
-Resume resume-mutation-resume-answered DoneNeverResent
-Resume resume-mutation-resume-cancelled CancelNeverResumes
-Resume resume-mutation-ignore-age OldAsks
-Resume resume-mutation-no-lock OneWorker
 EOF

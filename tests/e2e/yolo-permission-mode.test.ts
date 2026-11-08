@@ -11,33 +11,22 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runFx } from "../evals/eval-helpers";
-import { readStatusPanel } from "./info-panel";
 import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText,
   fakeShellRun,
   startFakeGateway,
-  TmuxSession,
-  tmuxAvailable,
-} from "./tmux-helpers";
+} from "./fake-gateway";
 import { expectPermissionModeContext } from "./permission-mode-context";
 
 const WARNING = "Full access enabled: fx permission checks disabled";
-const COMPACT_WARNING = "Full access";
-const QUIT_HINT = "press ctrl+c again to exit";
-const COMMAND_APPROVAL_PROMPT = "Would you like to run the following command?";
 const TIMEOUT = 30_000;
 const CONFIGURED_SANDBOX = process.platform === "darwin" ? "os" : "none";
 
-let session: TmuxSession | null = null;
 let gateway: { stop(): void } | null = null;
 const tempRoots: string[] = [];
 
 afterEach(async () => {
-  if (session) {
-    await session.kill();
-    session = null;
-  }
   gateway?.stop();
   gateway = null;
   for (const root of tempRoots.splice(0)) {
@@ -58,20 +47,6 @@ function createFixture(prefix: string) {
     workspace: realpathSync(workspace),
     settingsPath: join(home, ".fx", "settings.json"),
   };
-}
-
-async function waitForGatewayRequestCount(
-  fake: { requestCount(): number },
-  expected: number,
-): Promise<void> {
-  const deadline = Date.now() + TIMEOUT;
-  while (Date.now() < deadline) {
-    if (fake.requestCount() >= expected) return;
-    await Bun.sleep(25);
-  }
-  throw new Error(
-    `Timed out waiting for ${expected} Gateway request(s); received ${fake.requestCount()}`,
-  );
 }
 
 describe("yolo permission mode", () => {
@@ -286,296 +261,5 @@ describe("yolo permission mode", () => {
       expect(fake.requests).toHaveLength(2);
     },
     TIMEOUT,
-  );
-});
-
-describe.skipIf(!tmuxAvailable())("yolo interactive mode", () => {
-  test(
-    "Shift+Tab cycles through yolo and warning time pauses behind menus",
-    async () => {
-      const fixture = createFixture("fx-yolo-tui-");
-      const stderrPath = join(fixture.root, "stderr.log");
-      writeFileSync(
-        fixture.settingsPath,
-        JSON.stringify({
-          permission_mode: "ask",
-          sandbox: CONFIGURED_SANDBOX,
-          yolo_acknowledged: false,
-        }) + "\n",
-      );
-      writeFileSync(stderrPath, "");
-
-      session = await TmuxSession.create({
-        cwd: fixture.workspace,
-        stderrPath,
-        width: 120,
-        height: 40,
-        env: {
-          HOME: fixture.home,
-          AI_GATEWAY_API_KEY: undefined,
-          VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
-          FX_PERMISSION_MODE: undefined,
-        },
-      });
-
-      await session.waitForText("ask ·", TIMEOUT);
-      await session.sendKeys("BTab");
-      await session.waitForText("auto ·", TIMEOUT);
-      await session.sendKeys("BTab");
-      const warningPane = await session.waitForText(WARNING, TIMEOUT);
-      expect(warningPane).toContain("full access ·");
-
-      await session.sendText("/settings");
-      const settingsPane = await session.waitForText("←→ change", TIMEOUT);
-      expect(settingsPane).toContain("Permission mode");
-      expect(settingsPane).not.toContain("Command sandbox");
-      await Bun.sleep(4_300);
-      expect(await session.capturePane()).toContain("←→ change");
-
-      await session.sendKeys("Escape");
-      const resumedWarning = await session.waitForText(WARNING, TIMEOUT);
-      expect(resumedWarning).toContain("full access ·");
-
-      await Bun.sleep(1_500);
-      expect(await session.capturePane()).toContain(WARNING);
-      await session.waitForPane((pane) => !pane.includes(WARNING), 3_500);
-
-      const stored = JSON.parse(readFileSync(fixture.settingsPath, "utf8"));
-      expect(stored).toMatchObject({
-        permission_mode: "full-access",
-        sandbox: CONFIGURED_SANDBOX,
-        yolo_acknowledged: true,
-      });
-
-      await session.sendKeys("BTab");
-      await session.waitForText("ask ·", TIMEOUT);
-      const panel = await readStatusPanel(session, TIMEOUT);
-      expect(panel.fields.Permissions).toBe("ask");
-      expect(panel.rows.join("\n").toLowerCase()).not.toContain("sandbox");
-      const scrollback = await session.captureFullScrollback();
-      expect(scrollback).not.toContain("YOLO ·");
-      expect(scrollback).not.toContain("YOLO enabled:");
-      for (const mode of ["full-access", "yolo", "full access"]) {
-        await session.sendText(`/permissions ${mode}`);
-        await session.waitForText("mode set to full access", TIMEOUT);
-        await session.waitForText("full access ·", TIMEOUT);
-        expect(JSON.parse(readFileSync(fixture.settingsPath, "utf8")).permission_mode).toBe("full-access");
-        await session.sendKeys("BTab");
-        await session.waitForText("ask ·", TIMEOUT);
-      }
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-    },
-    45_000,
-  );
-
-  test(
-    "Shift+Tab applies auto to a later tool call in the active turn",
-    async () => {
-      const fixture = createFixture("fx-live-permission-auto-");
-      const markerPath = join(fixture.workspace, "auto-marker.txt");
-      const stderrPath = join(fixture.root, "stderr.log");
-      const tracePath = join(fixture.root, "trace.log");
-      writeFileSync(
-        fixture.settingsPath,
-        JSON.stringify({
-          permission_mode: "ask",
-          sandbox: CONFIGURED_SANDBOX,
-          yolo_acknowledged: true,
-        }) + "\n",
-      );
-      writeFileSync(stderrPath, "");
-
-      let releaseToolCall: (() => void) | undefined;
-      const toolCallGate = new Promise<void>((resolve) => {
-        releaseToolCall = resolve;
-      });
-      const fake = startFakeGateway([
-        async () => {
-          await toolCallGate;
-          return fakeShellRun(
-            "live_auto_command",
-            `printf 'LIVE_AUTO_OK\\n' > ${JSON.stringify(markerPath)}`,
-            { timeout_ms: 600_000 },
-          );
-        },
-        fakeGatewayFinalText("LIVE_AUTO_DONE"),
-      ]);
-      gateway = fake;
-
-      session = await TmuxSession.create({
-        cwd: fixture.workspace,
-        stderrPath,
-        width: 120,
-        height: 40,
-        env: {
-          HOME: fixture.home,
-          AI_GATEWAY_API_KEY: "fake-live-permission-key",
-          VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
-          FX_GATEWAY_BASE_URL: fake.baseUrl,
-          FX_GATEWAY_CHAT_URL: fake.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_PERMISSION_MODE: undefined,
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "permission",
-        },
-      });
-
-      await session.waitForText("ask ·", TIMEOUT);
-      await session.sendText("Run the requested marker command.");
-      await waitForGatewayRequestCount(fake, 1);
-      await session.sendKeys("BTab");
-      await session.waitForText("auto ·", TIMEOUT);
-      releaseToolCall?.();
-
-      const settledPane = await session.waitForPane(
-        (pane) => pane.includes("LIVE_AUTO_DONE") || pane.includes(COMMAND_APPROVAL_PROMPT),
-        TIMEOUT,
-      );
-      expect(settledPane).toContain("LIVE_AUTO_DONE");
-      expect(settledPane).not.toContain(COMMAND_APPROVAL_PROMPT);
-      expect(readFileSync(markerPath, "utf8")).toBe("LIVE_AUTO_OK\n");
-      expect(fake.classifierRequests).toHaveLength(1);
-      expect(readFileSync(tracePath, "utf8")).toContain(
-        "tool_name=shell permission_mode=auto",
-      );
-      expect(JSON.parse(readFileSync(fixture.settingsPath, "utf8"))).toMatchObject({
-        permission_mode: "auto",
-      });
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-    },
-    45_000,
-  );
-
-  test(
-    "Shift+Tab tightening to ask gates a later tool call in the active turn",
-    async () => {
-      const fixture = createFixture("fx-live-permission-ask-");
-      const markerPath = join(fixture.workspace, "ask-marker.txt");
-      const stderrPath = join(fixture.root, "stderr.log");
-      const tracePath = join(fixture.root, "trace.log");
-      writeFileSync(
-        fixture.settingsPath,
-        JSON.stringify({
-          permission_mode: "auto",
-          sandbox: CONFIGURED_SANDBOX,
-          yolo_acknowledged: true,
-        }) + "\n",
-      );
-      writeFileSync(stderrPath, "");
-
-      let releaseToolCall: (() => void) | undefined;
-      const toolCallGate = new Promise<void>((resolve) => {
-        releaseToolCall = resolve;
-      });
-      const fake = startFakeGateway([
-        async () => {
-          await toolCallGate;
-          return fakeShellRun(
-            "live_ask_command",
-            `printf 'LIVE_ASK_WRONG\\n' > ${JSON.stringify(markerPath)}`,
-            { timeout_ms: 600_000 },
-          );
-        },
-        fakeGatewayFinalText("LIVE_ASK_DONE"),
-      ]);
-      gateway = fake;
-
-      session = await TmuxSession.create({
-        cwd: fixture.workspace,
-        stderrPath,
-        width: 120,
-        height: 40,
-        env: {
-          HOME: fixture.home,
-          AI_GATEWAY_API_KEY: "fake-live-permission-key",
-          VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
-          FX_GATEWAY_BASE_URL: fake.baseUrl,
-          FX_GATEWAY_CHAT_URL: fake.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_PERMISSION_MODE: undefined,
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "permission",
-        },
-      });
-
-      await session.waitForText("auto ·", TIMEOUT);
-      await session.sendText("Run the requested marker command.");
-      await waitForGatewayRequestCount(fake, 1);
-      await session.sendKeys("BTab");
-      await session.waitForText("full access ·", TIMEOUT);
-      await session.sendKeys("BTab");
-      await session.waitForText("ask ·", TIMEOUT);
-      releaseToolCall?.();
-
-      const settledPane = await session.waitForPane(
-        (pane) => pane.includes(COMMAND_APPROVAL_PROMPT) || pane.includes("LIVE_ASK_DONE"),
-        TIMEOUT,
-      );
-      expect(settledPane).toContain(COMMAND_APPROVAL_PROMPT);
-      expect(settledPane).not.toContain("LIVE_ASK_DONE");
-      expect(existsSync(markerPath)).toBe(false);
-      expect(fake.classifierRequests).toHaveLength(0);
-      expect(readFileSync(tracePath, "utf8")).toContain(
-        "tool_name=shell permission_mode=ask",
-      );
-
-      await session.sendKeys("3");
-      await session.waitForText("LIVE_ASK_DONE", TIMEOUT);
-      expect(existsSync(markerPath)).toBe(false);
-      expect(JSON.parse(readFileSync(fixture.settingsPath, "utf8"))).toMatchObject({
-        permission_mode: "ask",
-      });
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-    },
-    45_000,
-  );
-
-  test(
-    "a pending ctrl+c keeps its quit hint intact and pauses the warning at 60 columns",
-    async () => {
-      const fixture = createFixture("fx-yolo-ctrl-c-");
-      const stderrPath = join(fixture.root, "stderr.log");
-      writeFileSync(
-        fixture.settingsPath,
-        JSON.stringify({
-          permission_mode: "yolo",
-          sandbox: CONFIGURED_SANDBOX,
-          yolo_acknowledged: false,
-        }) + "\n",
-      );
-      writeFileSync(stderrPath, "");
-
-      session = await TmuxSession.create({
-        cwd: fixture.workspace,
-        stderrPath,
-        width: 60,
-        height: 24,
-        env: {
-          HOME: fixture.home,
-          AI_GATEWAY_API_KEY: undefined,
-          VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
-          FX_PERMISSION_MODE: undefined,
-        },
-      });
-
-      await session.waitForText(WARNING, TIMEOUT);
-
-      await session.sendKeys("C-c");
-      const quitPane = await session.waitForText(QUIT_HINT, TIMEOUT);
-      expect(quitPane).not.toContain(WARNING);
-      expect(quitPane).not.toContain(COMPACT_WARNING);
-
-      // The quit arm lapses after 3s. The warning only survives that long
-      // because its visible budget paused while the hint owned the footer.
-      const resumedPane = await session.waitForText(WARNING, TIMEOUT);
-      expect(resumedPane).not.toContain(QUIT_HINT);
-      expect(session.isAlive()).toBe(true);
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-    },
-    45_000,
   );
 });

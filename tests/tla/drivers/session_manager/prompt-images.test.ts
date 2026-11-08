@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { artifacts, binary, testEnvironment, worktree } from "../lib/context";
 import { runTlc, sha256File, TLA_ROOT } from "../lib/tlc";
 
-const { fakeGatewayTitleDefault, TITLE_GENERATION_MARKER } = await import(join(worktree, "tests", "e2e", "tmux-helpers.ts"));
+const { fakeGatewayTitleDefault, TITLE_GENERATION_MARKER } = await import(join(worktree, "tests", "e2e", "fake-gateway.ts"));
 const { solidPng } = await import(join(worktree, "tests", "e2e", "fixtures", "image-encoding.ts"));
 const { copyV1Fixture } = await import(join(worktree, "tests", "e2e", "saved-sessions.ts"));
 

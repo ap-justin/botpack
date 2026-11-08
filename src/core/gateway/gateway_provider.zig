@@ -687,25 +687,6 @@ test "capability refresh does not retain a catalog for changed access" {
     try std.testing.expectEqual(@as(usize, 2), fake.calls);
 }
 
-test "capability refresh keys host-managed catalogs by provider" {
-    const alloc = std.testing.allocator;
-    var fake = FakeCatalog{ .outcome = .ready };
-    var provider = fake.provider();
-    provider.refresh_interval_ms = 60_000;
-    var resolver: CapabilityResolver = .{};
-    defer resolver.deinit(alloc);
-    const input = model_catalog.FetchInput{ .endpoint = "https://example.invalid", .access = .host_managed };
-    try resolver.refreshIfDue(alloc, provider, input);
-    provider.provider_id = .codex;
-    try resolver.refreshIfDue(alloc, provider, input);
-    try std.testing.expectEqual(@as(usize, 2), fake.calls);
-    fake.outcome = .unavailable;
-    provider.provider_id = .grok;
-    try resolver.refreshIfDue(alloc, provider, input);
-    try std.testing.expectEqual(@as(usize, 3), fake.calls);
-    try std.testing.expect(resolver.catalogEntries() == null);
-}
-
 test "available capabilities never fetch and use a completed catalog snapshot" {
     const alloc = std.testing.allocator;
     var fake = FakeCatalog{ .outcome = .ready };

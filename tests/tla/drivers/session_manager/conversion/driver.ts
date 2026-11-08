@@ -24,7 +24,7 @@ import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { artifacts, binary, repetitions, shellQuote, targetHelpers, worktree } from "../../lib/context";
 
-export const { startDynamicFakeGateway, fakeGatewayFinalText, fakeGatewayToolCall, fakeGatewaySse, FAKE_GATEWAY_MODEL, TmuxSession } = await targetHelpers();
+export const { startDynamicFakeGateway, fakeGatewayFinalText, fakeGatewayToolCall, fakeGatewaySse, FAKE_GATEWAY_MODEL } = await targetHelpers();
 // The models live with the code they describe (tests/tla/session_manager).
 const checker = join(worktree, "tests/tla/session_manager/trace/check_conversion.py");
 const savedLogsChecker = join(worktree, "tests/tla/session_manager/trace/check_saved_logs.py");
@@ -35,7 +35,7 @@ export type Answer = "none" | "opened" | "converted" | "busy" | "unreadable" | "
 type Damage = "ok" | "salvage" | "lost";
 // open2: two processes opened the root at once; `ans2` is the second's answer.
 type Kind = "create" | "write" | "hold" | "release" | "open" | "open2" | "all" | "crash" | "damage" | "fresh" | "list" | "recover";
-export type Via = "ask" | "app" | "continue" | "picker" | "slash" | "acp";
+export type Via = "ask" | "acp";
 type Run = { pid: number; code: number | null; signal: string | null; stdout: string; stderr: string; args: string[]; v2: boolean; home: string };
 type Observation = {
   k: Kind; r: string; ans: Answer; ans2?: Answer; v1: Record<string, number>; pub: Record<string, string>;
@@ -63,7 +63,7 @@ function terminalLeavesOut(dir: string, depth: number): boolean {
     try { closeSync(openSync(path, "r")); return false; } catch { return true; }
   });
 }
-export const VIAS: Via[] = ["ask", "app", "continue", "picker", "slash", "acp"];
+export const VIAS: Via[] = ["ask", "acp"];
 
 let pathFault: string | null = null;
 // ../../lib/path-fault.c, built once per run.
@@ -87,7 +87,6 @@ export function fixture(label: string, at?: string, models?: object[]) {
   const v1Root = join(home, ".fx/sessions"), v2Root = join(v1Root, "v2");
   const runs: Run[] = [];
   const active = new Set<ReturnType<typeof Bun.spawn>>();
-  const apps = new Set<any>();
   const acps = new Set<ChildProcess>();
   let respond: (body: string) => Response = () => fakeGatewayFinalText("UNEXPECTED_REQUEST");
   let injected: Record<string, string> = {};
@@ -178,13 +177,12 @@ export function fixture(label: string, at?: string, models?: object[]) {
   const v1Path = (id: string) => join(realpathSync(home), ".fx/sessions", id);
   const stagingPath = (id: string) => join(realpathSync(home), ".fx/sessions/v2/.tmp", id);
 
-  return { root, home, workspace, v1Root, v2Root, runs, gateway, env, start, fx, v1Ask, fingerprint, apps, acps, faultPaths, v1Path, stagingPath,
+  return { root, home, workspace, v1Root, v2Root, runs, gateway, env, start, fx, v1Ask, fingerprint, acps, faultPaths, v1Path, stagingPath,
     // What the host said in the last openVia: fx ask's output, ACP's load
-    // error and session updates, or the app's screen and stderr.
+    // error and session updates.
     said: "",
     setRespond: (f: (body: string) => Response) => { respond = f; },
     async finish() {
-      for (const app of apps) await app.kill().catch(() => {});
       for (const proc of acps) proc.kill("SIGKILL");
       for (const child of active) child.kill("SIGKILL");
       await Promise.all([...active].map(child => child.exited));
@@ -289,53 +287,7 @@ export async function openVia(f: Fixture, id: string, via: Via, prompt = "CONV_N
       return "opened";
     } finally { client.close(); }
   }
-  const flags = via === "app" ? `--resume ${shellQuote(id)}` : via === "continue" ? "-c" : via === "picker" ? "-r" : "";
-  const stderrPath = join(f.root, `app-${via}-${Date.now()}.stderr`);
-  const app = await TmuxSession.create({ cmd: `${shellQuote(binary)} ${flags}`, cwd: f.workspace, env: f.env(true), width: 120, height: 40, stderrPath });
-  f.apps.add(app);
-  const stderr = () => (existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : "");
-  // What the app said; once it has exited, its stderr may still be on its way.
-  const said = async () => {
-    if (!app.isAlive()) await waitUntil(() => stderr().length > 0, 2_000);
-    return (f.said = `${await app.captureFullScrollback().catch(() => "")}\n${stderr()}`);
-  };
-  try {
-    if (via === "slash") { await app.waitForComposer(15_000); await app.sendText("/resume"); }
-    if (via === "picker" || via === "slash") {
-      // The picker must list the v1 session; choose it.
-      if (!(await waitUntil(async () => (await app.capturePane()).includes(firstPrompt) || !app.isAlive(), 8_000)) || !app.isAlive()) {
-        return app.isAlive() ? "notfound" : refusal(await said(), `the ${via} picker`);
-      }
-      await app.sendKeys("Enter");
-    }
-    // Opened means the app says it resumed a session and shows its turns. A
-    // live app that never says so refused it in a notice, or opened
-    // something else, or nothing.
-    const resumed = await waitUntil(async () => !app.isAlive() || /session resumed|can.?t be converted/.test(await app.captureFullScrollback()), 15_000);
-    if (!app.isAlive()) return refusal(await said(), `the app (${via})`);
-    if (!resumed || !(await app.captureFullScrollback()).includes(firstPrompt)) return refusal(await said(), `the app (${via})`, "notfound");
-    await app.sendText(prompt);
-    assert(await waitUntil(async () => (await app.captureFullScrollback()).includes(`${prompt}_ANSWER`), 15_000), `the ${via} turn never answered`);
-    await said();
-    await app.sendText("/quit");
-    await app.waitForSessionEnd(10_000);
-    return "opened";
-  } finally { await app.kill().catch(() => {}); f.apps.delete(app); }
-}
-
-// Opens `id` in the v1 app and quits, which leaves it as the workspace's
-// remembered session for `-c` (v1 keeps it in ~/.fx/continue/).
-export async function rememberInV1(f: Fixture, id: string) {
-  const app = await TmuxSession.create({ cmd: `${shellQuote(v1Writer())} --resume ${shellQuote(id)}`, cwd: f.workspace, env: f.env(false), width: 120, height: 40 });
-  f.apps.add(app);
-  try {
-    await app.waitForComposer(15_000);
-    await app.sendText("/quit");
-    await app.waitForSessionEnd(10_000);
-  } finally { await app.kill().catch(() => {}); f.apps.delete(app); }
-  const continueDir = join(f.home, ".fx/continue");
-  assert(existsSync(continueDir) && readdirSync(continueDir).some(n => readFileSync(join(continueDir, n), "utf8").trim() === id),
-    "the v1 app did not remember the session for -c");
+  throw new Error(`unknown host ${via}`);
 }
 
 // `fx sessions convert`, as JSON or text: the run, and the answer it gave

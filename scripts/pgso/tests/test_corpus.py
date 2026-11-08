@@ -21,9 +21,7 @@ from scripts.pgso.runner import CommandResult
 
 TRAINING_E2E_TESTS = (
     "cli.test.ts",
-    "ask-presentation.test.ts",
     "config-persistence.test.ts",
-    "prompt-history.test.ts",
     "auth-refresh.test.ts",
     "host-managed-auth.test.ts",
     "file-tool-paths.test.ts",
@@ -39,67 +37,28 @@ TRAINING_E2E_TESTS = (
     "mcp-stdio.test.ts",
     "mcp-auth.test.ts",
     "session-recovery.test.ts",
-    "tui-startup.test.ts",
     "permission-errors.test.ts",
-    "tui-resize.test.ts",
-    "tui-render-stress.test.ts",
-    "tui-full-transcript-brutal.test.ts",
-    "tui-resume-brutal.test.ts",
-    "tui-permissions.test.ts",
-    "tui-interrupt-recovery.test.ts",
-    "tui-terminal-tool.test.ts",
-    "tui-native-clear-recovery.test.ts",
-    "tui-gateway-stream-lifecycle.test.ts",
 )
 
 VERIFICATION_E2E_TESTS = (
-    "slack-install.test.ts",
     "auto-mode-reliability.test.ts",
     "sessions.test.ts",
     "review-model-override.test.ts",
     "configured-providers.test.ts",
     "oauth-keychain-migration.test.ts",
     "mcp-verbs.test.ts",
-    "tui-auth-source-selection.test.ts",
-    "tui-compaction-activity.test.ts",
-    "tui-transcript-window.test.ts",
-    "tui-full-detail.test.ts",
     "compaction-policy.test.ts",
-    "tui-composer-edit-contracts.test.ts",
-    "tui-permissions-panel.test.ts",
-    "tui-effort-menu.test.ts",
-    "tui-usage.test.ts",
-    "tui-decision-prompts.test.ts",
     "poisoned-repository.test.ts",
-    "tui-file-picker.test.ts",
-    "tui-host-instances.test.ts",
-    "tui-input-line-delete.test.ts",
-    "tui-input-navigation.test.ts",
-    "tui-host-switch.test.ts",
-    "tui-render-replay.test.ts",
-    "tui-resume.test.ts",
-    "tui-slash-commands.test.ts",
-    "tui-slash-extra.test.ts",
-    "tui-slash-menu.test.ts",
-    "tui-status-session.test.ts",
     "ultrafast-fake-gateway.test.ts",
     "web-fetch-permission-progress.test.ts",
     "web-search-permission-progress.test.ts",
     "yolo-permission-mode.test.ts",
+    "ask-presentation.test.ts",
 )
 
 EXCLUDED_E2E_TESTS = (
     "ci-shards.test.ts",
     "context-limits-live.test.ts",
-    "notifications.test.ts",
-    "tmux-helpers.test.ts",
-    "tui-agent.test.ts",
-    "tui-command-permissions.test.ts",
-    "tui-direct-write-audit.test.ts",
-    "tui-keybindings.test.ts",
-    "tui-performance.test.ts",
-    "tui-render-lab.test.ts",
-    "tui-render-live-stress.test.ts",
     "web-fetch-live.test.ts",
     "web-search-live.test.ts",
 )
@@ -316,12 +275,7 @@ class PgsoCorpusTests(unittest.TestCase):
             load_corpus(self.write_manifest(payload), repo_root=self.root)
 
     def test_load_rejects_sound_and_nondeterministic_test_files(self) -> None:
-        for test_file in (
-            "notifications.test.ts",
-            "tui-agent.test.ts",
-            "tui-command-permissions.test.ts",
-            "web-search-live.test.ts",
-        ):
+        for test_file in ("web-search-live.test.ts",):
             with self.subTest(test_file=test_file):
                 (self.root / "tests" / "e2e" / test_file).write_text("test")
                 payload = self.manifest()
@@ -380,8 +334,8 @@ class PgsoCorpusTests(unittest.TestCase):
             EXCLUDED_E2E_TESTS,
             tuple(test_file for test_file, _ in corpus.intentional_exclusions),
         )
-        self.assertEqual(35, len(corpus.scenarios))
-        self.assertEqual(68, len(corpus.candidate_scenarios))
+        self.assertEqual(23, len(corpus.scenarios))
+        self.assertEqual(36, len(corpus.candidate_scenarios))
         self.assertEqual(
             {
                 "direct-help": 100,

@@ -7,7 +7,7 @@
 //   bun tests/tla/drivers/acp/speed/driver.ts --label main   # from the repository root, after zig build
 //
 // No live model calls: completions come from the fake Gateway in the
-// worktree's own tests/e2e/tmux-helpers.ts.
+// worktree's own tests/e2e/fake-gateway.ts.
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -320,7 +320,7 @@ async function main() {
   writeJson(join(reportDir, "manifest.json"), manifest);
   if (status) writeFileSync(join(reportDir, "worktree.diff"), git(worktree, "diff", "HEAD") + "\n");
 
-  const helpers = await import(join(worktree, "tests", "e2e", "tmux-helpers.ts")) as Helpers;
+  const helpers = await import(join(worktree, "tests", "e2e", "fake-gateway.ts")) as Helpers;
   const only = argValue("--only");
   const plans = [...DIRECTED, ...randomPlans(randomCount, steps, seed)]
     .filter((plan) => !only || new RegExp(only).test(plan.name));

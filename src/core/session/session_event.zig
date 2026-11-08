@@ -66,6 +66,30 @@ pub const ConversationAssistant = struct {
     text: []const u8,
     provider_replay: ?types.ProviderReplay = null,
     standalone_response: bool = false,
+
+    /// The default parse, except that replay from a removed ChatGPT or Grok
+    /// sign-in reads as none: replay only goes back to the provider that
+    /// wrote it, and the turn's text stays.
+    pub fn jsonParse(alloc: Allocator, source: anytype, options: std.json.ParseOptions) !ConversationAssistant {
+        const value = try std.json.innerParse(std.json.Value, alloc, source, options);
+        return jsonParseFromValue(alloc, value, options);
+    }
+
+    pub fn jsonParseFromValue(alloc: Allocator, value: std.json.Value, options: std.json.ParseOptions) !ConversationAssistant {
+        const Saved = struct {
+            text: []const u8,
+            provider_replay: ?types.ProviderReplay = null,
+            standalone_response: bool = false,
+        };
+        var kept = value;
+        if (kept == .object) {
+            if (kept.object.get("provider_replay")) |replay| {
+                if (session_codec.replayNamesRemovedProvider(replay)) _ = kept.object.orderedRemove("provider_replay");
+            }
+        }
+        const saved = try std.json.parseFromValueLeaky(Saved, alloc, kept, options);
+        return .{ .text = saved.text, .provider_replay = saved.provider_replay, .standalone_response = saved.standalone_response };
+    }
 };
 
 pub const ConversationUser = struct {
@@ -876,6 +900,9 @@ pub const PreferencesChanged = struct {
     effort: ?types.ReasoningEffort = null,
     fast_mode: ?bool = null,
     ultrafast_mode: ?bool = null,
+    /// `provider` was decoded from a removed ChatGPT or Grok sign-in; see
+    /// `DurableSessionPreferences.provider_removed`. Never written.
+    provider_removed: bool = false,
 
     fn deinit(self: *PreferencesChanged, alloc: Allocator) void {
         if (self.model) |model| alloc.free(model);
@@ -1547,7 +1574,10 @@ fn applyDelta(
                 alloc.free(current.preferences.model);
                 current.preferences.model = copy;
             }
-            if (payload.provider) |provider| current.preferences.provider = provider;
+            if (payload.provider) |provider| {
+                current.preferences.provider = provider;
+                current.preferences.provider_removed = payload.provider_removed;
+            }
             if (payload.effort) |effort| current.preferences.effort = effort;
             if (payload.fast_mode) |fast_mode| current.preferences.fast_mode = fast_mode;
             if (payload.ultrafast_mode) |ultrafast_mode| current.preferences.ultrafast_mode = ultrafast_mode;
@@ -1891,9 +1921,10 @@ fn parsePayload(alloc: Allocator, kind: Kind, value: std.json.Value) !Event {
             const object = try requireObject(value);
             if (object.count() == 0 or object.count() > 5) return error.InvalidEventFrame;
             try rejectUnknownKeys(object, &.{ "provider", "model", "effort", "fast_mode", "ultrafast_mode" });
-            const provider = if (object.get("provider")) |provider_value| provider_blk: {
-                break :provider_blk model_provider.parse_saved(provider_value) catch return error.InvalidEventFrame;
-            } else null;
+            const saved_provider = if (object.get("provider")) |provider_value|
+                (session_codec.parseSessionProvider(provider_value) catch return error.InvalidEventFrame)
+            else
+                null;
             const model = if (object.get("model")) |_| try dupeString(alloc, object, "model") else null;
             errdefer if (model) |owned| alloc.free(owned);
             const effort = if (object.get("effort")) |_|
@@ -1904,11 +1935,12 @@ fn parsePayload(alloc: Allocator, kind: Kind, value: std.json.Value) !Event {
             const fast_mode = if (object.get("fast_mode")) |_| try requireBool(object, "fast_mode") else null;
             const ultrafast_mode = if (object.get("ultrafast_mode")) |_| try requireBool(object, "ultrafast_mode") else null;
             break :blk .{ .preferences_changed = .{
-                .provider = provider,
+                .provider = if (saved_provider) |saved| saved.provider else null,
                 .model = model,
                 .effort = effort,
                 .fast_mode = fast_mode,
                 .ultrafast_mode = ultrafast_mode,
+                .provider_removed = if (saved_provider) |saved| saved.removed else false,
             } };
         },
         .workspace_rebound => blk: {
@@ -1965,6 +1997,9 @@ fn parsePayload(alloc: Allocator, kind: Kind, value: std.json.Value) !Event {
                 object.get("checkpoint") orelse return error.InvalidEventFrame,
             ) catch |err| switch (err) {
                 error.OutOfMemory => return error.OutOfMemory,
+                // A checkpoint from a removed sign-in can't be resumed, so it
+                // reads as cleared and the session keeps its history.
+                error.RemovedProvider => break :blk .{ .recovery_checkpoint_cleared = .{} },
                 else => return error.InvalidEventFrame,
             };
             break :blk .{ .recovery_checkpoint_set = .{ .checkpoint = checkpoint } };
@@ -2336,6 +2371,56 @@ test "event frame cap is inclusive of the required newline" {
     oversized[oversized.len - 2] = ' ';
     oversized[oversized.len - 1] = '\n';
     try std.testing.expectError(error.EventFrameTooLarge, decodeFrame(alloc, oversized));
+}
+
+test "events from a removed ChatGPT or Grok sign-in decode without failing the session" {
+    const alloc = std.testing.allocator;
+    const changed = try encodeLegacyFixtureFrame(alloc, .{
+        .log_generation = identifier(0x10),
+        .seq = 1,
+        .event_id = identifier(0x20),
+        .timestamp_ms = 1,
+        .event = .{ .preferences_changed = .{ .provider = .gateway, .model = @constCast("gpt-5.4-mini") } },
+    });
+    defer alloc.free(changed);
+    const as_codex = try std.mem.replaceOwned(u8, alloc, changed, "\"provider\":\"gateway\"", "\"provider\":\"codex\"");
+    defer alloc.free(as_codex);
+    var decoded = try decodeFrame(alloc, as_codex);
+    defer decoded.deinit(alloc);
+    try std.testing.expectEqual(model_provider.ProviderId.gateway, decoded.event.preferences_changed.provider.?);
+    try std.testing.expect(decoded.event.preferences_changed.provider_removed);
+
+    const set = try encodeLegacyFixtureFrame(alloc, .{
+        .log_generation = identifier(0x10),
+        .seq = 2,
+        .event_id = identifier(0x21),
+        .timestamp_ms = 2,
+        .event = .{ .recovery_checkpoint_set = .{ .checkpoint = .{
+            .turn_id = 1,
+            .user = .{ .text = @constCast("next") },
+            .assistant_source = @constCast(""),
+            .cause = .network_interrupted,
+            .action = .retrying_request,
+            .authority = .{ .provider = .gateway, .model = @constCast("grok-4") },
+            .requested_fast_mode = false,
+            .fast_mode = false,
+            .max_provider_attempts = 3,
+            .consumed_provider_attempts = 0,
+        } } },
+    });
+    defer alloc.free(set);
+    const as_grok = try std.mem.replaceOwned(u8, alloc, set, "\"provider\":\"gateway\"", "\"provider\":\"grok\"");
+    defer alloc.free(as_grok);
+    var cleared = try decodeFrame(alloc, as_grok);
+    defer cleared.deinit(alloc);
+    try std.testing.expectEqual(Kind.recovery_checkpoint_cleared, cleared.kind());
+
+    const assistant = try std.json.parseFromSlice(ConversationAssistant, alloc,
+        \\{"text":"kept prose","provider_replay":{"source":{"provider":"grok","model":"grok-4"},"parts_json":"[]"}}
+    , .{});
+    defer assistant.deinit();
+    try std.testing.expectEqualStrings("kept prose", assistant.value.text);
+    try std.testing.expect(assistant.value.provider_replay == null);
 }
 
 test "semantic reducer uses event timestamps and enforces immutable identity" {

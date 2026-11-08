@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { compactionRecordPath, logLines, sessionDir } from "./saved-sessions";
 
 process.env.FX_E2E_DISABLE_DOTENV = "1";
-const { fakeGatewayFinalText, startDynamicFakeGateway } = await import("./tmux-helpers");
+const { fakeGatewayFinalText, startDynamicFakeGateway } = await import("./fake-gateway");
 const binary = resolve(import.meta.dir, "../../zig-out/bin/fx");
 const checkpointMarker = "fx-compactor-v1\n";
 

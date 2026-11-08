@@ -3,11 +3,8 @@ const builtin = @import("builtin");
 const io_mod = @import("../shared/io.zig");
 const app_lifecycle = @import("../app/app_lifecycle.zig");
 const auth_runtime = @import("../auth/auth_runtime.zig");
-const chatgpt_oauth = @import("../auth/chatgpt_oauth.zig");
-const grok_oauth = @import("../auth/grok_oauth.zig");
 const acp_runner = @import("acp_runner.zig");
 const cli_ask = @import("cli_ask.zig");
-const cli_replay = @import("cli_replay.zig");
 const cli_flags = @import("cli_flags.zig");
 const completion = @import("completion.zig");
 const agent_run_flags = @import("agent_run_flags.zig");
@@ -23,8 +20,6 @@ const collections = @import("../shared/collections.zig");
 const config_runtime = @import("../config/config_runtime.zig");
 const credentials = @import("../auth/credentials.zig");
 const model_provider = @import("../config/model_provider.zig");
-const profiles = @import("../profiles/profiles.zig");
-const app_profile_runtime = @import("../app/app_profile_runtime.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
 const doctor_runtime = @import("doctor_runtime.zig");
 const gateway_provider = @import("../gateway/gateway_provider.zig");
@@ -33,7 +28,6 @@ const model_catalog_metadata = @import("../gateway/model_catalog_metadata.zig");
 const model_capabilities = @import("../config/model_capabilities.zig");
 const provider_set = @import("../gateway/provider_set.zig");
 const execution_process_provider = @import("../execution/process_provider.zig");
-const github_publish = @import("../github/github_publish.zig");
 const github_workflows = @import("../github/github_workflows.zig");
 const host = @import("../hosts/host.zig");
 const login_flow = @import("../auth/login_flow.zig");
@@ -47,7 +41,6 @@ const session_store = @import("../session/session_store.zig");
 const session_adapter = @import("../session/session_adapter.zig");
 const skill_contract = @import("../skills/skill_contract.zig");
 const types = @import("../shared/types.zig");
-const update_target = @import("../upgrade/update_target.zig");
 const test_builtin_gateway = if (builtin.is_test)
     @import("../../builtins/gateway.zig")
 else
@@ -67,7 +60,6 @@ const workspace_commands = @import("../workspace/workspace_commands.zig");
 const usage = @import("../../usage/usage.zig");
 const usage_host = @import("../app/usage_host.zig");
 
-const slack_install = @import("../slack/install.zig");
 const Allocator = std.mem.Allocator;
 const CommandCatalog = command_specs.TopLevelRegistry;
 const TopLevelKind = command_specs.TopLevelKind;
@@ -85,65 +77,18 @@ pub const Command = union(enum) {
     status: []const [:0]const u8,
     permissions: []const [:0]const u8,
     mcp: []const [:0]const u8,
-    slack: []const [:0]const u8,
     models: []const [:0]const u8,
     provider: []const [:0]const u8,
     doctor: []const [:0]const u8,
     teams: []const [:0]const u8,
     session: []const [:0]const u8,
     sessions: []const [:0]const u8,
-    resume_session: ResumeInvocation,
     credits: []const [:0]const u8,
     usage: []const [:0]const u8,
-    upgrade: []const [:0]const u8,
-    replay: []const [:0]const u8,
     workspace: []const [:0]const u8,
     config: []const [:0]const u8,
     completion: []const [:0]const u8,
     unknown: []const u8,
-};
-
-const ResumeInvocation = struct {
-    args: []const [:0]const u8,
-    top_level_alias: bool = false,
-    /// Set for `fx resume`, which only the upgrade relaunch may still use: an
-    /// older fx that installs this version restarts it with
-    /// `fx resume <id> --upgrade-relaunch`.
-    legacy_command: bool = false,
-};
-
-/// Prefix of the removed `--resume-<id>` alias, matched only to explain the
-/// replacement.
-const resume_id_alias_prefix = "--resume-";
-pub const upgrade_relaunch_arg = "--upgrade-relaunch";
-
-pub const UpgradeRelaunch = struct {
-    previous_revision: ?[]u8 = null,
-
-    pub fn deinit(self: *UpgradeRelaunch, alloc: Allocator) void {
-        if (self.previous_revision) |revision| alloc.free(revision);
-        self.* = undefined;
-    }
-};
-
-// `-r` is the short form of `--resume`. Given no value, either one opens the
-// session picker; given `last` or an ID, it resumes that session.
-const resume_short_flag = "-r";
-const resume_inline_prefix = "--resume=";
-
-pub const ResumeTarget = union(enum) {
-    remembered,
-    pick,
-    last,
-    id: []u8,
-
-    pub fn deinit(self: *ResumeTarget, alloc: Allocator) void {
-        switch (self.*) {
-            .remembered, .pick, .last => {},
-            .id => |value| alloc.free(value),
-        }
-        self.* = undefined;
-    }
 };
 
 pub const LaunchModifiers = struct {
@@ -160,19 +105,12 @@ pub const LaunchModifiers = struct {
     /// `--permission-mode` and its shortcuts; never saved.
     permission_override: ?types.PermissionMode = null,
 
-    /// `--profile <name>`: the agent profile main runs in. Owned.
-    profile_name: ?[]u8 = null,
-    /// `--instances <n>`: how many fx instances the host opens at startup,
-    /// each with its own session.
-    instances: ?usize = null,
-
     pub fn deinit(self: *LaunchModifiers, alloc: Allocator) void {
         if (self.context_limit_overrides.len > 0) alloc.free(self.context_limit_overrides);
         for (self.additional_directories) |path| alloc.free(path);
         if (self.additional_directories.len > 0) alloc.free(self.additional_directories);
         if (self.model_override) |model| alloc.free(model);
         if (self.provider_order_override) |order| freeProviderOrderOverride(alloc, order);
-        if (self.profile_name) |name| alloc.free(name);
         self.* = .{};
     }
 
@@ -212,20 +150,12 @@ fn parseProviderOrderFlag(alloc: Allocator, raw: []const u8, previous: ?[][]cons
 }
 
 pub const InteractiveLaunch = struct {
-    requested_resume: ?ResumeTarget = null,
-    upgrade_relaunch: ?UpgradeRelaunch = null,
     modifiers: LaunchModifiers = .{},
-    /// Why the session the launch resumes could not be converted from v1
-    /// (D61), for the message the launch exits with. Owned.
-    resume_refusal: ?[]u8 = null,
-    /// `fx "<prompt>"`: sent once the session's first frame is on screen.
+    /// `fx "<prompt>"`: parsed so the launch can be refused, and never sent.
     /// Owned by the allocator that parsed the launch.
     initial_prompt: ?[]u8 = null,
 
     pub fn deinit(self: *InteractiveLaunch, alloc: Allocator) void {
-        if (self.resume_refusal) |reason| alloc.free(reason);
-        if (self.requested_resume) |*target| target.deinit(alloc);
-        if (self.upgrade_relaunch) |*relaunch| relaunch.deinit(alloc);
         self.modifiers.deinit(alloc);
         if (self.initial_prompt) |prompt| alloc.free(prompt);
         self.* = undefined;
@@ -247,7 +177,8 @@ const version_usage = "usage: fx --version\n";
 pub const Config = struct {
     version: []const u8 = "",
     revision: []const u8 = "",
-    build_channel: update_target.Channel = .stable,
+    /// The `-Dupdate-channel` this binary was built with.
+    build_channel: []const u8 = "stable",
     auth_mode: credentials.AuthMode = .local,
     command_catalog: CommandCatalog,
     default_model: []const u8,
@@ -299,7 +230,7 @@ const LoginArgs = struct {
 const LoginFlag = enum { api_key };
 const login_flag_ids = cli_flags.idTable(LoginFlag, &builtin_commands.login_options);
 
-/// `fx login [vercel|codex|grok] [--api-key]`, in either order.
+/// `fx login [vercel] [--api-key]`, in either order.
 fn parseLoginArgs(rest: []const [:0]const u8) error{ InvalidLoginProviderArgs, ApiKeyNeedsVercel }!LoginArgs {
     var parsed: LoginArgs = .{};
     var provider_arg: ?[]const u8 = null;
@@ -331,11 +262,6 @@ fn selectCatalogModel(
     }
     return if (entries.len > 0) entries[0].id else null;
 }
-
-const UpgradeOptions = struct {
-    format: output_contracts.OutputFormat = .text,
-    channel: ?update_target.Channel = null,
-};
 
 const SessionListOptions = struct {
     format: output_contracts.OutputFormat = .text,
@@ -398,7 +324,6 @@ const AcpOptions = struct {
 
 const WorkflowOptions = struct {
     agent: agent_run_flags.Overrides = .{},
-    create: bool = false,
     context: []u8 = &.{},
 
     fn deinit(self: *WorkflowOptions, alloc: Allocator) void {
@@ -501,8 +426,6 @@ const LaunchFlag = enum {
     auto,
     full_access,
     yolo,
-    profile,
-    instances,
 };
 
 const launch_flag_ids = cli_flags.idTable(LaunchFlag, &builtin_commands.launch_options);
@@ -537,7 +460,6 @@ fn parseLaunchFlags(alloc: Allocator, args: []const [:0]const u8, comptime mode:
     errdefer {
         if (modifiers.model_override) |model| alloc.free(model);
         if (modifiers.provider_order_override) |order| freeProviderOrderOverride(alloc, order);
-        if (modifiers.profile_name) |name| alloc.free(name);
     }
 
     var prompt: ?[]const u8 = null;
@@ -592,18 +514,6 @@ fn parseLaunchFlags(alloc: Allocator, args: []const [:0]const u8, comptime mode:
             .ask => modifiers.permission_override = .ask,
             .auto => modifiers.permission_override = .auto,
             .full_access, .yolo => modifiers.permission_override = .yolo,
-            .profile => {
-                if (value.len == 0) return error.MissingProfileValue;
-                if (!profiles.validName(value)) return error.InvalidProfileName;
-                const owned = try alloc.dupe(u8, value);
-                if (modifiers.profile_name) |old| alloc.free(old);
-                modifiers.profile_name = owned;
-            },
-            .instances => {
-                const count = std.fmt.parseUnsigned(usize, value, 10) catch return error.InvalidInstancesValue;
-                if (count == 0) return error.InvalidInstancesValue;
-                modifiers.instances = count;
-            },
         }
     }
 
@@ -628,11 +538,6 @@ pub fn commandAfterGlobalLaunchArgs(args: []const [:0]const u8) ?[]const u8 {
 fn launchFlagFailure(args: []const [:0]const u8) ?cli_flags.Failure {
     var parser: cli_flags.Parser = .initPrefix(&builtin_commands.launch_options, args);
     while (parser.next() catch return parser.failure) |_| {}
-    // Flags may also follow a resume word and its target, as in `fx -c --model x`.
-    const rest = args[parser.index..];
-    if (rest.len > 0 and isResumeWord(rest[0])) {
-        return cli_flags.firstFailure(&builtin_commands.launch_options, rest[resumeHeadLen(rest, true)..]);
-    }
     return cli_flags.firstFailure(&builtin_commands.launch_options, args);
 }
 
@@ -640,8 +545,6 @@ fn launchFlagFailure(args: []const [:0]const u8) ?cli_flags.Failure {
 const launch_suggestion_options = builtin_commands.launch_options ++ [_]command_specs.OptionDoc{
     .{ .flag = "--help", .description = "" },
     .{ .flag = "--version", .description = "" },
-    .{ .flag = "--continue", .description = "" },
-    .{ .flag = "--resume", .description = "" },
 };
 
 /// The unknown flag that follows the launch flags in `args`, with the
@@ -726,15 +629,6 @@ pub fn parse(command_catalog: CommandCatalog, args: []const [:0]const u8) Comman
     switch (command[0]) {
         '-', 'h' => {
             if (command_specs.matchesTopLevel(command_catalog, command, .help)) return .help;
-            if (command_specs.matchesTopLevel(command_catalog, command, .@"resume") or
-                std.mem.startsWith(u8, command, resume_inline_prefix) or
-                std.mem.startsWith(u8, command, resume_id_alias_prefix))
-            {
-                return .{ .resume_session = .{
-                    .args = args,
-                    .top_level_alias = true,
-                } };
-            }
         },
         'a' => {
             if (command_specs.matchesTopLevel(command_catalog, command, .ask)) return .{ .ask = args[1..] };
@@ -765,28 +659,19 @@ pub fn parse(command_catalog: CommandCatalog, args: []const [:0]const u8) Comman
             if (command_specs.matchesTopLevel(command_catalog, command, .permissions)) return .{ .permissions = args[1..] };
             if (command_specs.matchesTopLevel(command_catalog, command, .provider)) return .{ .provider = args[1..] };
         },
-        'r' => {
-            if (command_specs.matchesTopLevel(command_catalog, command, .@"resume")) return .{ .resume_session = .{ .args = args[1..], .legacy_command = true } };
-            if (command_specs.matchesTopLevel(command_catalog, command, .replay)) return .{ .replay = args[1..] };
-        },
         's' => {
             if (command_specs.matchesTopLevel(command_catalog, command, .setup)) return .{ .setup = args[1..] };
             if (command_specs.matchesTopLevel(command_catalog, command, .status)) return .{ .status = args[1..] };
             if (command_specs.matchesTopLevel(command_catalog, command, .sessions)) return .{ .sessions = args[1..] };
             if (command_specs.matchesTopLevel(command_catalog, command, .session)) {
-                if (args.len > 1 and std.mem.eql(u8, args[1], "resume")) {
-                    return .{ .resume_session = .{ .args = args[2..] } };
-                }
                 return .{ .session = args[1..] };
             }
-            if (command_specs.matchesTopLevel(command_catalog, command, .slack)) return .{ .slack = args[1..] };
         },
         't' => {
             if (command_specs.matchesTopLevel(command_catalog, command, .teams)) return .{ .teams = args[1..] };
         },
         'u' => {
             if (command_specs.matchesTopLevel(command_catalog, command, .usage)) return .{ .usage = args[1..] };
-            if (command_specs.matchesTopLevel(command_catalog, command, .upgrade)) return .{ .upgrade = args[1..] };
         },
         'w' => {
             if (command_specs.matchesTopLevel(command_catalog, command, .workspace)) return .{ .workspace = args[1..] };
@@ -839,80 +724,6 @@ pub fn parseInteractiveLaunch(
         .interactive => return .{ .interactive = .{
             .modifiers = global_args.takeModifiers(),
         } },
-        .resume_session => |invocation| {
-            const resume_args = invocation.args;
-            const has_upgrade_relaunch = !invocation.top_level_alias and
-                resume_args.len >= 2 and
-                std.mem.eql(u8, resume_args[1], upgrade_relaunch_arg);
-            if (has_upgrade_relaunch and resume_args.len > 3) return error.InvalidResumeArgs;
-            if (invocation.legacy_command and !has_upgrade_relaunch) return error.RemovedResumeCommand;
-            var upgrade_relaunch: ?UpgradeRelaunch = null;
-            errdefer if (upgrade_relaunch) |*relaunch| relaunch.deinit(alloc);
-            if (has_upgrade_relaunch) {
-                const previous_revision = if (resume_args.len == 3) revision: {
-                    if (!update_target.isValidRevision(resume_args[2])) return error.InvalidResumeArgs;
-                    break :revision try alloc.dupe(u8, resume_args[2]);
-                } else null;
-                upgrade_relaunch = .{ .previous_revision = previous_revision };
-            }
-            const resume_line = if (has_upgrade_relaunch) resume_args[0..1] else resume_args;
-            const head_len = if (has_upgrade_relaunch) resume_line.len else resumeHeadLen(resume_line, invocation.top_level_alias);
-            var prompt: ?[]const u8 = null;
-            if (resume_line.len > head_len) {
-                // Launch flags may follow the resume word and its target, as in
-                // `fx -c --model x` or `fx session resume last --fast`. They're
-                // read together with the flags before the resume word, so the
-                // last one still wins.
-                const before = args[0 .. args.len - effective_args.len];
-                const after = resume_line[head_len..];
-                const line = try alloc.alloc([:0]const u8, before.len + after.len);
-                defer alloc.free(line);
-                @memcpy(line[0..before.len], before);
-                @memcpy(line[before.len..], after);
-                var launch = parseLaunchFlags(alloc, line, .around_prompt) catch |err| {
-                    // A second word after the target is a malformed resume,
-                    // not an unquoted prompt.
-                    if (err == error.UnquotedPrompt) return error.InvalidResumeArgs;
-                    // A removed resume spelling, such as `--id`, keeps its own
-                    // hint instead of reading as an unknown launch flag.
-                    if (err == error.InvalidFlag) {
-                        if (parseResumeArgs(alloc, resume_line, invocation.top_level_alias)) |parsed_target| {
-                            var unused = parsed_target;
-                            unused.deinit(alloc);
-                        } else |resume_err| if (removedResumeHint(resume_err) != null) return resume_err;
-                    }
-                    return err;
-                };
-                // `fx -c` and `fx -r` take a first prompt; `fx session resume`
-                // doesn't.
-                if (launch.prompt != null and !invocation.top_level_alias) {
-                    launch.deinit(alloc);
-                    return error.InvalidResumeArgs;
-                }
-                prompt = launch.prompt;
-                launch.remaining = &.{};
-                global_args.deinit(alloc);
-                global_args = launch;
-            }
-            if (prompt) |text| {
-                if (std.mem.trim(u8, text, " \t\r\n").len == 0) return error.EmptyLaunchPrompt;
-            }
-            var target = try parseResumeArgs(
-                alloc,
-                resume_line[0..head_len],
-                invocation.top_level_alias,
-            );
-            errdefer target.deinit(alloc);
-            const initial_prompt: ?[]u8 = if (prompt) |text| try alloc.dupe(u8, text) else null;
-            const relaunch = upgrade_relaunch;
-            upgrade_relaunch = null;
-            return .{ .interactive = .{
-                .requested_resume = target,
-                .upgrade_relaunch = relaunch,
-                .modifiers = global_args.takeModifiers(),
-                .initial_prompt = initial_prompt,
-            } };
-        },
         .unknown => |word| switch (classifyLaunchWord(command_catalog, word)) {
             .command_line => {},
             .print_flag => return error.PrintFlagUseAsk,
@@ -942,31 +753,6 @@ pub fn parseInteractiveLaunch(
         .effective_args = effective_args,
         .command = command,
     } };
-}
-
-/// How many leading words of a resume line name what to resume: the resume
-/// word, when `has_resume_word` (`-c`, `-r`, `--resume`), and its target.
-/// `-c`, `--continue`, and `--resume=<id>` carry their target. `-r` and
-/// `--resume` take the next word as theirs unless it's a long flag, because
-/// a session ID can start with a single dash; `fx session resume` does the
-/// same with its first word. Every word after these is a launch flag or, for
-/// the resume flags, the first prompt.
-fn resumeHeadLen(line: []const [:0]const u8, has_resume_word: bool) usize {
-    var len: usize = 0;
-    if (has_resume_word) {
-        if (line.len == 0) return 0;
-        const word = line[0];
-        len = 1;
-        if (!std.mem.eql(u8, word, "--resume") and !std.mem.eql(u8, word, resume_short_flag)) return len;
-    }
-    if (line.len > len and !std.mem.startsWith(u8, line[len], "--")) len += 1;
-    return len;
-}
-
-fn isResumeWord(word: []const u8) bool {
-    return std.mem.eql(u8, word, "-c") or std.mem.eql(u8, word, "--continue") or
-        std.mem.eql(u8, word, "--resume") or std.mem.eql(u8, word, resume_short_flag) or
-        std.mem.startsWith(u8, word, resume_inline_prefix);
 }
 
 const LaunchWord = enum {
@@ -1007,7 +793,6 @@ fn launchWordSuggestion(command_catalog: CommandCatalog, word: []const u8) ?[]co
     // Flag names people type without their dashes.
     const bare_flags = [_]struct { word: []const u8, flag: []const u8 }{
         .{ .word = "version", .flag = "--version" },
-        .{ .word = "continue", .flag = "--continue" },
     };
     for (bare_flags) |entry| {
         if (std.mem.eql(u8, word, entry.word)) return entry.flag;
@@ -1016,8 +801,6 @@ fn launchWordSuggestion(command_catalog: CommandCatalog, word: []const u8) ?[]co
     // taken for a mistyped command.
     var nearest: cli_flags.Nearest = .{ .word = word, .max_edits = if (word.len <= 4) 1 else 2 };
     for (command_catalog.specs) |spec| {
-        // `fx resume` is removed; its typos shouldn't point back to it.
-        if (spec.kind == .@"resume") continue;
         const names = [_][]const []const u8{ &.{spec.token}, spec.aliases };
         for (names) |group| for (group) |name| {
             if (name.len == 0 or name[0] == '-') continue;
@@ -1034,8 +817,6 @@ fn topLevelHelpRequest(command_catalog: CommandCatalog, args: []const [:0]const 
     if (args.len < 2) return null;
     const kind = command_specs.topLevelKindFromToken(command_catalog, args[0]) orelse return null;
     if (kind == .help) return null;
-    // `fx resume` was removed, so its help request gets the removal hint.
-    if (kind == .@"resume" and std.mem.eql(u8, args[0], "resume")) return null;
     for (args[1..]) |arg| {
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) return kind;
     }
@@ -1193,8 +974,6 @@ fn activateProviderSelection(
 fn runProviderLogin(alloc: Allocator, cfg: Config, provider: model_provider.ProviderId) !void {
     switch (provider) {
         .gateway => try login_flow.runLogin(alloc, cfg.gateway_provider.oauth_transport, cfg.url_opener),
-        .codex => try chatgpt_oauth.runLogin(alloc, cfg.gateway_provider.oauth_transport, cfg.url_opener),
-        .grok => try grok_oauth.runLogin(alloc, cfg.gateway_provider.oauth_transport, cfg.url_opener),
         .configured => return error.ConfiguredProviderUsesEnvironmentAuth,
     }
 }
@@ -1210,8 +989,8 @@ fn writeProviderLoginFailure(alloc: Allocator, deps: RunDeps, provider: model_pr
     }
     try writeProviderActivationError(alloc, deps, caller, switch (err) {
         error.ClientIdMissing => "missing FX_OAUTH_CLIENT_ID; configure the fx Vercel App client id first",
-        error.AccessDenied, error.ChatGptAuthorizationFailed, error.GrokAuthorizationFailed => "authorization denied",
-        error.ExpiredToken, error.LoginTimedOut, error.ChatGptLoginTimedOut, error.GrokLoginTimedOut => "authorization expired; run fx login again",
+        error.AccessDenied => "authorization denied",
+        error.ExpiredToken, error.LoginTimedOut => "authorization expired; run fx login again",
         else => "failed to sign in",
     });
 }
@@ -1285,8 +1064,6 @@ fn activateProviderSelectionFallible(
     {
         try writeStdout(deps, switch (target) {
             .gateway => "Gateway is already selected.\n",
-            .codex => "Codex is already selected.\n",
-            .grok => "Grok is already selected.\n",
             .configured => "Configured provider is already selected.\n",
         });
         return true;
@@ -1318,8 +1095,6 @@ fn activateProviderSelectionFallible(
             deps,
             caller,
             switch (target) {
-                .codex => "Codex credential is unavailable",
-                .grok => "Grok credential is unavailable",
                 .gateway => "configure a Gateway credential first",
                 .configured => "configure the provider auth environment variable first",
             },
@@ -1328,8 +1103,6 @@ fn activateProviderSelectionFallible(
     };
     const catalog_provider = cfg.provider_set.select(target).model_catalog orelse {
         try writeProviderActivationError(alloc, deps, caller, switch (target) {
-            .codex => "Codex model catalog is unavailable",
-            .grok => "Grok model catalog is unavailable",
             .gateway => "Gateway model catalog is unavailable",
             .configured => "Configured model catalog is unavailable",
         });
@@ -1401,15 +1174,11 @@ fn activateProviderSelectionFallible(
         .outcome => {},
     }
     if (performed_login) |provider| switch (provider) {
-        .codex => try writeStdout(deps, "Signed in with Codex.\n"),
-        .grok => try writeStdout(deps, "Signed in with Grok.\n"),
         .gateway, .configured => unreachable,
     };
     if (caller == .provider_command) {
         try writeStdout(deps, switch (target) {
             .gateway => "Provider set to Gateway.\n",
-            .codex => "Provider set to Codex.\n",
-            .grok => "Provider set to Grok.\n",
             .configured => "Provider set to configured connection.\n",
         });
     }
@@ -1418,14 +1187,6 @@ fn activateProviderSelectionFallible(
 
 fn runIfRequestedWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Config, deps: RunDeps) !RunResult {
     const parsed_launch = parseInteractiveLaunch(alloc, args, cfg.command_catalog) catch |err| {
-        if (err == error.InvalidResumeArgs) {
-            try writeTopLevelUsage(cfg.command_catalog, deps, .@"resume");
-            return usage_failure;
-        }
-        if (removedResumeHint(err)) |hint| {
-            try writeStderr(deps, hint);
-            return usage_failure;
-        }
         var writer: std.Io.Writer.Allocating = .init(alloc);
         defer writer.deinit();
         switch (err) {
@@ -1452,15 +1213,6 @@ fn runIfRequestedWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Con
     };
     switch (parsed_launch) {
         .interactive => |launch| {
-            if (launch.modifiers.profile_name) |name| {
-                if (try app_profile_runtime.launchFailure(alloc, name)) |message| {
-                    defer alloc.free(message);
-                    try writeStderr(deps, message);
-                    var rejected = launch;
-                    rejected.deinit(alloc);
-                    return .handled_failure;
-                }
-            }
             try writeMcpProfileWarningIfPresent(alloc, cfg, deps);
             return .{ .interactive = launch };
         },
@@ -1493,16 +1245,8 @@ fn runNonInteractiveWithDeps(
         .acp => global_args.modifiers.hasOnlyUltrafastOverride(),
         else => false,
     };
-    if (global_args.modifiers.profile_name != null) {
-        try writeStderr(deps, "fx: --profile applies to interactive sessions\n");
-        return usage_failure;
-    }
     if (global_args.modifiers.hasModelOverrides() and !acp_ultrafast_override) {
         try writeModelModifierUsage(alloc, deps, parsed_command, global_args.modifiers);
-        return usage_failure;
-    }
-    if (global_args.modifiers.instances != null) {
-        try writeStderr(deps, "fx: --instances applies to interactive sessions\n");
         return usage_failure;
     }
 
@@ -1525,7 +1269,7 @@ fn runNonInteractiveWithDeps(
     };
 
     switch (parsed_command) {
-        .interactive, .resume_session => unreachable,
+        .interactive => unreachable,
         .help => {
             try writeTopLevelHelp(alloc, cfg.command_catalog, deps, cfg.version, .stdout);
             return .handled_success;
@@ -1593,7 +1337,7 @@ fn runNonInteractiveWithDeps(
                     error.ApiKeyNeedsVercel => try writeStderr(deps, "fx login: --api-key works only with vercel\n"),
                     error.InvalidLoginProviderArgs => {
                         try writeFlagFailure(alloc, deps, .login, rest);
-                        try writeStderr(deps, "usage: fx login [vercel|codex|grok] [--api-key]\n");
+                        try writeStderr(deps, "usage: fx login [vercel] [--api-key]\n");
                     },
                 }
                 return usage_failure;
@@ -1621,65 +1365,18 @@ fn runNonInteractiveWithDeps(
             )) return .handled_failure;
             try writeStdout(deps, switch (login_provider) {
                 .gateway => "Signed in to Vercel.\nAI Gateway access may still require billing or API setup for the selected account.\n",
-                .codex => "Signed in with Codex.\n",
-                .grok => "Signed in with Grok.\n",
                 .configured => "Configured providers use settings.json authentication.\n",
             });
             return .handled_success;
         },
         .logout => |rest| {
-            const maybe_login_provider = parseLoginProvider(rest) catch {
-                try writeStderr(deps, "usage: fx logout [vercel|codex|grok]\n");
+            _ = parseLoginProvider(rest) catch {
+                try writeStderr(deps, "usage: fx logout [vercel]\n");
                 return usage_failure;
             };
             if (cfg.auth_mode == .host_managed) {
                 try writeHostManagedAuthResult(deps);
                 return .handled_success;
-            }
-            // Preserve the original `fx logout` behavior for scripts and users.
-            const login_provider = maybe_login_provider orelse .gateway;
-            if (login_provider == .codex) {
-                const outcome = chatgpt_oauth.logout() catch {
-                    try writeStderr(deps, "fx logout: failed to durably remove saved Codex login\n");
-                    return .handled_failure;
-                };
-                return switch (outcome) {
-                    .deleted => result: {
-                        try writeStdout(deps, "Signed out of Codex.\n");
-                        break :result .handled_success;
-                    },
-                    .missing => result: {
-                        try writeStdout(deps, "No Codex login session found.\n");
-                        break :result .handled_success;
-                    },
-                    .deleted_not_durable => result: {
-                        try writeStderr(deps, "fx logout: failed to durably remove saved Codex login\n");
-                        break :result .handled_failure;
-                    },
-                };
-            }
-            if (login_provider == .grok) {
-                const outcome = grok_oauth.logout(alloc, cfg.gateway_provider.oauth_transport) catch {
-                    try writeStderr(deps, "fx logout: failed to durably remove saved Grok login\n");
-                    return .handled_failure;
-                };
-                if (outcome.revocation_failed) {
-                    try writeStderr(deps, "fx logout: local Grok session removed, but remote revocation could not be confirmed\n");
-                }
-                return switch (outcome.deletion) {
-                    .deleted => result: {
-                        try writeStdout(deps, "Signed out of Grok.\n");
-                        break :result .handled_success;
-                    },
-                    .missing => result: {
-                        try writeStdout(deps, "No Grok login session found.\n");
-                        break :result .handled_success;
-                    },
-                    .deleted_not_durable => result: {
-                        try writeStderr(deps, "fx logout: failed to durably remove saved Grok login\n");
-                        break :result .handled_failure;
-                    },
-                };
             }
             const result = login_flow.logout(alloc, cfg.gateway_provider.oauth_transport) catch |err| switch (err) {
                 error.SessionDeleteFailed => {
@@ -1766,7 +1463,7 @@ fn runNonInteractiveWithDeps(
                 return usage_failure;
             }
             const target = model_provider.parse(rest[0]) orelse {
-                try writeStderr(deps, "fx provider: expected gateway, codex, grok, or a configured name\n");
+                try writeStderr(deps, "fx provider: expected gateway or a configured name\n");
                 return usage_failure;
             };
             const activated = activateProviderSelection(alloc, cfg, deps, target, .provider_command, null) catch |err| switch (err) {
@@ -1819,9 +1516,9 @@ fn runNonInteractiveWithDeps(
             defer mcp_inspection.deinit(alloc);
 
             var snapshot = statusSnapshotFromStartupWithBuild(startup, .{
-                .channel = cfg.build_channel,
                 .version = cfg.version,
                 .revision = cfg.revision,
+                .channel = cfg.build_channel,
             }, mcp_inspection.profile_diagnostic);
             snapshot.mcp = localMcpView(&mcp_inspection);
             snapshot.provider_endpoint = startup.provider_endpoint;
@@ -1857,28 +1554,6 @@ fn runNonInteractiveWithDeps(
                 .rules = rules,
                 .runtime_grants_available = false,
             }).render(alloc, opts.format);
-            defer alloc.free(text);
-            try writeFormattedOutput(deps, text, opts.format);
-            return .handled_success;
-        },
-        .slack => |rest| {
-            if (rest.len == 0) {
-                const help = try command_specs.renderTopLevelCommandHelp(alloc, cfg.command_catalog, .slack);
-                defer alloc.free(help);
-                try writeStdout(deps, help);
-                return .handled_success;
-            }
-            const opts = slack_install.parse(rest) catch |err| {
-                try writeUsageOrJsonError(alloc, cfg.command_catalog, deps, .slack, "slack", err, rest);
-                return usage_failure;
-            };
-            var arena: std.heap.ArenaAllocator = .init(alloc);
-            defer arena.deinit();
-            const snapshot = slack_install.run(arena.allocator(), opts.action, cfg.gateway_provider.oauth_transport, cfg.url_opener) catch |err| {
-                try writeCommandFailure(alloc, deps, "slack", err, opts.format);
-                return .handled_failure;
-            };
-            const text = try snapshot.render(alloc, opts.format);
             defer alloc.free(text);
             try writeFormattedOutput(deps, text, opts.format);
             return .handled_success;
@@ -1919,8 +1594,6 @@ fn runNonInteractiveWithDeps(
             const catalog_provider = available_providers.select(startup.provider).cli_model_catalog orelse {
                 try writeStderr(deps, switch (startup.provider) {
                     .gateway => "fx models: Gateway model catalog is unavailable\n",
-                    .codex => "fx models: Codex model catalog is unavailable\n",
-                    .grok => "fx models: Grok model catalog is unavailable\n",
                     .configured => "fx models: Configured model catalog is unavailable\n",
                 });
                 return .handled_failure;
@@ -2212,73 +1885,6 @@ fn runNonInteractiveWithDeps(
             try writeFormattedOutput(deps, text, opts.format);
             return if (snapshot.status == .ready) .handled_success else .handled_failure;
         },
-        .upgrade => |rest| {
-            const upgrade_runtime = @import("../upgrade/upgrade_runtime.zig");
-            var rejected_channel: ?[]const u8 = null;
-            const opts = parseUpgradeArgs(rest, &rejected_channel) catch |err| {
-                if (rejected_channel) |value| if (!argsContainJson(rest)) {
-                    const line = try alloc.print("fx upgrade: invalid value for --channel: {f}\n", .{text_utils.terminalSafe(value)});
-                    defer alloc.free(line);
-                    try writeStderr(deps, line);
-                };
-                try writeUsageOrJsonError(alloc, cfg.command_catalog, deps, .upgrade, "upgrade", err, rest);
-                return usage_failure;
-            };
-
-            var startup = deps.load_startup_state_without_credentials(
-                alloc,
-                cfg.default_model,
-                cfg.default_agent_step_limit,
-            ) catch |err| {
-                if (opts.format == .json) {
-                    try writeJsonCommandFailure(alloc, deps, "upgrade", err, "failed to load update settings");
-                } else {
-                    try writeStderr(deps, "fx upgrade: failed to load update settings\n");
-                }
-                return .handled_failure;
-            };
-            defer startup.deinit(alloc);
-            try writeConfigDiagnostics(alloc, deps, startup.config_diagnostics);
-
-            const channel = opts.channel orelse startup.update_channel;
-            if (opts.channel) |selected| {
-                var outcome = config_runtime.setUserPreferences(alloc, .{ .update_channel = selected }) catch |err| {
-                    if (opts.format == .json) {
-                        try writeJsonCommandFailure(alloc, deps, "upgrade", err, "failed to save update channel");
-                    } else {
-                        try writeStderr(deps, "fx upgrade: failed to save update channel\n");
-                    }
-                    return .handled_failure;
-                };
-                defer outcome.deinit(alloc);
-                if (opts.format == .text) {
-                    const line = try channelSavedLine(alloc, selected, outcome);
-                    defer alloc.free(line);
-                    try writeStdout(deps, line);
-                }
-            }
-
-            var result = upgrade_runtime.run(alloc, .{
-                .channel = cfg.build_channel,
-                .version = cfg.version,
-                .revision = cfg.revision,
-            }, channel, switch (opts.format) {
-                .text => .text,
-                .json => .json,
-            });
-            defer result.deinit(alloc);
-            const text = result.snapshot.render(alloc, switch (opts.format) {
-                .text => .text,
-                .json => .json,
-            }) catch {
-                try writeStderr(deps, "fx upgrade: render failed\n");
-                return .handled_failure;
-            };
-            defer alloc.free(text);
-            try writeStdout(deps, text);
-            if (opts.format == .json) try writeStdout(deps, "\n");
-            return if (result.snapshot.status == .failed) .handled_failure else .handled_success;
-        },
         .completion => |rest| {
             const shell = if (rest.len == 1) completion.parseShell(rest[0]) else null;
             if (shell == null) {
@@ -2322,10 +1928,6 @@ fn runNonInteractiveWithDeps(
                 .set, .unset => runConfigWrite(alloc, deps, opts),
                 .schema => runConfigSchema(alloc, deps, opts),
             };
-        },
-        .replay => |rest| {
-            const exit_code = try cli_replay.run(alloc, rest);
-            return if (exit_code == 0) .handled_success else .{ .handled_exit = exit_code };
         },
         .unknown => |command| {
             try writeStderr(deps, "fx: unknown subcommand: ");
@@ -2399,47 +2001,8 @@ fn runGithubWorkflow(
     defer alloc.free(prompt);
 
     const workflow_cfg = workflowConfigWithLaunchModifiers(cfg, launch_modifiers);
-    if (!opts.create) {
-        const exit_code = try cli_ask.runPrompt(alloc, prompt, opts.agent, workflow_cfg, cfg.context_registry, cfg.tool_set);
-        return if (exit_code == 0) .handled_success else .handled_failure;
-    }
-
-    const run_result = try cli_ask.runPromptCapture(alloc, prompt, opts.agent, workflow_cfg, cfg.context_registry, cfg.tool_set);
-    defer run_result.deinit(alloc);
-    if (run_result.exit_code != 0) return .handled_failure;
-
-    const draft = draftFromRun(alloc, run_result) catch {
-        try writeStderr(deps, switch (workflow) {
-            .pull_request => "fx pr: failed to parse drafted PR title/body\n",
-            .issue => "fx issue: failed to parse drafted issue title/body\n",
-        });
-        return .handled_failure;
-    };
-    defer draft.deinit(alloc);
-
-    const published = try github_publish.publish(alloc, switch (workflow) {
-        .pull_request => .pull_request,
-        .issue => .issue,
-    }, draft);
-    defer published.deinit(alloc);
-    if (!published.ok) {
-        try writeStderr(deps, switch (workflow) {
-            .pull_request => "fx pr: ",
-            .issue => "fx issue: ",
-        });
-        try writeStderr(deps, published.text);
-        try writeStderr(deps, "\n");
-        return .handled_failure;
-    }
-    try writeStdout(deps, published.text);
-    try writeStdout(deps, "\n");
-    return .handled_success;
-}
-
-/// Parses the draft from the completed final response only, so text the model
-/// wrote before a tool call never becomes the title or body.
-fn draftFromRun(alloc: Allocator, run_result: cli_ask.PromptRunResult) !github_publish.Draft {
-    return github_publish.parseDraft(alloc, run_result.final_source);
+    const exit_code = try cli_ask.runPrompt(alloc, prompt, opts.agent, workflow_cfg, cfg.context_registry, cfg.tool_set);
+    return if (exit_code == 0) .handled_success else .handled_failure;
 }
 
 fn writeStdout(deps: RunDeps, text: []const u8) !void {
@@ -2681,17 +2244,24 @@ fn writeStatusJsonLine(alloc: Allocator, deps: RunDeps, snapshot: output_contrac
     try writeRenderedJsonLine(alloc, deps, buf[0..], .{ .status = snapshot });
 }
 
+/// The version, revision, and update channel this binary was built from.
+const CurrentBuild = struct {
+    version: []const u8,
+    revision: []const u8,
+    channel: []const u8,
+};
+
 fn statusSnapshotFromStartup(startup: app_lifecycle.StartupStatus) output_contracts.StatusSnapshot {
     return statusSnapshotFromStartupWithBuild(startup, .{
-        .channel = .stable,
         .version = "",
         .revision = "",
+        .channel = "stable",
     }, .clear);
 }
 
 fn statusSnapshotFromStartupWithBuild(
     startup: app_lifecycle.StartupStatus,
-    build: update_target.CurrentBuild,
+    build: CurrentBuild,
     mcp_config_diagnostic: mcp_contract.ProfileConfigDiagnostic,
 ) output_contracts.StatusSnapshot {
     return .{
@@ -2700,15 +2270,16 @@ fn statusSnapshotFromStartupWithBuild(
         .effort = startup.effort,
         .provider = startup.provider,
         .auth = startup.auth,
-        .auth_help = startup.auth.missingHelp(.cli),
+        .auth_help = startup.auth.missingHelp(),
         .permission_mode = permissionModeForSnapshot(startup.permission_mode),
         .workspace_root = startup.workspace_root,
         .history_turns = 0,
         .session_permission_grants = 0,
         .agent_step_limit = startup.agent_step_limit,
         .ultrafast_requested = startup.ultrafast_mode,
-        .update_channel = startup.update_channel.label(),
-        .build_channel = build.channel.label(),
+        // No setting chooses a channel, so fx follows the one it was built for.
+        .update_channel = build.channel,
+        .build_channel = build.channel,
         .build_revision = build.revision,
         .mcp_config_error = switch (mcp_config_diagnostic) {
             .clear, .warning => null,
@@ -2977,11 +2548,9 @@ fn writeUsageOrJsonError(
 fn parsedOptions(kind: TopLevelKind) ?[]const command_specs.OptionDoc {
     return switch (kind) {
         .status, .doctor, .models, .permissions, .credits => &builtin_commands.json_only_options,
-        .slack => &command_specs.slack_options,
         .sessions => &builtin_commands.sessions_options,
         .login => &builtin_commands.login_options,
         .usage => &builtin_commands.usage_options,
-        .upgrade => &builtin_commands.upgrade_options,
         .workspace => &builtin_commands.workspace_options,
         .config => &builtin_commands.config_parse_options,
         .session => &builtin_commands.session_options,
@@ -3622,10 +3191,7 @@ fn commandFailureMessage(err: anyerror) ?[]const u8 {
         error.InvalidSessionDetailArgs,
         error.InvalidSessionMigrationArgs,
         error.InvalidSessionRecoveryArgs,
-        error.InvalidResumeArgs,
-        error.InvalidUpgradeArgs,
         error.InvalidConfigArgs,
-        error.InvalidSlackArguments,
         => "invalid arguments",
         error.UnknownConfigSetting => "unknown setting",
         error.WorkspaceConfigWrite => workspace_write_message,
@@ -3812,7 +3378,7 @@ fn workflowConfigWithLaunchModifiers(
 
 fn commandSupportsWorkspaceModifiers(command: Command) bool {
     return switch (command) {
-        .interactive, .ask, .acp, .pr, .issue, .resume_session => true,
+        .interactive, .ask, .acp, .pr, .issue => true,
         else => false,
     };
 }
@@ -3820,7 +3386,7 @@ fn commandSupportsWorkspaceModifiers(command: Command) bool {
 fn writeWorkspaceModifierUsage(deps: RunDeps) !void {
     try writeStderr(
         deps,
-        "fx: --add-dir and --no-additional-dirs are only supported for interactive, resume, ask, ACP, PR, and issue launches\n",
+        "fx: --add-dir and --no-additional-dirs are only supported for ask, ACP, PR, and issue launches\n",
     );
 }
 
@@ -3861,11 +3427,8 @@ fn globalLaunchErrorMessage(err: anyerror) ?[]const u8 {
     return switch (err) {
         error.MissingAddDirectoryValue => "--add-dir requires a directory path",
         error.MissingModelValue => "--model requires a model id",
-        error.MissingProfileValue => "--profile requires a profile name",
-        error.InvalidProfileName => "--profile names use lowercase letters, digits, '-', or '_'",
-        error.InvalidInstancesValue => "--instances takes a whole number of at least 1",
         error.InvalidEffortValue => "--effort value is not a valid reasoning effort",
-        error.InvalidProviderValue => "--provider accepts gateway, codex, grok, or a configured provider name",
+        error.InvalidProviderValue => "--provider accepts gateway or a configured provider name",
         error.InvalidProviderOrderValue => "--provider-order accepts comma-separated provider slugs (letters, digits, '-')",
         error.InvalidPermissionModeValue => "--permission-mode accepts ask, auto, or full-access",
         else => null,
@@ -3904,14 +3467,14 @@ test "ACP arguments take the agent-run flags and a log file" {
     try std.testing.expectEqualStrings("provider/astra", enabled.agent.model.?);
     try std.testing.expectEqual(@as(?bool, true), enabled.agent.ultrafast);
 
-    var last = try parseAcpArgs(alloc, &.{ "--ultrafast", "--no-ultrafast", "--model=a", "--model", "b", "--effort", "high", "--fast", "--ask", "--provider", "codex", "--log-file", "/tmp/acp.log" }, &bad);
+    var last = try parseAcpArgs(alloc, &.{ "--ultrafast", "--no-ultrafast", "--model=a", "--model", "b", "--effort", "high", "--fast", "--ask", "--provider", "gateway", "--log-file", "/tmp/acp.log" }, &bad);
     defer last.deinit(alloc);
     try std.testing.expectEqual(@as(?bool, false), last.agent.ultrafast);
     try std.testing.expectEqualStrings("b", last.agent.model.?);
     try std.testing.expectEqualStrings("high", last.agent.effort.?.label());
     try std.testing.expect(last.agent.fast.?);
     try std.testing.expectEqual(types.PermissionMode.ask, last.agent.permission.?);
-    try std.testing.expectEqualStrings("codex", last.agent.provider.?.label());
+    try std.testing.expectEqualStrings("gateway", last.agent.provider.?.label());
     try std.testing.expectEqualStrings("/tmp/acp.log", last.log_file.?);
 
     try std.testing.expectError(error.InvalidAgentRunValue, parseAcpArgs(alloc, &.{ "--effort", "high effort" }, &bad));
@@ -3924,12 +3487,11 @@ test "ACP arguments take the agent-run flags and a log file" {
 test "pr and issue take the agent-run flags before their context" {
     const alloc = std.testing.allocator;
     var bad: ?BadAgentValue = null;
-    var opts = try parseWorkflowArgs(alloc, &.{ "--auto", "--model", "m", "--effort=low", "--provider-order", "a,b", "--create", "fix", "the", "--model", "x" }, &bad);
+    var opts = try parseWorkflowArgs(alloc, &.{ "--auto", "--model", "m", "--effort=low", "--provider-order", "a,b", "fix", "the", "--model", "x" }, &bad);
     defer opts.deinit(alloc);
     try std.testing.expectEqual(types.PermissionMode.auto, opts.agent.permission.?);
     try std.testing.expectEqualStrings("m", opts.agent.model.?);
     try std.testing.expectEqual(@as(usize, 2), opts.agent.provider_order.?.len);
-    try std.testing.expect(opts.create);
     // Flags after the context are part of it.
     try std.testing.expectEqualStrings("fix the --model x", opts.context);
 
@@ -4110,40 +3672,6 @@ fn parseLocalSurfaceArgs(args: []const [:0]const u8) !LocalSurfaceOptions {
         .option => options.format = .json,
     };
     return options;
-}
-
-const UpgradeFlag = enum { channel, json };
-const upgrade_flag_ids = cli_flags.idTable(UpgradeFlag, &builtin_commands.upgrade_options);
-
-/// On a `--channel` value that names no channel, sets `rejected_channel` to it,
-/// borrowed from `args`.
-fn parseUpgradeArgs(args: []const [:0]const u8, rejected_channel: *?[]const u8) !UpgradeOptions {
-    var options = UpgradeOptions{};
-    var parser: cli_flags.Parser = .init(&builtin_commands.upgrade_options, args);
-    while (parser.next() catch return error.InvalidUpgradeArgs) |item| switch (item) {
-        .positional => return error.InvalidUpgradeArgs,
-        .option => |match| switch (upgrade_flag_ids[match.index].?) {
-            .channel => options.channel = update_target.Channel.parse(match.value.?) orelse {
-                rejected_channel.* = match.value.?;
-                return error.InvalidUpgradeArgs;
-            },
-            .json => options.format = .json,
-        },
-    };
-    return options;
-}
-
-/// The line `fx upgrade --channel` prints after saving, so the user knows the
-/// channel persists and where. Caller owns the result.
-fn channelSavedLine(
-    alloc: Allocator,
-    channel: update_target.Channel,
-    outcome: config_runtime.CommitOutcome,
-) ![]u8 {
-    return switch (outcome) {
-        .unchanged => alloc.print("Release channel is already {s}.\n", .{channel.label()}),
-        .committed => alloc.print("Release channel set to {s} in {s}/settings.json.\n", .{ channel.label(), profile_paths.displayRoot() }),
-    };
 }
 
 const SessionListFlag = enum { all, limit, cursor, json };
@@ -4329,68 +3857,11 @@ fn parseSessionRecoveryArgs(
     };
 }
 
-fn parseResumeArgs(
-    alloc: Allocator,
-    args: []const [:0]const u8,
-    top_level_alias: bool,
-) !ResumeTarget {
-    if (args.len == 0) return .last;
-
-    if (top_level_alias) {
-        const flag = args[0];
-        if (std.mem.startsWith(u8, flag, resume_inline_prefix)) {
-            if (args.len != 1) return error.InvalidResumeArgs;
-            return resumeFlagTarget(alloc, flag[resume_inline_prefix.len..]);
-        }
-        if (std.mem.eql(u8, flag, "--resume") or std.mem.eql(u8, flag, resume_short_flag)) {
-            return switch (args.len) {
-                1 => .pick,
-                2 => resumeFlagTarget(alloc, args[1]),
-                else => error.InvalidResumeArgs,
-            };
-        }
-        if (std.mem.eql(u8, flag, "--resume-last")) return error.RemovedResumeLast;
-        if (std.mem.startsWith(u8, flag, resume_id_alias_prefix)) return error.RemovedResumeIdAlias;
-        if (args.len != 1) return error.InvalidResumeArgs;
-        if (std.mem.eql(u8, flag, "-c") or std.mem.eql(u8, flag, "--continue")) return .remembered;
-        return error.InvalidResumeArgs;
-    }
-
-    if (std.mem.eql(u8, args[0], "--resume")) return error.RemovedResumeLastFlag;
-    if (std.mem.eql(u8, args[0], "--id")) return error.RemovedResumeIdFlag;
-    if (args.len != 1) return error.InvalidResumeArgs;
-
-    const trimmed = std.mem.trim(u8, args[0], " \t\r\n");
-    if (trimmed.len == 0) return error.InvalidResumeArgs;
-    if (std.mem.eql(u8, trimmed, "last")) return .last;
-    return .{ .id = try alloc.dupe(u8, trimmed) };
-}
-
-/// The session a `--resume` or `-r` value names: `last`, or an exact ID.
-fn resumeFlagTarget(alloc: Allocator, value: []const u8) !ResumeTarget {
-    const id = std.mem.trim(u8, value, " \t\r\n");
-    if (id.len == 0) return error.InvalidResumeArgs;
-    if (std.mem.eql(u8, id, "last")) return .last;
-    return .{ .id = try alloc.dupe(u8, id) };
-}
-
-/// The hint for a removed resume spelling, or null for any other error.
-fn removedResumeHint(err: anyerror) ?[]const u8 {
-    return switch (err) {
-        error.RemovedResumeLast => "fx: --resume-last was removed; use fx --resume last\n",
-        error.RemovedResumeIdAlias => "fx: --resume-<id> was removed; use fx --resume <id>\n",
-        error.RemovedResumeCommand => "fx: fx resume was removed; use fx --resume [last|<id>] or fx session resume [last|<id>]\n",
-        error.RemovedResumeIdFlag => "fx session resume: --id was removed; use fx session resume <id>\n",
-        error.RemovedResumeLastFlag => "fx session resume: --resume --last was removed; use fx session resume last\n",
-        else => null,
-    };
-}
-
-const WorkflowFlag = enum { permission_mode, ask, auto, full_access, yolo, provider, model, effort, fast, no_fast, ultrafast, no_ultrafast, provider_order, provider_strict, no_provider_strict, create };
+const WorkflowFlag = enum { permission_mode, ask, auto, full_access, yolo, provider, model, effort, fast, no_fast, ultrafast, no_ultrafast, provider_order, provider_strict, no_provider_strict };
 // `fx issue` documents the same flags as `fx pr`.
 const workflow_flag_ids = cli_flags.idTable(WorkflowFlag, &builtin_commands.pr_options);
 
-/// Reads `--auto` and `--create`, then joins the rest into the context.
+/// Reads the agent-run flags, then joins the rest into the context.
 fn parseWorkflowArgs(alloc: Allocator, args: []const [:0]const u8, bad: *?BadAgentValue) !WorkflowOptions {
     var opts: WorkflowOptions = .{};
     errdefer opts.agent.deinit(alloc);
@@ -4398,14 +3869,8 @@ fn parseWorkflowArgs(alloc: Allocator, args: []const [:0]const u8, bad: *?BadAge
     // Prefix mode stops at positionals, so every item is an option.
     while (parser.next() catch return error.InvalidWorkflowArgs) |item| {
         const id = workflow_flag_ids[item.option.index].?;
-        if (agent_run_flags.fromId(id)) |flag| {
-            try applyAgentFlag(alloc, &opts.agent, flag, &builtin_commands.pr_options, item.option, bad);
-            continue;
-        }
-        switch (id) {
-            .create => opts.create = true,
-            else => unreachable,
-        }
+        const flag = agent_run_flags.fromId(id).?;
+        try applyAgentFlag(alloc, &opts.agent, flag, &builtin_commands.pr_options, item.option, bad);
     }
     // Context starts at the first argument that isn't a flag. A dash word
     // there is a flag this command doesn't take, such as a typo, not
@@ -4442,42 +3907,6 @@ fn isVersionFlag(arg: []const u8) bool {
 
 fn testCommandCatalog() CommandCatalog {
     return builtin_commands.top_level_registry;
-}
-
-test "launch flags may follow the resume word and its target" {
-    const alloc = std.testing.allocator;
-    const command_catalog = testCommandCatalog();
-    const Case = struct { args: []const [:0]const u8, target: std.meta.Tag(ResumeTarget), model: ?[]const u8 = null, fast: ?bool = null, prompt: ?[]const u8 = null };
-    const cases = [_]Case{
-        .{ .args = &.{ "-c", "--model", "x" }, .target = .remembered, .model = "x" },
-        .{ .args = &.{ "--continue", "--fast" }, .target = .remembered, .fast = true },
-        .{ .args = &.{ "--resume", "last", "--model", "x" }, .target = .last, .model = "x" },
-        .{ .args = &.{ "-r", "--model", "x" }, .target = .pick, .model = "x" },
-        .{ .args = &.{ "-c", "hello world", "--model", "x" }, .target = .remembered, .model = "x", .prompt = "hello world" },
-        .{ .args = &.{ "--model", "y", "-c", "--model", "x" }, .target = .remembered, .model = "x" },
-        .{ .args = &.{ "session", "resume", "last", "--fast" }, .target = .last, .fast = true },
-    };
-    for (cases) |case| {
-        var parsed = try parseInteractiveLaunch(alloc, case.args, command_catalog);
-        switch (parsed) {
-            .interactive => |*launch| {
-                defer launch.deinit(alloc);
-                try std.testing.expectEqual(case.target, std.meta.activeTag(launch.requested_resume.?));
-                if (case.model) |model| try std.testing.expectEqualStrings(model, launch.modifiers.model_override.?);
-                if (case.fast) |fast| try std.testing.expectEqual(fast, launch.modifiers.fast_override.?);
-                if (case.prompt) |prompt| try std.testing.expectEqualStrings(prompt, launch.initial_prompt.?) else try std.testing.expect(launch.initial_prompt == null);
-            },
-            .noninteractive => |*value| {
-                value.deinit(alloc);
-                return error.TestExpectedInteractiveLaunch;
-            },
-        }
-    }
-
-    const bad: []const [:0]const u8 = &.{ "-c", "--bogus" };
-    try std.testing.expectError(error.InvalidFlag, parseInteractiveLaunch(alloc, bad, command_catalog));
-    try std.testing.expectEqualStrings("--bogus", launchFlagFailure(bad).?.unknown.flag);
-    try std.testing.expectError(error.InvalidResumeArgs, parseInteractiveLaunch(alloc, &.{ "session", "resume", "last", "hello" }, command_catalog));
 }
 
 test "parse recognizes every top-level command and preserves unknown commands" {
@@ -4533,16 +3962,8 @@ test "parse recognizes every top-level command and preserves unknown commands" {
         .session => |rest| try std.testing.expectEqual(@as(usize, 1), rest.len),
         else => return error.TestExpectedEqual,
     }
-    switch (parse(command_catalog, &.{ @constCast("session"), @constCast("resume"), @constCast("last") })) {
-        .resume_session => |invocation| try std.testing.expectEqual(@as(usize, 1), invocation.args.len),
-        else => return error.TestExpectedEqual,
-    }
     switch (parse(command_catalog, &.{ @constCast("sessions"), @constCast("--json") })) {
         .sessions => |rest| try std.testing.expectEqual(@as(usize, 1), rest.len),
-        else => return error.TestExpectedEqual,
-    }
-    switch (parse(command_catalog, &.{ @constCast("resume"), @constCast("last") })) {
-        .resume_session => |invocation| try std.testing.expectEqual(@as(usize, 1), invocation.args.len),
         else => return error.TestExpectedEqual,
     }
     switch (parse(command_catalog, &.{ @constCast("credits"), @constCast("--json") })) {
@@ -4551,18 +3972,6 @@ test "parse recognizes every top-level command and preserves unknown commands" {
     }
     switch (parse(command_catalog, &.{ @constCast("usage"), @constCast("--period"), @constCast("24h") })) {
         .usage => |rest| try std.testing.expectEqual(@as(usize, 2), rest.len),
-        else => return error.TestExpectedEqual,
-    }
-    switch (parse(command_catalog, &.{@constCast("upgrade")})) {
-        .upgrade => |rest| try std.testing.expectEqual(@as(usize, 0), rest.len),
-        else => return error.TestExpectedEqual,
-    }
-    switch (parse(command_catalog, &.{ @constCast("update"), @constCast("--channel"), @constCast("dev") })) {
-        .upgrade => |rest| try std.testing.expectEqual(@as(usize, 2), rest.len),
-        else => return error.TestExpectedEqual,
-    }
-    switch (parse(command_catalog, &.{ @constCast("replay"), @constCast("tape") })) {
-        .replay => |rest| try std.testing.expectEqual(@as(usize, 1), rest.len),
         else => return error.TestExpectedEqual,
     }
     switch (parse(command_catalog, &.{@constCast("wat")})) {
@@ -4649,25 +4058,6 @@ test "global context limits reject missing values and stop at the command" {
     try std.testing.expectEqual(@as(usize, 3), parsed.remaining.len);
 }
 
-test "--instances takes a whole number of at least 1" {
-    const invalid = [_][]const [:0]const u8{
-        &.{ @constCast("--instances"), @constCast("0") },
-        &.{@constCast("--instances=0")},
-        &.{ @constCast("--instances"), @constCast("two") },
-        &.{@constCast("--instances=-1")},
-        &.{@constCast("--instances=")},
-    };
-    for (invalid) |args| try std.testing.expectError(error.InvalidInstancesValue, parseGlobalLaunchArgs(std.testing.allocator, args));
-    // A bare `--instances` is the shared parser's missing value.
-    try std.testing.expectError(error.InvalidFlag, parseGlobalLaunchArgs(std.testing.allocator, &.{@constCast("--instances")}));
-    try std.testing.expectEqualStrings("--instances", launchFlagFailure(&.{@constCast("--instances")}).?.missing_value);
-    try std.testing.expectEqualStrings("--instances takes a whole number of at least 1", globalLaunchErrorMessage(error.InvalidInstancesValue).?);
-
-    var parsed = try parseGlobalLaunchArgs(std.testing.allocator, &.{ @constCast("--instances"), @constCast("3") });
-    defer parsed.deinit(std.testing.allocator);
-    try std.testing.expectEqual(@as(?usize, 3), parsed.modifiers.instances);
-}
-
 test "global launch modifiers own repeatable additional directories and suppression" {
     var parsed = try parseGlobalLaunchArgs(std.testing.allocator, &.{
         @constCast("--add-dir"),
@@ -4690,7 +4080,7 @@ test "global launch modifiers own repeatable additional directories and suppress
 test "global launch modifiers own provider model effort and fast overrides before the command" {
     var parsed = try parseGlobalLaunchArgs(std.testing.allocator, &.{
         @constCast("--provider"),
-        @constCast("grok"),
+        @constCast("gateway"),
         @constCast("--model"),
         @constCast("provider/launch-model"),
         @constCast("--effort=high"),
@@ -4700,7 +4090,7 @@ test "global launch modifiers own provider model effort and fast overrides befor
     });
     defer parsed.deinit(std.testing.allocator);
 
-    try std.testing.expectEqual(@as(?model_provider.ProviderId, .grok), parsed.modifiers.provider_override);
+    try std.testing.expectEqual(@as(?model_provider.ProviderId, .gateway), parsed.modifiers.provider_override);
     try std.testing.expectEqualStrings("provider/launch-model", parsed.modifiers.model_override.?);
     try std.testing.expect(parsed.modifiers.effort_override.?.eql(types.ReasoningEffort.literal("high")));
     try std.testing.expectEqual(@as(?bool, true), parsed.modifiers.fast_override);
@@ -4985,83 +4375,6 @@ test "parse local surface args accepts only json" {
     try std.testing.expectError(error.InvalidLocalSurfaceArgs, parseLocalSurfaceArgs(&.{@constCast("--wat")}));
 }
 
-test "parse upgrade args accepts a remembered release channel" {
-    var rejected: ?[]const u8 = null;
-    const defaults = try parseUpgradeArgs(&.{}, &rejected);
-    try std.testing.expectEqual(output_contracts.OutputFormat.text, defaults.format);
-    try std.testing.expect(defaults.channel == null);
-
-    const selected = try parseUpgradeArgs(&.{
-        @constCast("--channel"),
-        @constCast("dev"),
-        @constCast("--json"),
-    }, &rejected);
-    try std.testing.expectEqual(output_contracts.OutputFormat.json, selected.format);
-    try std.testing.expectEqual(update_target.Channel.dev, selected.channel.?);
-
-    const stable = try parseUpgradeArgs(&.{@constCast("--channel=stable")}, &rejected);
-    try std.testing.expectEqual(update_target.Channel.stable, stable.channel.?);
-    try std.testing.expect(rejected == null);
-
-    try std.testing.expectError(
-        error.InvalidUpgradeArgs,
-        parseUpgradeArgs(&.{ @constCast("--channel"), @constCast("nightly") }, &rejected),
-    );
-    try std.testing.expectEqualStrings("nightly", rejected.?);
-
-    rejected = null;
-    const last = try parseUpgradeArgs(&.{ "--channel=dev", "--channel", "stable" }, &rejected);
-    try std.testing.expectEqual(update_target.Channel.stable, last.channel.?);
-}
-
-test "upgrade channel saved line says whether the file changed" {
-    const alloc = std.testing.allocator;
-    const set = try channelSavedLine(alloc, .dev, .{ .committed = .{ .scope = .user } });
-    defer alloc.free(set);
-    try std.testing.expectEqualStrings("Release channel set to dev in ~/.fx/settings.json.\n", set);
-
-    const same = try channelSavedLine(alloc, .stable, .unchanged);
-    defer alloc.free(same);
-    try std.testing.expectEqualStrings("Release channel is already stable.\n", same);
-}
-
-test "runIfRequested names an upgrade channel that does not exist" {
-    var capture = CaptureOutput.init(std.testing.allocator);
-    defer capture.deinit();
-
-    const result = try runIfRequestedWithDeps(
-        std.testing.allocator,
-        &.{ @constCast("upgrade"), @constCast("--channel=nightly") },
-        testConfig(),
-        capture.deps(),
-    );
-    try std.testing.expectEqual(usage_failure, result);
-    try std.testing.expectEqualStrings("", capture.stdout.written());
-    try std.testing.expect(std.mem.startsWith(
-        u8,
-        capture.stderr.written(),
-        "fx upgrade: invalid value for --channel: nightly\nusage: fx upgrade",
-    ));
-}
-
-test "runIfRequested reports bad upgrade arguments as json with --json" {
-    var capture = CaptureOutput.init(std.testing.allocator);
-    defer capture.deinit();
-
-    const result = try runIfRequestedWithDeps(
-        std.testing.allocator,
-        &.{ @constCast("upgrade"), @constCast("--json"), @constCast("--channel=nightly") },
-        testConfig(),
-        capture.deps(),
-    );
-    try std.testing.expectEqual(usage_failure, result);
-    try std.testing.expectEqualStrings(
-        "{\"kind\":\"upgrade\",\"error\":\"invalid arguments\",\"code\":\"InvalidUpgradeArgs\"}\n",
-        capture.stdout.written(),
-    );
-    try std.testing.expectEqualStrings("", capture.stderr.written());
-}
-
 test "parse session list args supports bounded canonical pagination" {
     const empty = try parseSessionListArgs(&.{});
     try std.testing.expectEqual(output_contracts.OutputFormat.text, empty.format);
@@ -5229,188 +4542,16 @@ test "parse session recovery args accepts exact ids and rejects ambiguity" {
     );
 }
 
-test "parse resume args defaults to last owns ids and rejects invalid input" {
-    const implicit = try parseResumeArgs(std.testing.allocator, &.{}, false);
-    try std.testing.expectEqual(ResumeTarget.last, implicit);
-
-    const explicit = try parseResumeArgs(std.testing.allocator, &.{@constCast("last")}, false);
-    try std.testing.expectEqual(ResumeTarget.last, explicit);
-
-    var target = try parseResumeArgs(std.testing.allocator, &.{@constCast(" session-123 ")}, false);
-    defer target.deinit(std.testing.allocator);
-    switch (target) {
-        .id => |value| try std.testing.expectEqualStrings("session-123", value),
-        else => return error.TestExpectedEqual,
-    }
-
-    try std.testing.expectError(error.InvalidResumeArgs, parseResumeArgs(std.testing.allocator, &.{ @constCast("a"), @constCast("b") }, false));
-    try std.testing.expectError(error.InvalidResumeArgs, parseResumeArgs(std.testing.allocator, &.{@constCast("   ")}, false));
-}
-
-test "removed resume spellings fail with a hint" {
-    const cases = [_]struct { args: []const [:0]const u8, top_level_alias: bool, err: anyerror }{
-        .{ .args = &.{ "--id", "release.2026.06" }, .top_level_alias = false, .err = error.RemovedResumeIdFlag },
-        .{ .args = &.{ "--resume", "--last" }, .top_level_alias = false, .err = error.RemovedResumeLastFlag },
-        .{ .args = &.{"--resume-last"}, .top_level_alias = true, .err = error.RemovedResumeLast },
-        .{ .args = &.{"--resume-session.123"}, .top_level_alias = true, .err = error.RemovedResumeIdAlias },
-    };
-    for (cases) |case| {
-        try std.testing.expectError(case.err, parseResumeArgs(std.testing.allocator, case.args, case.top_level_alias));
-        try std.testing.expect(removedResumeHint(case.err) != null);
-    }
-}
-
-test "parse resume args accepts an operand on the top-level resume flag" {
-    var target = try parseResumeArgs(std.testing.allocator, &.{
-        @constCast("--resume"),
-        @constCast("session-123"),
-    }, true);
-    defer target.deinit(std.testing.allocator);
-
-    switch (target) {
-        .remembered, .pick, .last => return error.TestExpectedExactResumeId,
-        .id => |id| try std.testing.expectEqualStrings("session-123", id),
-    }
-
-    const latest = try parseResumeArgs(std.testing.allocator, &.{
-        @constCast("--resume"),
-        @constCast("last"),
-    }, true);
-    try std.testing.expectEqual(ResumeTarget.last, latest);
-}
-
-test "parseInteractiveLaunch accepts legacy and revision-bearing upgrade relaunches" {
-    const alloc = std.testing.allocator;
-    const command_catalog = testCommandCatalog();
-    const revision = "abcdef0123456789abcdef0123456789abcdef01";
-
-    const cases = [_]struct {
-        args: []const [:0]const u8,
-        expected_revision: ?[]const u8,
-    }{
-        .{
-            .args = &.{ @constCast("resume"), @constCast("session-123"), @constCast("--upgrade-relaunch") },
-            .expected_revision = null,
-        },
-        .{
-            .args = &.{ @constCast("resume"), @constCast("session-123"), @constCast("--upgrade-relaunch"), @constCast(revision) },
-            .expected_revision = revision,
-        },
-    };
-
-    for (cases) |case| {
-        const parsed = try parseInteractiveLaunch(alloc, case.args, command_catalog);
-        switch (parsed) {
-            .interactive => |value| {
-                var launch = value;
-                defer launch.deinit(alloc);
-                const relaunch = launch.upgrade_relaunch orelse return error.TestExpectedUpgradeRelaunch;
-                if (case.expected_revision) |expected| {
-                    try std.testing.expectEqualStrings(expected, relaunch.previous_revision.?);
-                } else try std.testing.expect(relaunch.previous_revision == null);
-            },
-            .noninteractive => |value| {
-                var noninteractive = value;
-                defer noninteractive.deinit(alloc);
-                return error.TestExpectedInteractiveLaunch;
-            },
-        }
-    }
-
-    try std.testing.expectError(
-        error.InvalidResumeArgs,
-        parseInteractiveLaunch(alloc, &.{
-            @constCast("resume"),
-            @constCast("session-123"),
-            @constCast("--upgrade-relaunch"),
-            @constCast("not-a-revision"),
-        }, command_catalog),
-    );
-}
-
-test "parseInteractiveLaunch shares native resume grammar" {
-    const alloc = std.testing.allocator;
-    const command_catalog = testCommandCatalog();
-    const cases = [_]struct {
-        args: []const [:0]const u8,
-        expected_id: ?[]const u8,
-    }{
-        .{ .args = &.{ @constCast("--resume"), @constCast("last") }, .expected_id = null },
-        .{ .args = &.{ @constCast("--resume"), @constCast("session-123") }, .expected_id = "session-123" },
-        .{ .args = &.{@constCast("--resume=session-123")}, .expected_id = "session-123" },
-        .{ .args = &.{ @constCast("-r"), @constCast("last") }, .expected_id = null },
-        .{ .args = &.{ @constCast("-r"), @constCast("session-123") }, .expected_id = "session-123" },
-        .{ .args = &.{ @constCast("session"), @constCast("resume"), @constCast("last") }, .expected_id = null },
-        .{ .args = &.{ @constCast("session"), @constCast("resume"), @constCast("session.v3") }, .expected_id = "session.v3" },
-    };
-    for (cases) |case| {
-        const parsed = try parseInteractiveLaunch(alloc, case.args, command_catalog);
-        switch (parsed) {
-            .interactive => |value| {
-                var launch = value;
-                defer launch.deinit(alloc);
-                const target = launch.requested_resume orelse return error.TestExpectedResumeTarget;
-                if (case.expected_id) |expected_id| switch (target) {
-                    .id => |id| try std.testing.expectEqualStrings(expected_id, id),
-                    .remembered, .pick, .last => return error.TestExpectedExactResumeId,
-                } else try std.testing.expectEqual(ResumeTarget.last, target);
-            },
-            .noninteractive => |value| {
-                var noninteractive = value;
-                defer noninteractive.deinit(alloc);
-                return error.TestExpectedInteractiveLaunch;
-            },
-        }
-    }
-
-    try std.testing.expectError(
-        error.InvalidResumeArgs,
-        parseInteractiveLaunch(
-            alloc,
-            &.{ @constCast("--resume"), @constCast("one"), @constCast("a prompt"), @constCast("three") },
-            command_catalog,
-        ),
-    );
-    try std.testing.expectError(
-        error.InvalidFlag,
-        parseInteractiveLaunch(alloc, &.{@constCast("--add-dir")}, command_catalog),
-    );
-}
-
-test "workflow drafts come only from the completed final response" {
-    const alloc = std.testing.allocator;
-    const final = "Add greeting constant\n\n## Summary\n\n- Export `greeting` from **greeting.ts**.";
-
-    const draft = try draftFromRun(alloc, .{
-        .exit_code = 0,
-        .assistant_output = @constCast("Let me look at the branch first.\n\n" ++ final),
-        .final_source = @constCast(final),
-    });
-    defer draft.deinit(alloc);
-    try std.testing.expectEqualStrings("Add greeting constant", draft.title);
-    try std.testing.expectEqualStrings("## Summary\n\n- Export `greeting` from **greeting.ts**.", draft.body);
-
-    for ([_][]const u8{ "", "Done." }) |final_source| {
-        try std.testing.expectError(error.InvalidGithubDraft, draftFromRun(alloc, .{
-            .exit_code = 0,
-            .assistant_output = @constCast("Let me look at the branch first."),
-            .final_source = @constCast(final_source),
-        }));
-    }
-}
-
 test "parse workflow args consumes leading flags and joins remaining context exactly" {
     var bad: ?BadAgentValue = null;
-    var opts = try parseWorkflowArgs(std.testing.allocator, &.{ "--auto", "--create", "ready", "for", "review" }, &bad);
+    var opts = try parseWorkflowArgs(std.testing.allocator, &.{ "--auto", "ready", "for", "review" }, &bad);
     defer opts.deinit(std.testing.allocator);
     try std.testing.expectEqual(types.PermissionMode.auto, opts.agent.permission.?);
-    try std.testing.expect(opts.create);
     try std.testing.expectEqualStrings("ready for review", opts.context);
 
     var later_flag = try parseWorkflowArgs(std.testing.allocator, &.{ "context", "--auto" }, &bad);
     defer later_flag.deinit(std.testing.allocator);
     try std.testing.expect(later_flag.agent.permission == null);
-    try std.testing.expect(!later_flag.create);
     try std.testing.expectEqualStrings("context --auto", later_flag.context);
 
     var empty = try parseWorkflowArgs(std.testing.allocator, &.{}, &bad);
@@ -5424,9 +4565,8 @@ test "pr and issue reject a flag they don't take instead of sending it as contex
     try std.testing.expectError(error.InvalidWorkflowArgs, parseWorkflowArgs(std.testing.allocator, &.{ "--auto", "--add-dir", "/tmp" }, &bad));
     try std.testing.expectError(error.InvalidWorkflowArgs, parseWorkflowArgs(std.testing.allocator, &.{ "--config", "fast_mode=true" }, &bad));
 
-    var dashed = try parseWorkflowArgs(std.testing.allocator, &.{ "--create", "--", "--verbose", "is", "gone" }, &bad);
+    var dashed = try parseWorkflowArgs(std.testing.allocator, &.{ "--", "--verbose", "is", "gone" }, &bad);
     defer dashed.deinit(std.testing.allocator);
-    try std.testing.expect(dashed.create);
     try std.testing.expectEqualStrings("--verbose is gone", dashed.context);
 }
 
@@ -5525,7 +4665,7 @@ test "workspace launch modifiers still reject unsupported local command help" {
     );
     try std.testing.expectEqual(usage_failure, result);
     try std.testing.expectEqualStrings("", capture.stdout.written());
-    try std.testing.expect(std.mem.find(u8, capture.stderr.written(), "only supported for interactive, resume, ask, ACP, PR, and issue launches") != null);
+    try std.testing.expect(std.mem.find(u8, capture.stderr.written(), "only supported for ask, ACP, PR, and issue launches") != null);
 }
 
 test "global workspace launch option errors use user-facing copy" {
@@ -5694,9 +4834,7 @@ test "login --api-key stores a pasted key like setup, without the deprecation wa
 
 test "login arguments take one provider and --api-key only for vercel" {
     try std.testing.expectEqual(LoginArgs{}, try parseLoginArgs(&.{}));
-    try std.testing.expectEqual(LoginArgs{ .provider = .codex }, try parseLoginArgs(&.{"codex"}));
     try std.testing.expectEqual(LoginArgs{ .provider = .gateway, .api_key = true }, try parseLoginArgs(&.{ "--api-key", "vercel" }));
-    try std.testing.expectError(error.ApiKeyNeedsVercel, parseLoginArgs(&.{ "codex", "--api-key" }));
     try std.testing.expectError(error.InvalidLoginProviderArgs, parseLoginArgs(&.{ "vercel", "codex" }));
     try std.testing.expectError(error.InvalidLoginProviderArgs, parseLoginArgs(&.{"--bogus"}));
 }
@@ -5927,171 +5065,6 @@ test "runIfRequested invalid json local flags write json error" {
     try std.testing.expect(std.mem.find(u8, capture.stdout.written(), "\"code\":\"InvalidLocalSurfaceArgs\"") != null);
 }
 
-test "runIfRequested resume no args returns last target" {
-    var capture = CaptureOutput.init(std.testing.allocator);
-    defer capture.deinit();
-
-    const result = try runIfRequestedWithDeps(std.testing.allocator, &.{ @constCast("session"), @constCast("resume") }, testConfig(), capture.deps());
-    switch (result) {
-        .interactive => |launch| try std.testing.expectEqual(ResumeTarget.last, launch.requested_resume.?),
-        else => return error.TestExpectedEqual,
-    }
-    try std.testing.expectEqualStrings("", capture.stderr.written());
-}
-
-test "runIfRequested -r and a bare --resume ask which session to resume" {
-    const spellings = [_][]const [:0]const u8{
-        &.{@constCast("-r")},
-        &.{@constCast("--resume")},
-    };
-    for (spellings) |args| {
-        var capture = CaptureOutput.init(std.testing.allocator);
-        defer capture.deinit();
-
-        const result = try runIfRequestedWithDeps(
-            std.testing.allocator,
-            args,
-            testConfig(),
-            capture.deps(),
-        );
-        switch (result) {
-            .interactive => |launch| try std.testing.expectEqual(ResumeTarget.pick, launch.requested_resume.?),
-            else => return error.TestExpectedEqual,
-        }
-        try std.testing.expectEqualStrings("", capture.stdout.written());
-        try std.testing.expectEqualStrings("", capture.stderr.written());
-    }
-
-    var extra_capture = CaptureOutput.init(std.testing.allocator);
-    defer extra_capture.deinit();
-    const extra = try runIfRequestedWithDeps(
-        std.testing.allocator,
-        &.{ @constCast("-r"), @constCast("session.123"), @constCast("a prompt"), @constCast("extra") },
-        testConfig(),
-        extra_capture.deps(),
-    );
-    try std.testing.expectEqual(usage_failure, extra);
-}
-
-test "runIfRequested top-level resume aliases return the existing target" {
-    const aliases = [_][]const [:0]const u8{
-        &.{@constCast("--continue")},
-        &.{@constCast("-c")},
-    };
-    for (aliases) |args| {
-        var capture = CaptureOutput.init(std.testing.allocator);
-        defer capture.deinit();
-
-        const result = try runIfRequestedWithDeps(
-            std.testing.allocator,
-            args,
-            testConfig(),
-            capture.deps(),
-        );
-        switch (result) {
-            .interactive => |launch| {
-                try std.testing.expectEqual(ResumeTarget.remembered, launch.requested_resume.?);
-            },
-            else => return error.TestExpectedEqual,
-        }
-        try std.testing.expectEqualStrings("", capture.stdout.written());
-        try std.testing.expectEqualStrings("", capture.stderr.written());
-    }
-
-    var operand_capture = CaptureOutput.init(std.testing.allocator);
-    defer operand_capture.deinit();
-
-    const operand = try runIfRequestedWithDeps(
-        std.testing.allocator,
-        &.{ @constCast("--resume"), @constCast("session.123") },
-        testConfig(),
-        operand_capture.deps(),
-    );
-    switch (operand) {
-        .interactive => |launch_value| {
-            var launch = launch_value;
-            defer launch.deinit(std.testing.allocator);
-            switch (launch.requested_resume.?) {
-                .id => |id| try std.testing.expectEqualStrings("session.123", id),
-                .remembered, .pick, .last => return error.TestExpectedExactResumeId,
-            }
-        },
-        else => return error.TestExpectedEqual,
-    }
-}
-
-test "runIfRequested removed resume spellings exit with the replacement" {
-    const cases = [_]struct { args: []const [:0]const u8, stderr: []const u8 }{
-        .{ .args = &.{"--resume-session.123"}, .stderr = "fx: --resume-<id> was removed; use fx --resume <id>\n" },
-        .{ .args = &.{"--resume-"}, .stderr = "fx: --resume-<id> was removed; use fx --resume <id>\n" },
-        .{ .args = &.{ "--resume-last", "unexpected" }, .stderr = "fx: --resume-last was removed; use fx --resume last\n" },
-        .{ .args = &.{ "resume", "--resume", "--last" }, .stderr = "fx: fx resume was removed; use fx --resume [last|<id>] or fx session resume [last|<id>]\n" },
-        .{ .args = &.{ "resume", "--resume" }, .stderr = "fx: fx resume was removed; use fx --resume [last|<id>] or fx session resume [last|<id>]\n" },
-    };
-    for (cases) |case| {
-        var capture = CaptureOutput.init(std.testing.allocator);
-        defer capture.deinit();
-
-        const result = try runIfRequestedWithDeps(std.testing.allocator, case.args, testConfig(), capture.deps());
-        try std.testing.expectEqual(usage_failure, result);
-        try std.testing.expectEqualStrings(case.stderr, capture.stderr.written());
-    }
-}
-
-test "runIfRequested rejects malformed resume aliases with canonical usage" {
-    const cases = [_][]const [:0]const u8{
-        &.{ @constCast("--continue"), @constCast("unexpected"), @constCast("extra") },
-        &.{ @constCast("--resume"), @constCast("   ") },
-        &.{ @constCast("session"), @constCast("resume"), @constCast("a"), @constCast("b") },
-    };
-    for (cases) |args| {
-        var capture = CaptureOutput.init(std.testing.allocator);
-        defer capture.deinit();
-
-        const result = try runIfRequestedWithDeps(
-            std.testing.allocator,
-            args,
-            testConfig(),
-            capture.deps(),
-        );
-        try std.testing.expectEqual(usage_failure, result);
-        try std.testing.expectEqualStrings(
-            "usage: fx session resume [last|<id>] | -r, --resume [last|<id>] | --continue | -c\n",
-            capture.stderr.written(),
-        );
-    }
-}
-
-test "runIfRequested resume id returns owned id" {
-    var capture = CaptureOutput.init(std.testing.allocator);
-    defer capture.deinit();
-
-    const result = try runIfRequestedWithDeps(std.testing.allocator, &.{ @constCast("--resume"), @constCast("abc123") }, testConfig(), capture.deps());
-    switch (result) {
-        .interactive => |launch_value| {
-            var launch = launch_value;
-            defer launch.deinit(std.testing.allocator);
-            switch (launch.requested_resume.?) {
-                .id => |value| try std.testing.expectEqualStrings("abc123", value),
-                else => return error.TestExpectedEqual,
-            }
-        },
-        else => return error.TestExpectedEqual,
-    }
-}
-
-test "runIfRequested invalid resume writes usage" {
-    var capture = CaptureOutput.init(std.testing.allocator);
-    defer capture.deinit();
-
-    const result = try runIfRequestedWithDeps(std.testing.allocator, &.{ @constCast("--resume"), @constCast("a"), @constCast("b"), @constCast("c") }, testConfig(), capture.deps());
-    try std.testing.expectEqual(usage_failure, result);
-    try std.testing.expectEqualStrings(
-        "usage: fx session resume [last|<id>] | -r, --resume [last|<id>] | --continue | -c\n",
-        capture.stderr.written(),
-    );
-}
-
 test "runIfRequested takes one argument that isn't a command as the first prompt" {
     const cases = [_]struct {
         args: []const [:0]const u8,
@@ -6118,7 +5091,6 @@ test "runIfRequested takes one argument that isn't a command as the first prompt
         };
         defer launch.deinit(std.testing.allocator);
         try std.testing.expectEqualStrings(case.prompt, launch.initial_prompt.?);
-        try std.testing.expect(launch.requested_resume == null);
         if (case.model) |model| {
             try std.testing.expectEqualStrings(model, launch.modifiers.model_override.?);
         } else {
@@ -6126,57 +5098,6 @@ test "runIfRequested takes one argument that isn't a command as the first prompt
         }
         try std.testing.expectEqualStrings("", capture.stderr.written());
     }
-}
-
-test "runIfRequested takes a first prompt after a resume target" {
-    const cases = [_]struct {
-        args: []const [:0]const u8,
-        target: std.meta.Tag(ResumeTarget),
-        id: ?[]const u8 = null,
-    }{
-        .{ .args = &.{ @constCast("-c"), @constCast("fix it") }, .target = .remembered },
-        .{ .args = &.{ @constCast("--continue"), @constCast("fix it") }, .target = .remembered },
-        .{ .args = &.{ @constCast("-r"), @constCast("last"), @constCast("fix it") }, .target = .last },
-        .{ .args = &.{ @constCast("-r"), @constCast("session.123"), @constCast("fix it") }, .target = .id, .id = "session.123" },
-        .{ .args = &.{ @constCast("--resume"), @constCast("session.123"), @constCast("fix it") }, .target = .id, .id = "session.123" },
-        .{ .args = &.{ @constCast("--resume=last"), @constCast("fix it") }, .target = .last },
-        .{ .args = &.{ @constCast("--model"), @constCast("a"), @constCast("-c"), @constCast("fix it") }, .target = .remembered },
-    };
-    for (cases) |case| {
-        var capture = CaptureOutput.init(std.testing.allocator);
-        defer capture.deinit();
-
-        const result = try runIfRequestedWithDeps(std.testing.allocator, case.args, testConfig(), capture.deps());
-        var launch = switch (result) {
-            .interactive => |value| value,
-            else => return error.TestExpectedInteractiveLaunch,
-        };
-        defer launch.deinit(std.testing.allocator);
-        try std.testing.expectEqualStrings("fix it", launch.initial_prompt.?);
-        const target = launch.requested_resume.?;
-        try std.testing.expectEqual(case.target, std.meta.activeTag(target));
-        if (case.id) |id| try std.testing.expectEqualStrings(id, target.id);
-        try std.testing.expectEqualStrings("", capture.stderr.written());
-    }
-
-    // A second word after the prompt is a usage error. Launch flags may
-    // follow the target or the prompt; another test covers them.
-    const rejected = [_][]const [:0]const u8{
-        &.{ @constCast("-r"), @constCast("a"), @constCast("b"), @constCast("c") },
-        &.{ @constCast("-c"), @constCast("fix it"), @constCast("again") },
-    };
-    for (rejected) |args| {
-        var capture = CaptureOutput.init(std.testing.allocator);
-        defer capture.deinit();
-        const result = try runIfRequestedWithDeps(std.testing.allocator, args, testConfig(), capture.deps());
-        try std.testing.expectEqual(usage_failure, result);
-    }
-
-    var empty_capture = CaptureOutput.init(std.testing.allocator);
-    defer empty_capture.deinit();
-    const empty = try runIfRequestedWithDeps(std.testing.allocator, &.{ @constCast("-c"), @constCast(" ") }, testConfig(), empty_capture.deps());
-    try std.testing.expectEqual(usage_failure, empty);
-    try std.testing.expectEqualStrings("fx: the prompt is empty\n", empty_capture.stderr.written());
 }
 
 test "runIfRequested explains a first argument that is neither a command nor a prompt" {
@@ -6336,43 +5257,6 @@ test "runIfRequested models json describes each model from its catalog entry" {
             "\"efforts\":[\"low\",\"high\"],\"fast\":true,\"ultrafast\":true}]}\n",
         capture.stdout.written(),
     );
-}
-
-test "modelDetails lets the catalog entry decide and keeps Ultrafast to the Gateway" {
-    const Fallback = struct {
-        fn capabilities(_: []const u8) model_capabilities.Capabilities {
-            return .{
-                .supports_fast_mode = true,
-                .reasoning_efforts = .fromSlice(&.{types.ReasoningEffort.literal("medium")}),
-            };
-        }
-    };
-    var bundle = testConfig().provider_set.gateway;
-    bundle.fallback_model_capabilities_fn = Fallback.capabilities;
-    const entries = [_]model_catalog.ModelCatalogEntry{.{
-        .id = @constCast("openai/gpt-6-astra"),
-        .name = @constCast("GPT-6 Astra"),
-        .model_type = @constCast("language"),
-        .supports_ultrafast_mode = true,
-    }};
-    const ids = [_][]const u8{ "openai/gpt-6-astra", "provider/unlisted" };
-
-    const gateway = try modelDetails(std.testing.allocator, &ids, &entries, bundle, .gateway);
-    defer std.testing.allocator.free(gateway);
-    try std.testing.expectEqualStrings("GPT-6 Astra", gateway[0].name.?);
-    try std.testing.expect(gateway[0].ultrafast);
-    try std.testing.expect(!gateway[0].fast);
-    try std.testing.expectEqual(@as(usize, 0), gateway[0].efforts.len);
-    try std.testing.expectEqual(@as(?[]const u8, null), gateway[1].name);
-    try std.testing.expect(gateway[1].fast);
-    try std.testing.expectEqualStrings("medium", gateway[1].efforts.slice()[0].label());
-
-    const codex = try modelDetails(std.testing.allocator, &ids, &entries, bundle, .codex);
-    defer std.testing.allocator.free(codex);
-    try std.testing.expect(!codex[0].ultrafast);
-
-    const undescribed = try modelDetails(std.testing.allocator, &ids, &.{}, bundle, .gateway);
-    try std.testing.expectEqual(@as(usize, 0), undescribed.len);
 }
 
 test "runIfRequested credits renders through the configured provider" {
@@ -6549,7 +5433,7 @@ test "writeRenderedJsonLine renders doctor json through output contract" {
 
     var checks = [_]doctor_runtime.Check{
         .{ .name = "auth", .status = .ok, .detail = "AI_GATEWAY_API_KEY is configured" },
-        .{ .name = "gh", .status = .warn, .detail = "GitHub CLI not found in PATH" },
+        .{ .name = "git", .status = .warn, .detail = "not a git repository; pr/issue workflows will be limited" },
     };
     const snapshot = doctor_runtime.Snapshot{
         .workspace_root = @constCast("/tmp/fx"),
@@ -6569,7 +5453,7 @@ test "writeRenderedJsonLine renders doctor json through output contract" {
     );
 
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"doctor\",\"ok_count\":1,\"warn_count\":1,\"fail_count\":0,\"workspace\":\"/tmp/fx\",\"model\":\"test-model\",\"auth\":\"AI_GATEWAY_API_KEY\",\"auth_refreshable\":false,\"permission_mode\":\"auto\",\"agent_step_limit\":42,\"checks\":[{\"name\":\"auth\",\"status\":\"ok\",\"detail\":\"AI_GATEWAY_API_KEY is configured\"},{\"name\":\"gh\",\"status\":\"warn\",\"detail\":\"GitHub CLI not found in PATH\"}]}\n",
+        "{\"kind\":\"doctor\",\"ok_count\":1,\"warn_count\":1,\"fail_count\":0,\"workspace\":\"/tmp/fx\",\"model\":\"test-model\",\"auth\":\"AI_GATEWAY_API_KEY\",\"auth_refreshable\":false,\"permission_mode\":\"auto\",\"agent_step_limit\":42,\"checks\":[{\"name\":\"auth\",\"status\":\"ok\",\"detail\":\"AI_GATEWAY_API_KEY is configured\"},{\"name\":\"git\",\"status\":\"warn\",\"detail\":\"not a git repository; pr/issue workflows will be limited\"}]}\n",
         capture.stdout.written(),
     );
 }
@@ -6982,4 +5866,37 @@ const CreditsProviderProbe = struct {
 
 fn ownedCreditsErrorSnapshot(alloc: Allocator, message: []const u8) output_contracts.CreditsSnapshot {
     return .{ .err_message = alloc.dupe(u8, message) catch null };
+}
+
+test "modelDetails lets the catalog entry decide and keeps Ultrafast to the Gateway" {
+    const Fallback = struct {
+        fn capabilities(_: []const u8) model_capabilities.Capabilities {
+            return .{
+                .supports_fast_mode = true,
+                .reasoning_efforts = .fromSlice(&.{types.ReasoningEffort.literal("medium")}),
+            };
+        }
+    };
+    var bundle = testConfig().provider_set.gateway;
+    bundle.fallback_model_capabilities_fn = Fallback.capabilities;
+    const entries = [_]model_catalog.ModelCatalogEntry{.{
+        .id = @constCast("openai/gpt-6-astra"),
+        .name = @constCast("GPT-6 Astra"),
+        .model_type = @constCast("language"),
+        .supports_ultrafast_mode = true,
+    }};
+    const ids = [_][]const u8{ "openai/gpt-6-astra", "provider/unlisted" };
+
+    const gateway = try modelDetails(std.testing.allocator, &ids, &entries, bundle, .gateway);
+    defer std.testing.allocator.free(gateway);
+    try std.testing.expectEqualStrings("GPT-6 Astra", gateway[0].name.?);
+    try std.testing.expect(gateway[0].ultrafast);
+    try std.testing.expect(!gateway[0].fast);
+    try std.testing.expectEqual(@as(usize, 0), gateway[0].efforts.len);
+    try std.testing.expectEqual(@as(?[]const u8, null), gateway[1].name);
+    try std.testing.expect(gateway[1].fast);
+    try std.testing.expectEqualStrings("medium", gateway[1].efforts.slice()[0].label());
+
+    const undescribed = try modelDetails(std.testing.allocator, &ids, &.{}, bundle, .gateway);
+    try std.testing.expectEqual(@as(usize, 0), undescribed.len);
 }

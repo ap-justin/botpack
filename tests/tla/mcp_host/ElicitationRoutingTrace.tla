@@ -1,7 +1,6 @@
 ---- MODULE ElicitationRoutingTrace ----
 \* Trace wrapper for ElicitationRouting.tla. trace.ts generates TraceObs from
-\* a real `fx ask` in a terminal against the harness's 2025 stdio fixture
-\* (tests/tla/drivers/mcp_host/). Questions are numbered in the order the fixture
+\* records of the harness's 2025 stdio fixture (tests/tla/drivers/mcp_host/models.test.ts). Questions are numbered in the order the fixture
 \* sent them; each form asks for one string, and the harness answers with
 \* "for-<n>" naming the question it saw, so the fixture's log says whose
 \* answer reached which question.

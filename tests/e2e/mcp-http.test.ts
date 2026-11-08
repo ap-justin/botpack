@@ -26,9 +26,7 @@ import {
   fakeGatewayToolCall,
   startDynamicFakeGateway,
   startFakeGateway,
-  TmuxSession,
-  tmuxAvailable,
-} from "./tmux-helpers";
+} from "./fake-gateway";
 
 const MODEL = "openai/gpt-5";
 const TOOL_NAME = "mcp_fixture_echo";
@@ -39,24 +37,20 @@ let contentLengthFixture: Awaited<
   ReturnType<typeof startContentLengthMcpHttpFixture>
 > | null = null;
 let gateway: ReturnType<typeof startFakeGateway> | null = null;
-let tui: TmuxSession | null = null;
 let proxy: Awaited<ReturnType<typeof startIdleDropProxy>> | null = null;
 
 afterEach(async () => {
-  const activeTui = tui;
   const activeGateway = gateway;
   const activeFixture = fixture;
   const activeContentLengthFixture = contentLengthFixture;
   const activeProxy = proxy;
   const activeCleanupRoot = cleanupRoot;
-  tui = null;
   gateway = null;
   fixture = null;
   contentLengthFixture = null;
   proxy = null;
   cleanupRoot = null;
 
-  if (activeTui) await activeTui.kill();
   activeGateway?.stop();
   activeProxy?.stop();
   activeFixture?.stop();
@@ -963,57 +957,6 @@ describe("modern MCP Streamable HTTP", () => {
     assertModernWire(fixture);
   }, 30_000);
 
-  test.skipIf(!tmuxAvailable())(
-    "the TUI resumes a modern HTTP operation after validated form elicitation",
-    async () => {
-      fixture = startModernMcpHttpFixture("mrtr_form");
-      const root = createRoot("tui-mrtr-form", fixture);
-      gateway = startToolGateway("HTTP form elicitation complete.");
-      const stderrPath = join(root.root, "stderr.log");
-      tui = await TmuxSession.create({
-        isolated: true,
-        cwd: root.workspace,
-        width: 110,
-        height: 32,
-        stderrPath,
-        env: fixtureEnv(root, gateway),
-      });
-
-      await tui.waitForComposer(15_000);
-      await tui.sendText("Call the HTTP MCP fixture.");
-      await tui.waitForText("MCP server fixture requests confirmed", 20_000);
-      await tui.sendKeys("1");
-      await tui.waitForText("Current values:", 20_000);
-      await tui.sendKeys("1");
-      await tui.waitForText("HTTP form elicitation complete.", 20_000);
-
-      const calls = fixture.requests.filter((entry) =>
-        entry.message.method === "tools/call"
-      );
-      expect(calls).toHaveLength(2);
-      expect(calls[1]?.message.id).not.toBe(calls[0]?.message.id);
-      expect(calls[1]?.message.params?.name).toBe(calls[0]?.message.params?.name);
-      expect(calls[1]?.message.params?.arguments).toEqual(
-        calls[0]?.message.params?.arguments,
-      );
-      expect(calls[1]?.message.params?.inputResponses).toEqual({
-        confirm: { action: "accept", content: { confirmed: true } },
-      });
-      expect(calls[1]?.message.params?.requestState).toBe("http-opaque");
-      expect(calls[0]?.message.params?._meta?.[
-        "io.modelcontextprotocol/clientCapabilities"
-      ]).toEqual({ elicitation: { form: {}, url: {} } });
-      expect(calls[1]?.message.params?._meta?.[
-        "io.modelcontextprotocol/clientCapabilities"
-      ]).toEqual({ elicitation: { form: {}, url: {} } });
-      expect(gateway.requests[2]?.body).toContain(
-        "HTTP continued after elicitation",
-      );
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-    },
-    30_000,
-  );
-
   test("mixed SSE delimiters complete across chunks without waiting for EOF", async () => {
     fixture = startModernMcpHttpFixture("sse_mixed_delimiters");
     const root = createRoot("mixed-sse-delimiters", fixture, 1_000);
@@ -1241,43 +1184,5 @@ describe("modern MCP Streamable HTTP", () => {
     expect(heldOpen.requests.filter((entry) => entry.message.method === "tools/call")).toHaveLength(1);
     expect(closedWhileRunning).toBe(1);
   }, 30_000);
-
-  test.skipIf(!tmuxAvailable())(
-    "TUI cancellation closes the in-flight HTTP response",
-    async () => {
-      fixture = startModernMcpHttpFixture("stall_call");
-      const root = createRoot("cancel", fixture, 30_000);
-      gateway = startToolGateway("Cancelled HTTP MCP complete.");
-      tui = await TmuxSession.create({
-        isolated: true,
-        cwd: root.workspace,
-        width: 100,
-        height: 30,
-        env: fixtureEnv(root, gateway),
-      });
-
-      await tui.waitForComposer(15_000);
-      await tui.sendText("Call the stalled HTTP fixture.");
-      const callDeadline = Date.now() + 15_000;
-      while (
-        !fixture.requests.some((entry) => entry.message.method === "tools/call") &&
-        Date.now() < callDeadline
-      ) {
-        await Bun.sleep(25);
-      }
-      expect(
-        fixture.requests.some((entry) => entry.message.method === "tools/call"),
-      ).toBe(true);
-
-      await tui.sendInterruptEscapePair(10_000);
-      await tui.waitForText(`Cancelled ${TOOL_NAME}`, 10_000);
-      const cancelDeadline = Date.now() + 5_000;
-      while (fixture.cancelledCalls === 0 && Date.now() < cancelDeadline) {
-        await Bun.sleep(25);
-      }
-      expect(fixture.cancelledCalls).toBe(1);
-    },
-    40_000,
-  );
 
 });

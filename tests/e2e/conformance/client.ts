@@ -14,7 +14,7 @@ import {
   fakeGatewayFinalText,
   fakeGatewayToolCall,
   startFakeGateway,
-} from "../tmux-helpers";
+} from "../fake-gateway";
 
 const serverUrl = process.argv[2];
 if (!serverUrl) {

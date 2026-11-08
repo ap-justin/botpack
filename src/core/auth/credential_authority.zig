@@ -17,6 +17,7 @@ pub fn derive(
     source: types.CredentialSource,
     account_id: ?[]const u8,
 ) ?Identity {
+    _ = account_id;
     var hash = Sha256.init(.{});
     hash.update("fx-credential-authority-v1\x00");
     hash.update(@tagName(source));
@@ -28,30 +29,14 @@ pub fn derive(
         .host_managed,
         .configured,
         => hash.update("\x00slot\x00"),
-        .chatgpt_subscription,
-        .grok_subscription,
-        => {
-            const account = account_id orelse return null;
-            if (account.len == 0) return null;
-            hash.update("\x00account\x00");
-            hash.update(account);
-        },
     }
     var bytes: [Sha256.digest_length]u8 = undefined;
     hash.final(&bytes);
     return .{ .bytes = bytes };
 }
 
-test "credential authority uses account identity for provider subscriptions" {
-    const first = derive(.chatgpt_subscription, "acct_1").?;
-    const refreshed = derive(.chatgpt_subscription, "acct_1").?;
-    const other = derive(.chatgpt_subscription, "acct_2").?;
-    try std.testing.expect(first.eql(refreshed));
-    try std.testing.expect(!first.eql(other));
-    try std.testing.expect(derive(.chatgpt_subscription, null) == null);
-    try std.testing.expect(derive(.grok_subscription, "") == null);
+test "credential authority is a 32 byte digest" {
     try std.testing.expect(@sizeOf(Identity) == 32);
-    _ = types.CredentialSource;
 }
 
 test "credential authority uses non-secret Gateway credential slots" {

@@ -6,8 +6,6 @@ const command_admission = @import("../permissions/command_admission.zig");
 const agent_runtime = @import("../agent/agent_runtime.zig");
 const agent_stream_provider = @import("../agent/stream_provider.zig");
 const app_lifecycle = @import("../app/app_lifecycle.zig");
-const shared_theme = @import("../shared/theme.zig");
-const ui_render = @import("../../ui/render.zig");
 const app_runtime_setup = @import("../app/app_runtime_setup.zig");
 const auth_runtime = @import("../auth/auth_runtime.zig");
 const credentials = @import("../auth/credentials.zig");
@@ -101,7 +99,6 @@ const web_search_runtime = @import("../tooling/web_search_runtime.zig");
 const types = @import("../shared/types.zig");
 const history_range = @import("../shared/history_range.zig");
 const worker_runtime = @import("../agent/worker_runtime.zig");
-const ask_presentation = @import("../../ui/ask_presentation.zig");
 const url_opener = @import("../hosts/url_opener.zig");
 
 const Allocator = std.mem.Allocator;
@@ -510,12 +507,6 @@ const OutputMode = enum {
     quiet,
     json,
     raw,
-    terminal,
-    terminal_no_color,
-
-    fn isTerminal(self: OutputMode) bool {
-        return self == .terminal or self == .terminal_no_color;
-    }
 
     fn capturesJson(self: OutputMode) bool {
         return self == .json;
@@ -675,7 +666,6 @@ const AskContext = struct {
     auth_failure: ?auth_runtime.FailureSnapshot = null,
     output_mode: OutputMode = .raw,
     prompt_permissions: bool = false,
-    presenter: ?*ask_presentation.Runtime = null,
     pending_tool_progress: std.ArrayList(PendingToolProgress) = .empty,
     deferred_tool_progress: std.ArrayList([]u8) = .empty,
     pending_tool_progress_mutex: std.Io.Mutex = .init,
@@ -1220,20 +1210,10 @@ pub fn run(alloc: Allocator, args: []const [:0]const u8, cfg: Config, context_re
     });
 }
 
-fn selectOutputMode(quiet: bool, json: bool, stdout_is_tty: bool, no_color: bool) OutputMode {
+fn selectOutputMode(quiet: bool, json: bool) OutputMode {
     if (json) return .json;
     if (quiet) return .quiet;
-    if (!stdout_is_tty) return .raw;
-    return if (no_color) .terminal_no_color else .terminal;
-}
-
-fn askElicitationCapabilities(
-    output_mode: OutputMode,
-    stdin_is_tty: bool,
-    stderr_is_tty: bool,
-) @import("../mcp/elicitation.zig").Capabilities {
-    if (!output_mode.isTerminal() or !stdin_is_tty or !stderr_is_tty) return .{};
-    return .{ .form = true, .url = true };
+    return .raw;
 }
 
 fn checkHeadlessCancellation(deps: RunDeps) !void {
@@ -1250,6 +1230,20 @@ fn writeAskUsage(deps: RunDeps, usage: []const u8) !void {
     try deps.write_stderr(deps.stderr_ctx, "usage: fx ");
     try deps.write_stderr(deps.stderr_ctx, usage);
     try deps.write_stderr(deps.stderr_ctx, "\n");
+}
+
+/// The provider settings select, to name it in an error; null when none is
+/// saved or the file can't be read again. Caller owns the result.
+fn savedProviderName(alloc: Allocator) error{OutOfMemory}!?[]u8 {
+    const workspace_root = io_mod.realpathAlloc(alloc, ".") catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return null,
+    };
+    defer alloc.free(workspace_root);
+    return config_runtime.savedProviderNameAlloc(alloc, workspace_root) catch |err| switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        else => null,
+    };
 }
 
 fn askErrorNotice(err: anyerror) ?[]const u8 {
@@ -1353,12 +1347,7 @@ fn runWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Config, deps: 
 
     // NO_COLOR and TERM=dumb turn color off, like --no-color.
     const no_color = options.no_color or terminal_env.colorDisabled();
-    const output_mode = selectOutputMode(
-        options.quiet,
-        options.json_output,
-        deps.stdout_is_tty(deps.stdout_ctx),
-        no_color,
-    );
+    const output_mode = selectOutputMode(options.quiet, options.json_output);
     const result = runPromptInternal(alloc, options.prompt, options.agent.permission, effective_cfg, .{
         .output_mode = output_mode,
         .prompt_permissions = options.prompt_permissions,
@@ -1391,7 +1380,12 @@ fn runWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Config, deps: 
             // settings file, it's a failure to run.
             const from_flag = options.agent.provider != null;
             const code: u8 = if (from_flag) output_contracts.usage_exit_code else 1;
-            const name = if (options.agent.provider) |provider| provider.label() else config_runtime.providerEnvOverride() orelse "";
+            const saved_name = if (from_flag or config_runtime.providerEnvOverride() != null)
+                null
+            else
+                try savedProviderName(alloc);
+            defer if (saved_name) |owned| alloc.free(owned);
+            const name = if (options.agent.provider) |provider| provider.label() else config_runtime.providerEnvOverride() orelse saved_name orelse "";
             if (options.json_output) {
                 const json = try renderErrorJsonResult(alloc, @errorName(err), code);
                 defer alloc.free(json);
@@ -1530,7 +1524,7 @@ fn missingCredentialResult(
     const status = auth_runtime.StatusSnapshot{
         .required_source = auth_runtime.requestedSource(provider, preferred),
     };
-    const message = status.missingHelp(.cli).?;
+    const message = status.missingHelp().?;
     try options.deps.write_stderr(options.deps.stderr_ctx, "fx ask: ");
     try options.deps.write_stderr(options.deps.stderr_ctx, message);
     try options.deps.write_stderr(options.deps.stderr_ctx, "\n");
@@ -1571,7 +1565,6 @@ fn runPromptInternal(alloc: Allocator, prompt: []const u8, permission_override: 
             options.settings_overrides,
         );
     defer startup.deinit(alloc);
-    applyAskThemeChoice(startup.theme);
     cfg.provider_set.definitions = startup.configured_providers.definitions;
     // Bind gateway chat traffic to a per-process connection pool and warm one
     // connection in the background while the rest of startup continues.
@@ -1642,17 +1635,10 @@ fn runPromptInternal(alloc: Allocator, prompt: []const u8, permission_override: 
     defer ctx.deinit();
     ctx.use_process_interrupt_flag = options.deps.install_headless_interrupt;
     try ctx.checkCancellation();
-    var presenter: ?ask_presentation.Runtime = null;
-    defer if (presenter) |*value| value.deinit();
     var worker_events_drained = false;
     ctx.workspace_access = startup.takeWorkspaceAccess();
     ctx.output_mode = options.output_mode;
     ctx.prompt_permissions = options.prompt_permissions;
-    ctx.mcp_elicitation_capabilities = askElicitationCapabilities(
-        options.output_mode,
-        options.deps.stdin_is_tty(options.deps.stdin_ctx),
-        options.deps.stderr_is_tty(options.deps.stderr_ctx),
-    );
     ctx.command_timeout_ms = options.command_timeout_ms;
     ctx.model = startup.selected_model;
     ctx.provider = startup.provider;
@@ -1675,13 +1661,6 @@ fn runPromptInternal(alloc: Allocator, prompt: []const u8, permission_override: 
     ctx.mode_id = mode_id;
     ctx.permission_rules = try takeCorePermissionRules(alloc, &startup);
     ctx.context_enabled = startup.context_enabled;
-    if (options.output_mode.isTerminal()) {
-        presenter = try ask_presentation.Runtime.init(alloc, .{
-            .text = owned_prompt,
-            .images = @constCast(options.images),
-        }, options.output_mode == .terminal_no_color);
-        ctx.presenter = &presenter.?;
-    }
     try ctx.configureNotifications(
         startup.notification_turn_end,
         startup.notification_attention_required,
@@ -1882,7 +1861,7 @@ fn runPromptInternal(alloc: Allocator, prompt: []const u8, permission_override: 
     };
 
     const deps = agentRuntimeDeps(&ctx);
-    const semantic_presentation = if (ctx.presenter) |value| value.semanticSink() else null;
+    const semantic_presentation: ?agent_runtime.SemanticPresentationSink = null;
     try ctx.checkCancellation();
     const title_task = maybeStartAskTitleTask(
         &ctx,
@@ -1947,7 +1926,6 @@ fn runPromptInternal(alloc: Allocator, prompt: []const u8, permission_override: 
         if (try runAskTurn(&ctx, alloc, options, &deps, semantic_presentation, turn_config, follow)) |early| return early;
     }
     worker_events_drained = true;
-    if (ctx.presenter) |value| try value.finish();
 
     return takePromptRunResult(&ctx, alloc);
 }
@@ -2126,7 +2104,7 @@ fn agentRuntimeDeps(ctx: *AskContext) agent_runtime.AgentRuntimeDeps {
     return .{
         .ctx = @ptrCast(ctx),
         .agent_stream_provider = ctx.agentStreamProvider(),
-        .render_assistant_text = ctx.output_mode.isTerminal(),
+        .render_assistant_text = false,
         .tool_registry = ctx.toolRegistry(),
         .context_registry = ctx.deps.context_registry,
         .context_enabled = ctx.context_enabled,
@@ -2605,7 +2583,7 @@ fn cliPermissionPromptAllowed(
     stdin_is_tty: bool,
 ) bool {
     return switch (output_mode) {
-        .raw, .terminal, .terminal_no_color => true,
+        .raw => true,
         .json, .quiet => prompt_permissions and stdin_is_tty,
     };
 }
@@ -3162,20 +3140,13 @@ fn pushText(raw_ctx: *anyopaque, emission: agent_runtime.TextEmission) !void {
                 try ctx.writeStderr(text);
             },
             .quiet => try ctx.writeStderr(text),
-            .terminal, .terminal_no_color => try ctx.presenter.?.pushText(text),
         },
         .assistant_source => |text| switch (ctx.output_mode) {
             .raw, .json => try pushRawAssistantText(ctx, text),
-            .quiet, .terminal, .terminal_no_color => {},
+            .quiet => {},
         },
-        .assistant_rendered => |text| switch (ctx.output_mode) {
-            .terminal, .terminal_no_color => try ctx.presenter.?.pushText(text),
-            .quiet, .json, .raw => {},
-        },
-        .operational => |text| switch (ctx.output_mode) {
-            .terminal, .terminal_no_color => try ctx.presenter.?.pushText(text),
-            .quiet, .json, .raw => try ctx.writeStderr(text),
-        },
+        .assistant_rendered => {},
+        .operational => |text| try ctx.writeStderr(text),
     }
 }
 
@@ -3224,30 +3195,23 @@ fn writeRawAssistantBytes(ctx: *AskContext, text: []const u8) !void {
 
 fn pushToolLifecycle(raw_ctx: *anyopaque, event: types.ToolLifecycleEvent) !void {
     const ctx: *AskContext = @ptrCast(@alignCast(raw_ctx));
-    if (ctx.output_mode.isTerminal()) {
-        try ctx.presenter.?.pushToolLifecycle(event);
-    }
     switch (event) {
-        .provisional => |provisional| if (!ctx.output_mode.isTerminal()) {
+        .provisional => |provisional| {
             if (provisional.tool_name) |tool_name| {
                 try beginPendingToolProgress(ctx, provisional.id.call_id, tool_name);
             }
         },
         .authoritative_started => |started| {
             ctx.step_count += 1;
-            if (!ctx.output_mode.isTerminal()) {
-                try beginPendingToolProgress(ctx, started.id.call_id, started.tool_name);
-            }
+            try beginPendingToolProgress(ctx, started.id.call_id, started.tool_name);
             if (ctx.raw_has_output) ctx.raw_boundary_pending = true;
         },
-        .progress => |progress| if (!ctx.output_mode.isTerminal()) {
+        .progress => |progress| {
             try publishPendingToolProgress(ctx, progress.id.call_id, progress.text);
         },
-        .turn_finished => if (!ctx.output_mode.isTerminal()) clearPendingToolProgress(ctx),
+        .turn_finished => clearPendingToolProgress(ctx),
         .terminal => |value| {
-            if (!ctx.output_mode.isTerminal()) {
-                try settlePendingToolProgress(ctx, value.id.call_id, value.outcome);
-            }
+            try settlePendingToolProgress(ctx, value.id.call_id, value.outcome);
             // Report a fallback right after the command it affected; a later
             // recapture in the same run would otherwise clear it unseen.
             writeShellSnapshotNotice(ctx);
@@ -3352,7 +3316,6 @@ fn clearPendingToolProgress(ctx: *AskContext) void {
 
 fn onWebSearchProgress(raw_ctx: *anyopaque, _: []const u8, progress: types.WebSearchProgress) void {
     const ctx: *AskContext = @ptrCast(@alignCast(raw_ctx));
-    if (ctx.output_mode.isTerminal()) return;
     const alloc = std.heap.c_allocator;
     const line = tool_presentation.formatWebSearchProgressPlain(alloc, progress) catch return;
     defer alloc.free(line);
@@ -3363,7 +3326,6 @@ fn onWebSearchProgress(raw_ctx: *anyopaque, _: []const u8, progress: types.WebSe
 
 fn onWebFetchProgress(raw_ctx: *anyopaque, _: []const u8, progress: types.WebFetchProgress) void {
     const ctx: *AskContext = @ptrCast(@alignCast(raw_ctx));
-    if (ctx.output_mode.isTerminal()) return;
     const alloc = std.heap.c_allocator;
     const line = tool_presentation.formatWebFetchProgressPlain(alloc, progress) catch return;
     defer alloc.free(line);
@@ -3374,11 +3336,6 @@ fn onWebFetchProgress(raw_ctx: *anyopaque, _: []const u8, progress: types.WebFet
 
 fn pushSystemNotice(raw_ctx: *anyopaque, text: []const u8) !void {
     const ctx: *AskContext = @ptrCast(@alignCast(raw_ctx));
-    if (ctx.presenter) |presenter| return presenter.pushNotice(.{
-        .topic = "system",
-        .tone = .neutral,
-        .body = text,
-    });
     try ctx.writeStderr("[notice] ");
     try ctx.writeStderr(text);
     try ctx.writeStderr("\n");
@@ -3387,16 +3344,6 @@ fn pushSystemNotice(raw_ctx: *anyopaque, text: []const u8) !void {
 fn pushContextNotice(raw_ctx: *anyopaque, text: []const u8) !void {
     const ctx: *AskContext = @ptrCast(@alignCast(raw_ctx));
     if (!try ctx.session.claimContextNotice(ctx.alloc, text)) return;
-    if (ctx.presenter) |presenter| {
-        const body = try types.renderContextNoticeBody(ctx.alloc, text);
-        defer ctx.alloc.free(body);
-        return presenter.pushNotice(.{
-            .topic = "context",
-            .tone = .warning,
-            .body = body,
-            .visibility = .full_only,
-        });
-    }
     try pushSystemNotice(raw_ctx, text);
 }
 
@@ -3434,14 +3381,13 @@ fn pushRouteRecoveryStatus(raw_ctx: *anyopaque, status: types.RouteRecoveryStatu
 
 fn pushDiffBlock(raw_ctx: *anyopaque, payload: agent_runtime.DiffEntryPayload) !void {
     const ctx: *AskContext = @ptrCast(@alignCast(raw_ctx));
-    if (ctx.presenter) |presenter| return presenter.pushDiffBlock(payload);
     defer diff_mod.freeDiffEntryPayload(std.heap.c_allocator, payload);
     try ctx.writeStderr(payload.preview);
 }
 
 fn pushCommandOutputComplete(raw_ctx: *anyopaque, _: ?types.ToolLifecycleId) !void {
     const ctx: *AskContext = @ptrCast(@alignCast(raw_ctx));
-    if (ctx.output_mode.isTerminal() or !ctx.command_output_line_open) return;
+    if (!ctx.command_output_line_open) return;
     try ctx.writeStderr("\n");
     ctx.command_output_line_open = false;
 }
@@ -3471,7 +3417,6 @@ fn formatToolExecutionError(_: *anyopaque, arena: Allocator, tool_name: []const 
 
 fn onCommandOutputChunk(raw_ctx: *anyopaque, _: ?types.ToolLifecycleId, _: command_output_content.Stream, chunk: []const u8) !void {
     const ctx: *AskContext = @ptrCast(@alignCast(raw_ctx));
-    if (ctx.output_mode.isTerminal()) return;
     try ctx.writeStderr(chunk);
     if (chunk.len > 0) ctx.command_output_line_open = chunk[chunk.len - 1] != '\n';
 }
@@ -4106,25 +4051,6 @@ fn toCorePermissionMode(mode: anytype) PermissionMode {
 
 fn takeCorePermissionRules(_: Allocator, startup: *app_lifecycle.StartupState) !types.PermissionRuleSet {
     return startup.takePermissionRules();
-}
-
-/// Theme selection mirrors the interactive bootstrap: FX_THEME wins over the
-/// settings "theme" key. light/dark pin the builtin variant immediately; a
-/// named theme records its source so the presentation layer can resolve it
-/// once terminal detection picks the variant.
-fn applyAskThemeChoice(settings_theme: ?[]const u8) void {
-    var configured: ?[]const u8 = settings_theme;
-    if (io_mod.getenv("FX_THEME")) |value| {
-        if (value.len > 0) configured = value;
-    }
-    const choice = if (configured) |value| shared_theme.classifyValue(value) else null;
-    if (choice) |selected| switch (selected) {
-        .pin_light, .pin_dark => {
-            shared_theme.setSource(null, true);
-            ui_render.initTheme(selected == .pin_light, null);
-        },
-        .custom => |name| shared_theme.setSource(name, false),
-    };
 }
 
 fn loadStartupStateDefault(
@@ -5104,30 +5030,6 @@ test "fx ask publishes a complete refreshed credential before later consumers" {
     );
 }
 
-test "fx ask ChatGPT route disables Gateway-backed auxiliary providers" {
-    const alloc = std.testing.allocator;
-    var stdout_capture = TestCapture{};
-    defer stdout_capture.deinit(alloc);
-    var stderr_capture = TestCapture{};
-    defer stderr_capture.deinit(alloc);
-    var ctx = AskContext.init(
-        alloc,
-        testConfig(),
-        testPromptRunDeps(&stdout_capture, &stderr_capture, testPresentKeyStartup),
-        "/tmp/workspace",
-    );
-    defer ctx.deinit();
-    ctx.api_key = "chatgpt-secret";
-    ctx.credential_source = .chatgpt_subscription;
-    ctx.provider = .codex;
-    ctx.model = "gpt-5.4";
-
-    const tool_ctx = ctx.toolContext();
-    try std.testing.expect(tool_ctx.web_search_backend == null);
-    try std.testing.expect(!tool_ctx.auto_classifier.enabled());
-    try std.testing.expect(tool_ctx.permission_reviewer_provider == null);
-}
-
 test "fx ask finalization fails every failed turn" {
     const cases = [_]struct {
         outcome: types.TurnPresentationOutcome,
@@ -5294,14 +5196,14 @@ test "parse options preserves model effort and fast overrides" {
 test "parse options accepts a per-run provider and the last one wins" {
     const alloc = std.testing.allocator;
 
-    var spaced = try parseOptionsWithStdin(alloc, &.{ "--provider", "codex", "hello" }, .tty);
+    var spaced = try parseOptionsWithStdin(alloc, &.{ "--provider", "gateway", "hello" }, .tty);
     defer spaced.deinit(alloc);
-    try std.testing.expect(spaced.agent.provider.?.eql(.codex));
+    try std.testing.expect(spaced.agent.provider.?.eql(.gateway));
     try std.testing.expectEqualStrings("hello", spaced.prompt);
 
-    var last = try parseOptionsWithStdin(alloc, &.{ "--provider", "codex", "--provider=grok", "hello" }, .tty);
+    var last = try parseOptionsWithStdin(alloc, &.{ "--provider", "gateway", "--provider=local", "hello" }, .tty);
     defer last.deinit(alloc);
-    try std.testing.expect(last.agent.provider.?.eql(.grok));
+    try std.testing.expect(last.agent.provider.?.eql(model_provider.parse("local").?));
 
     var defaulted = try parseOptionsWithStdin(alloc, &.{"hello"}, .tty);
     defer defaulted.deinit(alloc);
@@ -6685,8 +6587,6 @@ test "fx ask permission prompt policy requires explicit captured-mode opt in and
     };
     const cases = [_]Case{
         .{ .output_mode = .raw, .prompt_permissions = false, .stdin_is_tty = false, .expected = true },
-        .{ .output_mode = .terminal, .prompt_permissions = false, .stdin_is_tty = false, .expected = true },
-        .{ .output_mode = .terminal_no_color, .prompt_permissions = false, .stdin_is_tty = false, .expected = true },
         .{ .output_mode = .json, .prompt_permissions = false, .stdin_is_tty = true, .expected = false },
         .{ .output_mode = .quiet, .prompt_permissions = false, .stdin_is_tty = true, .expected = false },
         .{ .output_mode = .json, .prompt_permissions = true, .stdin_is_tty = false, .expected = false },
@@ -9124,9 +9024,7 @@ test "CLI nonterminal progress preserves distinct not-run labels without duplica
 }
 
 test "CLI output mode selection preserves machine output precedence" {
-    try std.testing.expectEqual(OutputMode.json, selectOutputMode(true, true, true, true));
-    try std.testing.expectEqual(OutputMode.quiet, selectOutputMode(true, false, true, false));
-    try std.testing.expectEqual(OutputMode.raw, selectOutputMode(false, false, false, true));
-    try std.testing.expectEqual(OutputMode.terminal, selectOutputMode(false, false, true, false));
-    try std.testing.expectEqual(OutputMode.terminal_no_color, selectOutputMode(false, false, true, true));
+    try std.testing.expectEqual(OutputMode.json, selectOutputMode(true, true));
+    try std.testing.expectEqual(OutputMode.quiet, selectOutputMode(true, false));
+    try std.testing.expectEqual(OutputMode.raw, selectOutputMode(false, false));
 }

@@ -109,7 +109,6 @@ The model checks each law over every query and field it can build from its alpha
 | G7 | Every planted engine bug is caught. | `mutations.json`, `code`. |
 | G8 | The engine survives fuzzing. | A `std.testing.fuzz` test in `fuzzy_match.zig` that checks the laws on arbitrary bytes, listed in `tests/fuzz/targets.json` and `src/fuzz_targets.zig`, with inline seeds and any saved inputs in `tests/fuzz/corpus/fuzzy_match/`. |
 | G9 | The engine stays fast at realistic and adversarial sizes. | The `stress` stage, with the budgets in Stress budgets. |
-| G10 | The built binary's Models and skills menus list exactly what the model says, in order and with the same count. | The `binary` stage. |
 | G11 | The repository's own checks pass. | `zig fmt --check src/`, `zig build`, `zig build test`, and the E2E files that cover the changed surfaces. |
 
 ## Stress budgets

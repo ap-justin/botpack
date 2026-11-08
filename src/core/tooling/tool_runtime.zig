@@ -7666,36 +7666,6 @@ fn executeVisionPathTargetsForTest(
     });
 }
 
-test "Codex vision calls fail before provider access" {
-    const alloc = std.testing.allocator;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const catalog = try makeVisionCatalog(alloc, tmp.dir, 1);
-    defer types.freeImageAttachmentSlice(alloc, catalog);
-    const provider_json = try visionProviderSuccess(alloc, &.{1});
-    defer alloc.free(provider_json);
-    const responses = [_]VisionGatewayResponse{.{ .content = provider_json }};
-    var fixture = VisionGatewayFixture{ .alloc = alloc, .responses = &responses };
-    defer fixture.deinit();
-    var rt = TestRuntime{
-        .provider = .codex,
-        .provider_capabilities = .{},
-        .agent_stream_provider = fixture.provider(),
-        .tool_registry = .{ .tools = vision_test_registry_tools[0..] },
-        .session_allocator = alloc,
-    };
-    defer rt.deinit(alloc);
-    const args = try visionArgs(alloc, &.{1}, "Read the image");
-    defer alloc.free(args);
-
-    const result = try executeVisionForTest(&rt, alloc, args, catalog);
-    defer alloc.free(@constCast(result.model_output));
-
-    try std.testing.expectEqual(tool_contracts.ToolExecutionStatus.failure, result.status);
-    try std.testing.expectEqualStrings("Unsupported tool: vision", result.model_output);
-    try std.testing.expectEqual(@as(usize, 0), fixture.call_count);
-}
-
 fn visionRequestAllocationCount(args_json: []const u8) !usize {
     var probe = std.testing.FailingAllocator.init(
         testing_allocator.no_resize,

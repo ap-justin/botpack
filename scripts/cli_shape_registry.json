@@ -9,37 +9,13 @@
       "job": "setting-override",
       "stability": "stable"
     },
-    "FX_AUTO_UPGRADE": {
-      "job": "setting-override",
-      "stability": "stable"
-    },
     "FX_BENCH": {
       "job": "diagnostics",
       "stability": "internal"
     },
-    "FX_CONFIGURED_PROVIDERS": {
-      "job": "setting-override",
-      "stability": "internal"
-    },
-    "FX_DEBUG_RECORD": {
-      "job": "diagnostics",
-      "stability": "stable"
-    },
-    "FX_DEBUG_RECORD_SILENT_BANNER": {
-      "job": "diagnostics",
-      "stability": "stable"
-    },
     "FX_DISABLE_KEYCHAIN": {
       "job": "credentials",
       "stability": "stable"
-    },
-    "FX_EFFORT": {
-      "job": "setting-override",
-      "stability": "internal"
-    },
-    "FX_FAST": {
-      "job": "setting-override",
-      "stability": "internal"
     },
     "FX_GATEWAY_BASE_URL": {
       "job": "internal",
@@ -48,10 +24,6 @@
     "FX_GATEWAY_CHAT_URL": {
       "job": "internal",
       "stability": "internal"
-    },
-    "FX_HERDR": {
-      "job": "integration",
-      "stability": "stable"
     },
     "FX_HOME": {
       "job": "location",
@@ -97,14 +69,6 @@
       "job": "setting-override",
       "stability": "stable"
     },
-    "FX_RECORD": {
-      "job": "diagnostics",
-      "stability": "stable"
-    },
-    "FX_RECORD_INPUT": {
-      "job": "diagnostics",
-      "stability": "stable"
-    },
     "FX_REVIEW_MODEL": {
       "job": "setting-override",
       "stability": "stable"
@@ -115,10 +79,6 @@
     },
     "FX_SOUND": {
       "job": "setting-override",
-      "stability": "stable"
-    },
-    "FX_SYNC_UPDATES": {
-      "job": "diagnostics",
       "stability": "stable"
     },
     "FX_TEST_ACP_PROMPT_REAP_READY": {
@@ -142,26 +102,6 @@
       "stability": "internal"
     },
     "FX_TEST_CACHE_WARMING_TTL_MS": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_CHATGPT_ISSUER_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_CHATGPT_ORIGIN": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_CHATGPT_TOKEN_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_CODEX_CLIENT_VERSION": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_CODEX_VERSION_URL": {
       "job": "test",
       "stability": "internal"
     },
@@ -193,51 +133,11 @@
       "job": "test",
       "stability": "internal"
     },
-    "FX_TEST_GROK_CLIENT_VERSION": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_GROK_ISSUER_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_GROK_ORIGIN": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_GROK_REVOKE_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_GROK_TOKEN_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_GROK_USERINFO_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_GROK_VERSION_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
     "FX_TEST_INPUT_LOOP_NETWORK_GUARD": {
       "job": "test",
       "stability": "internal"
     },
-    "FX_TEST_INSTANCES": {
-      "job": "test",
-      "stability": "internal"
-    },
     "FX_TEST_OAUTH_ISSUER_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_OPENAI_CODEX_MODELS_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_OPENAI_CODEX_RESPONSES_URL": {
       "job": "test",
       "stability": "internal"
     },
@@ -281,23 +181,7 @@
       "job": "test",
       "stability": "internal"
     },
-    "FX_TEST_UPGRADE_BASE_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
     "FX_TEST_USAGE_CLOCK_FILE": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_XAI_GROK_MODALITIES_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_XAI_GROK_MODELS_URL": {
-      "job": "test",
-      "stability": "internal"
-    },
-    "FX_TEST_XAI_GROK_RESPONSES_URL": {
       "job": "test",
       "stability": "internal"
     },
@@ -321,10 +205,6 @@
       "job": "diagnostics",
       "stability": "stable"
     },
-    "FX_UI_OBSERVE_DIR": {
-      "job": "diagnostics",
-      "stability": "internal"
-    },
     "FX_ULTRAFAST": {
       "job": "setting-override",
       "stability": "stable"
@@ -342,29 +222,18 @@
     "FX_TEST_AI_GATEWAY_API_KEY": "Keychain service name used by keychain tests, not an env var"
   },
   "external_env": [
-    "AI_GATEWAY_API_KEY",
-    "CMUX_WORKSPACE_ID",
-    "COLORFGBG",
-    "COLORTERM",
     "COLUMNS",
     "COMSPEC",
     "DISPLAY",
     "GIT_CONFIG_GLOBAL",
     "GIT_CONFIG_NOSYSTEM",
     "GIT_CONFIG_SYSTEM",
-    "HERDR_PANE_ID",
-    "HERDR_SOCKET_PATH",
     "HOME",
-    "LANG",
     "NO_COLOR",
-    "PATH",
     "SHELL",
     "SSH_CONNECTION",
     "TERM",
-    "TERM_PROGRAM",
     "TMPDIR",
-    "TMUX",
-    "TMUX_PANE",
     "TYPESAFE_API_KEY",
     "TYPESAFE_BASE_URL",
     "USER",
@@ -379,43 +248,28 @@
     "--version": "Detects a version request before any command parser runs.",
     "-v": "Short form of --version.",
     "--json": "Picks the error format when a command's own parser has rejected its arguments.",
-    "--resume": "The fixed resume grammar: --resume takes an optional last or ID operand.",
-    "--continue": "The fixed resume grammar.",
-    "-c": "The fixed resume grammar.",
-    "-r": "The fixed resume grammar: short for --resume, with the same optional operand.",
-    "--resume=": "The fixed resume grammar: --resume with its operand inline.",
-    "--resume-last": "Removed resume spelling, matched only to name its replacement.",
-    "--resume-": "Removed --resume-<id> spellings, matched only to name the replacement.",
-    "--upgrade-relaunch": "The internal word fx upgrade passes when it restarts fx into the new version.",
-    "--id": "Removed fx session resume --id spelling, matched only to name its replacement.",
-    "--golden": "Maps a missing-value failure onto fx replay's own error.",
     "-p": "Other agents' one-shot flag. fx doesn't accept it; it is matched only to point to fx ask.",
     "--print": "Long form of -p, matched only to point to fx ask.",
     "--print=": "Inline form of --print, matched only to point to fx ask.",
     "--no-": "Pairs each --x with --no-x at compile time to build the launch usage line from launch_options; no argument is read."
   },
   "run_options": {
-    "_about": "One row per option a run can set, named on every surface: the agent-run flag, the setting, its FX_* variable, the ACP config option, and the libfx option. Names may differ by surface, as ACP's mode does, but each one is written here. check_cli_shape fails when ACP offers a config option or libfx's FxModelOptions declares a field that no row names, or when a row names something that doesn't exist.",
+    "_about": "One row per option a run can set, named on every surface: the agent-run flag, the setting, its FX_* variable, and the ACP config option. Names may differ by surface, as ACP's mode does, but each one is written here. check_cli_shape fails when ACP offers a config option that no row names, or when a row names something that doesn't exist.",
     "effort": {
       "flag": "--effort",
       "setting": "effort",
-      "env": "FX_EFFORT",
-      "acp": "effort",
-      "libfx": "model.effort"
+      "acp": "effort"
     },
     "fast": {
       "flag": "--fast",
       "setting": "fast_mode",
-      "env": "FX_FAST",
-      "acp": "fast",
-      "libfx": "model.fast"
+      "acp": "fast"
     },
     "model": {
       "flag": "--model",
       "setting": "models",
       "env": "FX_MODEL",
-      "acp": "model",
-      "libfx": "model.id"
+      "acp": "model"
     },
     "permission_mode": {
       "flag": "--permission-mode",
@@ -427,25 +281,16 @@
       "flag": "--provider",
       "setting": "provider",
       "env": "FX_PROVIDER",
-      "acp": "provider",
-      "libfx": "provider"
+      "acp": "provider"
     },
     "ultrafast": {
       "flag": "--ultrafast",
       "setting": "ultrafast_mode",
       "env": "FX_ULTRAFAST",
-      "acp": "ultrafast",
-      "libfx": "model.ultrafast"
+      "acp": "ultrafast"
     }
   },
-  "exceptions": {
-    "flag_names": {
-      "--resume-": "Prefix of the removed --resume-<id> alias, kept so the removed spelling fails with a hint."
-    },
-    "setting_keys": {
-      "statusLine": "Older spelling of status_line, still read so existing settings files keep working; fx writes only status_line."
-    }
-  },
+  "exceptions": {},
   "hand_parsed_files": {
     "src/builtins/skills.zig": "Reads a pasted npx skills add command line, another program's flags.",
     "src/core/shell_command/command_classification.zig": "Classifies shell commands the agent runs, another program's flags.",

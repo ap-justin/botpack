@@ -5,12 +5,9 @@
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { binary, shellQuote, targetModule } from "../../lib/context";
 import {
-  Acp, fakeGatewayFinalText, fakeGatewaySse, fakeGatewayToolCall, plainReplies, shown, TmuxSession, waitUntil, type Fixture, type Via, v1Writer,
+  Acp, fakeGatewayFinalText, fakeGatewaySse, fakeGatewayToolCall, plainReplies, shown, waitUntil, type Fixture, type Via,
 } from "./driver";
-
-const { readPermissionsPanel } = await targetModule("info-panel.ts");
 
 export type Made = { id: string; read(home: string, v2: boolean): Promise<string | null> };
 
@@ -38,58 +35,6 @@ function calls(...steps: [callId: string, tool: string, input: object][]) {
   return (body: string) => {
     const next = steps.find(([callId]) => !body.includes(callId));
     return next ? fakeGatewayToolCall(...next) : fakeGatewayFinalText("CONV_CALLS_DONE");
-  };
-}
-
-// Resumes `id` in the app on the profile at `home`, runs `use` once the
-// session is open, and quits; null when the session does not open.
-async function inApp(f: Fixture, home: string, v2: boolean, id: string, use: (app: any) => Promise<string | null>): Promise<string | null> {
-  const app = await TmuxSession.create({
-    cmd: `${shellQuote(v2 ? binary : v1Writer())} --resume ${shellQuote(id)}`, cwd: f.workspace, env: f.env(v2, home), width: 200, height: 50,
-  });
-  f.apps.add(app);
-  try {
-    const opened = await waitUntil(async () => !app.isAlive() || (await app.captureFullScrollback()).includes("session resumed"), 15_000);
-    if (!opened || !app.isAlive()) return null;
-    await app.waitForComposer(15_000);
-    const result = await use(app);
-    await app.sendText("/quit");
-    await app.waitForSessionEnd(10_000);
-    return result;
-  } finally { await app.kill().catch(() => {}); f.apps.delete(app); }
-}
-
-// A saved-session allow rule, made in the v1 app; read back by /permissions.
-// The rule names a path in the workspace, which both copies share.
-async function rules(f: Fixture): Promise<Made> {
-  plainReplies(f);
-  const id = (await f.v1Ask(["CONV_FIRST"])).session_id;
-  // Relative, so the rule's display text, which fx shortens, keeps its name.
-  const command = "touch conv-allowed";
-  await inApp(f, f.home, false, id, async app => {
-    await app.sendText(`/permissions remember allow shell ${JSON.stringify({ action: "run", timeout_ms: 600_000, command })}`);
-    await app.waitForText("Remember allow for this saved session", 15_000);
-    await app.sendKeys("1");
-    await app.waitForText("saved-session permission rule updated", 15_000);
-    return "";
-  });
-  assert(readFileSync(join(f.v1Root, id, "permissions.json"), "utf8").includes("conv-allowed"), "the v1 app saved no permission rule");
-  return {
-    id, read: (home, v2) => inApp(f, home, v2, id, async app => {
-      // The older build lists the rules in the transcript; this one in the
-      // /permissions panel. Both read back as the older build listed them.
-      if (v2) {
-        const panel = await readPermissionsPanel(app, 15_000, (shown: any) => shown.fields["Saved rules"] !== undefined);
-        const count = panel.fields["Saved rules"];
-        if (count === "none") return "saved-session permission rules: none";
-        return [`saved-session permission rules (${count}):`, ...(panel.items["Saved rules"] ?? []).map((rule: string) => `  ${rule}`)].join("\n");
-      }
-      await app.sendText("/permissions");
-      await app.waitForText("saved-session permission rules", 15_000);
-      const text = await app.captureFullScrollback();
-      const [head, ...listed] = text.slice(text.lastIndexOf("saved-session permission rules")).split("\n\n")[0]!.split("\n");
-      return [head!.trimEnd(), ...listed.map((rule) => `  ${rule.trim()}`)].join("\n");
-    }),
   };
 }
 
@@ -265,7 +210,6 @@ async function sideFile(f: Fixture): Promise<Made> {
 // Each kind: how it is made, the host whose open is observed, and what its
 // v1 reading must show for the comparison to mean something.
 export const KINDS: Record<string, { name: string; make(f: Fixture): Promise<Made>; via: Via; shows: RegExp }> = {
-  rules: { name: "saved-session permission rules", make: rules, via: "app", shows: /saved-session permission rules \(1\):\n\s+1 allow shell\.run touch .*conv-allowed/ },
   acp: { name: "ACP client prompt and tool identities", make: acpClient, via: "acp", shows: /CONV_CLIENT_PROMPT.*Read page/ },
   terminal: { name: "hosted terminal state", make: terminal, via: "ask", shows: /ended when the fx process that started it exited/ },
   unfinished: { name: "unfinished reply in recovery.json", make: unfinished, via: "ask", shows: /CONV_PARTIAL_REPLY.*turn_aborted/ },

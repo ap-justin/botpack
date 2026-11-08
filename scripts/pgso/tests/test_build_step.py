@@ -56,8 +56,6 @@ class PgsoBuildStepTests(unittest.TestCase):
     def test_benchmark_ir_step_emits_release_safe_bitcode(self) -> None:
         cases = {
             "file_index": "file-index.bc",
-            "ui_activity": "ui-activity.bc",
-            "approval_review": "approval-review.bc",
         }
         for selector, output_name in cases.items():
             with self.subTest(selector=selector):

@@ -58,8 +58,6 @@ Every column except the last two comes from the current code. Rows 1 and 2 add t
 
 | Fake | Where | Stands in for |
 | --- | --- | --- |
-| The fake gateway's catalog | `startFakeGateway` in `tests/e2e/tmux-helpers.ts`, from `tests/tla/drivers/fuzzy_match/binary.ts` | The model catalog the Models menu lists |
-| Skill folders in an isolated home | `tests/tla/drivers/fuzzy_match/binary.ts` | Installed skills for the skills menu |
 | The harness | `tests/tla/drivers/fuzzy_match/harness.zig` | Nothing: it reads one case per line, calls the real `fuzzy_match.match`, and prints the answer |
 
 The drivers never reimplement the engine. The TypeScript oracle in `oracle.ts` is a second implementation of the model, checked against TLC, used only to compute expectations quickly for large and random runs.

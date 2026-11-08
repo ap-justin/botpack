@@ -1,72 +1,41 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-  chmodSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
-import { FX_BIN, runFx } from "../evals/eval-helpers";
+import { runFx } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText,
-  fakeGatewayPermissionDecision,
-  fakeGatewaySse,
   fakeGatewaySerializedToolCall,
+  fakeGatewaySse,
   fakeGatewayToolCall,
-  fakeShellRun,
-  startDynamicFakeGateway,
   startFakeGateway,
-  terminalFixtureShell,
-  TmuxSession,
-  tmuxAvailable,
-} from "./tmux-helpers";
+} from "./fake-gateway";
+
+// `fx ask` as a script sees it: stdout and stderr redirected, no terminal.
 
 const TIMEOUT = 30_000;
-const TERMINAL_FIXTURE_SHELL = terminalFixtureShell();
 const MARKDOWN =
   "# Ask presentation\n\n" +
   "**bold** and [docs](https://example.com)\n\n" +
   "- first item\n- second item\n\n---\n\n" +
   "| Name | Value |\n| --- | --- |\n| one | two |\n\n" +
   "```zig\nconst answer: u8 = 42;\n```\n";
-const WIDE_TABLE =
-  "| # | Choice | Direct consequences |\n" +
-  "|---|---|---|\n" +
-  "| 1 | **Change:** on reopen, an unfinished turn gets `turn_interrupted{reason: crash}`; it's never cut | " +
-  "`recovery.json` and `recovery.asked` go away. The adapter handles a turn that ends in a tool call with no result |\n" +
-  "| 8 | **Keep:** forks start only at turn boundaries (or turn 0) | Mid-turn forks deferred |\n";
+
+type GatewayRequestBody = {
+  prompt: Array<{ role: string; content: unknown }>;
+};
 
 const roots: string[] = [];
 const gateways: Array<{ stop(): void }> = [];
-const sessions: TmuxSession[] = [];
 
-afterEach(async () => {
-  for (const session of sessions.splice(0)) await session.kill();
+afterEach(() => {
   for (const gateway of gateways.splice(0)) gateway.stop();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 function createRoot() {
   const root = mkdtempSync(join(tmpdir(), "fx-e2e-ask-presentation-"));
-  const home = join(root, "home");
-  const workspace = join(root, "workspace");
-  mkdirSync(home);
-  mkdirSync(workspace);
-  roots.push(root);
-  return { root, home: realpathSync(home), workspace: realpathSync(workspace) };
-}
-
-function createShortRoot() {
-  const root = realpathSync(mkdtempSync("/tmp/fx-ask-terminal-"));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
   mkdirSync(home);
@@ -91,48 +60,6 @@ function gatewayEnv(
     FX_GATEWAY_CHAT_URL: gateway.chatUrl,
     FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
   };
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
-function terminalCommand(args: string[]): string {
-  const fx = [FX_BIN, ...args].map(shellQuote).join(" ");
-  const script = `${fx}; code=$?; printf '\\n__FX_EXIT_%s__\\n' "$code"; exit "$code"`;
-  return `/bin/sh -c ${shellQuote(script)}`;
-}
-
-function fakeGatewayStreamingText(lines: string[], delayMs: number) {
-  const encoder = new TextEncoder();
-  return new Response(
-    new ReadableStream<Uint8Array>({
-      async start(controller) {
-        for (const line of lines) {
-          controller.enqueue(encoder.encode(
-            `data: ${JSON.stringify({
-              type: "text-delta",
-              id: "answer_1",
-              delta: `${line}\n`,
-            })}\n\n`,
-          ));
-          if (delayMs > 0) await Bun.sleep(delayMs);
-        }
-        controller.enqueue(encoder.encode(
-          `data: ${JSON.stringify({
-            type: "finish",
-            finishReason: { unified: "stop", raw: "stop" },
-            usage: {
-              inputTokens: { total: 3 },
-              outputTokens: { total: lines.length },
-            },
-          })}\n\ndata: [DONE]\n\n`,
-        ));
-        controller.close();
-      },
-    }),
-    { headers: { "content-type": "text/event-stream" } },
-  );
 }
 
 describe("fx ask presentation", () => {
@@ -464,528 +391,17 @@ describe("fx ask presentation", () => {
     expect(result.stderr).toContain("Reading missing.txt");
     expect(result.stderr).toContain("Reading fallback.txt");
   }, TIMEOUT);
-
-  test.skipIf(!tmuxAvailable())(
-    "TTY stdout uses the Minimal transcript and compact tool group",
-    async () => {
-      const root = createRoot();
-      writeFileSync(join(root.workspace, "fixture.txt"), "fixture contents\n");
-      let releaseFinal: (() => void) | undefined;
-      const finalReady = new Promise<void>((resolve) => {
-        releaseFinal = resolve;
-      });
-      const gateway = startFakeGateway([
-        fakeGatewayToolCall("read_fixture", "read_file", { path: "fixture.txt" }),
-        fakeGatewaySerializedToolCall(
-          "read_missing",
-          "read_file",
-          JSON.stringify({ path: "missing.txt" }),
-          "Between groups.\n",
-        ),
-        async () => {
-          await finalReady;
-          return fakeGatewayFinalText(MARKDOWN);
-        },
-      ]);
-      gateways.push(gateway);
-
-      const session = await TmuxSession.create({
-        isolated: true,
-        cmd: terminalCommand([
-          "ask",
-          "--auto",
-          "--no-save",
-          "Inspect fixture.txt and render the response.",
-        ]),
-        cwd: root.workspace,
-        env: { ...gatewayEnv(root.home, gateway), NO_COLOR: undefined },
-        width: 120,
-        height: 40,
-        remainOnExit: true,
-      });
-      sessions.push(session);
-
-      await session.waitForText("Between groups.", TIMEOUT);
-      await session.resizeWindow(104, 36);
-      releaseFinal!();
-      await session.waitForText("__FX_EXIT_0__", TIMEOUT);
-      const pane = await session.capturePane();
-      const scrollback = await session.captureFullScrollback();
-      const escaped = await session.captureFullScrollbackEscapes();
-      expect(scrollback).toContain("Inspect fixture.txt and render the response.");
-      expect(pane.match(/1 tool call · 1 read/g)).toHaveLength(2);
-      expect(pane).toContain("Reading fixture.txt");
-      expect(pane).toContain("Between groups.");
-      expect(pane).toContain("Reading missing.txt");
-      expect(pane).toContain("failed");
-      expect(pane).toContain("Ask presentation");
-      expect(pane).toContain("bold and docs");
-      expect(pane).toContain("first item");
-      expect(pane).toContain("const answer: u8 = 42;");
-      expect(pane).toContain("─ zig ─");
-      expect(pane).not.toContain("│ const answer: u8 = 42;");
-      expect(pane).not.toContain("# Ask presentation");
-      expect(pane).not.toContain("**bold**");
-      expect(escaped).toContain("\x1b[");
-    },
-    TIMEOUT,
-  );
-
-  test.skipIf(!tmuxAvailable())(
-    "inline code URL keeps its full target across wrapped transcript rows",
-    async () => {
-      const root = createRoot();
-      const url = "http://localhost:3210/bench?run=https://github.com/vercel/e/actions/runs/36247033515";
-      const gateway = startFakeGateway([fakeGatewayFinalText(`Open \`${url}.\`\n`)]);
-      gateways.push(gateway);
-      const stderrPath = join(root.root, "stderr.log");
-      writeFileSync(stderrPath, "");
-
-      const session = await TmuxSession.create({
-        isolated: true,
-        cmd: FX_BIN,
-        cwd: root.workspace,
-        env: { ...gatewayEnv(root.home, gateway), NO_COLOR: undefined },
-        width: 82,
-        height: 24,
-        stderrPath,
-      });
-      sessions.push(session);
-
-      await session.sendText("Show the URL.");
-      await session.waitForText("3515.", TIMEOUT);
-      const pane = await session.captureFullScrollback();
-      const rows = pane.split("\n").filter((row) => row.includes("localhost:") || row.includes("3515."));
-      expect(rows).toHaveLength(2);
-      const escaped = await session.captureFullScrollbackEscapes();
-      const target = `\x1b]8;id=fx-1;${url}\x1b\\`;
-      const linkedRows = escaped.split("\n").filter((row) => row.includes(target));
-      expect(linkedRows).toHaveLength(2);
-      expect(linkedRows[0]).toContain("localhost:");
-      expect(linkedRows[1]).toContain("3515\x1b]8;;\x1b\\.");
-      expect(escaped).not.toContain(`\x1b]8;;${url}.\x1b\\`);
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-      expect(gateway.requestCount()).toBe(1);
-    },
-    TIMEOUT,
-  );
-
-  test.skipIf(!tmuxAvailable())(
-    "--no-color keeps the TTY layout without fx styles or hyperlinks",
-    async () => {
-      const root = createRoot();
-      const gateway = startFakeGateway([fakeGatewayFinalText(MARKDOWN)]);
-      gateways.push(gateway);
-
-      const session = await TmuxSession.create({
-        isolated: true,
-        cmd: terminalCommand([
-          "ask",
-          "--no-color",
-          "--no-save",
-          "Render the no-color fixture.",
-        ]),
-        cwd: root.workspace,
-        env: { ...gatewayEnv(root.home, gateway), NO_COLOR: undefined },
-        width: 120,
-        height: 40,
-        remainOnExit: true,
-      });
-      sessions.push(session);
-
-      await session.waitForText("__FX_EXIT_0__", TIMEOUT);
-      const pane = await session.captureFullScrollback();
-      const escaped = await session.captureFullScrollbackEscapes();
-      expect(pane).toContain("Render the no-color fixture.");
-      expect(pane).toContain("Ask presentation");
-      expect(pane).toContain("bold and docs");
-      expect(pane).toContain("const answer: u8 = 42;");
-      expect(escaped).not.toMatch(/\x1b\[[0-9;]*m/);
-      expect(escaped).not.toContain("\x1b]8;");
-    },
-    TIMEOUT,
-  );
-
-  test.skipIf(!tmuxAvailable())(
-    "NO_COLOR and TERM=dumb render like --no-color",
-    async () => {
-      // Both standard variables turn fx ask's color off.
-      for (const env of [{ NO_COLOR: "1" }, { NO_COLOR: undefined, TERM: "dumb" }]) {
-        const root = createRoot();
-        const gateway = startFakeGateway([fakeGatewayFinalText(MARKDOWN)]);
-        gateways.push(gateway);
-
-        const session = await TmuxSession.create({
-          isolated: true,
-          cmd: terminalCommand(["ask", "--no-save", "Render the standard no-color fixture."]),
-          cwd: root.workspace,
-          env: { ...gatewayEnv(root.home, gateway), ...env },
-          width: 120,
-          height: 40,
-          remainOnExit: true,
-        });
-        sessions.push(session);
-
-        await session.waitForText("__FX_EXIT_0__", TIMEOUT);
-        const pane = await session.captureFullScrollback();
-        const escaped = await session.captureFullScrollbackEscapes();
-        expect(pane).toContain("Ask presentation");
-        expect(pane).toContain("const answer: u8 = 42;");
-        expect(escaped).not.toMatch(/\x1b\[[0-9;]*m/);
-      }
-    },
-    TIMEOUT * 2,
-  );
-
-  test.skipIf(!tmuxAvailable())(
-    "light theme uses readable syntax colors in TTY code blocks with redirected stdin",
-    async () => {
-      const root = createRoot();
-      const gateway = startFakeGateway([fakeGatewayFinalText(MARKDOWN)]);
-      gateways.push(gateway);
-      const stderrPath = join(root.root, "stderr.log");
-      writeFileSync(stderrPath, "");
-
-      const session = await TmuxSession.create({
-        isolated: true,
-        cmd: `${terminalCommand([
-          "ask",
-          "--no-save",
-          "Render the light-theme fixture.",
-        ])} </dev/null`,
-        cwd: root.workspace,
-        env: {
-          ...gatewayEnv(root.home, gateway),
-          FX_THEME: "light",
-          NO_COLOR: undefined,
-        },
-        width: 120,
-        height: 40,
-        remainOnExit: true,
-        stderrPath,
-      });
-      sessions.push(session);
-
-      await session.waitForText("__FX_EXIT_0__", TIMEOUT);
-      const escaped = await session.captureFullScrollbackEscapes();
-      expect(escaped).toContain("\x1b[38;5;238mconst\x1b[39m");
-      expect(escaped).not.toContain("\x1b[38;5;252mconst\x1b[39m");
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-    },
-    TIMEOUT,
-  );
-
-  test.skipIf(!tmuxAvailable())(
-    "TTY tables wider than the pane wrap cells inside the grid",
-    async () => {
-      const root = createRoot();
-      const gateway = startFakeGateway([fakeGatewayFinalText(WIDE_TABLE)]);
-      gateways.push(gateway);
-      const stderrPath = join(root.root, "stderr.log");
-      writeFileSync(stderrPath, "");
-
-      const session = await TmuxSession.create({
-        isolated: true,
-        cmd: terminalCommand(["ask", "--no-save", "Render the wide table fixture."]),
-        cwd: root.workspace,
-        env: { ...gatewayEnv(root.home, gateway), NO_COLOR: undefined },
-        width: 72,
-        height: 40,
-        remainOnExit: true,
-        stderrPath,
-      });
-      sessions.push(session);
-
-      await session.waitForText("__FX_EXIT_0__", TIMEOUT);
-      const scrollback = await session.captureFullScrollback();
-      const grid = scrollback
-        .split("\n")
-        .map((line) => line.trimEnd())
-        .filter((line) => /^\s*[┌│├└]/.test(line));
-      expect(grid[0]).toMatch(/^\s*┌───┬─+┬─+┐$/);
-      expect(grid.at(-1)).toMatch(/^\s*└───┴─+┴─+┘$/);
-      expect(new Set(grid.map((line) => line.length)).size).toBe(1);
-      expect(grid.some((line) => /^\s*│ 1 │ Change:/.test(line))).toBe(true);
-      expect(grid.some((line) => /^\s*│   │ \S/.test(line))).toBe(true);
-      expect(scrollback).not.toContain("Choice: ");
-      expect(scrollback).not.toContain("Direct consequences: ");
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-    },
-    TIMEOUT,
-  );
-
-  test.skipIf(!tmuxAvailable())(
-    "TTY output taller than the pane survives in native scrollback",
-    async () => {
-      const root = createRoot();
-      const answerLines = Array.from(
-        { length: 60 },
-        (_, index) => `ANSWER_LINE_${String(index + 1).padStart(2, "0")}`,
-      );
-      const gateway = startFakeGateway([
-        fakeGatewaySse([
-          ...answerLines.map((line) => ({
-            type: "text-delta",
-            id: "answer_1",
-            delta: `${line}\n`,
-          })),
-          {
-            type: "finish",
-            finishReason: { unified: "stop", raw: "stop" },
-            usage: {
-              inputTokens: { total: 3 },
-              outputTokens: { total: 60 },
-            },
-          },
-        ]),
-      ]);
-      gateways.push(gateway);
-      const stderrPath = join(root.root, "stderr.log");
-      writeFileSync(stderrPath, "");
-
-      const session = await TmuxSession.create({
-        isolated: true,
-        cmd: terminalCommand([
-          "ask",
-          "--no-save",
-          "Render every answer line.",
-        ]),
-        cwd: root.workspace,
-        env: gatewayEnv(root.home, gateway),
-        width: 80,
-        height: 12,
-        minimumHistoryLines: 200,
-        remainOnExit: true,
-        stderrPath,
-      });
-      sessions.push(session);
-
-      await session.waitForText("__FX_EXIT_0__", TIMEOUT);
-      const scrollback = await session.captureFullScrollback();
-      let previousIndex = -1;
-      for (const line of answerLines) {
-        const index = scrollback.indexOf(line);
-        expect(index, line).toBeGreaterThan(previousIndex);
-        previousIndex = index;
-      }
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-    },
-    TIMEOUT,
-  );
-
-  test.skipIf(!tmuxAvailable())(
-    "TTY prints the header before output and releases while the response is open",
-    async () => {
-      const root = createRoot();
-      const answerLines = Array.from(
-        { length: 40 },
-        (_, index) => `OPEN_STREAM_LINE_${String(index + 1).padStart(2, "0")}`,
-      );
-      let releaseOutput = () => {};
-      const outputGate = new Promise<void>((resolve) => {
-        releaseOutput = resolve;
-      });
-      let releaseResponse = () => {};
-      const responseGate = new Promise<void>((resolve) => {
-        releaseResponse = resolve;
-      });
-      const gateway = startDynamicFakeGateway(() => {
-        const encoder = new TextEncoder();
-        return new Response(
-          new ReadableStream<Uint8Array>({
-            async start(controller) {
-              await outputGate;
-              for (const line of answerLines) {
-                controller.enqueue(encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: "text-delta",
-                    id: "answer_1",
-                    delta: `${line}\n`,
-                  })}\n\n`,
-                ));
-              }
-              await responseGate;
-              controller.enqueue(encoder.encode(
-                `data: ${JSON.stringify({
-                  type: "finish",
-                  finishReason: { unified: "stop", raw: "stop" },
-                  usage: {
-                    inputTokens: { total: 3 },
-                    outputTokens: { total: answerLines.length },
-                  },
-                })}\n\ndata: [DONE]\n\n`,
-              ));
-              controller.close();
-            },
-          }),
-          { headers: { "content-type": "text/event-stream" } },
-        );
-      });
-      gateways.push(gateway);
-      const stderrPath = join(root.root, "stderr.log");
-      writeFileSync(stderrPath, "");
-
-      const session = await TmuxSession.create({
-        isolated: true,
-        cmd: terminalCommand([
-          "ask",
-          "--no-save",
-          "Stream every answer line.",
-        ]),
-        cwd: root.workspace,
-        env: gatewayEnv(root.home, gateway),
-        width: 80,
-        height: 12,
-        minimumHistoryLines: 200,
-        remainOnExit: true,
-        stderrPath,
-      });
-      sessions.push(session);
-
-      try {
-        const requestDeadline = Date.now() + 5_000;
-        while (gateway.requestCount() === 0 && Date.now() < requestDeadline) {
-          await Bun.sleep(25);
-        }
-        expect(gateway.requestCount()).toBe(1);
-
-        const headerDeadline = Date.now() + 5_000;
-        let initialScrollback = "";
-        while (Date.now() < headerDeadline) {
-          initialScrollback = await session.captureFullScrollback();
-          if (
-            initialScrollback.includes("Run /help for commands") &&
-            initialScrollback.includes("Stream every answer line.")
-          ) break;
-          await Bun.sleep(25);
-        }
-        expect(initialScrollback).toContain("Run /help for commands");
-        expect(initialScrollback).toContain("Stream every answer line.");
-        expect(initialScrollback).not.toContain(answerLines[0]!);
-        expect(initialScrollback.indexOf("Run /help for commands")).toBeLessThan(
-          initialScrollback.indexOf("Stream every answer line."),
-        );
-
-        releaseOutput();
-        const releaseDeadline = Date.now() + 5_000;
-        let openScrollback = "";
-        while (Date.now() < releaseDeadline) {
-          openScrollback = await session.captureFullScrollback();
-          if (openScrollback.includes(answerLines[0]!)) break;
-          await Bun.sleep(25);
-        }
-        expect(openScrollback).toContain(answerLines[0]!);
-      } finally {
-        releaseOutput();
-        releaseResponse();
-      }
-
-      await session.waitForText("__FX_EXIT_0__", TIMEOUT);
-      const finalScrollback = await session.captureFullScrollback();
-      expect(finalScrollback.split("Run /help for commands")).toHaveLength(2);
-      for (const line of answerLines) {
-        expect(finalScrollback.split(line)).toHaveLength(2);
-      }
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-    },
-    TIMEOUT,
-  );
-
-  test.skipIf(!tmuxAvailable())(
-    "TTY wrapped output stays ordered and appears exactly once",
-    async () => {
-      const root = createRoot();
-      const answerLines = Array.from(
-        { length: 7 },
-        (_, index) =>
-          `WRAPPED_LINE_${String(index + 1).padStart(2, "0")} ${"x".repeat(190)}`,
-      );
-      const gateway = startFakeGateway([
-        () => fakeGatewayStreamingText(answerLines, 3),
-      ]);
-      gateways.push(gateway);
-      const stderrPath = join(root.root, "stderr.log");
-      writeFileSync(stderrPath, "");
-
-      const session = await TmuxSession.create({
-        isolated: true,
-        cmd: terminalCommand([
-          "ask",
-          "--no-save",
-          "Render every wrapped answer line.",
-        ]),
-        cwd: root.workspace,
-        env: gatewayEnv(root.home, gateway),
-        width: 100,
-        height: 20,
-        minimumHistoryLines: 100,
-        remainOnExit: true,
-        stderrPath,
-      });
-      sessions.push(session);
-
-      await session.waitForText(/__FX_EXIT_[0-9]+__/, TIMEOUT);
-      const scrollback = await session.captureFullScrollback();
-      expect(scrollback).toContain("__FX_EXIT_0__");
-      let previousIndex = -1;
-      for (const line of answerLines) {
-        const marker = line.slice(0, "WRAPPED_LINE_00".length);
-        const index = scrollback.indexOf(marker);
-        expect(index, marker).toBeGreaterThan(previousIndex);
-        expect(scrollback.split(marker)).toHaveLength(2);
-        previousIndex = index;
-      }
-      expect(readFileSync(stderrPath, "utf8")).toBe("");
-    },
-    TIMEOUT,
-  );
-
-  test.skipIf(!tmuxAvailable())(
-    "TTY Minimal hides context and auto-approval notices",
-    async () => {
-      const root = createRoot();
-      const instructions = join(root.root, "instructions.md");
-      writeFileSync(instructions, "# Fixture instructions\n");
-      symlinkSync(instructions, join(root.workspace, "AGENTS.md"));
-      const gateway = startFakeGateway(
-        [
-          fakeShellRun("write_fixture", "printf notice-test > ask-notice.txt", {
-            timeout_ms: 600_000,
-          }),
-          fakeGatewayFinalText("Notice filtering complete.\n"),
-        ],
-        { classifierResponses: [fakeGatewayPermissionDecision()] },
-      );
-      gateways.push(gateway);
-
-      const session = await TmuxSession.create({
-        isolated: true,
-        cmd: terminalCommand([
-          "ask",
-          "--auto",
-          "--no-save",
-          "Run the notice filtering fixture.",
-        ]),
-        cwd: root.workspace,
-        env: { ...gatewayEnv(root.home, gateway), NO_COLOR: undefined },
-        width: 120,
-        height: 40,
-        remainOnExit: true,
-      });
-      sessions.push(session);
-
-      await session.waitForText("__FX_EXIT_0__", TIMEOUT);
-      const scrollback = await session.captureFullScrollback();
-      expect(scrollback).toContain("Run the notice filtering fixture.");
-      expect(scrollback).toContain("Notice filtering complete.");
-      expect(scrollback).toContain("1 tool call · 1 command");
-      expect(scrollback).not.toContain("project instructions");
-      expect(scrollback).not.toContain("Auto agent approved this request");
-      expect(scrollback).not.toMatch(/[*✓!✗⊘i] system:/);
-    },
-    TIMEOUT,
-  );
 });
+
+function userShellRun(id: string, command: string) {
+  return fakeGatewayToolCall(id, "shell", {
+    request: { action: "run", command, yield_time_ms: 30_000 },
+  });
+}
+
+function occurrences(text: string, needle: string): number {
+  return text.split(needle).length - 1;
+}
 
 // Both login shells read these files, so the tests hold for zsh and bash.
 function writeStartupFiles(home: string, body: string): void {
@@ -996,25 +412,6 @@ function writeStartupFiles(home: string, body: string): void {
 function startupLoads(home: string): number {
   const log = join(home, "rc.log");
   return existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).length : 0;
-}
-
-function userShellRun(id: string, command: string) {
-  return fakeGatewayToolCall(id, "shell", {
-    request: { action: "run", command, yield_time_ms: 30_000 },
-  });
-}
-
-function filesContaining(dir: string, needle: string): string[] {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir).flatMap((name) => {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) return filesContaining(path, needle);
-    return readFileSync(path).includes(needle) ? [path] : [];
-  });
-}
-
-function occurrences(text: string, needle: string): number {
-  return text.split(needle).length - 1;
 }
 
 describe("fx ask shell startup files", () => {
@@ -1134,58 +531,4 @@ describe("fx ask shell startup files", () => {
     expect(occurrences(result.stderr, notice)).toBe(1);
     expect(gateway.requests[3]!.body).toContain("FX_RECOVERY_ALIAS");
   }, TIMEOUT);
-
-  test.skipIf(!tmuxAvailable())(
-    "exported startup-file secrets stay out of traces, sessions, and trace reports",
-    async () => {
-      const root = createRoot();
-      const secret = `FX_SENTINEL_${crypto.randomUUID()}`;
-      writeStartupFiles(root.home, `export FX_E2E_SECRET=${secret}\n`);
-      const clipboardBin = join(root.root, "clipboard-bin");
-      mkdirSync(clipboardBin);
-      writeFileSync(join(clipboardBin, "osascript"), "#!/bin/sh\nexit 1\n");
-      chmodSync(join(clipboardBin, "osascript"), 0o755);
-      const tracePath = join(root.root, "fx-trace.log");
-      const gateway = startFakeGateway([
-        userShellRun("secret", "test -n \"$FX_E2E_SECRET\" && printf FX_SECRET_VISIBLE"),
-        fakeGatewayFinalText("SECRET_CHECK_DONE"),
-      ]);
-      gateways.push(gateway);
-      const session = await TmuxSession.create({
-        cwd: root.workspace,
-        width: 110,
-        height: 34,
-        stderrPath: join(root.root, "stderr.log"),
-        env: {
-          ...gatewayEnv(root.home, gateway),
-          FX_PERMISSION_MODE: "full-access",
-          FX_SOUND: "0",
-          FX_AUTO_UPGRADE: "0",
-          FX_TRACE_LOG: tracePath,
-          FX_TRACE_SCOPES: "core,tool,agent,session",
-          PATH: `${clipboardBin}:${process.env.PATH}`,
-          TMPDIR: root.root,
-        },
-      });
-      try {
-        await session.waitForComposer(TIMEOUT);
-        await session.sendText("Check the secret.");
-        await session.waitForText("SECRET_CHECK_DONE", TIMEOUT);
-        await session.sendText("/trace");
-        await session.waitForText("Trace saved at", TIMEOUT);
-      } finally {
-        await session.kill();
-      }
-
-      expect(gateway.requests[1]!.body).toContain("FX_SECRET_VISIBLE");
-      const report = readdirSync(root.root).find((name) => name.startsWith("fx-trace-") && name.endsWith(".md"));
-      expect(report).toBeDefined();
-      expect(readFileSync(join(root.root, report!), "utf8")).not.toContain(secret);
-      expect(readFileSync(tracePath, "utf8")).toContain("shell snapshot ready");
-      expect(readFileSync(tracePath, "utf8")).not.toContain(secret);
-      expect(filesContaining(join(root.home, ".fx"), secret)).toEqual([]);
-      for (const request of gateway.requests) expect(request.body).not.toContain(secret);
-    },
-    TIMEOUT,
-  );
 });

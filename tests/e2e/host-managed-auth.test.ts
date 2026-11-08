@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runFx } from "../evals/eval-helpers";
-import { fakeGatewayFinalText, TmuxSession } from "./tmux-helpers";
+import { fakeGatewayFinalText } from "./fake-gateway";
 
 const TIMEOUT = 30_000;
 
@@ -20,10 +20,7 @@ describe("host-managed authentication", () => {
   let requests: CapturedRequest[] = [];
   let server: ReturnType<typeof Bun.serve>;
   let baseUrl = "";
-  let codexUnauthorizedResponses = 0;
-  // Replies the Codex and Grok fakes cut short before any text.
-  let emptyLengthReplies = 0;
-  const responseBodies: Array<{ path: string; body: string }> = [];
+  let gatewayUnauthorizedResponses = 0;
 
   beforeAll(() => {
     root = mkdtempSync(join(tmpdir(), "fx-host-managed-auth-"));
@@ -47,80 +44,11 @@ describe("host-managed authentication", () => {
           });
         }
         if (path === "/gateway/responses") {
-          return fakeGatewayFinalText("GATEWAY_HOST_MANAGED_OK");
-        }
-        if (path === "/codex/models") {
-          return Response.json({ models: [{
-            slug: "gpt-5.4-mini",
-            visibility: "list",
-            supported_in_api: true,
-            priority: 1,
-            supported_reasoning_levels: [{ effort: "low" }],
-            additional_speed_tiers: [],
-            input_modalities: ["text"],
-            context_window: 272000,
-          }, {
-            slug: "gpt-5.6-luna",
-            visibility: "list",
-            supported_in_api: true,
-            priority: 2,
-            supported_reasoning_levels: [{ effort: "medium" }],
-            additional_speed_tiers: [],
-            input_modalities: ["text"],
-            context_window: 272000,
-          }] });
-        }
-        if (path === "/codex/responses" || path === "/grok/responses") {
-          responseBodies.push({ path, body: await request.text() });
-          if (emptyLengthReplies > 0) {
-            emptyLengthReplies -= 1;
-            return new Response(
-              'data: {"type":"response.incomplete","response":{"id":"resp_empty_length","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[],"usage":{"input_tokens":4,"output_tokens":4096}}}\n\n',
-              { headers: { "content-type": "text/event-stream" } },
-            );
-          }
-        }
-        if (path === "/codex/responses") {
-          if (codexUnauthorizedResponses > 0) {
-            codexUnauthorizedResponses -= 1;
+          if (gatewayUnauthorizedResponses > 0) {
+            gatewayUnauthorizedResponses -= 1;
             return Response.json({ error: { message: "host rejected request" } }, { status: 401 });
           }
-          return new Response(
-            'data: {"type":"response.output_text.delta","delta":"CODEX_HOST_MANAGED_OK"}\n\n' +
-              'data: {"type":"response.completed","response":{"id":"resp_codex_host","status":"completed","usage":{"input_tokens":4,"output_tokens":2}}}\n\n',
-            { headers: { "content-type": "text/event-stream" } },
-          );
-        }
-        if (path === "/grok/models") {
-          return Response.json({ data: [{
-            id: "grok-subscription-only",
-            model: "grok-subscription-only",
-            api_backend: "responses",
-            context_window: 1000000,
-            supports_reasoning_effort: false,
-            reasoning_efforts: [],
-          }, {
-            id: "grok-4.20",
-            model: "grok-4.20",
-            api_backend: "responses",
-            context_window: 1000000,
-            supports_reasoning_effort: false,
-            reasoning_efforts: [],
-          }] });
-        }
-        if (path === "/grok/modalities") {
-          return Response.json({ models: [{
-            id: "grok-4.20",
-            input_modalities: ["text"],
-            output_modalities: ["text"],
-          }] });
-        }
-        if (path === "/grok/responses") {
-          return new Response(
-            'data: {"type":"response.output_text.delta","delta":"GROK_HOST_MANAGED_OK"}\n\n' +
-              'data: {"type":"response.completed","response":{"id":"resp_grok_host","status":"completed","usage":{"input_tokens":4,"output_tokens":2}}}\n\n',
-            { headers: { "content-type": "text/event-stream" } },
-          );
+          return fakeGatewayFinalText("GATEWAY_HOST_MANAGED_OK");
         }
         return new Response("not found", { status: 404 });
       },
@@ -145,15 +73,10 @@ describe("host-managed authentication", () => {
       FX_SOUND: "0",
       FX_TEST_GATEWAY_MODELS_URL: `${baseUrl}/gateway/models`,
       FX_TEST_GATEWAY_CHAT_URL: `${baseUrl}/gateway/responses`,
-      FX_TEST_OPENAI_CODEX_MODELS_URL: `${baseUrl}/codex/models`,
-      FX_TEST_OPENAI_CODEX_RESPONSES_URL: `${baseUrl}/codex/responses`,
-      FX_TEST_XAI_GROK_MODELS_URL: `${baseUrl}/grok/models`,
-      FX_TEST_XAI_GROK_MODALITIES_URL: `${baseUrl}/grok/modalities`,
-      FX_TEST_XAI_GROK_RESPONSES_URL: `${baseUrl}/grok/responses`,
     };
   }
 
-  test("runs Gateway Codex and Grok without local authentication headers", async () => {
+  test("runs Gateway without local authentication headers", async () => {
     const childEnv = env();
     const status = await runFx(["status", "--json"], { cwd: workspace, env: childEnv });
     expect(status.code).toBe(0);
@@ -169,52 +92,35 @@ describe("host-managed authentication", () => {
     }
     expect(existsSync(join(home, ".fx", "auth.json"))).toBe(false);
 
-    for (const [provider, marker] of [
-      ["gateway", "GATEWAY_HOST_MANAGED_OK"],
-      ["codex", "CODEX_HOST_MANAGED_OK"],
-      ["grok", "GROK_HOST_MANAGED_OK"],
-    ] as const) {
-      const selected = await runFx(["provider", provider], {
-        cwd: workspace,
-        env: childEnv,
-        timeoutMs: TIMEOUT,
-      });
-      expect(selected.code).toBe(0);
-      expect(selected.stderr).toBe("");
+    const selected = await runFx(["provider", "gateway"], {
+      cwd: workspace,
+      env: childEnv,
+      timeoutMs: TIMEOUT,
+    });
+    expect(selected.code).toBe(0);
+    expect(selected.stderr).toBe("");
 
-      const models = await runFx(["models", "--json"], {
-        cwd: workspace,
-        env: childEnv,
-        timeoutMs: TIMEOUT,
-      });
-      expect(models.code).toBe(0);
-      expect(models.stderr).toBe("");
-      if (provider === "grok") {
-        expect(JSON.parse(models.stdout).ids).toEqual(["grok-subscription-only", "grok-4.20"]);
-        const settings = JSON.parse(readFileSync(join(home, ".fx", "settings.json"), "utf8"));
-        expect(settings.provider).toBe("grok");
-        expect(settings.models.grok).toBe("grok-subscription-only");
-      }
+    const models = await runFx(["models", "--json"], {
+      cwd: workspace,
+      env: childEnv,
+      timeoutMs: TIMEOUT,
+    });
+    expect(models.code).toBe(0);
+    expect(models.stderr).toBe("");
 
-      const asked = await runFx(["ask", "--json", "--no-save", "Reply once."], {
-        cwd: workspace,
-        env: childEnv,
-        timeoutMs: TIMEOUT,
-      });
-      expect(asked.code).toBe(0);
-      expect(asked.stderr).toBe("");
-      expect(asked.stdout).toContain(marker);
-    }
+    const asked = await runFx(["ask", "--json", "--no-save", "Reply once."], {
+      cwd: workspace,
+      env: childEnv,
+      timeoutMs: TIMEOUT,
+    });
+    expect(asked.code).toBe(0);
+    expect(asked.stderr).toBe("");
+    expect(asked.stdout).toContain("GATEWAY_HOST_MANAGED_OK");
 
     expect(requests.length).toBeGreaterThan(0);
     for (const request of requests) {
       expect(request.headers.get("authorization"), request.path).toBeNull();
       expect(request.headers.get("x-vercel-ai-gateway-team"), request.path).toBeNull();
-      expect(request.headers.get("chatgpt-account-id"), request.path).toBeNull();
-      expect(request.headers.get("x-xai-token-auth"), request.path).toBeNull();
-      expect(request.headers.get("x-authenticateresponse"), request.path).toBeNull();
-      expect(request.headers.get("x-grok-user-id"), request.path).toBeNull();
-      expect(request.headers.get("x-userid"), request.path).toBeNull();
     }
     expect(existsSync(join(home, ".fx", "auth.json"))).toBe(false);
   }, TIMEOUT);
@@ -233,71 +139,6 @@ describe("host-managed authentication", () => {
 
   test("final provider 401 does not enter local refresh or replay", async () => {
     const childEnv = env();
-    const selected = await runFx(["provider", "codex"], {
-      cwd: workspace,
-      env: childEnv,
-      timeoutMs: TIMEOUT,
-    });
-    expect(selected.code).toBe(0);
-
-    const before = requests.filter((request) => request.path === "/codex/responses").length;
-    codexUnauthorizedResponses = 1;
-    const asked = await runFx(["ask", "--json", "--no-save", "Reply once."], {
-      cwd: workspace,
-      env: childEnv,
-      timeoutMs: TIMEOUT,
-    });
-    expect(asked.code).toBe(1);
-    const after = requests.filter((request) => request.path === "/codex/responses").length;
-    expect(after - before).toBe(1);
-    expect(existsSync(join(home, ".fx", "auth.json"))).toBe(false);
-  }, TIMEOUT);
-
-  test("an empty reply cut short is asked again with fx's limit through Grok and at low effort through Codex", async () => {
-    const childEnv = env();
-    const turnBodies = (path: string) => responseBodies
-      .filter((entry) => entry.path === path && !entry.body.includes("Generate a short title"))
-      .map((entry) => JSON.parse(entry.body) as { max_output_tokens?: number; reasoning?: { effort?: string } });
-    for (const provider of ["codex", "grok"] as const) {
-      const selected = await runFx(["provider", provider], {
-        cwd: workspace,
-        env: childEnv,
-        timeoutMs: TIMEOUT,
-      });
-      expect(selected.code).toBe(0);
-      const path = `/${provider}/responses`;
-      const before = turnBodies(path).length;
-      emptyLengthReplies = 1;
-      const asked = await runFx(["ask", "--json", "--no-save", "Reply once."], {
-        cwd: workspace,
-        env: childEnv,
-        timeoutMs: TIMEOUT,
-      });
-      emptyLengthReplies = 0;
-      const sent = turnBodies(path).slice(before);
-      expect(asked.code).toBe(0);
-      expect(sent[0]!.max_output_tokens).toBeUndefined();
-      if (provider === "codex") {
-        // The Codex endpoint ignores fx's limit, so the resend asks for less
-        // reasoning instead, which the selected model offers.
-        expect(sent).toHaveLength(2);
-        expect(sent[1]!.max_output_tokens).toBeUndefined();
-        expect(sent[0]!.reasoning?.effort).toBeUndefined();
-        expect(sent[1]!.reasoning?.effort).toBe("low");
-        expect(asked.stderr).toContain("Retrying with low effort.");
-        expect(asked.stderr).not.toContain("Retrying with a higher limit");
-        expect(asked.stdout).toContain("CODEX_HOST_MANAGED_OK");
-      } else {
-        expect(sent).toHaveLength(2);
-        expect(sent[1]!.max_output_tokens).toBe(32_768);
-        expect(asked.stderr).toContain("Retrying with a higher limit.");
-        expect(asked.stdout).toContain("GROK_HOST_MANAGED_OK");
-      }
-    }
-  }, TIMEOUT * 2);
-
-  test("interactive host-managed session streams through the same authority", async () => {
-    const childEnv = env();
     const selected = await runFx(["provider", "gateway"], {
       cwd: workspace,
       env: childEnv,
@@ -305,36 +146,17 @@ describe("host-managed authentication", () => {
     });
     expect(selected.code).toBe(0);
 
-    const stderrPath = join(root, "tui.stderr");
-    const tracePath = join(root, "tui.trace");
-    const before = requests.length;
-    const session = await TmuxSession.create({
+    const before = requests.filter((request) => request.path === "/gateway/responses").length;
+    gatewayUnauthorizedResponses = 1;
+    const asked = await runFx(["ask", "--json", "--no-save", "Reply once."], {
       cwd: workspace,
-      env: {
-        ...childEnv,
-        FX_TRACE_LOG: tracePath,
-        FX_TRACE_SCOPES: "auth,session,worker,gateway",
-      },
-      stderrPath,
-      isolated: true,
+      env: childEnv,
+      timeoutMs: TIMEOUT,
     });
-    try {
-      await session.waitForComposer(TIMEOUT);
-      await session.sendText("Reply once.");
-      const pane = await session.waitForText("GATEWAY_HOST_MANAGED_OK", TIMEOUT);
-      expect(pane).toContain("GATEWAY_HOST_MANAGED_OK");
-    } catch (error) {
-      const trace = existsSync(tracePath) ? readFileSync(tracePath, "utf8") : "<no trace>";
-      throw new Error(`${String(error)}\ntrace:\n${trace}`);
-    } finally {
-      await session.kill();
-    }
-
-    expect(readFileSync(stderrPath, "utf8")).toBe("");
-    expect(requests.length).toBeGreaterThan(before);
-    for (const request of requests.slice(before)) {
-      expect(request.headers.get("authorization"), request.path).toBeNull();
-      expect(request.headers.get("x-vercel-ai-gateway-team"), request.path).toBeNull();
-    }
-  }, TIMEOUT * 2);
+    gatewayUnauthorizedResponses = 0;
+    expect(asked.code).toBe(1);
+    const after = requests.filter((request) => request.path === "/gateway/responses").length;
+    expect(after - before).toBe(1);
+    expect(existsSync(join(home, ".fx", "auth.json"))).toBe(false);
+  }, TIMEOUT);
 });

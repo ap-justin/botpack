@@ -19,10 +19,6 @@ pub const Scope = enum {
     member,
     /// AI Gateway API key: that key only (`api_key_id=self`).
     api_key,
-    /// A ChatGPT plan through Codex: its limits, not AI Gateway reports.
-    codex,
-    /// A Grok plan: its allowance and credits, not AI Gateway reports.
-    grok,
 
     /// Whether usage comes from AI Gateway reports rather than a provider's
     /// plan.
@@ -201,7 +197,6 @@ pub fn reportPath(buf: []u8, scope: Scope, first: i64, last: i64) ![]const u8 {
     const filter = switch (scope) {
         .member => "metered_scope=user",
         .api_key => "api_key_id=self",
-        .codex, .grok => return error.NotAiGateway,
     };
     return std.mem.print(buf, "/v1/report?start_date={s}&end_date={s}&group_by=model&{s}", .{
         formatDay(&a, first),
@@ -350,24 +345,6 @@ fn money(value: std.json.Value) ParseError!f64 {
 
 const testing = std.testing;
 
-test "paths pick the filter for how fx is signed in" {
-    var buf: [256]u8 = undefined;
-    const day = utcDay(1_791_676_800_000); // 2026-10-11
-    try testing.expectEqualStrings(
-        "/v1/report?start_date=2026-10-05&end_date=2026-10-10&group_by=model&metered_scope=user",
-        try reportPath(&buf, .member, day - 6, day - 1),
-    );
-    try testing.expectEqualStrings(
-        "/v1/report?start_date=2026-10-11&end_date=2026-10-11&group_by=model&api_key_id=self",
-        try reportPath(&buf, .api_key, day, day),
-    );
-    try testing.expectEqualStrings(
-        "/ai-gateway/usage-report?teamId=team_1&scope=user&start=2026-10-11&end=2026-10-11",
-        try budgetPath(&buf, "team_1", day),
-    );
-    try testing.expectError(error.NotAiGateway, reportPath(&buf, .codex, day, day));
-}
-
 test "model rows parse, merge duplicates and sort by cost" {
     const body =
         \\{"results":[
@@ -459,5 +436,22 @@ test "the budget comes from the member's usage-report entry" {
     try testing.expectError(
         error.InvalidResponse,
         parseBudget(testing.allocator, "{\"users\":[{\"budget\":{\"limitAmount\":1,\"currentSpend\":1,\"refreshPeriod\":\"hourly\"}}]}"),
+    );
+}
+
+test "paths pick the filter for how fx is signed in" {
+    var buf: [256]u8 = undefined;
+    const day = utcDay(1_791_676_800_000); // 2026-10-11
+    try testing.expectEqualStrings(
+        "/v1/report?start_date=2026-10-05&end_date=2026-10-10&group_by=model&metered_scope=user",
+        try reportPath(&buf, .member, day - 6, day - 1),
+    );
+    try testing.expectEqualStrings(
+        "/v1/report?start_date=2026-10-11&end_date=2026-10-11&group_by=model&api_key_id=self",
+        try reportPath(&buf, .api_key, day, day),
+    );
+    try testing.expectEqualStrings(
+        "/ai-gateway/usage-report?teamId=team_1&scope=user&start=2026-10-11&end=2026-10-11",
+        try budgetPath(&buf, "team_1", day),
     );
 }
