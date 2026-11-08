@@ -904,6 +904,8 @@ fn handleRestoreSession(
         durable.preferences.provider;
     const effective_model = if (state.process_model_override or state.process_provider_override)
         state.selected_model
+    else if (durable.preferences.provider_removed)
+        removedSignInReplacementModel(state)
     else
         durable.preferences.model;
     var staged_credential = server.prepareCredentialForProvider(state, effective_provider) catch |err| {
@@ -1313,6 +1315,14 @@ const ConversionNotice = struct {
             debug_trace.logf("acp", "event=conversion_notice_dropped err={s}", .{@errorName(err)});
     }
 };
+
+/// The Gateway model a session saved under a removed ChatGPT or Grok sign-in
+/// opens with: that provider's model ids aren't Gateway ids, so the user's
+/// default replaces it. `selected_model` is that default only when the
+/// startup provider is Gateway.
+fn removedSignInReplacementModel(state: *const server.ServerState) []const u8 {
+    return if (state.provider == .gateway) state.selected_model else state.cfg.default_model;
+}
 
 fn handleLoadFailure(
     state: *server.ServerState,

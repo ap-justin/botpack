@@ -109,6 +109,7 @@ pub const keys = [_]Key{
     .{ .name = "auto_compact_percent", .where = .profile, .kind = .integer, .minimum = 10, .maximum = 80, .description = "Start automatic compaction at this percentage of usable input capacity" },
     .{ .name = "auto_upgrade", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "cache_warming", .where = .profile, .kind = .boolean, .description = "Keep a waiting Claude conversation's prompt cache alive for up to 30 minutes" },
+    .{ .name = "codex_model", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "collapse_tool_calls", .where = .profile, .kind = .boolean, .description = "Show a summary for each group of tool calls" },
     .{ .name = "context", .where = .project_safe, .kind = .boolean, .description = "Load project instructions such as AGENTS.md" },
     .{ .name = "context_limits", .where = .profile, .kind = .object, .map = true, .description = "Context limits by name, in bytes or off, as --context-limit takes them" },
@@ -120,6 +121,7 @@ pub const keys = [_]Key{
     .{ .name = "fast_mode", .where = .profile, .kind = .boolean, .description = "Use faster inference when the model supports it" },
     .{ .name = "fast_mode_model_bound", .where = .profile, .kind = .boolean, .description = "Managed by fx alongside fast_mode" },
     .{ .name = "first_call_tool_choice", .where = .profile, .kind = .string, .values = &.{ "auto", "none" }, .description = "Tool choice for the first request of a turn" },
+    .{ .name = "grok_model", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "input_appearance", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "max_agent_steps", .where = .project_safe, .kind = .integer, .minimum = 0, .description = "Most agent steps per turn; 0 means no limit" },
     .{ .name = "max_tool_result_bytes", .where = .project_safe, .kind = .integer, .minimum = 1024, .description = "Tool output budget in model context, in bytes" },
@@ -419,6 +421,21 @@ test "project files ignore profile keys but not project-safe or retired ones" {
     try std.testing.expect(!ignoredInProject("provider_order"));
     try std.testing.expect(!ignoredInProject("maxxing_mode"));
     try std.testing.expect(!ignoredInProject("not_a_setting"));
+}
+
+test "the ChatGPT and Grok model keys load as retired, not unknown" {
+    const alloc = std.testing.allocator;
+    var parsed = try std.json.parseFromSlice(std.json.Value, alloc,
+        \\{"codex_model":"gpt-5.4-mini","grok_model":"grok-4.20-0309-non-reasoning",
+        \\ "workspaces":{"/w":{"codex_model":"gpt-5.4-mini"}}}
+    , .{});
+    defer parsed.deinit();
+    const unknown = try findUnknown(alloc, parsed.value, .profile);
+    defer alloc.free(unknown);
+    try std.testing.expectEqual(@as(usize, 0), unknown.len);
+    try std.testing.expectEqual(Where.retired, find("codex_model").?.where);
+    try std.testing.expectEqual(Where.retired, find("grok_model").?.where);
+    try std.testing.expect(!ignoredInProject("codex_model"));
 }
 
 test "unknown keys are found at the top level, in fixed objects, and in workspace overrides" {

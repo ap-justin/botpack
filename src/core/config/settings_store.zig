@@ -2164,7 +2164,9 @@ fn validateKnownSettingsObject(
         if (value != .string) return error.InvalidSettingsFormat;
     }
     if (object.get("credential_source")) |value| {
-        if (value != .string or types.parseCredentialSource(value.string) == null) {
+        if (value != .string or
+            (types.parseCredentialSource(value.string) == null and !types.isRemovedCredentialSource(value.string)))
+        {
             return error.InvalidSettingsFormat;
         }
     }

@@ -107,6 +107,22 @@ pub fn parse(value: []const u8) ?ProviderId {
     return result;
 }
 
+/// The built-in labels of the ChatGPT ("codex") and Grok sign-ins, which older
+/// builds wrote to settings and sessions. Both are valid configured-connection
+/// names too, so only a caller that knows no connection defines the name may
+/// treat it as removed.
+pub fn isRemovedSignIn(name: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(name, "codex") or std.ascii.eqlIgnoreCase(name, "grok");
+}
+
+/// Like `parse_saved`, but a bare removed sign-in label is `RemovedProvider`.
+/// A saved configured connection is always `{name, binding}`, so a bare string
+/// naming one can only have come from an older build's built-in provider.
+pub fn parse_saved_or_removed(value: std.json.Value) error{ InvalidProviderBinding, RemovedProvider }!ProviderId {
+    if (value == .string and isRemovedSignIn(value.string)) return error.RemovedProvider;
+    return parse_saved(value);
+}
+
 pub fn parse_saved(value: std.json.Value) error{InvalidProviderBinding}!ProviderId {
     if (value == .string) {
         const provider = parse(value.string) orelse return error.InvalidProviderBinding;
@@ -179,6 +195,14 @@ test "provider equality compares tags before names and name keys stay name-only"
     const builtin_key = NameKey.fromProvider(gateway);
     try std.testing.expect(builtin_key.eqlName("gateway"));
     try std.testing.expect(builtin_key.eqlProvider(gateway));
+}
+
+test "a bare saved ChatGPT or Grok label is removed, not an unbound connection" {
+    try std.testing.expectError(error.RemovedProvider, parse_saved_or_removed(.{ .string = "codex" }));
+    try std.testing.expectError(error.RemovedProvider, parse_saved_or_removed(.{ .string = "grok" }));
+    try std.testing.expectEqual(ProviderId.gateway, try parse_saved_or_removed(.{ .string = "gateway" }));
+    try std.testing.expectError(error.InvalidProviderBinding, parse_saved_or_removed(.{ .string = "local" }));
+    try std.testing.expect(!isRemovedSignIn("gateway"));
 }
 
 test "provider parsing recognizes builtins and validated configured names" {
