@@ -725,7 +725,8 @@ pub const Catalog = struct {
         for (c.servers, c.lists) |s, l| {
             if (!tool_names.matchesServer(name, s.name)) continue;
             const text = try c.unavailableText(alloc, s, l) orelse continue;
-            return .{ .rejected = .{ .model_output = text } };
+            errdefer alloc.free(text);
+            return .{ .rejected = .{ .model_output = text, .unavailable_server = try alloc.dupe(u8, s.name) } };
         }
         return null;
     }
@@ -1122,6 +1123,30 @@ test "a reload keeps a kept server's list and the bindings made from it, until a
     // The kept server's list stays without asking it again.
     try testing.expectEqual(@as(usize, 1), (try c.snapshotToolNames(a, .{})).len);
     try testing.expect(c.hasTool("mcp_late_echo", .unrestricted));
+}
+
+test "a tool schema lookup names the server that yielded no tool list" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    const configs = [_]mcp_contract.McpServerConfig{.{
+        .name = "keyed",
+        .transport = .http,
+        .url = "https://example.invalid/mcp",
+        .bearer_token_env = @constCast("FX_MCP_HOST_TEST_UNSET"),
+    }};
+    var r: Runtime = undefined;
+    try r.start(testing.allocator, testing.io, &configs, &f.inherited, f.options());
+    defer r.deinit();
+    var c: Catalog = undefined;
+    try c.init(testing.allocator, testing.io, &r, .{});
+    defer c.deinit();
+
+    var held = (try c.toolSchema(testing.allocator, "mcp_keyed_list", .{}, .{}, .unrestricted, null)).?;
+    defer held.deinit(testing.allocator);
+    try testing.expectEqualStrings("keyed", held.rejected.unavailable_server.?);
+    // A name in no configured server's namespace is not found, with no server to blame.
+    try testing.expect((try c.toolSchema(testing.allocator, "mcp_other_list", .{}, .{}, .unrestricted, null)) == null);
 }
 
 test "a search says why a server it names has no tools, and calls that end say how" {
