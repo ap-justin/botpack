@@ -2610,16 +2610,20 @@ fn promptWorkerMain(active: *ActivePrompt) void {
         &active.msg,
         active.mode,
         active.permission_mode,
-    ) catch |err| .{
-        .rpc_error = .{
-            .code = ErrorCode.internal_error,
-            // A storage fault is named (D29); the wasm host keeps the error name.
-            .message = if (active.state.sessions_v2 != null)
-                sessions.v2StorageFaultMessage("Session could not be saved", err) orelse @errorName(err)
-            else
-                @errorName(err),
-        },
+    ) catch |err| blk: {
+        debug_trace.logf("acp", "event=prompt_handler_failed err={s}", .{@errorName(err)});
+        break :blk .{
+            .rpc_error = .{
+                .code = ErrorCode.internal_error,
+                // A storage fault is named (D29); the wasm host keeps the error name.
+                .message = if (active.state.sessions_v2 != null)
+                    sessions.v2StorageFaultMessage("Session could not be saved", err) orelse @errorName(err)
+                else
+                    @errorName(err),
+            },
+        };
     };
+    debug_trace.logf("acp", "event=prompt_handler_returned kind={s}", .{@tagName(outcome)});
     const finished_steering: ?libfx_steering.Finished = if (active.state.active_session) |*session|
         session.steering.finishTurn(active.state.alloc, active.alloc, "turn_finished") catch |err| blk: {
             debug_trace.logf("acp", "failed to collect steering prompts at turn end err={s}", .{@errorName(err)});
@@ -2629,7 +2633,7 @@ fn promptWorkerMain(active: *ActivePrompt) void {
         null;
     defer if (finished_steering) |finished| finished.deinit(active.alloc);
     active.reapable.store(true, .seq_cst);
-    publishPromptOutcome(active, outcome) catch {};
+    publishPromptOutcome(active, outcome);
     if (finished_steering) |finished| publishSteeringOutcomes(active, outcome, finished) catch {};
     prompt_test_controls.pauseAfterTerminalWrite();
 }
@@ -2699,25 +2703,51 @@ pub fn noteSteeringTool(state: *ServerState, call_id: []const u8, started: bool)
     }
 }
 
-fn publishPromptOutcome(active: *ActivePrompt, outcome: prompt_handler.TerminalOutcome) !void {
+fn publishPromptOutcome(active: *ActivePrompt, outcome: prompt_handler.TerminalOutcome) void {
+    const usage = if (active.state.active_session) |*session|
+        session.session_rt.agent.turn_usage
+    else
+        types.Usage{};
+    answerPrompt(&active.state.writer, active.alloc, active.msg.id, outcome, usage);
+}
+
+/// Writes the prompt's answer. A response that cannot be built or written
+/// is traced and replaced by an error, so the client is never left waiting
+/// on a prompt that has already ended.
+fn answerPrompt(
+    writer: *jsonrpc.Writer,
+    alloc: Allocator,
+    id: ?jsonrpc.RequestId,
+    outcome: prompt_handler.TerminalOutcome,
+    usage: types.Usage,
+) void {
+    debug_trace.logf("acp", "event=prompt_answer kind={s}", .{@tagName(outcome)});
+    writePromptAnswer(writer, alloc, id, outcome, usage) catch |err| {
+        debug_trace.logf("acp", "event=prompt_answer_failed kind={s} err={s}", .{ @tagName(outcome), @errorName(err) });
+        writer.writeError(alloc, id, .{
+            .code = ErrorCode.internal_error,
+            .message = "The prompt's response could not be sent",
+        }) catch |fallback_err| {
+            debug_trace.logf("acp", "event=prompt_answer_fallback_failed err={s}", .{@errorName(fallback_err)});
+        };
+    };
+}
+
+fn writePromptAnswer(
+    writer: *jsonrpc.Writer,
+    alloc: Allocator,
+    id: ?jsonrpc.RequestId,
+    outcome: prompt_handler.TerminalOutcome,
+    usage: types.Usage,
+) !void {
     switch (outcome) {
         .stop_reason => |stop_reason| {
-            var response: std.Io.Writer.Allocating = .init(active.alloc);
+            var response: std.Io.Writer.Allocating = .init(alloc);
             defer response.deinit();
-            const usage = if (active.state.active_session) |*session|
-                session.session_rt.agent.turn_usage
-            else
-                types.Usage{};
-            try acp_types.writePromptResponseWithUsage(
-                &response.writer,
-                stop_reason,
-                usage,
-            );
-            try active.state.writer.writeResponse(active.alloc, active.msg.id, response.writer.buffered());
+            try acp_types.writePromptResponseWithUsage(&response.writer, stop_reason, usage);
+            try writer.writeResponse(alloc, id, response.writer.buffered());
         },
-        .rpc_error => |rpc_error| {
-            try active.state.writer.writeError(active.alloc, active.msg.id, rpc_error);
-        },
+        .rpc_error => |rpc_error| try writer.writeError(alloc, id, rpc_error),
     }
 }
 
@@ -5206,4 +5236,40 @@ test "speedSupportedBy keeps only the lanes the new model offers" {
     try std.testing.expectEqual(SessionSpeed{ .fast = false, .ultrafast = false }, speedSupportedBy(on, .gateway, plain));
     const standard: SessionSpeed = .{ .fast = false, .ultrafast = false };
     try std.testing.expectEqual(standard, speedSupportedBy(standard, .gateway, both));
+}
+
+const AnswerCapture = struct {
+    alloc: Allocator,
+    frames: std.ArrayList([]u8) = .empty,
+    fail_results: bool = false,
+
+    fn write(raw: ?*anyopaque, frame: []const u8) anyerror!void {
+        const self: *AnswerCapture = @ptrCast(@alignCast(raw.?));
+        if (self.fail_results and std.mem.find(u8, frame, "\"result\"") != null) return error.BrokenPipe;
+        try self.frames.append(self.alloc, try self.alloc.dupe(u8, frame));
+    }
+
+    fn deinit(self: *AnswerCapture) void {
+        for (self.frames.items) |frame| self.alloc.free(frame);
+        self.frames.deinit(self.alloc);
+    }
+};
+
+test "a prompt whose response cannot be written still gets an error answer" {
+    const alloc = std.testing.allocator;
+    var capture = AnswerCapture{ .alloc = alloc };
+    defer capture.deinit();
+    var writer = jsonrpc.Writer.initCallback(&capture, AnswerCapture.write);
+    const id: jsonrpc.RequestId = .{ .integer = 7 };
+
+    answerPrompt(&writer, alloc, id, .{ .stop_reason = .end_turn }, .{ .input_tokens = 3 });
+    try std.testing.expectEqual(@as(usize, 1), capture.frames.items.len);
+    try std.testing.expect(std.mem.find(u8, capture.frames.items[0], "\"stopReason\":\"end_turn\"") != null);
+
+    capture.fail_results = true;
+    answerPrompt(&writer, alloc, id, .{ .stop_reason = .end_turn }, .{});
+    try std.testing.expectEqual(@as(usize, 2), capture.frames.items.len);
+    try std.testing.expect(std.mem.find(u8, capture.frames.items[1], "\"id\":7") != null);
+    try std.testing.expect(std.mem.find(u8, capture.frames.items[1], "-32603") != null);
+    try std.testing.expect(std.mem.find(u8, capture.frames.items[1], "could not be sent") != null);
 }

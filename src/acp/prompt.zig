@@ -1210,6 +1210,7 @@ pub fn handlePrompt(
         }
     };
     try endJournalTurn(alloc, state.alloc, session);
+    debug_trace.logf("acp", "event=prompt_turn_ended session={s}", .{session.session_id});
     if (try runReportTurns(state, session, alloc, &ctx, &deps, agent_config, job)) |outcome| {
         prompt_input.retainImageSnapshots();
         return outcome;
@@ -1218,6 +1219,7 @@ pub fn handlePrompt(
     completeAcpTitleTask(state, session);
     try sessions.sendActiveSessionInfoUpdate(state, alloc);
     try sessions.sendActiveSessionUsageUpdate(state, alloc);
+    debug_trace.logf("acp", "event=prompt_updates_sent session={s}", .{session.session_id});
 
     // A steer's interrupt the turn finished before reaching is not a cancel.
     if (state.cfg.minimal_kernel) server.releaseSteeringInterrupt(state);

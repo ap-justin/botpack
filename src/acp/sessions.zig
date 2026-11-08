@@ -2004,13 +2004,19 @@ pub fn sendActiveSessionInfoUpdate(state: *server.ServerState, alloc: Allocator)
 pub fn sendActiveSessionUsageUpdate(state: *server.ServerState, alloc: Allocator) !void {
     const active = if (state.active_session) |*session| session else return;
     const used = active.context_used.load(.acquire);
-    if (used == 0) return;
+    if (used == 0) {
+        debug_trace.logf("acp", "event=usage_update_skipped reason=no_usage session={s}", .{active.session_id});
+        return;
+    }
     const provider_bundle = state.cfg.provider_set.select(active.provider);
     const capabilities = state.capability_resolver.available(
         active.model,
         provider_bundle.fallbackModelCapabilities(active.model),
     );
-    const context_window = capabilities.context_window orelse return;
+    const context_window = capabilities.context_window orelse {
+        debug_trace.logf("acp", "event=usage_update_skipped reason=no_context_window session={s}", .{active.session_id});
+        return;
+    };
 
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();

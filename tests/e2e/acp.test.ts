@@ -1659,11 +1659,13 @@ describe("acp: model-independent", () => {
   );
 
   test(
-    "ACP answers the first prompt after a streamed reply, a generated title and a usage update",
+    "ACP answers the first prompt when the gateway reports no usage and the title arrives after the turn",
     async () => {
       const root = createIsolatedRoot("fx-acp-title-usage-");
-      // The shape a real gateway streams: step and metadata events around the
-      // text, usage with cache counts, and a context window for the model.
+      const tracePath = join(root.root, "trace.log");
+      // The shape a real gateway streamed in a live trace: metadata events
+      // around the text, no usage on the finish event, and a title that comes
+      // back after the turn has ended.
       const streamedAnswer = () => fakeGatewaySse([
         { type: "stream-start", warnings: [] },
         { type: "response-metadata", id: "resp_1", modelId: FAKE_GATEWAY_MODEL },
@@ -1673,21 +1675,25 @@ describe("acp: model-independent", () => {
         {
           type: "finish",
           finishReason: { unified: "stop", raw: "end_turn" },
-          usage: {
-            inputTokens: { total: 120, cacheRead: 100, cacheWrite: 10 },
-            outputTokens: { total: 5, reasoning: 2 },
-          },
           providerMetadata: { gateway: { cost: "0.0001", generationId: "gen_1" } },
         },
       ]);
       const gateway = startDynamicFakeGateway(_raw => streamedAnswer(), {
-        titleResponses: [finalText("A Short Title")],
-        models: [{ id: "anthropic/claude-haiku-5.5", type: "language", tags: ["tool-use"], context_window: 200_000 }],
+        titleResponses: [async () => {
+          await Bun.sleep(150);
+          return finalText("A Short Title");
+        }],
+        models: [{ id: "anthropic/claude-haiku-5.5", type: "language", tags: ["explicit-caching", "reasoning", "tool-use"], context_window: 200_000, max_tokens: 64_000 }],
       });
       try {
         client = await AcpClient.create({
           cwd: root.workspace,
-          env: { ...fakeGatewayEnv(root, gateway), FX_MODEL: "anthropic/claude-haiku-5.5" },
+          env: {
+            ...fakeGatewayEnv(root, gateway),
+            FX_MODEL: "anthropic/claude-haiku-5.5",
+            FX_TRACE_LOG: tracePath,
+            FX_TRACE_SCOPES: "acp",
+          },
         });
         await client.request("initialize", { protocolVersion: 1 }, 1);
         await client.request("session/new", { mcpServers: [] }, 2);
@@ -1701,8 +1707,12 @@ describe("acp: model-independent", () => {
           .map((message: any) => message.params.update.sessionUpdate);
         expect(kinds).toContain("agent_message_chunk");
         expect(kinds).toContain("session_info_update");
-        expect(kinds).toContain("usage_update");
         expect(client.stderr).toBe("");
+        // The trace names each step from the turn's end to the answer.
+        const trace = readFileSync(tracePath, "utf8");
+        for (const event of ["prompt_turn_ended", "usage_update_skipped reason=no_usage", "prompt_updates_sent", "prompt_handler_returned kind=stop_reason", "prompt_answer kind=stop_reason"]) {
+          expect(trace).toContain(`event=${event}`);
+        }
       } finally {
         await client?.close();
         gateway.stop();
