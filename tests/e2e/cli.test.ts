@@ -355,14 +355,14 @@ describe("cli: help", () => {
       expect(stdout).toContain("Run one noninteractive request");
       expect(stdout).toContain("Sign in to Vercel AI Gateway");
       expect(stdout).toContain("Sign out of Vercel AI Gateway");
-      // At the 80-column default the summary wraps, so "connection" lands on the next line.
+      // runFx inherits COLUMNS, and at the 80-column default the summary wraps
+      // "connection" onto the next line, so accept it on either line.
       const providerRow = stdout.indexOf("  provider <name>");
       expect(providerRow).toBeGreaterThanOrEqual(0);
       const providerLine = stdout.slice(providerRow, stdout.indexOf("\n", providerRow));
-      expect(providerLine).toContain("Choose AI Gateway or a configured");
-      expect(stdout.indexOf("connection", providerRow)).toBeGreaterThan(
-        providerRow + providerLine.length,
-      );
+      const summaryStart = providerLine.indexOf("Choose AI Gateway or a configured");
+      expect(summaryStart).toBeGreaterThanOrEqual(0);
+      expect(stdout.indexOf("connection", providerRow)).toBeGreaterThan(providerRow + summaryStart);
       // `fx setup` is deprecated and hidden; `fx login --api-key` replaces it.
       expect(stdout).not.toContain("Configure a Vercel AI Gateway API key");
       expect(stdout).toContain("login [vercel] [--api-key]");
