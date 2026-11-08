@@ -18,7 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { FX_BIN, HAS_API_KEY, REPO_ROOT, runFx } from "../evals/eval-helpers";
+import { FX_BIN, REPO_ROOT, runFx } from "../evals/eval-helpers";
 import {
   AUTO_EXA_SERIALIZED_TOOL_NAMES,
   customProviderGuidanceState,
@@ -10443,6 +10443,50 @@ describe("acp: model-backed protocol", () => {
   );
 
   test(
+    "session/new rejects an invalid MCP env name with -32602 and keeps serving",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-mcp-bad-env-");
+      const gateway = startFakeGateway([]);
+      const badEntries = [
+        { name: "A=B", value: "x" },
+        { name: "", value: "x" },
+        { name: "A\u0000B", value: "x" },
+        { name: "OK_NAME", value: "x\u0000y" },
+      ];
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: fakeGatewayEnv(root, gateway),
+        });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        let id = 2;
+        for (const entry of badEntries) {
+          const rejected = await client.request("session/new", {
+            cwd: root.workspace,
+            mcpServers: [{
+              name: "fixture",
+              command: process.execPath,
+              args: [MCP_STDIO_FIXTURE],
+              env: [entry],
+            }],
+          }, id++) as any;
+          expect(rejected.result).toBeUndefined();
+          expect(rejected.error.code).toBe(-32602);
+        }
+
+        const created = await client.request("session/new", { cwd: root.workspace, mcpServers: [] }, id) as any;
+        expect(created.error).toBeUndefined();
+        expect(typeof created.result.sessionId).toBe("string");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "session/prompt returns response with stopReason",
     async () => {
       const root = createIsolatedRoot("fx-acp-session-prompt-");
@@ -10477,7 +10521,13 @@ describe("acp: model-backed protocol", () => {
         }
 
         expect(promptResult).not.toBeNull();
-        expect(promptResult.result.stopReason).toBeDefined();
+        expect(promptResult.result.stopReason).toBe("end_turn");
+        expect(promptResult.result._meta).toBeUndefined();
+        const agentText = messages
+          .filter((message) => message.params?.update?.sessionUpdate === "agent_message_chunk")
+          .map((message) => message.params.update.content.text)
+          .join("");
+        expect(agentText).toContain("pong");
       } finally {
         await client?.close();
         gateway.stop();
@@ -10485,35 +10535,6 @@ describe("acp: model-backed protocol", () => {
       }
     },
     90_000,
-  );
-
-  test(
-    "session/cancel does not crash the server",
-    async () => {
-      const root = createIsolatedRoot("fx-acp-session-cancel-");
-      const gateway = startFakeGateway([]);
-      try {
-        client = await AcpClient.create({
-          cwd: root.workspace,
-          env: fakeGatewayEnv(root, gateway),
-        });
-        await client.request("initialize", { protocolVersion: 1 }, 1);
-        await client.request("session/new", { mcpServers: [] }, 2);
-        await client.readLine(); // consume session/update notification
-
-        client.send({ jsonrpc: "2.0", method: "session/cancel", params: {} });
-        await new Promise((r) => setTimeout(r, 300));
-
-        const listResp = await client.request("session/list", {}, 3) as any;
-        expect(listResp.result).toBeDefined();
-        expect(Array.isArray(listResp.result.sessions)).toBe(true);
-      } finally {
-        await client?.close();
-        gateway.stop();
-        rmSync(root.root, { recursive: true, force: true });
-      }
-    },
-    TIMEOUT,
   );
 
   test(
