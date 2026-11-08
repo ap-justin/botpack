@@ -10072,7 +10072,9 @@ test "selecting a tool mid-turn leaves the cached prompt prefix byte-identical" 
     defer alloc.free(tools_after);
     const before_open = tools_before[0 .. tools_before.len - 1];
     try std.testing.expectEqualStrings(before_open, tools_after[0..before_open.len]);
-    try std.testing.expectEqual(@as(u8, ','), tools_after[before_open.len]);
+    // With no fixed tools the list was `[]`, so the selected tool follows the bracket directly.
+    const separator: u8 = if (names_before.len == 0) '{' else ',';
+    try std.testing.expectEqual(separator, tools_after[before_open.len]);
 }
 
 test "two turns of one session share the prompt prefix and the tool list" {
@@ -10154,7 +10156,11 @@ const down_one_tool = fixtureTool("mcp_down_one");
 const down_two_tool = fixtureTool("mcp_down_two");
 
 /// One more tool than a turn restores.
-const many_mcp = blk: {
+const many_mcp: struct {
+    tools: [33]SelectedTool,
+    calls: [33]ToolCall,
+    names: [33][]const u8,
+} = blk: {
     @setEvalBranchQuota(100_000);
     const count = 33;
     var tools: [count]SelectedTool = undefined;
