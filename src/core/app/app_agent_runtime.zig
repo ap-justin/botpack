@@ -885,8 +885,9 @@ pub fn Runtime(comptime App: type) type {
             return tool_runtime.validateToolCall(toolContext(app, agent, ignored_list_entries, max_list_entries, max_read_file_bytes, max_read_file_lines, max_read_file_line_len, max_command_output_bytes, gateway_retry_count, gateway_chat_url), arena, call);
         }
 
-        /// The current definition of a live MCP tool the model called without
-        /// loading it this turn, or null when no permitted tool has that name.
+        /// The current definition of a live MCP tool not loaded this turn,
+        /// or why there is none: no permitted tool has that name, or its
+        /// server yielded no tool list.
         pub fn resolveUnselectedMcpTool(
             app: *App,
             agent: *AppAgent,
@@ -900,8 +901,8 @@ pub fn Runtime(comptime App: type) type {
             max_command_output_bytes: usize,
             gateway_retry_count: usize,
             gateway_chat_url: []const u8,
-        ) !?tool_mcp_runtime.SelectedTool {
-            return tool_runtime.resolveUnselectedMcpTool(toolContext(app, agent, ignored_list_entries, max_list_entries, max_read_file_bytes, max_read_file_lines, max_read_file_line_len, max_command_output_bytes, gateway_retry_count, gateway_chat_url), arena, name);
+        ) !tool_mcp_runtime.UnselectedLookup {
+            return tool_runtime.lookupUnselectedMcpTool(toolContext(app, agent, ignored_list_entries, max_list_entries, max_read_file_bytes, max_read_file_lines, max_read_file_line_len, max_command_output_bytes, gateway_retry_count, gateway_chat_url), arena, name);
         }
 
         pub fn checkToolAvailability(

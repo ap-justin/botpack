@@ -6,6 +6,7 @@ const context_limits = @import("../config/context_limits.zig");
 const elicitation = @import("../mcp/elicitation.zig");
 const mcp_contract = @import("../mcp/mcp_contract.zig");
 const access_policy = @import("../mcp/access_policy.zig");
+const tool_names = @import("../mcp/tool_names.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -308,6 +309,27 @@ pub const SelectedTool = struct {
     }
 };
 
+/// What looking up a live MCP tool by name, without the model selecting it,
+/// found. Borrows from the lookup's arena.
+pub const UnselectedLookup = union(enum) {
+    resolved: SelectedTool,
+    /// No tool by that name may be advertised: none exists, or the permission
+    /// rules or the access view refuse it.
+    missing,
+    /// The configured server whose namespace holds the name yielded no tool
+    /// list: it failed to start, needs a login, or is held.
+    server_unavailable: []const u8,
+
+    /// Whether `name` is in the namespace of a server a lookup found
+    /// unavailable, so looking it up would wait on that server again.
+    pub fn namesUnavailableServer(unavailable_servers: []const []const u8, name: []const u8) bool {
+        for (unavailable_servers) |server| {
+            if (tool_names.matchesServer(name, server)) return true;
+        }
+        return false;
+    }
+};
+
 pub fn freeSelectedTools(alloc: Allocator, tools: []const SelectedTool) void {
     for (tools) |tool| tool.deinit(alloc);
     alloc.free(tools);
@@ -334,6 +356,9 @@ pub const ToolSchemaResult = union(enum) {
         model_output: []u8,
         notice: ?[]u8 = null,
         mcp_binding: ?Binding = null,
+        /// On `.rejected`, the configured server that yielded no tool list
+        /// for the name's namespace.
+        unavailable_server: ?[]u8 = null,
     };
 
     pub fn deinit(self: *ToolSchemaResult, alloc: Allocator) void {
@@ -343,6 +368,7 @@ pub const ToolSchemaResult = union(enum) {
         };
         alloc.free(payload.model_output);
         if (payload.notice) |notice| alloc.free(notice);
+        if (payload.unavailable_server) |server| alloc.free(server);
         self.* = undefined;
     }
 };

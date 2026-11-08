@@ -36,6 +36,7 @@ const Allocator = std.mem.Allocator;
 const HistoryTurn = types.HistoryTurn;
 const PermissionGrant = types.PermissionGrant;
 const ToolCall = types.ToolCall;
+const SelectedTool = @import("../../../tooling/tool_mcp_runtime.zig").SelectedTool;
 const QueuedPrompt = worker_runtime.QueuedPrompt;
 
 const FakeCompletion = test_support.FakeCompletion;
@@ -9872,6 +9873,7 @@ const echo_binding: types.McpToolBinding = .{
     .catalog_generation = 1,
     .auth_generation = 1,
 };
+const echo_tool: SelectedTool = .{ .name = "mcp_fixture_echo", .schema_json = echo_tool_schema, .mcp_binding = echo_binding };
 
 /// The request's `prompt` entries up to and including the last one that
 /// carries an Anthropic cache marker, as JSON.
@@ -9946,7 +9948,7 @@ test "selecting a tool mid-turn leaves the cached prompt prefix byte-identical" 
     var hooks = FakeAgentRuntimeDeps.init(alloc);
     defer hooks.deinit();
     hooks.permission_decisions = &.{.once};
-    hooks.resolvable_mcp_tool = .{ .name = "mcp_fixture_echo", .schema_json = echo_tool_schema, .mcp_binding = echo_binding };
+    hooks.resolvable_mcp_tools = &.{echo_tool};
     hooks.exec_plans = &.{.{ .result = .{
         .model_output = "selected",
         .selected_dynamic_tools = &.{.{ .name = "mcp_fixture_echo", .schema_json = echo_tool_schema, .mcp_binding = echo_binding }},
@@ -9987,7 +9989,7 @@ test "two turns of one session share the prompt prefix and the tool list" {
     var hooks = FakeAgentRuntimeDeps.init(alloc);
     defer hooks.deinit();
     hooks.permission_decisions = &.{ .once, .once };
-    hooks.resolvable_mcp_tool = .{ .name = "mcp_fixture_echo", .schema_json = echo_tool_schema, .mcp_binding = echo_binding };
+    hooks.resolvable_mcp_tools = &.{echo_tool};
     hooks.exec_plans = &.{
         .{ .result = .{
             .model_output = "selected",
@@ -10006,7 +10008,7 @@ test "two turns of one session share the prompt prefix and the tool list" {
     defer second_gateway.deinit();
     var second_hooks = FakeAgentRuntimeDeps.init(alloc);
     defer second_hooks.deinit();
-    second_hooks.resolvable_mcp_tool = hooks.resolvable_mcp_tool;
+    second_hooks.resolvable_mcp_tools = hooks.resolvable_mcp_tools;
     var second_fixture = PromptFixture{};
     var second_job = second_fixture.job();
     second_job.prompt = @constCast("follow up");
@@ -10027,4 +10029,265 @@ test "two turns of one session share the prompt prefix and the tool list" {
     try std.testing.expectEqual(last_of_first.len, start_of_second.len);
     for (last_of_first, 0..) |name, index| try std.testing.expectEqualStrings(name, start_of_second[index]);
     try std.testing.expectEqualStrings("mcp_fixture_echo", start_of_second[start_of_second.len - 1]);
+}
+
+fn fixtureTool(comptime name: []const u8) SelectedTool {
+    return .{
+        .name = name,
+        .schema_json = "{\"type\":\"function\",\"name\":\"" ++ name ++ "\",\"description\":\"Fixture\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}",
+        .mcp_binding = echo_binding,
+    };
+}
+
+fn selectCall(comptime id: []const u8, comptime name: []const u8) ToolCall {
+    return toolCall(id, "mcp_select_tool", "{\"name\":\"" ++ name ++ "\"}");
+}
+
+const alpha_tool = fixtureTool("mcp_fixture_alpha");
+const beta_tool = fixtureTool("mcp_fixture_beta");
+const gamma_tool = fixtureTool("mcp_fixture_gamma");
+const down_one_tool = fixtureTool("mcp_down_one");
+const down_two_tool = fixtureTool("mcp_down_two");
+
+/// One more tool than a turn restores.
+const many_mcp = blk: {
+    @setEvalBranchQuota(100_000);
+    const count = 33;
+    var tools: [count]SelectedTool = undefined;
+    var calls: [count]ToolCall = undefined;
+    var names: [count][]const u8 = undefined;
+    inline for (0..count) |index| {
+        const name = std.fmt.comptimePrint("mcp_fixture_t{d:0>2}", .{index});
+        tools[index] = fixtureTool(name);
+        calls[index] = toolCall(name, name, "{}");
+        names[index] = name;
+    }
+    const final_tools = tools;
+    const final_calls = calls;
+    const final_names = names;
+    break :blk .{ .tools = final_tools, .calls = final_calls, .names = final_names };
+};
+
+/// Runs the next turn of the session whose saved history is `history`.
+fn runFollowUpTurn(gateway: *FakeGateway, hooks: *FakeAgentRuntimeDeps, history: []HistoryTurn) !void {
+    var fixture = PromptFixture{};
+    var job = fixture.job();
+    job.prompt = @constCast("follow up");
+    job.history = history;
+    try runFakePrompt(gateway, hooks, fixture.config(), job);
+}
+
+/// Asserts `body` advertises `fixed_body`'s tools followed by `added`, in order.
+fn expectToolsAfterFixed(alloc: Allocator, fixed_body: []const u8, body: []const u8, added: []const []const u8) !void {
+    const fixed = try toolNames(alloc, fixed_body);
+    defer freeToolNames(alloc, fixed);
+    const names = try toolNames(alloc, body);
+    defer freeToolNames(alloc, names);
+    try std.testing.expectEqual(fixed.len + added.len, names.len);
+    for (fixed, names[0..fixed.len]) |want, got| try std.testing.expectEqualStrings(want, got);
+    for (added, names[fixed.len..]) |want, got| try std.testing.expectEqualStrings(want, got);
+}
+
+fn expectLookups(hooks: *const FakeAgentRuntimeDeps, expected: []const []const u8) !void {
+    try std.testing.expectEqual(expected.len, hooks.mcp_lookups.items.len);
+    for (expected, hooks.mcp_lookups.items) |want, got| try std.testing.expectEqualStrings(want, got);
+}
+
+test "two selections in one turn append in selection order" {
+    const alloc = std.testing.allocator;
+    const select_alpha = [_]ToolCall{selectCall("select-alpha", "mcp_fixture_alpha")};
+    const select_beta = [_]ToolCall{selectCall("select-beta", "mcp_fixture_beta")};
+    const completions = [_]FakeCompletion{
+        .{ .tool_calls = &select_alpha },
+        .{ .tool_calls = &select_beta },
+        .{ .content = "Final" },
+    };
+    var gateway = FakeGateway.init(alloc, &completions);
+    defer gateway.deinit();
+    var hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer hooks.deinit();
+    hooks.resolvable_mcp_tools = &.{ alpha_tool, beta_tool };
+    hooks.exec_plans = &.{
+        .{ .result = .{ .model_output = "selected", .selected_dynamic_tools = &.{alpha_tool} } },
+        .{ .result = .{ .model_output = "selected", .selected_dynamic_tools = &.{beta_tool} } },
+    };
+    var fixture = PromptFixture{};
+    var job = fixture.job();
+    job.permission_mode = .auto;
+    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
+
+    try std.testing.expectEqual(@as(usize, 3), gateway.request_bodies.items.len);
+    const fixed = gateway.request_bodies.items[0];
+    try expectToolsAfterFixed(alloc, fixed, gateway.request_bodies.items[1], &.{"mcp_fixture_alpha"});
+    try expectToolsAfterFixed(alloc, fixed, gateway.request_bodies.items[2], &.{ "mcp_fixture_alpha", "mcp_fixture_beta" });
+}
+
+test "the next turn starts with every tool the last selected, called or not, in selection order" {
+    const alloc = std.testing.allocator;
+    const select_alpha = [_]ToolCall{selectCall("select-alpha", "mcp_fixture_alpha")};
+    const select_beta = [_]ToolCall{selectCall("select-beta", "mcp_fixture_beta")};
+    const call_beta = [_]ToolCall{toolCall("call-beta", "mcp_fixture_beta", "{}")};
+    const completions = [_]FakeCompletion{
+        .{ .tool_calls = &select_alpha },
+        .{ .tool_calls = &select_beta },
+        .{ .tool_calls = &call_beta },
+        .{ .content = "First answer" },
+    };
+    var gateway = FakeGateway.init(alloc, &completions);
+    defer gateway.deinit();
+    var hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer hooks.deinit();
+    hooks.resolvable_mcp_tools = &.{ alpha_tool, beta_tool };
+    hooks.exec_plans = &.{
+        .{ .result = .{ .model_output = "selected", .selected_dynamic_tools = &.{alpha_tool} } },
+        .{ .result = .{ .model_output = "selected", .selected_dynamic_tools = &.{beta_tool} } },
+        .{ .result = .{ .model_output = "called" } },
+    };
+    var fixture = PromptFixture{};
+    var job = fixture.job();
+    job.permission_mode = .auto;
+    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
+    try std.testing.expectEqual(@as(usize, 4), gateway.request_bodies.items.len);
+
+    const second_completions = [_]FakeCompletion{.{ .content = "Second answer" }};
+    var second_gateway = FakeGateway.init(alloc, &second_completions);
+    defer second_gateway.deinit();
+    var second_hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer second_hooks.deinit();
+    second_hooks.resolvable_mcp_tools = hooks.resolvable_mcp_tools;
+    try runFollowUpTurn(&second_gateway, &second_hooks, hooks.history_turns.items);
+
+    const fixed = gateway.request_bodies.items[0];
+    const ended_with: []const []const u8 = &.{ "mcp_fixture_alpha", "mcp_fixture_beta" };
+    try expectToolsAfterFixed(alloc, fixed, gateway.request_bodies.items[3], ended_with);
+    try expectToolsAfterFixed(alloc, fixed, second_gateway.request_bodies.items[0], ended_with);
+}
+
+test "the next turn restores directly called tools in first-call order" {
+    const alloc = std.testing.allocator;
+    const call_beta = [_]ToolCall{toolCall("call-beta", "mcp_fixture_beta", "{}")};
+    const call_alpha = [_]ToolCall{toolCall("call-alpha", "mcp_fixture_alpha", "{}")};
+    const call_beta_again = [_]ToolCall{toolCall("call-beta-again", "mcp_fixture_beta", "{}")};
+    const completions = [_]FakeCompletion{
+        .{ .tool_calls = &call_beta },
+        .{ .tool_calls = &call_alpha },
+        .{ .tool_calls = &call_beta_again },
+        .{ .content = "First answer" },
+    };
+    var gateway = FakeGateway.init(alloc, &completions);
+    defer gateway.deinit();
+    var hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer hooks.deinit();
+    hooks.resolvable_mcp_tools = &.{ alpha_tool, beta_tool };
+    var fixture = PromptFixture{};
+    var job = fixture.job();
+    job.permission_mode = .auto;
+    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
+
+    const second_completions = [_]FakeCompletion{.{ .content = "Second answer" }};
+    var second_gateway = FakeGateway.init(alloc, &second_completions);
+    defer second_gateway.deinit();
+    var second_hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer second_hooks.deinit();
+    second_hooks.resolvable_mcp_tools = hooks.resolvable_mcp_tools;
+    try runFollowUpTurn(&second_gateway, &second_hooks, hooks.history_turns.items);
+
+    try expectToolsAfterFixed(alloc, gateway.request_bodies.items[0], second_gateway.request_bodies.items[0], &.{ "mcp_fixture_beta", "mcp_fixture_alpha" });
+    try expectLookups(&second_hooks, &.{ "mcp_fixture_beta", "mcp_fixture_alpha" });
+}
+
+test "a turn restores at most 32 tools, the first the conversation used" {
+    const alloc = std.testing.allocator;
+    const completions = [_]FakeCompletion{
+        .{ .tool_calls = &many_mcp.calls },
+        .{ .content = "First answer" },
+    };
+    var gateway = FakeGateway.init(alloc, &completions);
+    defer gateway.deinit();
+    var hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer hooks.deinit();
+    hooks.resolvable_mcp_tools = &many_mcp.tools;
+    var fixture = PromptFixture{};
+    var job = fixture.job();
+    job.permission_mode = .auto;
+    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
+
+    const second_completions = [_]FakeCompletion{.{ .content = "Second answer" }};
+    var second_gateway = FakeGateway.init(alloc, &second_completions);
+    defer second_gateway.deinit();
+    var second_hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer second_hooks.deinit();
+    second_hooks.resolvable_mcp_tools = hooks.resolvable_mcp_tools;
+    try runFollowUpTurn(&second_gateway, &second_hooks, hooks.history_turns.items);
+
+    try expectToolsAfterFixed(alloc, gateway.request_bodies.items[0], second_gateway.request_bodies.items[0], many_mcp.names[0..32]);
+    try expectLookups(&second_hooks, many_mcp.names[0..32]);
+}
+
+test "a tool that no longer resolves is left out of the restored list" {
+    const alloc = std.testing.allocator;
+    const calls = [_]ToolCall{
+        toolCall("call-alpha", "mcp_fixture_alpha", "{}"),
+        toolCall("call-beta", "mcp_fixture_beta", "{}"),
+        toolCall("call-gamma", "mcp_fixture_gamma", "{}"),
+    };
+    const completions = [_]FakeCompletion{
+        .{ .tool_calls = &calls },
+        .{ .content = "First answer" },
+    };
+    var gateway = FakeGateway.init(alloc, &completions);
+    defer gateway.deinit();
+    var hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer hooks.deinit();
+    hooks.resolvable_mcp_tools = &.{ alpha_tool, beta_tool, gamma_tool };
+    var fixture = PromptFixture{};
+    var job = fixture.job();
+    job.permission_mode = .auto;
+    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
+
+    const second_completions = [_]FakeCompletion{.{ .content = "Second answer" }};
+    var second_gateway = FakeGateway.init(alloc, &second_completions);
+    defer second_gateway.deinit();
+    var second_hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer second_hooks.deinit();
+    second_hooks.resolvable_mcp_tools = &.{ alpha_tool, gamma_tool };
+    try runFollowUpTurn(&second_gateway, &second_hooks, hooks.history_turns.items);
+
+    try expectToolsAfterFixed(alloc, gateway.request_bodies.items[0], second_gateway.request_bodies.items[0], &.{ "mcp_fixture_alpha", "mcp_fixture_gamma" });
+    try expectLookups(&second_hooks, &.{ "mcp_fixture_alpha", "mcp_fixture_beta", "mcp_fixture_gamma" });
+}
+
+test "a server with no tool list is asked once per restore and the turn still runs" {
+    const alloc = std.testing.allocator;
+    const calls = [_]ToolCall{
+        toolCall("call-down-one", "mcp_down_one", "{}"),
+        toolCall("call-alpha", "mcp_fixture_alpha", "{}"),
+        toolCall("call-down-two", "mcp_down_two", "{}"),
+    };
+    const completions = [_]FakeCompletion{
+        .{ .tool_calls = &calls },
+        .{ .content = "First answer" },
+    };
+    var gateway = FakeGateway.init(alloc, &completions);
+    defer gateway.deinit();
+    var hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer hooks.deinit();
+    hooks.resolvable_mcp_tools = &.{ down_one_tool, alpha_tool, down_two_tool };
+    var fixture = PromptFixture{};
+    var job = fixture.job();
+    job.permission_mode = .auto;
+    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
+
+    const second_completions = [_]FakeCompletion{.{ .content = "Second answer" }};
+    var second_gateway = FakeGateway.init(alloc, &second_completions);
+    defer second_gateway.deinit();
+    var second_hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer second_hooks.deinit();
+    second_hooks.resolvable_mcp_tools = hooks.resolvable_mcp_tools;
+    second_hooks.unavailable_mcp_servers = &.{"down"};
+    try runFollowUpTurn(&second_gateway, &second_hooks, hooks.history_turns.items);
+
+    try expectLookups(&second_hooks, &.{ "mcp_down_one", "mcp_fixture_alpha" });
+    try expectToolsAfterFixed(alloc, gateway.request_bodies.items[0], second_gateway.request_bodies.items[0], &.{"mcp_fixture_alpha"});
+    try std.testing.expectEqual(types.TurnPresentationOutcome.completed, second_hooks.finalized_outcome.?);
 }

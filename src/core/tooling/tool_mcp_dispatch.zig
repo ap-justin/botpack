@@ -85,6 +85,7 @@ pub fn callSelect(
     };
     switch (schema_result) {
         .rejected => |payload| {
+            defer if (payload.unavailable_server) |server| ctx.allocator.free(server);
             if (payload.notice) |notice| {
                 defer ctx.allocator.free(notice);
                 try tool_dispatch.reportContextNotice(ctx, notice);
