@@ -336,8 +336,9 @@ pub const ServerState = struct {
     /// one re-read the credentials and answer `AUTH_REQUIRED` until they exist.
     auth_pending: bool = false,
     /// `initialize` kept the effort, fast and ultrafast overrides unvalidated
-    /// because auth was pending. Session creation validates them against the
-    /// catalog and fails until they pass, as `initialize` would have.
+    /// because auth was pending. `session/new`, `session/load` and
+    /// `session/resume` validate them against the catalog and fail until they
+    /// pass, as `initialize` would have.
     startup_overrides_held: bool = false,
     gateway_source_preference: ?types.CredentialSource = null,
     credential_refresh_after_ms: ?i64 = null,
@@ -3105,7 +3106,8 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
     }
 
     // The model catalog needs a credential, so initialize skips it while auth
-    // is pending and the overrides wait for session creation to validate them.
+    // is pending and the overrides wait for the first session call to validate
+    // them.
     if (!state.auth_pending and !try resolveStartupCatalog(state, alloc, msg)) return;
     if (!try applyStartupOverrides(state, alloc, msg)) return;
     state.startup_overrides_held = state.auth_pending;
