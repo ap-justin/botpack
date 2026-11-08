@@ -285,8 +285,8 @@ pub const AgentCapabilities = struct {
 /// is the entry that keeps `authMethods` non-empty.
 pub const agent_auth_method_id = "fx-login";
 /// The Terminal Auth method, advertised only to a client that sent
-/// `clientCapabilities.auth.terminal: true`. One id for every provider's
-/// terminal login: clients already send this one.
+/// `clientCapabilities.auth.terminal: true`. It runs
+/// `fx login vercel --api-key`.
 pub const terminal_auth_method_id = "fx-login-api-key";
 
 /// Whether `authenticate` accepts `method_id`. The terminal id is accepted
