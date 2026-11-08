@@ -54,11 +54,21 @@ jobs:
         run: zig build -Doptimize=ReleaseSafe -Dcpu=baseline
 
       - name: Smoke-test
+        shell: bash
+        env:
+          FX_AUTO_UPGRADE: "0"
         run: |
-          ./zig-out/bin/fx --version
-          ./zig-out/bin/fx --help >/dev/null
+          # An empty HOME is what the ACP registry's check starts the agent with.
+          export HOME="$RUNNER_TEMP/smoke-home"
+          mkdir -p "$HOME"
+          timeout 10 ./zig-out/bin/fx --version
+          timeout 10 ./zig-out/bin/fx --help >/dev/null
+          # fx acp exits at end of input, so a timeout (exit 124) fails the step.
           printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{}}}' \
-            | timeout 10 ./zig-out/bin/fx acp | head -c 400; echo
+            | timeout 10 ./zig-out/bin/fx acp > "$RUNNER_TEMP/initialize.out"
+          head -c 400 "$RUNNER_TEMP/initialize.out"; echo
+          grep -E '"id": ?1[,}]' "$RUNNER_TEMP/initialize.out" | grep -q '"result"' \
+            || { echo "::error::fx acp did not answer initialize with a result"; exit 1; }
 
       - name: Package
         run: |
