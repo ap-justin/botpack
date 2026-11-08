@@ -58,6 +58,36 @@ const said_max = 96;
 /// Bytes of a progress note the host is shown, before "...".
 const note_max = 160;
 
+/// MCP versions a server named, joined with ", " to match how fx lists its
+/// own. Only [0-9A-Za-z.-] is kept, since the text is the server's and
+/// reaches the user; a version that doesn't fit in `said_max` is left out.
+const Versions = struct {
+    buf: [said_max]u8 = undefined,
+    len: u8 = 0,
+
+    fn slice(v: *const Versions) ?[]const u8 {
+        return if (v.len == 0) null else v.buf[0..v.len];
+    }
+
+    /// Adds the version in the JSON string token `raw`.
+    fn add(v: *Versions, raw: []const u8) void {
+        const text = wire.plainString(raw) orelse return;
+        var kept: [said_max]u8 = undefined;
+        var n: usize = 0;
+        for (text) |c| {
+            if (!std.ascii.isAlphanumeric(c) and c != '.' and c != '-') continue;
+            if (n == kept.len) return;
+            kept[n] = c;
+            n += 1;
+        }
+        const separator: []const u8 = if (v.len == 0) "" else ", ";
+        if (n == 0 or v.len + separator.len + n > said_max) return;
+        @memcpy(v.buf[v.len..][0..separator.len], separator);
+        @memcpy(v.buf[v.len + separator.len ..][0..n], kept[0..n]);
+        v.len = @intCast(v.len + separator.len + n);
+    }
+};
+
 /// The start of `line`, at most `max` bytes, terminal-safe, in `buf`: never
 /// a cut UTF-8 sequence, control bytes as '?', and "..." when cut.
 fn excerptOf(comptime max: usize, buf: *[max + 3]u8, line: []const u8) []const u8 {
@@ -287,9 +317,11 @@ pub const Server = struct {
     /// server was last ready: what a failed start wrote instead.
     stray: [excerpt_max + 3]u8 = undefined,
     /// The versions the server named in its last discover or initialize
-    /// answer, comma-separated, until a new process or detection run.
-    said: [said_max]u8 = undefined,
-    said_len: u8 = 0,
+    /// answer, until a new process or detection run.
+    said: Versions = .{},
+    /// `said` as it was when detection last failed: the failure's text
+    /// names these even after the server starts again.
+    failed_said: Versions = .{},
     stray_len: u8 = 0,
     /// The message of the last progress event, until the next `next`.
     note: [note_max + 3]u8 = undefined,
@@ -435,15 +467,15 @@ pub const Server = struct {
         return if (r.stdio) r.proc.exitStatus() else null;
     }
 
-    /// The versions the server named in its last answer, if any.
-    pub fn versionsSaid(r: *const Server) ?[]const u8 {
-        return if (r.said_len == 0) null else r.said[0..r.said_len];
+    /// The versions the server named in the answers that led to its last
+    /// detection failure, if any; a new process or detection run keeps them.
+    pub fn failedVersions(r: *const Server) ?[]const u8 {
+        return r.failed_said.slice();
     }
 
     /// Remembers the versions `body` names: a refusal's `data.supported`, a
     /// discover result's `supportedVersions`, or the `protocolVersion` an
-    /// initialize result answers with. Only [0-9A-Za-z.-] is kept, since
-    /// the text is the server's and reaches the user.
+    /// initialize result answers with.
     fn noteVersions(r: *Server, body: @FieldType(wire.Response, "body")) void {
         var found: [1]?[]const u8 = .{null};
         switch (body) {
@@ -456,30 +488,11 @@ pub const Server = struct {
             },
         }
         const raw = found[0] orelse return;
-        r.said_len = 0;
-        if (raw.len > 0 and raw[0] == '"') return r.sayVersion(raw);
+        r.said = .{};
+        if (raw.len > 0 and raw[0] == '"') return r.said.add(raw);
         var elements: wire.Elements = undefined;
         elements.init(raw) catch return;
-        while (elements.next() catch null) |element| r.sayVersion(element);
-    }
-
-    fn sayVersion(r: *Server, raw: []const u8) void {
-        const text = wire.plainString(raw) orelse return;
-        var n: usize = r.said_len;
-        if (n != 0) {
-            if (n == said_max) return;
-            r.said[n] = ',';
-            n += 1;
-        }
-        const first = n;
-        for (text) |c| {
-            if (n == said_max) break;
-            if (std.ascii.isAlphanumeric(c) or c == '.' or c == '-') {
-                r.said[n] = c;
-                n += 1;
-            }
-        }
-        if (n > first) r.said_len = @intCast(n);
+        while (elements.next() catch null) |element| r.said.add(element);
     }
 
     /// An excerpt of the last stdout line that answered nothing since the
@@ -2091,7 +2104,7 @@ pub const Server = struct {
     fn stepEra(r: *Server, event: era.Event) Error!void {
         const was = r.detector.state;
         var out: era.Output = .{};
-        if (event == .process_started) r.said_len = 0;
+        if (event == .process_started) r.said = .{};
         r.detector.step(event, &out) catch return;
         if (was == .unknown and r.detector.state != .unknown) r.start_due_ms = r.now() + r.options.timeouts.start_ms;
         if (r.tracer()) |t| try era.writeTrace(t, r.era_instance, &out);
@@ -2130,13 +2143,16 @@ pub const Server = struct {
                 if (r.stdio and v != .legacy and !r.subs.up) try r.stepSubs(.transport_up);
                 if (first and v != .legacy and r.options.listen_tools) try r.listen(0, subscription.bit(.tools), false);
             },
-            .failed => |f| {
-                // Stdio: a process that can't be detected is stopped, and the
-                // next start is a new one.
-                if (r.stdio) r.proc.stop() catch {};
-                r.emit(.{ .failed = .{ .era = f } });
-            },
+            .failed => |f| r.detectionFailed(f),
         };
+    }
+
+    fn detectionFailed(r: *Server, f: era.Failure) void {
+        // Stdio: a process that can't be detected is stopped, and the
+        // next start is a new one.
+        if (r.stdio) r.proc.stop() catch {};
+        r.failed_said = r.said;
+        r.emit(.{ .failed = .{ .era = f } });
     }
 
     /// Detection chose initialize: the newest legacy version is offered first.
@@ -2275,6 +2291,38 @@ test {
     // Behavior is tested by the conformance suite and the Bun driver, which
     // run cli/conformance.zig on this; this makes sure everything compiles.
     std.testing.refAllDecls(Server);
+}
+
+fn testServer(r: *Server) !void {
+    try r.init(std.testing.io, std.testing.allocator, .{
+        .link = .{ .http = .{ .url = "http://127.0.0.1:1/mcp" } },
+        .client = .{ .info = .{ .name = "test", .version = "0" } },
+    });
+}
+
+test "the versions a server names are joined with a comma and a space, and one that doesn't fit is left out whole" {
+    var r: Server = undefined;
+    try testServer(&r);
+    defer r.deinit();
+    r.noteVersions(.{ .failure = .{ .code = wire.code.invalid_params, .message = "\"x\"", .data = "{\"supported\":[\"2025-06-18\",\"2024-11-05\"]}" } });
+    try std.testing.expectEqualStrings("2025-06-18, 2024-11-05", r.said.slice().?);
+    // Eight fill 94 of the 96 bytes; the ninth would be cut.
+    r.noteVersions(.{ .result = .{ .kind = .complete, .raw = "{\"supportedVersions\":[\"2025-06-01\",\"2025-06-02\",\"2025-06-03\",\"2025-06-04\",\"2025-06-05\",\"2025-06-06\",\"2025-06-07\",\"2025-06-08\",\"2025-06-09\"]}" } });
+    try std.testing.expectEqualStrings("2025-06-01, 2025-06-02, 2025-06-03, 2025-06-04, 2025-06-05, 2025-06-06, 2025-06-07, 2025-06-08", r.said.slice().?);
+}
+
+test "a detection failure names the versions behind it, also once the server starts again" {
+    var r: Server = undefined;
+    try testServer(&r);
+    defer r.deinit();
+    r.noteVersions(.{ .failure = .{ .code = wire.code.invalid_params, .message = "\"x\"", .data = "{\"supported\":[\"2024-11-05\"]}" } });
+    r.detectionFailed(.initialize_failed);
+    try r.stepEra(.process_started);
+    try std.testing.expect(r.said.slice() == null);
+    try std.testing.expectEqualStrings("2024-11-05", r.failedVersions().?);
+    // A failure whose answers named nothing names nothing, not an earlier run's versions.
+    r.detectionFailed(.initialize_failed);
+    try std.testing.expect(r.failedVersions() == null);
 }
 
 test "a send that fails after the outbox took its copy frees the copy once" {

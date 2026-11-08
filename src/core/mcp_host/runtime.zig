@@ -2288,10 +2288,9 @@ test "a failed sign-in says why in words, with the server's own" {
 
 fn writeFailure(w: *std.Io.Writer, why: []const u8, said: ?[]const u8, exit: ?mcp.stdio.Exit, stray: ?[]const u8, tail: ?[]const u8) std.Io.Writer.Error!void {
     try w.writeAll(describeFailure(why));
-    for (version_failures) |name| if (std.mem.eql(u8, why, name)) {
+    if (isOneOf(why, &version_failures) or (said != null and isOneOf(why, &refusals))) {
         try w.print(" (fx speaks {s}; the server {s}{s})", .{ fx_versions, if (said != null) "named " else "named no version", said orelse "" });
-        break;
-    };
+    }
     // "its process exited" says how; another failure adds it.
     const own = std.mem.eql(u8, why, "process");
     if (exit) |e| switch (e) {
@@ -2303,7 +2302,16 @@ fn writeFailure(w: *std.Io.Writer, why: []const u8, said: ?[]const u8, exit: ?mc
 }
 
 /// The failures that mean fx and the server found no MCP version in common.
-const version_failures = [_][]const u8{ "rejected", "no_shared_version", "unsupported_version", "initialize_failed" };
+const version_failures = [_][]const u8{ "no_shared_version", "unsupported_version" };
+/// Failures that are about versions only when the server named some: each
+/// also covers a timeout, a crash, or a refusal for another reason
+/// (-32020, -32021).
+const refusals = [_][]const u8{ "rejected", "initialize_failed" };
+
+fn isOneOf(why: []const u8, names: []const []const u8) bool {
+    for (names) |name| if (std.mem.eql(u8, why, name)) return true;
+    return false;
+}
 
 /// The MCP versions fx speaks, most preferred first.
 const fx_versions = blk: {
@@ -2496,7 +2504,9 @@ test "a server in the per-request era connects and lists its tools" {
     try testing.expectEqualStrings("2026-07-28", status.version.?);
 }
 
-/// Starts the fake server in `mode` and returns why it is down, in `arena`.
+/// Starts the fake server in `mode` and returns why listing its tools
+/// failed, in `arena`. That answer is written when the start fails; a
+/// status read later may find the server started again after its backoff.
 fn refusedFake(comptime mode: fake_server.Mode, arena: Allocator) ![]const u8 {
     var f: Fixture = undefined;
     try f.initMode(mode);
@@ -2507,9 +2517,7 @@ fn refusedFake(comptime mode: fake_server.Mode, arena: Allocator) ![]const u8 {
     defer r.deinit();
     const listed = try r.tools(arena, "fake", null);
     try testing.expect(listed == .failed);
-    const status = (try r.statuses(arena))[0];
-    try testing.expect(status.state == .failed or status.state == .retrying);
-    return try arena.dupe(u8, status.last_error.?);
+    return listed.failed;
 }
 
 test "a server that lists no version fx speaks fails, naming both sides' versions" {
@@ -2900,7 +2908,7 @@ test "a failure says how the process ended, what it wrote instead of MCP, and it
     try testing.expectEqualStrings("its process exited with code 7; its last stderr lines: \"npm error code E401 / npm error Incorrect or missing password.\"", w.buffered());
     w = .fixed(&buf);
     try writeFailure(&w, "initialize_failed", null, .{ .signal = 15 }, "not json", null);
-    try testing.expectEqualStrings("it refused or never answered fx's initialize request (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named no version); its process exited on signal 15; it wrote \"not json\" instead of MCP", w.buffered());
+    try testing.expectEqualStrings("it refused or never answered fx's initialize request; its process exited on signal 15; it wrote \"not json\" instead of MCP", w.buffered());
     w = .fixed(&buf);
     try writeFailure(&w, "FileNotFound", null, null, null, null);
     try testing.expectEqualStrings("its command was not found", w.buffered());
@@ -2909,11 +2917,27 @@ test "a failure says how the process ended, what it wrote instead of MCP, and it
 test "a version failure names the versions fx speaks and the ones the server named" {
     var buf: [512]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
-    try writeFailure(&w, "rejected", "2025-06-18,2024-11-05", null, null, null);
-    try testing.expectEqualStrings("it refused fx's MCP version (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2025-06-18,2024-11-05)", w.buffered());
+    try writeFailure(&w, "rejected", "2025-06-18, 2024-11-05", null, null, null);
+    try testing.expectEqualStrings("it refused fx's MCP version (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2025-06-18, 2024-11-05)", w.buffered());
+    w = .fixed(&buf);
+    try writeFailure(&w, "initialize_failed", "2024-11-05", null, null, null);
+    try testing.expectEqualStrings("it refused or never answered fx's initialize request (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2024-11-05)", w.buffered());
+    w = .fixed(&buf);
+    try writeFailure(&w, "no_shared_version", null, null, null, null);
+    try testing.expectEqualStrings("it supports no MCP version fx speaks (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named no version)", w.buffered());
     w = .fixed(&buf);
     try writeFailure(&w, "process", "2025-06-18", null, null, null);
     try testing.expectEqualStrings("its process exited", w.buffered());
+}
+
+test "a refusal that names no version says nothing about versions, since it may not be about one" {
+    var buf: [512]u8 = undefined;
+    var w: std.Io.Writer = .fixed(&buf);
+    try writeFailure(&w, "rejected", null, null, null, null);
+    try testing.expectEqualStrings("it refused fx's MCP version", w.buffered());
+    w = .fixed(&buf);
+    try writeFailure(&w, "initialize_failed", null, null, null, null);
+    try testing.expectEqualStrings("it refused or never answered fx's initialize request", w.buffered());
 }
 
 test "a question no call can show is answered cancel, and the server goes on" {

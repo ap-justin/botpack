@@ -86,8 +86,9 @@ pub const Status = struct {
     /// nothing since the server was last ready, until it starts again.
     exit: ?process.Exit,
     stray_line: ?[]const u8,
-    /// The versions the server named in its last discover or initialize
-    /// answer, comma-separated, as far as detection went.
+    /// The versions the server named in the answers that led to its last
+    /// detection failure, ", "-separated; they stay as they were when it
+    /// starts again.
     versions_said: ?[]const u8,
 };
 
@@ -216,7 +217,7 @@ pub const Engine = struct {
             .last_error = slot.last_error,
             .exit = if (slot.server) |s| s.exitStatus() else null,
             .stray_line = if (slot.server) |s| s.strayLine() else null,
-            .versions_said = if (slot.server) |s| s.versionsSaid() else null,
+            .versions_said = if (slot.server) |s| s.failedVersions() else null,
         };
     }
 
