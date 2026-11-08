@@ -435,8 +435,7 @@ pub const Server = struct {
         return if (r.stdio) r.proc.exitStatus() else null;
     }
 
-    /// An excerpt of the last stdout line that answered nothing since the
-    /// server was last ready.
+    /// The versions the server named in its last answer, if any.
     pub fn versionsSaid(r: *const Server) ?[]const u8 {
         return if (r.said_len == 0) null else r.said[0..r.said_len];
     }
@@ -483,6 +482,8 @@ pub const Server = struct {
         if (n > first) r.said_len = @intCast(n);
     }
 
+    /// An excerpt of the last stdout line that answered nothing since the
+    /// server was last ready.
     pub fn strayLine(r: *const Server) ?[]const u8 {
         return if (r.stray_len == 0) null else r.stray[0..r.stray_len];
     }
