@@ -163,14 +163,16 @@ UnsupportedVersion(s) ==
     /\ unlisted' = FALSE
     /\ UNCHANGED <<process, lastMeta, processEra, flipped, initializedSent, earlyOp>>
 
-\* -32020 or -32021: a modern server that won't serve this client.
+\* -32021: a modern server that won't serve this client. -32020 is not here:
+\* a proxy that drops Mcp-Method makes a modern server refuse discovery with it,
+\* so it is a LegacyAnswer and falls back to initialize.
 ModernRejection ==
     /\ pending = "discover"
     /\ modernSeen' = TRUE
     /\ Fail
     /\ UNCHANGED <<advertised, process, lastMeta, processEra, flipped, initializedSent, badFallback, earlyOp, unlisted>>
 
-\* Any other error, an error without an id, or no answer in time:
+\* Any other error (-32020 included), an error without an id, or no answer in time:
 \* the server is legacy, unless it already answered like a modern server in
 \* this process. Then it is a modern server that stopped answering, and only
 \* a listed legacy version allows initialize (VER-03).

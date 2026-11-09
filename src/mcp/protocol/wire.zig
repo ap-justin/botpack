@@ -278,6 +278,33 @@ pub fn plainString(raw: []const u8) ?[]const u8 {
     return contents;
 }
 
+/// The start of a JSON string token's contents, unescaped into `buf`: as
+/// many bytes as fit, so a long string's may end inside a UTF-8 sequence.
+/// Null when `raw` isn't a string.
+pub fn decodeStringPrefix(buf: []u8, raw: []const u8) ?[]const u8 {
+    if (raw.len < 2 or raw[0] != '"') return null;
+    // A top-level string pushes nothing on the scanner's stack.
+    var none: std.heap.FixedBufferAllocator = .init(&.{});
+    var scanner: std.json.Scanner = .initCompleteInput(none.allocator(), raw);
+    defer scanner.deinit();
+    var len: usize = 0;
+    while (true) {
+        const token = scanner.next() catch return null;
+        const part: []const u8 = switch (token) {
+            .partial_string, .string => |s| s,
+            .partial_string_escaped_1 => |*b| b,
+            .partial_string_escaped_2 => |*b| b,
+            .partial_string_escaped_3 => |*b| b,
+            .partial_string_escaped_4 => |*b| b,
+            else => return null,
+        };
+        const n = @min(part.len, buf.len - len);
+        @memcpy(buf[len..][0..n], part[0..n]);
+        len += n;
+        if (token == .string) return buf[0..len];
+    }
+}
+
 /// A JSON string token's contents, unescaped: the token's own bytes when it has
 /// no escapes, else a copy in `a`. Null when `raw` isn't a string.
 pub fn decodeString(a: std.mem.Allocator, raw: []const u8) std.mem.Allocator.Error!?[]const u8 {
@@ -596,6 +623,17 @@ test "decodes string tokens with or without escapes" {
     try testing.expectEqualStrings("https://x/y\u{e9}", (try decodeString(a, "\"https:\\/\\/x\\/y\\u00e9\"")).?);
     try testing.expectEqual(@as(?[]const u8, null), try decodeString(a, "42"));
     try testing.expectEqual(@as(?[]const u8, null), try decodeString(a, "\"a\\x\""));
+}
+
+test "decodes the start of a string token into a fixed buffer" {
+    var buf: [8]u8 = undefined;
+    try testing.expectEqualStrings("a\"b", decodeStringPrefix(&buf, "\"a\\\"b\"").?);
+    try testing.expectEqualStrings("say \"hi\"", decodeStringPrefix(&buf, "\"say \\\"hi\\\" to \\u00e9 and more\"").?);
+    // A cut may end inside a UTF-8 sequence.
+    try testing.expectEqualStrings("abcdefg\xc3", decodeStringPrefix(&buf, "\"abcdefg\\u00e9\"").?);
+    try testing.expectEqual(@as(?[]const u8, null), decodeStringPrefix(&buf, "42"));
+    try testing.expectEqual(@as(?[]const u8, null), decodeStringPrefix(&buf, "\"a\\x\""));
+    try testing.expectEqual(@as(?[]const u8, null), decodeStringPrefix(&buf, "\"a"));
 }
 
 test "finds a plain string in an array" {

@@ -142,6 +142,20 @@ export const scenarios: Scenario[] = [
       sameList(eraLines(lines), [{ failed: "rejected" }], "era lines"),
   }),
   eraScenario({
+    name: "u04-header-mismatch-falls-back",
+    description: "-32020 to the probe (a proxy dropped Mcp-Method) falls back to initialize; the session stays legacy and requests don't probe again",
+    rules: [
+      { method: "server/discover", error: { code: -32020, message: "Bad Request", data: { mismatch: { header: "(missing)", body: "server/discover" } } } },
+      initializeResult(),
+      toolsFor(null),
+    ],
+    script: ["start", "detect", "expect era-legacy", "request tools/list", "outcome 3 result", ...STOP],
+    check: (lines, final, log) =>
+      expectFinal(final, { era: "legacy", era_version: LEGACY }) ??
+      sameList(methods(log), ["server/discover", "initialize", "notifications/initialized", "tools/list"], "received methods") ??
+      sameList(eraLines(lines), [{ ready: LEGACY }], "era lines"),
+  }),
+  eraScenario({
     name: "u04-no-shared-version",
     description: "A DiscoverResult with no shared version and no legacy version fails without initialize (VER-01)",
     rules: [discoverResult(["2099-01-01"])],

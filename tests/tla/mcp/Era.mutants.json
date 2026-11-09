@@ -12,7 +12,7 @@
     "invariant": "NoFallbackAfterModern"
   },
   {
-    "description": "-32020 or -32021 falls back to initialize",
+    "description": "-32021 falls back to initialize",
     "old": "ModernRejection ==\n    /\\ pending = \"discover\"\n    /\\ modernSeen' = TRUE\n    /\\ Fail\n    /\\ UNCHANGED <<advertised, process, lastMeta, processEra, flipped, initializedSent, badFallback, earlyOp, unlisted>>",
     "new": "ModernRejection ==\n    /\\ pending = \"discover\"\n    /\\ modernSeen' = TRUE\n    /\\ StartInitialize(TRUE, advertised)\n    /\\ UNCHANGED <<advertised, process, lastMeta, processEra, flipped, initializedSent, earlyOp, unlisted>>",
     "invariant": "NoFallbackAfterModern"
