@@ -106,7 +106,7 @@ fn segmentEql(text: []const u8, raw: []const u8, fallback: []const u8) bool {
 }
 
 /// Whether `name` is a qualified spelling of `tool` on `server`: the server
-/// and tool names as the server gives them, or as fx sanitises them, joined as
+/// and tool names as the server gives them, or as fx sanitizes them, joined as
 /// `<server>.<tool>`, `<server>/<tool>`, `mcp__<server>__<tool>`, or
 /// `mcp_<server>_<tool>`.
 pub fn namesQualifiedTool(name: []const u8, server: []const u8, tool: []const u8) bool {
