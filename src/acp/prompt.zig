@@ -279,6 +279,23 @@ const AcpContext = struct {
         session.clearFailureMessage();
     }
 
+    /// Keeps `notice` as the message the prompt answers with if its turn
+    /// fails. Only the user's turn answers with it; a subagent's turn has
+    /// no prompt.
+    fn noteFailureNotice(self: *AcpContext, notice: []const u8) void {
+        if (self.current_prompt_input == null) return;
+        const session = if (self.state.active_session) |*active| active else return;
+        const trimmed = std.mem.trim(u8, notice, &std.ascii.whitespace);
+        if (trimmed.len > 0) session.setFailureMessage(trimmed);
+    }
+
+    /// A new model reply starts, so the notices before it no longer say why
+    /// the turn might fail.
+    fn forgetFailureNotice(self: *AcpContext) void {
+        if (self.current_prompt_input == null) return;
+        if (self.state.active_session) |*session| session.clearFailureMessage();
+    }
+
     /// The prompt's answer from how its last turn ended; a cancel is the
     /// caller's to check first.
     fn turnOutcome(self: *const AcpContext, session: *const server.ActiveSessionState) TerminalOutcome {
@@ -3308,6 +3325,11 @@ fn pushRouteRecoveryStatus(
     status: types.RouteRecoveryStatus,
 ) !void {
     const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
+    // The uncertain-tool review pauses the turn with this status and no text.
+    if (status.kind == .unsafe_tool_start) {
+        var label_buf: [types.RouteRecoveryStatus.label_max_bytes]u8 = undefined;
+        ctx.noteFailureNotice(status.label(&label_buf));
+    }
     try ctx.sendModelRecoveryStatus(status);
 }
 
@@ -3316,12 +3338,16 @@ fn pushText(raw_ctx: *anyopaque, emission: agent_runtime.TextEmission) !void {
     const text, const message_id = switch (emission) {
         .assistant_started => {
             ctx.message_kind = null;
+            ctx.forgetFailureNotice();
             return;
         },
         .assistant_source => |text| .{ text, ctx.assistantMessageId() },
         .assistant_rendered => return,
         .assistant_restarted => |text| .{ text, ctx.operationalMessageId() },
-        .operational => |text| .{ text, ctx.operationalMessageId() },
+        .operational => |text| blk: {
+            ctx.noteFailureNotice(text);
+            break :blk .{ text, ctx.operationalMessageId() };
+        },
     };
     if (text.len == 0) return;
     ctx.sendAgentText(message_id, text) catch {};
@@ -3388,7 +3414,10 @@ fn pushContextNotice(raw_ctx: *anyopaque, text: []const u8) !void {
 
 fn pushDiffBlock(raw_ctx: *anyopaque, payload: agent_runtime.DiffEntryPayload) !void {
     defer diff_mod.freeDiffEntryPayload(std.heap.c_allocator, payload);
-    try pushText(raw_ctx, .{ .operational = payload.preview });
+    // A diff is shown as operational text but is no notice a failure answers with.
+    const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
+    if (payload.preview.len == 0) return;
+    ctx.sendAgentText(ctx.operationalMessageId(), payload.preview) catch {};
 }
 
 fn pushCommandOutputComplete(_: *anyopaque, _: ?types.ToolLifecycleId) !void {}
@@ -3403,10 +3432,7 @@ fn pushHttpError(raw_ctx: *anyopaque, status: std.http.Status, detail: []const u
         null;
     defer if (owned_message) |message| ctx.alloc.free(message);
     const msg = owned_message orelse formatHttpError(&buf, status, detail);
-    // Only the user's turn answers with this; a subagent's turn has no prompt.
-    if (ctx.current_prompt_input != null) {
-        if (ctx.state.active_session) |*session| session.setFailureMessage(msg);
-    }
+    ctx.noteFailureNotice(msg);
     ctx.sendAgentText(ctx.operationalMessageId(), msg) catch {};
 }
 
@@ -5414,6 +5440,81 @@ test "a failed prompt answers its own failure, not an earlier prompt's HTTP erro
     try std.testing.expect(second_outcome == .rpc_error);
     try std.testing.expectEqual(ErrorCode.internal_error, second_outcome.rpc_error.code);
     try std.testing.expectEqualStrings(turn_failed_message, second_outcome.rpc_error.message);
+}
+
+test "a failed or paused turn answers the notice that ended it" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-turn-notice.jsonl", .{});
+    defer capture.close(io_mod.getIo());
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+    state.writer = .{ .stdout = capture };
+    const session = &state.active_session.?;
+    var prompt_input = ParsedPromptInput{ .text = &.{} };
+
+    const Step = union(enum) {
+        operational: []const u8,
+        assistant_started,
+        diff: []const u8,
+        uncertain_tool,
+    };
+    const cases = [_]struct {
+        user_turn: bool = true,
+        steps: []const Step,
+        outcome: types.TurnPresentationOutcome = .failed,
+        expected: []const u8,
+    }{
+        .{
+            .steps = &.{ .{ .operational = "The model sent an empty reply." }, .{ .operational = "\n" } },
+            .expected = "The model sent an empty reply.",
+        },
+        .{
+            .steps = &.{ .{ .operational = "Gateway did not confirm ultrafast.\n" }, .assistant_started },
+            .expected = turn_failed_message,
+        },
+        .{ .steps = &.{.{ .diff = "--- a/x\n+++ b/x\n" }}, .expected = turn_failed_message },
+        .{ .user_turn = false, .steps = &.{.{ .operational = "Subagent notice" }}, .expected = turn_failed_message },
+        .{ .steps = &.{.uncertain_tool}, .outcome = .paused, .expected = "⚠ Tool state needs review · context preserved" },
+    };
+    for (cases) |case| {
+        var ctx = AcpContext{
+            .alloc = alloc,
+            .state = &state,
+            .session_id = "session_1",
+            .current_prompt_input = if (case.user_turn) &prompt_input else null,
+        };
+        const deps = agentRuntimeDeps(&ctx);
+        ctx.resetTurnOutcome(session);
+        for (case.steps) |step| switch (step) {
+            .operational => |text| try deps.push_text(deps.ctx, .{ .operational = text }),
+            .assistant_started => try deps.push_text(deps.ctx, .assistant_started),
+            .diff => |preview| try deps.push_diff_block(deps.ctx, .{ .preview = try std.heap.c_allocator.dupe(u8, preview) }),
+            .uncertain_tool => try deps.push_route_recovery_status(deps.ctx, .{ .kind = .unsafe_tool_start }),
+        };
+        try deps.finalize_turn(deps.ctx, 1, case.outcome, null);
+
+        const outcome = ctx.turnOutcome(session);
+        try std.testing.expect(outcome == .rpc_error);
+        try std.testing.expectEqualStrings(case.expected, outcome.rpc_error.message);
+    }
+}
+
+test "a failure message keeps whole codepoints and replaces invalid bytes" {
+    const alloc = std.testing.allocator;
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+    const session = &state.active_session.?;
+
+    var long: [server.failure_message_max_bytes + 8]u8 = @splat('a');
+    // "é" is two bytes; its first byte is the buffer's last.
+    @memcpy(long[server.failure_message_max_bytes - 1 ..][0..2], "é");
+    session.setFailureMessage(&long);
+    try std.testing.expectEqual(server.failure_message_max_bytes - 1, session.failureMessage().len);
+
+    session.setFailureMessage("bad \xff detail");
+    try std.testing.expectEqualStrings("bad \u{FFFD} detail", session.failureMessage());
 }
 
 test "a report turn that completes decides the prompt's answer after a failed turn" {

@@ -71,6 +71,22 @@ pub fn utf8PrefixByBytes(text: []const u8, max_bytes: usize) []const u8 {
     return text[0..utf8BackwardBoundary(text, max_bytes)];
 }
 
+/// Copies the longest run of whole codepoints of `raw` that fits `dest`, each
+/// byte outside a valid sequence as U+FFFD, and returns the copied part.
+pub fn copyValidUtf8Prefix(dest: []u8, raw: []const u8) []u8 {
+    var len: usize = 0;
+    var index: usize = 0;
+    while (index < raw.len) {
+        const sequence_len = validUtf8SequenceLength(raw, index);
+        const piece = if (sequence_len) |n| raw[index .. index + n] else &std.unicode.replacement_character_utf8;
+        if (len + piece.len > dest.len) break;
+        @memcpy(dest[len..][0..piece.len], piece);
+        len += piece.len;
+        index += sequence_len orelse 1;
+    }
+    return dest[0..len];
+}
+
 pub fn normalizeLineEndingsInPlace(bytes: []u8) []u8 {
     var read: usize = 0;
     var write: usize = 0;
@@ -1652,6 +1668,25 @@ test "utf8PrefixByBytes keeps complete codepoints" {
     try std.testing.expectEqualStrings("ab", utf8PrefixByBytes(text, 3));
     try std.testing.expectEqualStrings("ab\xc3\xa9", utf8PrefixByBytes(text, 4));
     try std.testing.expectEqualStrings(text, utf8PrefixByBytes(text, text.len));
+}
+
+test "copyValidUtf8Prefix keeps whole codepoints and replaces invalid bytes" {
+    const replacement = std.unicode.replacement_character_utf8;
+    const cases = [_]struct { raw: []const u8, dest_len: usize, expected: []const u8 }{
+        .{ .raw = "ab\xc3\xa9z", .dest_len = 16, .expected = "ab\xc3\xa9z" },
+        .{ .raw = "ab\xc3\xa9z", .dest_len = 3, .expected = "ab" },
+        .{ .raw = "a\xffb", .dest_len = 16, .expected = "a" ++ replacement ++ "b" },
+        .{ .raw = "a\xc3", .dest_len = 16, .expected = "a" ++ replacement },
+        .{ .raw = "a\xed\xa0\x80", .dest_len = 16, .expected = "a" ++ replacement ++ replacement ++ replacement },
+        .{ .raw = "a\xff", .dest_len = 3, .expected = "a" },
+        .{ .raw = "", .dest_len = 4, .expected = "" },
+    };
+    for (cases) |case| {
+        var buf: [16]u8 = undefined;
+        const copied = copyValidUtf8Prefix(buf[0..case.dest_len], case.raw);
+        try std.testing.expectEqualStrings(case.expected, copied);
+        try std.testing.expect(std.unicode.utf8ValidateSlice(copied));
+    }
 }
 
 test "normalizeLineEndingsInPlace compacts crlf and normalizes lone cr" {

@@ -1,5 +1,6 @@
 const std = @import("std");
 const testing_allocator = @import("../core/shared/testing_allocator.zig");
+const text_utils = @import("../core/shared/text_utils.zig");
 const managed_execution = @import("../core/execution/managed_execution.zig");
 const acp_runner = @import("../core/cli/acp_runner.zig");
 const config_runtime = @import("../core/config/config_runtime.zig");
@@ -226,7 +227,7 @@ const PendingLegacyUrl = struct {
     }
 };
 
-const failure_message_max_bytes = 1024;
+pub const failure_message_max_bytes = 1024;
 
 pub const ActiveSessionState = struct {
     observer_hooks: ?@import("libfx_hooks.zig").Config = null,
@@ -286,11 +287,11 @@ pub const ActiveSessionState = struct {
     /// prompt, and what a running session held must reopen.
     staging_needed: StagedTotals = .{},
 
-    /// Keeps the first `failure_message_max_bytes` bytes of `message`.
+    /// Keeps the whole codepoints of `message` that fit
+    /// `failure_message_max_bytes`, invalid bytes as U+FFFD, since the error
+    /// frame copies the message as raw bytes.
     pub fn setFailureMessage(self: *ActiveSessionState, message: []const u8) void {
-        const len = @min(message.len, self.failure_message_buf.len);
-        @memcpy(self.failure_message_buf[0..len], message[0..len]);
-        self.failure_message_len = len;
+        self.failure_message_len = text_utils.copyValidUtf8Prefix(&self.failure_message_buf, message).len;
     }
 
     pub fn clearFailureMessage(self: *ActiveSessionState) void {
@@ -2711,9 +2712,11 @@ fn publishPromptOutcome(active: *ActivePrompt, outcome: prompt_handler.TerminalO
     answerPrompt(&active.state.writer, active.alloc, active.msg.id, outcome, usage);
 }
 
-/// Writes the prompt's answer. A response that cannot be built or written
-/// is traced and replaced by an error, so the client is never left waiting
-/// on a prompt that has already ended.
+/// Writes the prompt's answer. A response that cannot be built is traced and
+/// replaced by an error, so the client is never left waiting on a prompt that
+/// has already ended. One that fails while being written gets no second
+/// frame: part of the first may be on the stream, and the two would run
+/// together into a line neither parses from.
 fn answerPrompt(
     writer: *jsonrpc.Writer,
     alloc: Allocator,
@@ -2722,32 +2725,35 @@ fn answerPrompt(
     usage: types.Usage,
 ) void {
     debug_trace.logf("acp", "event=prompt_answer kind={s}", .{@tagName(outcome)});
-    writePromptAnswer(writer, alloc, id, outcome, usage) catch |err| {
-        debug_trace.logf("acp", "event=prompt_answer_failed kind={s} err={s}", .{ @tagName(outcome), @errorName(err) });
+    const built = buildPromptAnswer(alloc, id, outcome, usage) catch |err| {
+        debug_trace.logf("acp", "event=prompt_answer_build_failed kind={s} err={s}", .{ @tagName(outcome), @errorName(err) });
         writer.writeError(alloc, id, .{
             .code = ErrorCode.internal_error,
             .message = "The prompt's response could not be sent",
         }) catch |fallback_err| {
             debug_trace.logf("acp", "event=prompt_answer_fallback_failed err={s}", .{@errorName(fallback_err)});
         };
+        return;
+    };
+    writer.send(alloc, built) catch |err| {
+        debug_trace.logf("acp", "event=prompt_answer_failed kind={s} err={s}", .{ @tagName(outcome), @errorName(err) });
     };
 }
 
-fn writePromptAnswer(
-    writer: *jsonrpc.Writer,
+fn buildPromptAnswer(
     alloc: Allocator,
     id: ?jsonrpc.RequestId,
     outcome: prompt_handler.TerminalOutcome,
     usage: types.Usage,
-) !void {
+) !jsonrpc.Writer.Built {
     switch (outcome) {
         .stop_reason => |stop_reason| {
             var response: std.Io.Writer.Allocating = .init(alloc);
             defer response.deinit();
             try acp_types.writePromptResponseWithUsage(&response.writer, stop_reason, usage);
-            try writer.writeResponse(alloc, id, response.writer.buffered());
+            return jsonrpc.Writer.buildResponse(alloc, id, response.writer.buffered());
         },
-        .rpc_error => |rpc_error| try writer.writeError(alloc, id, rpc_error),
+        .rpc_error => |rpc_error| return jsonrpc.Writer.buildError(alloc, id, rpc_error),
     }
 }
 
@@ -5255,7 +5261,7 @@ const AnswerCapture = struct {
     }
 };
 
-test "a prompt whose response cannot be written still gets an error answer" {
+test "a prompt whose response cannot be built still gets an error answer" {
     const alloc = std.testing.allocator;
     var capture = AnswerCapture{ .alloc = alloc };
     defer capture.deinit();
@@ -5266,10 +5272,20 @@ test "a prompt whose response cannot be written still gets an error answer" {
     try std.testing.expectEqual(@as(usize, 1), capture.frames.items.len);
     try std.testing.expect(std.mem.find(u8, capture.frames.items[0], "\"stopReason\":\"end_turn\"") != null);
 
-    capture.fail_results = true;
-    answerPrompt(&writer, alloc, id, .{ .stop_reason = .end_turn }, .{});
+    var failing: std.testing.FailingAllocator = .init(alloc, .{ .fail_index = 0 });
+    answerPrompt(&writer, failing.allocator(), id, .{ .stop_reason = .end_turn }, .{});
     try std.testing.expectEqual(@as(usize, 2), capture.frames.items.len);
     try std.testing.expect(std.mem.find(u8, capture.frames.items[1], "\"id\":7") != null);
     try std.testing.expect(std.mem.find(u8, capture.frames.items[1], "-32603") != null);
     try std.testing.expect(std.mem.find(u8, capture.frames.items[1], "could not be sent") != null);
+}
+
+test "a prompt whose response fails while being written gets no second frame" {
+    const alloc = std.testing.allocator;
+    var capture = AnswerCapture{ .alloc = alloc, .fail_results = true };
+    defer capture.deinit();
+    var writer = jsonrpc.Writer.initCallback(&capture, AnswerCapture.write);
+
+    answerPrompt(&writer, alloc, .{ .integer = 7 }, .{ .stop_reason = .end_turn }, .{});
+    try std.testing.expectEqual(@as(usize, 0), capture.frames.items.len);
 }

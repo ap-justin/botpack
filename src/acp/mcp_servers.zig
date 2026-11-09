@@ -165,7 +165,7 @@ pub fn parseErrorMessage(err: ParseError) []const u8 {
         error.MissingArgs => "Each stdio MCP server requires args",
         error.InvalidArgs => "MCP server args must be an array of strings",
         error.MissingEnv => "Each stdio MCP server requires env",
-        error.InvalidEnv => "MCP server env must be an array of name/value string entries",
+        error.InvalidEnv => "MCP server env must be an array of name/value string entries; a name must be non-empty with no \"=\" or NUL, and a value must have no NUL",
         error.MissingUrl => "Each HTTP MCP server requires url",
         error.InvalidUrl => "MCP server url must be a valid HTTPS or explicit loopback HTTP endpoint",
         error.MissingHeaders => "Each HTTP MCP server requires headers",
@@ -484,6 +484,12 @@ test "ACP MCP parser rejects malformed required stdio fields" {
     for (cases) |case| {
         try std.testing.expectError(case.expected, parse(std.testing.allocator, case.json));
     }
+}
+
+test "ACP MCP env rejection says what a name and value cannot hold" {
+    const message = parseErrorMessage(error.InvalidEnv);
+    try std.testing.expect(std.mem.find(u8, message, "non-empty with no \"=\" or NUL") != null);
+    try std.testing.expect(std.mem.find(u8, message, "value must have no NUL") != null);
 }
 
 test "ACP MCP parser owns official HTTP request fields" {

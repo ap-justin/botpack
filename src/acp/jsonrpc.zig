@@ -277,29 +277,51 @@ pub const Writer = struct {
         } });
     }
 
-    fn writeFrame(self: *Writer, alloc: Allocator, frame: Frame) !void {
+    /// A frame rendered but not yet sent, owned by the allocator it was
+    /// built with until `send` takes it.
+    pub const Built = struct {
+        bytes: []u8,
+        kind: std.meta.Tag(Frame),
+    };
+
+    pub fn buildResponse(alloc: Allocator, id: ?RequestId, result_json: []const u8) !Built {
+        return build(alloc, .{ .response = .{ .id = id, .result_json = result_json } });
+    }
+
+    pub fn buildError(alloc: Allocator, id: ?RequestId, err: RpcError) !Built {
+        return build(alloc, .{ .error_response = .{ .id = id, .err = err } });
+    }
+
+    fn build(alloc: Allocator, frame: Frame) !Built {
         var out: std.Io.Writer.Allocating = .init(alloc);
         defer out.deinit();
-
         try frame.write(&out.writer);
+        return .{ .bytes = try out.toOwnedSlice(), .kind = frame };
+    }
 
-        const slice = try out.toOwnedSlice();
-        defer alloc.free(slice);
+    /// Writes `built` and frees it. On an error part of the frame may
+    /// already be on the stream.
+    pub fn send(self: *Writer, alloc: Allocator, built: Built) !void {
+        defer alloc.free(built.bytes);
 
         // An answer to a request is traced at each step, since a client that
         // never receives one only waits.
-        const answers = frame == .response or frame == .error_response;
+        const answers = built.kind == .response or built.kind == .error_response;
         const io = io_mod.getIo();
-        if (answers) debug_trace.logf("acp", "event=frame_write_begin kind={s} bytes={d}", .{ @tagName(frame), slice.len });
+        if (answers) debug_trace.logf("acp", "event=frame_write_begin kind={s} bytes={d}", .{ @tagName(built.kind), built.bytes.len });
         self.mutex.lockUncancelable(io);
         defer self.mutex.unlock(io);
-        if (answers) debug_trace.logf("acp", "event=frame_write_locked kind={s}", .{@tagName(frame)});
+        if (answers) debug_trace.logf("acp", "event=frame_write_locked kind={s}", .{@tagName(built.kind)});
         if (self.callback) |callback| {
-            try callback.write_fn(callback.context, slice);
+            try callback.write_fn(callback.context, built.bytes);
         } else {
-            try self.stdout.writeStreamingAll(io, slice);
+            try self.stdout.writeStreamingAll(io, built.bytes);
         }
-        if (answers) debug_trace.logf("acp", "event=frame_write_done kind={s}", .{@tagName(frame)});
+        if (answers) debug_trace.logf("acp", "event=frame_write_done kind={s}", .{@tagName(built.kind)});
+    }
+
+    fn writeFrame(self: *Writer, alloc: Allocator, frame: Frame) !void {
+        try self.send(alloc, try build(alloc, frame));
     }
 
     pub fn writeId(w: *std.Io.Writer, id: ?RequestId) !void {
