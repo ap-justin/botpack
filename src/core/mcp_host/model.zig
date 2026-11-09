@@ -379,8 +379,21 @@ pub const Catalog = struct {
         errdefer loaded.deinit(alloc);
         c.mutex.lockUncancelable(c.io);
         defer c.mutex.unlock(c.io);
+        // The budget runs out in the order tools are added, so the servers
+        // with fewer tools go first and stay whole; one large server cannot
+        // push the small ones out. Servers of equal size keep their order.
+        const order = try alloc.alloc(usize, c.servers.len);
+        defer alloc.free(order);
+        var eligible: usize = 0;
         for (c.servers, c.lists, 0..) |s, l, i| {
             if (!s.always_loaded or l.state != .loaded) continue;
+            order[eligible] = i;
+            eligible += 1;
+        }
+        std.sort.insertion(usize, order[0..eligible], c.lists, fewerToolsFirst);
+        for (order[0..eligible]) |i| {
+            const s = c.servers[i];
+            const l = c.lists[i];
             const instructions = try c.runtime.instructions(alloc, s.name);
             defer if (instructions) |text| alloc.free(text);
             for (l.tools) |*tool| {
@@ -982,6 +995,10 @@ fn toolSchemaFn(raw: *anyopaque, alloc: Allocator, name: []const u8, rules: type
     return catalog(raw).toolSchema(alloc, name, rules, limits, access, cancel);
 }
 
+fn fewerToolsFirst(lists: []const Catalog.List, a: usize, b: usize) bool {
+    return lists[a].tools.len < lists[b].tools.len;
+}
+
 fn resolveQualifiedFn(raw: *anyopaque, alloc: Allocator, name: []const u8, rules: types.PermissionRuleSet, access: Access, cancel: Cancel) anyerror!tool_mcp_runtime.QualifiedLookup {
     return catalog(raw).resolveQualified(alloc, name, rules, access, cancel);
 }
@@ -1170,6 +1187,39 @@ test "a server-qualified name resolves to the exposed tools it fits" {
     try testing.expectEqualStrings("mcp_my_server_echo_2", ambiguous.many[1]);
     // Only the server as it is written fits its own spelling.
     try testing.expectEqualStrings("mcp_my_server_echo", (try c.resolveQualified(a, "my server.echo", .{}, .unrestricted, null)).one);
+}
+
+test "the always-loaded budget keeps the server with fewer tools whole, whatever the config order" {
+    var wide_fixture: Fixture = undefined;
+    try wide_fixture.initMode(.open_object);
+    defer wide_fixture.deinit();
+    var narrow_fixture: Fixture = undefined;
+    try narrow_fixture.init();
+    defer narrow_fixture.deinit();
+    const configs = [_]mcp_contract.McpServerConfig{
+        .{ .name = "wide", .command = wide_fixture.server, .always_loaded = true },
+        .{ .name = "narrow", .command = narrow_fixture.server, .always_loaded = true },
+    };
+    var r: Runtime = undefined;
+    try r.start(testing.allocator, testing.io, &configs, &wide_fixture.inherited, wide_fixture.options());
+    defer r.deinit();
+    var c: Catalog = undefined;
+    try c.init(testing.allocator, testing.io, &r, .{});
+    defer c.deinit();
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // Room for the narrow server's one tool and nothing beside it.
+    const narrow = (try c.toolSchema(a, "mcp_narrow_echo", .{}, .{}, .unrestricted, null)).?;
+    var limits: context_limits.Values = .{};
+    limits.mcp_selected_schema_bytes = .{ .value = .{ .bytes = narrow.selected.model_output.len + 16 }, .source = .command_line };
+
+    var loaded = try c.snapshotAlwaysLoadedTools(a, .{}, limits, .unrestricted, null);
+    defer loaded.deinit(a);
+    try testing.expectEqual(@as(usize, 1), loaded.tools.len);
+    try testing.expectEqualStrings("mcp_narrow_echo", loaded.tools[0].name);
+    try testing.expect(loaded.notice != null);
 }
 
 test "an open-object argument stays an object in the schema and reaches the server as one" {
