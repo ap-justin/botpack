@@ -204,6 +204,11 @@ function fakeGatewayEnv(
   };
 }
 
+// The text of a session update: a message's content, or a notice's title.
+function updateText(update: any): string {
+  return update?.sessionUpdate === "notice" ? String(update.title ?? "") : acpContentText(update?.content);
+}
+
 function acpContentText(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) return content.map(acpContentText).join("");
@@ -1242,8 +1247,10 @@ function expectSavedOriginal(home: string, sessionId: string, body: string, orig
   expect(saved).not.toContain(original.toString("base64"));
 }
 
-async function startAutoSession(client: AcpClient, hooks = false) {
-  await client.request("initialize", { protocolVersion: 1 }, 1);
+// With `notices`, the client shows ACP v1 Session Notices, so context notices
+// reach it as `notice` updates; without, they are not sent to it at all.
+async function startAutoSession(client: AcpClient, hooks = false, notices = false) {
+  await client.request("initialize", { protocolVersion: 1, ...(notices ? { clientCapabilities: { session: { notices: {} } } } : {}) }, 1);
   const created = await client.request("session/new", { mcpServers: [], ...(hooks ? { _meta: { fx: { hooks: { captureContent: true } } } } : {}) }, 2) as any;
   await client.readLine(); // consume session/update notification
   await client.request("session/set_mode", { modeId: "auto" }, 3);
@@ -2981,19 +2988,19 @@ describe("acp: model-independent", () => {
           cwd: root.workspace,
           env: fakeGatewayEnv(root, gateway),
         });
-        await startAutoSession(client);
+        await startAutoSession(client, false, true);
 
         const first = await runPrompt(client, "check bounded project rules", TIMEOUT);
         const firstNotices = first.messages.filter((message: any) =>
           message.method === "session/update" &&
-          message.params?.update?.sessionUpdate === "agent_message_chunk" &&
-          message.params.update.content?.text?.includes("project instruction file")
+          message.params?.update?.sessionUpdate === "notice" &&
+          message.params.update.title?.includes("project instruction file")
         );
         expect(firstNotices).toHaveLength(1);
-        expect(firstNotices[0].params.update.content.text).toContain(
+        expect(firstNotices[0].params.update.title).toContain(
           "effective=24 bytes",
         );
-        expect(firstNotices[0].params.update.content.text).toContain(
+        expect(firstNotices[0].params.update.title).toContain(
           "source=workspace settings",
         );
         expect(JSON.stringify(first)).toContain("ACP_CONTEXT_LIMIT_FIRST");
@@ -3001,8 +3008,8 @@ describe("acp: model-independent", () => {
         const second = await runPrompt(client, "check the same bounded rules again", TIMEOUT);
         const secondNotices = second.messages.filter((message: any) =>
           message.method === "session/update" &&
-          message.params?.update?.sessionUpdate === "agent_message_chunk" &&
-          message.params.update.content?.text?.includes("project instruction file")
+          message.params?.update?.sessionUpdate === "notice" &&
+          message.params.update.title?.includes("project instruction file")
         );
         expect(secondNotices).toHaveLength(0);
         expect(JSON.stringify(second)).toContain("ACP_CONTEXT_LIMIT_SECOND");
@@ -3050,7 +3057,7 @@ describe("acp: model-independent", () => {
             args: testCase.args,
             env: fakeGatewayEnv(root, gateway),
           });
-          await startAutoSession(client);
+          await startAutoSession(client, false, true);
           const result = await runPromptBlocks(client, [
             { type: "text", text: "Inspect the remote resource metadata." },
             { type: "resource", resource: { uri: remoteUri } },
@@ -3072,7 +3079,7 @@ describe("acp: model-independent", () => {
 
           const notices = result.messages
             .filter((message: any) => message.method === "session/update")
-            .map((message: any) => acpContentText(message.params?.update?.content))
+            .map((message: any) => updateText(message.params?.update))
             .join("\n");
           expect(notices).toContain("action=omitted");
           expect(notices).toContain("reason=unsafe target");
@@ -3100,7 +3107,7 @@ describe("acp: model-independent", () => {
           cwd: root.workspace,
           env: fakeGatewayEnv(root, gateway),
         });
-        await startAutoSession(client);
+        await startAutoSession(client, false, true);
         const result = await runPromptBlocks(client, [
           { type: "text", text: "Inspect the deeply scoped target." },
           { type: "resource", resource: { uri: pathToFileURL(target).href } },
@@ -3115,7 +3122,7 @@ describe("acp: model-independent", () => {
         expect(prompt).toContain('reason="selection cap"');
         const notices = result.messages
           .filter((message: any) => message.method === "session/update")
-          .map((message: any) => acpContentText(message.params?.update?.content))
+          .map((message: any) => updateText(message.params?.update))
           .join("\n");
         expect(notices).toContain("reason=oversized rule file");
         expect(notices).toContain("reason=selection cap");
@@ -3157,7 +3164,7 @@ describe("acp: model-independent", () => {
             args: testCase.args,
             env: fakeGatewayEnv(root, gateway),
           });
-          await startAutoSession(client);
+          await startAutoSession(client, false, true);
           const result = await runPromptBlocks(client, [
             { type: "text", text: "Inspect the remote resource metadata." },
             ...resources,
@@ -3178,7 +3185,7 @@ describe("acp: model-independent", () => {
 
           const notices = result.messages
             .filter((message: any) => message.method === "session/update")
-            .map((message: any) => acpContentText(message.params?.update?.content))
+            .map((message: any) => updateText(message.params?.update))
             .join("\n");
           expect(notices.length).toBeLessThan(64 * 1024);
           expect(notices).toContain("96 additional records");
@@ -3390,7 +3397,7 @@ describe("acp: model-independent", () => {
   );
 
   test(
-    "an editor that sets session.notices to false gets context notices as agent messages",
+    "an editor that sets session.notices to false gets no context notice in the agent message",
     async () => {
       // ACP v1 advertises notices only with an object, `{}`.
       const root = createIsolatedRoot("fx-acp-notices-false-");
@@ -3423,7 +3430,8 @@ describe("acp: model-independent", () => {
         const updates = prompt.messages.map((message) => message.params?.update).filter(Boolean);
         expect(updates.filter((update) => update.sessionUpdate === "notice")).toEqual([]);
         const texts = updates.filter((update) => update.sessionUpdate === "agent_message_chunk").map((update) => update.content?.text ?? "");
-        expect(texts.join("")).toContain("[context] MCP description for");
+        expect(texts.join("")).not.toContain("[context]");
+        expect(texts.join("")).toBe("ACP notices complete");
         expect(client.stderr).toBe("");
       } finally {
         await client?.close();
@@ -9117,7 +9125,7 @@ describe("acp: model-independent", () => {
           args: ["--context-limit", "skill_catalog_bytes=1024", "acp"],
           env: fakeGatewayEnv(root, gateway),
         });
-        await startAutoSession(client);
+        await startAutoSession(client, false, true);
         const prompts = [
           "Design a system architecture with bounded retries and recovery.",
           "Design a system architecture with bounded retries and recovery.\n" +
@@ -9238,7 +9246,7 @@ describe("acp: model-independent", () => {
             FX_TRACE_SCOPES: "skill,skills,acp,config",
           },
         });
-        await startAutoSession(client);
+        await startAutoSession(client, false, true);
         const result = await runPrompt(
           client,
           "Run the ACP skill discovery diagnostic probe.",
@@ -9275,17 +9283,17 @@ describe("acp: model-independent", () => {
 
         const diagnosticNotices = result.messages.filter((message: any) =>
           message.method === "session/update" &&
-          message.params?.update?.sessionUpdate === "agent_message_chunk" &&
-          message.params.update.content?.text?.includes("skill discovery warning:")
+          message.params?.update?.sessionUpdate === "notice" &&
+          message.params.update.title?.includes("skill discovery warning:")
         );
         expect(diagnosticNotices).toHaveLength(1);
-        expect(diagnosticNotices[0].params.update.content.text).toContain(
+        expect(diagnosticNotices[0].params.update.title).toContain(
           malformedDirectory,
         );
-        expect(diagnosticNotices[0].params.update.content.text).toContain(
+        expect(diagnosticNotices[0].params.update.title).toContain(
           "metadata is invalid (duplicate_recognized_key)",
         );
-        expect(diagnosticNotices[0].params.update.content.text).not.toContain(
+        expect(diagnosticNotices[0].params.update.title).not.toContain(
           malformedBody,
         );
 
