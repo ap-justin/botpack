@@ -1185,6 +1185,11 @@ test "a server-qualified name resolves to the exposed tools it fits" {
     try testing.expectEqual(@as(usize, 2), ambiguous.many.len);
     try testing.expectEqualStrings("mcp_my_server_echo", ambiguous.many[0]);
     try testing.expectEqualStrings("mcp_my_server_echo_2", ambiguous.many[1]);
+    // A tool the permission rules deny is no candidate, so it cannot be
+    // reached by a spelling the rules never named.
+    var deny = [_]types.PermissionRule{.{ .permission = @constCast("mcp_my_server_echo"), .pattern = @constCast("*"), .action = .deny }};
+    const narrowed = try c.resolveQualified(a, "my_server.echo", .{ .rules = &deny }, .unrestricted, null);
+    try testing.expectEqualStrings("mcp_my_server_echo_2", narrowed.one);
     // Only the server as it is written fits its own spelling.
     try testing.expectEqualStrings("mcp_my_server_echo", (try c.resolveQualified(a, "my server.echo", .{}, .unrestricted, null)).one);
 }

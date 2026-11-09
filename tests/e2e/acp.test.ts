@@ -859,6 +859,7 @@ test("ACP applies the permission check to the tool a server-qualified name resol
   const run = await runQualifiedMcpCall("fixture.echo", [{ name: "fixture", fixture: startModernMcpHttpFixture("json") }]);
   expect(run.permissionRequests.length).toBeGreaterThan(0);
   expect(JSON.stringify(run.permissionRequests)).toContain("echo");
+  expect(run.replayedName).toBe(MCP_TOOL_NAME);
   expect(run.toolCalls).toHaveLength(0);
   expect(run.toolText).not.toContain(MODERN_HTTP_TOOL_RESULT);
   expect(run.stderr).toBe("");
