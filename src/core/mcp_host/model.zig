@@ -317,7 +317,7 @@ pub const Catalog = struct {
         if (permissions.rulesDenyAllTargetsForPermission(permission_rules, name)) return null;
         const instructions = try c.runtime.instructions(alloc, c.servers[found.server].name);
         defer if (instructions) |text| alloc.free(text);
-        var projection = try selected_schema.project(alloc, found.tool.*, instructions, limits);
+        var projection = try selected_schema.project(alloc, found.tool.*, c.servers[found.server].name, instructions, limits);
         if (projection == .selected) projection.selected.mcp_binding = c.bindingLocked(found.server, found.tool.*);
         return projection;
     }
@@ -399,7 +399,7 @@ pub const Catalog = struct {
             for (l.tools) |*tool| {
                 if (permissions.rulesDenyAllTargetsForPermission(permission_rules, tool.prefixed_name)) continue;
                 if (!c.allowsLocked(access, i, tool.prefixed_name)) continue;
-                try loaded.add(alloc, tool.*, instructions, c.bindingLocked(i, tool.*), limits);
+                try loaded.add(alloc, tool.*, s.name, instructions, c.bindingLocked(i, tool.*), limits);
             }
         }
         return loaded.finish(alloc);
@@ -425,7 +425,7 @@ pub const Catalog = struct {
         if (std.meta.eql(known_binding, current)) return .current;
         const instructions = try c.runtime.instructions(alloc, c.servers[found.server].name);
         defer if (instructions) |text| alloc.free(text);
-        var projection = try selected_schema.project(alloc, found.tool.*, instructions, limits);
+        var projection = try selected_schema.project(alloc, found.tool.*, c.servers[found.server].name, instructions, limits);
         if (projection == .rejected) {
             projection.deinit(alloc);
             return .unavailable;

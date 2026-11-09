@@ -3443,6 +3443,70 @@ describe("acp: model-independent", () => {
     LIVE_TIMEOUT,
   );
 
+  // Two always-loaded servers whose instructions are cut, and a budget with
+  // room for one tool: the model hears of both limits, and of the cut once per
+  // server however many of its tools a search loads.
+  for (const withNotices of [false, true]) {
+    test(
+      `context notices stay out of the agent message ${withNotices ? "and arrive as notices" : "for an editor without notices"}`,
+      async () => {
+        const root = createIsolatedRoot("fx-acp-budget-notice-");
+        const httpFixtures = [startModernMcpHttpFixture("json"), startModernMcpHttpFixture("json")];
+        const gateway = startFakeGateway([
+          fakeGatewayToolCall("search_budget", "capability_search", { kind: "mcp", server: "alpha", query: "echo", limit: 5 }),
+          finalText("budget reply"),
+        ]);
+        try {
+          client = await AcpClient.create({
+            cwd: root.workspace,
+            env: { ...fakeGatewayEnv(root, gateway) },
+            args: ["--context-limit", "mcp_selected_schema_bytes=700", "--context-limit", "mcp_server_instructions_bytes=8", "acp"],
+          });
+          await client.request("initialize", { protocolVersion: 1, clientCapabilities: { session: { notices: withNotices ? {} : false } } }, 1);
+          const created = await client.request(
+            "session/new",
+            {
+              cwd: root.workspace,
+              mcpServers: [
+                { type: "http", name: "alpha", url: httpFixtures[0]!.url, headers: [] },
+                { type: "http", name: "beta", url: httpFixtures[1]!.url, headers: [] },
+              ],
+            },
+            2,
+          ) as any;
+          expect(created.error).toBeUndefined();
+          await client.readLine();
+          await client.request("session/set_mode", { modeId: "auto" }, 3);
+          const prompt = await runPrompt(client, "Find the echo tool.", TIMEOUT);
+          expect(prompt.promptResult.result.stopReason).toBe("end_turn");
+          const body = JSON.stringify(gateway.requests[0]!.body);
+          // The budget left one of the two tools out.
+          expect(["mcp_alpha_echo", "mcp_beta_echo"].filter((name) => body.includes(name))).toHaveLength(1);
+          const updates = prompt.messages.map((message) => message.params?.update).filter(Boolean);
+          const texts = updates.filter((update) => update.sessionUpdate === "agent_message_chunk").map((update) => update.content?.text ?? "");
+          expect(texts.join("")).toBe("budget reply");
+          const notices = updates.filter((update) => update.sessionUpdate === "notice").map((update) => update.title as string);
+          if (!withNotices) {
+            expect(notices).toEqual([]);
+          } else {
+            expect(notices.some((title) => title.includes("exceeded the mcp_selected_schema_bytes budget"))).toBe(true);
+            // Named for the server, once.
+            expect(notices.filter((title) => title.includes("instructions truncated"))).toEqual([
+              expect.stringContaining('MCP server "alpha"'),
+            ]);
+          }
+          expect(client.stderr).toBe("");
+        } finally {
+          await client?.close();
+          gateway.stop();
+          for (const fixture of httpFixtures) fixture.stop();
+          rmSync(root.root, { recursive: true, force: true });
+        }
+      },
+      LIVE_TIMEOUT,
+    );
+  }
+
   test(
     "ACP loads a supplied server's tools every turn, unless it opts out",
     async () => {
