@@ -913,7 +913,7 @@ test("ACP finishes a provider search the turn ended before it finished", async (
     sendPrompt(client, 3, "Search the web.");
     const { responses } = await readUntilResponses(client, [3]);
     expect(responses.get(3)!.result).toBeUndefined();
-    expect(responses.get(3)!.error).toEqual({ code: -32603, message: "The turn stopped before it finished" });
+    expect(responses.get(3)!.error).toEqual({ code: -32603, message: "⚠ Tool state needs review · unexpected tool call during reconciliation · context preserved" });
     const search = client.rawLines
       .map(line => JSON.parse(line))
       .filter((message: any) => message.method === "session/update" && message.params?.update?.toolCallId === "search_open")
