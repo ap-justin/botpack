@@ -785,6 +785,89 @@ test("configured provider ACP runs a direct call to a supplied MCP tool that is 
   }
 }, 45000);
 
+// A model that reads its client's tool list as `<server>.<tool>` calls the tool
+// by that name; fx runs the MCP tool it names, as a call by its own name would.
+async function runQualifiedMcpCall(
+  callName: string,
+  servers: Array<{ name: string; fixture: ReturnType<typeof startModernMcpHttpFixture> }>,
+  options: { mode?: "auto" | "ask" } = {},
+) {
+  const isReview = (body: any) => body.tools?.some((tool: any) => tool.function?.name === "permission_decision");
+  const fixture = createConfiguredProviderFixture(body => {
+    if (isReview(body)) return configuredToolCompletion(body.model, "permission_decision", { decision: "clear", rationale: "fixture review" });
+    if (body.messages.some((message: any) => message.role === "tool")) return configuredCompletion(body.model, "qualified call complete");
+    return configuredToolCompletion(body.model, callName, { text: "qualified" }, "qualified_call");
+  });
+  const client = await AcpClient.create({ cwd: fixture.workspace, env: fixture.env });
+  try {
+    await client.request("initialize", { protocolVersion: 1 }, 1);
+    const created = await client.request("session/new", {
+      cwd: fixture.workspace,
+      mcpServers: servers.map(server => ({ ...acpHttpServer(server.fixture, "acp"), name: server.name, _meta: { fx: { alwaysLoaded: false } } })),
+    }, 2) as any;
+    if (created.error) throw new Error(JSON.stringify(created));
+    await client.readLine();
+    if (options.mode === "auto") await client.request("session/set_mode", { modeId: "auto" }, 3);
+    const prompt = await runPrompt(client, "Call the echo tool by its qualified name.", TIMEOUT);
+    if (prompt.promptResult.error) throw new Error(JSON.stringify(prompt.promptResult.error));
+    expect(prompt.promptResult.result.stopReason).toBe("end_turn");
+    const agentRequests = fixture.requests.filter(request => !isReview(request.body));
+    const toolMessage = agentRequests.at(-1)!.body.messages.find((message: any) => message.role === "tool" && message.tool_call_id === "qualified_call");
+    const replayedCall = agentRequests.at(-1)!.body.messages
+      .flatMap((message: any) => message.tool_calls ?? [])
+      .find((call: any) => call.id === "qualified_call");
+    return {
+      toolText: toolMessage?.content as string,
+      replayedName: replayedCall?.function?.name as string,
+      permissionRequests: prompt.messages.filter((message: any) => message.method === "session/request_permission"),
+      toolCalls: servers.flatMap(server => server.fixture.requests.filter(entry => entry.message.method === "tools/call")),
+      stderr: client.stderr,
+    };
+  } finally {
+    await client.close();
+    fixture.close();
+    for (const server of servers) server.fixture.stop();
+  }
+}
+
+test("ACP runs a deferred MCP tool called as server.tool and records its exposed name", async () => {
+  const run = await runQualifiedMcpCall("fixture.echo", [{ name: "fixture", fixture: startModernMcpHttpFixture("json") }], { mode: "auto" });
+  expect(run.toolText).toContain(`${MODERN_HTTP_TOOL_RESULT}:qualified`);
+  expect(run.toolCalls).toHaveLength(1);
+  expect(run.replayedName).toBe(MCP_TOOL_NAME);
+  expect(run.stderr).toBe("");
+}, 45000);
+
+test("ACP refuses a server-qualified MCP name that fits two tools and lists both", async () => {
+  const run = await runQualifiedMcpCall("my_server.echo", [
+    { name: "my server", fixture: startModernMcpHttpFixture("json") },
+    { name: "my_server", fixture: startModernMcpHttpFixture("json") },
+  ], { mode: "auto" });
+  expect(run.toolCalls).toHaveLength(0);
+  expect(run.toolText).toContain("mcp_my_server_echo");
+  expect(run.toolText).toContain("mcp_my_server_echo_2");
+  expect(run.toolText).toContain("capability_search");
+  expect(run.stderr).toBe("");
+}, 45000);
+
+test("ACP applies the permission check to the tool a server-qualified name resolves to", async () => {
+  const run = await runQualifiedMcpCall("fixture.echo", [{ name: "fixture", fixture: startModernMcpHttpFixture("json") }]);
+  expect(run.permissionRequests.length).toBeGreaterThan(0);
+  expect(JSON.stringify(run.permissionRequests)).toContain("echo");
+  expect(run.toolCalls).toHaveLength(0);
+  expect(run.toolText).not.toContain(MODERN_HTTP_TOOL_RESULT);
+  expect(run.stderr).toBe("");
+}, 45000);
+
+test("ACP answers an unknown server-qualified MCP name with the name format and capability_search", async () => {
+  const run = await runQualifiedMcpCall("fixture.missing", [{ name: "fixture", fixture: startModernMcpHttpFixture("json") }], { mode: "auto" });
+  expect(run.toolCalls).toHaveLength(0);
+  expect(run.toolText).toContain("Unsupported tool: fixture.missing");
+  expect(run.toolText).toContain("mcp_<server>_<tool>");
+  expect(run.toolText).toContain("capability_search");
+  expect(run.stderr).toBe("");
+}, 45000);
+
 // A provider search name is finished by its terminal lifecycle event, so it
 // must not get a second final update from the rejection hook.
 for (const [name, finalText] of [
