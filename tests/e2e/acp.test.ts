@@ -849,7 +849,7 @@ test("ACP refuses a server-qualified MCP name that fits two tools and lists both
     { name: "my_server", fixture: startModernMcpHttpFixture("json") },
   ], { mode: "auto" });
   expect(run.toolCalls).toHaveLength(0);
-  expect(run.toolText).toContain("mcp_my_server_echo");
+  expect(run.toolText).toMatch(/mcp_my_server_echo(?!_2)/);
   expect(run.toolText).toContain("mcp_my_server_echo_2");
   expect(run.toolText).toContain("capability_search");
   expect(run.stderr).toBe("");
