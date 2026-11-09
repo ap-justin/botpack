@@ -236,10 +236,10 @@ const SchemaLoads = struct {
                 break;
             }
             errdefer alloc.free(payload.model_output);
+            if (carries_instructions) try instructed.append(alloc, match.server_name);
             const name = try alloc.dupe(u8, match.tool.prefixed_name);
             entry.tool = .{ .name = name, .schema_json = payload.model_output, .mcp_binding = match.binding };
             remaining -= payload.model_output.len;
-            if (carries_instructions) try instructed.append(alloc, match.server_name);
         }
         return loads;
     }
