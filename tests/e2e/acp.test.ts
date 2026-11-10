@@ -10687,40 +10687,53 @@ describe("acp: model-backed protocol", () => {
   );
 
   test(
-    "session/new rejects an invalid MCP env name with -32602 and keeps serving",
+    "session/new rejects an invalid MCP env entry with -32602 and keeps serving",
     async () => {
       const root = createIsolatedRoot("fx-acp-mcp-bad-env-");
-      const gateway = startFakeGateway([]);
+      const gateway = startFakeGateway([finalText("still serving")]);
       const badEntries = [
         { name: "A=B", value: "x" },
         { name: "", value: "x" },
         { name: "A\u0000B", value: "x" },
         { name: "OK_NAME", value: "x\u0000y" },
       ];
+      const withEnv = (env: Array<{ name: string; value: string }>) => ({
+        cwd: root.workspace,
+        mcpServers: [{
+          name: "fixture",
+          command: process.execPath,
+          args: [MCP_STDIO_FIXTURE],
+          env,
+        }],
+      });
       try {
         client = await AcpClient.create({
           cwd: root.workspace,
           env: fakeGatewayEnv(root, gateway),
         });
         await client.request("initialize", { protocolVersion: 1 }, 1);
-        let id = 2;
+        const first = await client.request("session/new", { cwd: root.workspace, mcpServers: [] }, 2) as any;
+        expect(first.error).toBeUndefined();
+
+        let id = 3;
         for (const entry of badEntries) {
-          const rejected = await client.request("session/new", {
-            cwd: root.workspace,
-            mcpServers: [{
-              name: "fixture",
-              command: process.execPath,
-              args: [MCP_STDIO_FIXTURE],
-              env: [entry],
-            }],
-          }, id++) as any;
+          const rejected = await client.request("session/new", withEnv([entry]), id++) as any;
           expect(rejected.result).toBeUndefined();
           expect(rejected.error.code).toBe(-32602);
+          expect(rejected.error.message).toContain("MCP server env must be an array of name/value string entries");
         }
 
-        const created = await client.request("session/new", { cwd: root.workspace, mcpServers: [] }, id) as any;
-        expect(created.error).toBeUndefined();
-        expect(typeof created.result.sessionId).toBe("string");
+        // The session made before the rejections still runs a turn.
+        const turn = await runPrompt(client, "Say that you are still serving.", TIMEOUT);
+        expect(turn.promptResult.error).toBeUndefined();
+        expect(turn.promptResult.result.stopReason).toBe("end_turn");
+
+        // The same shape with a valid entry is accepted, so the -32602 above
+        // comes from the env entry and not from the rest of the request.
+        const accepted = await client.request("session/new", withEnv([{ name: "OK_NAME", value: "x" }]), id) as any;
+        expect(accepted.error).toBeUndefined();
+        expect(typeof accepted.result.sessionId).toBe("string");
+        expect(accepted.result.sessionId).not.toBe(first.result.sessionId);
       } finally {
         await client?.close();
         gateway.stop();
