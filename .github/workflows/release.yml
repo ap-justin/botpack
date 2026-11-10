@@ -30,7 +30,7 @@ jobs:
             runner: ubuntu-24.04-arm
             arch: aarch64
     env:
-      ARCHIVE: fx-${{ matrix.name }}.tar.gz
+      ARCHIVE: lia-${{ matrix.name }}.tar.gz
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -57,26 +57,26 @@ jobs:
       - name: Smoke-test
         shell: bash
         env:
-          FX_AUTO_UPGRADE: "0"
+          LIA_AUTO_UPGRADE: "0"
         run: |
           # An empty HOME is what the ACP registry's check starts the agent with.
           export HOME="$RUNNER_TEMP/smoke-home"
           mkdir -p "$HOME"
-          timeout 10 ./zig-out/bin/fx --version
-          timeout 10 ./zig-out/bin/fx --help >/dev/null
-          # fx acp exits at end of input, so a timeout (exit 124) fails the step.
+          timeout 10 ./zig-out/bin/lia --version
+          timeout 10 ./zig-out/bin/lia --help >/dev/null
+          # lia acp exits at end of input, so a timeout (exit 124) fails the step.
           printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{}}}' \
-            | timeout 10 ./zig-out/bin/fx acp > "$RUNNER_TEMP/initialize.out"
+            | timeout 10 ./zig-out/bin/lia acp > "$RUNNER_TEMP/initialize.out"
           head -c 400 "$RUNNER_TEMP/initialize.out"; echo
           grep -E '"id": ?1[,}]' "$RUNNER_TEMP/initialize.out" | grep -q '"result"' \
-            || { echo "::error::fx acp did not answer initialize with a result"; exit 1; }
+            || { echo "::error::lia acp did not answer initialize with a result"; exit 1; }
 
       - name: Package
         run: |
           dir="$RUNNER_TEMP/package"
           mkdir -p "$dir"
-          cp zig-out/bin/fx LICENSE THIRD_PARTY_NOTICES.md "$dir/"
-          tar -czf "$RUNNER_TEMP/$ARCHIVE" -C "$dir" fx LICENSE THIRD_PARTY_NOTICES.md
+          cp zig-out/bin/lia LICENSE THIRD_PARTY_NOTICES.md "$dir/"
+          tar -czf "$RUNNER_TEMP/$ARCHIVE" -C "$dir" lia LICENSE THIRD_PARTY_NOTICES.md
           cd "$RUNNER_TEMP" && sha256sum "$ARCHIVE" > "$ARCHIVE.sha256" && cat "$ARCHIVE.sha256"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

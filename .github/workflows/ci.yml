@@ -129,7 +129,7 @@ jobs:
 
       - name: Unit tests
         env:
-          FX_TEST_SHELL_PARITY_ALL_SHELLS: "1"
+          LIA_TEST_SHELL_PARITY_ALL_SHELLS: "1"
         run: timeout 2700s zig build test -Doptimize=ReleaseSafe --summary all
 
       # The job passes no AI_GATEWAY_API_KEY, so the live-model cases skip.
