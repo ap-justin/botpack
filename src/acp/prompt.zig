@@ -4035,6 +4035,7 @@ test "ACP maps selected-model image capability failures to one stable error" {
                 );
             },
             .stop_reason => return error.UnexpectedStopReason,
+            .auth_required => return error.UnexpectedAuthRequired,
         }
     }
     try std.testing.expectError(error.OutOfMemory, promptExecutionFailure(error.OutOfMemory));
