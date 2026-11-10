@@ -285,12 +285,14 @@ const AcpContext = struct {
     }
 
     /// Keeps `notice` as the message the prompt answers with if its turn
-    /// fails. Only the user's turn answers with it; a subagent's turn has
-    /// no prompt.
-    fn noteFailureNotice(self: *AcpContext, notice: []const u8) void {
+    /// fails, without the ANSI escapes the client never receives. Only the
+    /// user's turn answers with it; a subagent's turn has no prompt.
+    fn noteFailureNotice(self: *AcpContext, notice: []const u8) !void {
         if (self.current_prompt_input == null) return;
         const session = if (self.state.active_session) |*active| active else return;
-        const trimmed = std.mem.trim(u8, notice, &std.ascii.whitespace);
+        const plain = try stripAnsiAlloc(self.alloc, notice);
+        defer if (plain.ptr != notice.ptr) self.alloc.free(plain);
+        const trimmed = std.mem.trim(u8, plain, &std.ascii.whitespace);
         if (trimmed.len > 0) session.setFailureMessage(trimmed);
     }
 
@@ -314,12 +316,18 @@ const AcpContext = struct {
 
     /// The prompt's answer from a turn that ended by throwing `err`. Content
     /// the provider blocked or the model refused is ACP v1's `refusal`, a
-    /// result rather than an error.
-    fn thrownTurnOutcome(self: *const AcpContext, err: anyerror) anyerror!TerminalOutcome {
+    /// result rather than an error. A failed turn that recorded a notice
+    /// answers with it; otherwise `err` decides.
+    fn thrownTurnOutcome(self: *const AcpContext, session: *const server.ActiveSessionState, err: anyerror) anyerror!TerminalOutcome {
         if (self.content_filtered or err == error.ContentFiltered or err == error.ModelRefused) {
             return .{ .stop_reason = .content_filter };
         }
-        return promptExecutionFailure(err);
+        if (promptExecutionFailure(err)) |outcome| return outcome else |rethrown| {
+            if (rethrown != error.OutOfMemory and self.turn_failed and session.failureMessage().len > 0) {
+                return self.turnOutcome(session);
+            }
+            return rethrown;
+        }
     }
 
     fn sendUpdate(self: *AcpContext, update_json: []const u8) !void {
@@ -1238,7 +1246,7 @@ pub fn handlePrompt(
             endJournalTurn(alloc, state.alloc, session) catch |end_err| {
                 debug_trace.logf("session", "event=libfx_journal_turn_end_failed err={s} turn_err={s}", .{ @errorName(end_err), @errorName(err) });
             };
-            return ctx.thrownTurnOutcome(err);
+            return ctx.thrownTurnOutcome(session, err);
         }
     };
     try endJournalTurn(alloc, state.alloc, session);
@@ -3079,7 +3087,7 @@ fn runReportTurns(
                 return null;
             }
             if (err == error.Cancelled and session.cancel_flag.load(.seq_cst)) return null;
-            return try ctx.thrownTurnOutcome(err);
+            return try ctx.thrownTurnOutcome(session, err);
         };
         try endJournalTurn(alloc, state.alloc, session);
     }
@@ -3340,12 +3348,16 @@ fn pushRouteRecoveryStatus(
     status: types.RouteRecoveryStatus,
 ) !void {
     const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
-    // The uncertain-tool review pauses the turn with this status and no text.
-    if (status.kind == .unsafe_tool_start) {
-        var label_buf: [types.RouteRecoveryStatus.label_max_bytes]u8 = undefined;
-        ctx.noteFailureNotice(status.label(&label_buf));
+    // These end the turn with this status and no text, so its label is the
+    // notice. A content filter answers `refusal`, not a notice.
+    switch (status.kind) {
+        .terminal_provider_error, .unsafe_assistant_output, .unsafe_tool_start => {
+            var label_buf: [types.RouteRecoveryStatus.label_max_bytes]u8 = undefined;
+            try ctx.noteFailureNotice(status.label(&label_buf));
+        },
+        .content_filter => ctx.content_filtered = true,
+        else => {},
     }
-    if (status.kind == .content_filter) ctx.content_filtered = true;
     try ctx.sendModelRecoveryStatus(status);
 }
 
@@ -3361,7 +3373,7 @@ fn pushText(raw_ctx: *anyopaque, emission: agent_runtime.TextEmission) !void {
         .assistant_rendered => return,
         .assistant_restarted => |text| .{ text, ctx.operationalMessageId() },
         .operational => |text| blk: {
-            ctx.noteFailureNotice(text);
+            try ctx.noteFailureNotice(text);
             break :blk .{ text, ctx.operationalMessageId() };
         },
     };
@@ -3449,7 +3461,7 @@ fn pushHttpError(raw_ctx: *anyopaque, status: std.http.Status, detail: []const u
         null;
     defer if (owned_message) |message| ctx.alloc.free(message);
     const msg = owned_message orelse formatHttpError(&buf, status, detail);
-    ctx.noteFailureNotice(msg);
+    try ctx.noteFailureNotice(msg);
     ctx.sendAgentText(ctx.operationalMessageId(), msg) catch {};
 }
 
@@ -5448,7 +5460,7 @@ test "a content-filtered turn answers refusal and another model error still thro
         .{ .status = .content_filter, .thrown = error.ModelError, .refusal = true },
         .{ .status = null, .thrown = error.ContentFiltered, .refusal = true },
         .{ .status = null, .thrown = error.ModelRefused, .refusal = true },
-        .{ .status = .terminal_provider_error, .thrown = error.ModelError, .refusal = false },
+        .{ .status = .failed, .thrown = error.ModelError, .refusal = false },
         .{ .status = null, .thrown = error.ModelError, .refusal = false },
     };
     for (cases) |case| {
@@ -5459,11 +5471,72 @@ test "a content-filtered turn answers refusal and another model error still thro
         try deps.finalize_turn(deps.ctx, 1, .failed, null);
 
         if (case.refusal) {
-            const outcome = try ctx.thrownTurnOutcome(case.thrown);
+            const outcome = try ctx.thrownTurnOutcome(session, case.thrown);
             try std.testing.expect(outcome == .stop_reason);
             try std.testing.expectEqual(acp_types.StopReason.content_filter, outcome.stop_reason);
         } else {
-            try std.testing.expectError(case.thrown, ctx.thrownTurnOutcome(case.thrown));
+            try std.testing.expectError(case.thrown, ctx.thrownTurnOutcome(session, case.thrown));
+        }
+    }
+}
+
+test "a thrown turn failure answers its recorded notice without ANSI escapes" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-thrown-notice.jsonl", .{});
+    defer capture.close(io_mod.getIo());
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+    state.writer = .{ .stdout = capture };
+    const session = &state.active_session.?;
+    var prompt_input = ParsedPromptInput{ .text = &.{} };
+
+    const Step = union(enum) {
+        operational: []const u8,
+        status: types.RouteRecoveryStatus,
+    };
+    const cases = [_]struct {
+        step: ?Step,
+        thrown: anyerror,
+        // Null: the turn rethrows `thrown`.
+        expected: ?[]const u8,
+    }{
+        .{
+            .step = .{ .operational = "\x1b[31mThe model sent an empty reply.\x1b[0m\n" },
+            .thrown = error.StreamInterrupted,
+            .expected = "The model sent an empty reply.",
+        },
+        .{
+            .step = .{ .status = .{ .kind = .terminal_provider_error, .attempt = 2 } },
+            .thrown = error.ModelError,
+            .expected = "⚠ Provider unavailable · stopped after 2 attempts",
+        },
+        .{
+            .step = .{ .status = .{ .kind = .unsafe_assistant_output } },
+            .thrown = error.ModelError,
+            .expected = "⚠ Response interrupted · partial output preserved",
+        },
+        .{ .step = null, .thrown = error.ModelError, .expected = null },
+        .{ .step = .{ .operational = "The model sent an empty reply." }, .thrown = error.OutOfMemory, .expected = null },
+    };
+    for (cases) |case| {
+        var ctx = AcpContext{ .alloc = alloc, .state = &state, .session_id = "session_1", .current_prompt_input = &prompt_input };
+        const deps = agentRuntimeDeps(&ctx);
+        ctx.resetTurnOutcome(session);
+        if (case.step) |step| switch (step) {
+            .operational => |text| try deps.push_text(deps.ctx, .{ .operational = text }),
+            .status => |status| try deps.push_route_recovery_status(deps.ctx, status),
+        };
+        try deps.finalize_turn(deps.ctx, 1, .failed, null);
+
+        if (case.expected) |expected| {
+            const outcome = try ctx.thrownTurnOutcome(session, case.thrown);
+            try std.testing.expect(outcome == .rpc_error);
+            try std.testing.expectEqual(ErrorCode.internal_error, outcome.rpc_error.code);
+            try std.testing.expectEqualStrings(expected, outcome.rpc_error.message);
+        } else {
+            try std.testing.expectError(case.thrown, ctx.thrownTurnOutcome(session, case.thrown));
         }
     }
 }
