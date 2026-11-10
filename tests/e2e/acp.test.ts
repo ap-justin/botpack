@@ -8032,6 +8032,76 @@ describe("acp: model-independent", () => {
 
 
   test(
+    "a forbidden turn answers a generic error, not AUTH_REQUIRED",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-forbidden-");
+      const gateway = startFakeGateway([
+        new Response(JSON.stringify({ error: { message: "team restriction" } }), {
+          status: 403,
+          headers: { "content-type": "application/json" },
+        }),
+      ]);
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: fakeGatewayEnv(root, gateway),
+        });
+        await startAutoSession(client);
+        sendPrompt(client, 98, "Exercise the forbidden response.");
+
+        const response = await readResponse(client, 98);
+        expect(response.result).toBeUndefined();
+        expect(response.error.code).toBe(-32603);
+        expect(response.error.data?.authMethods).toBeUndefined();
+        await expectOneFrameFor(client, 98, 99);
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "a prompt whose credential vanished after session/new answers AUTH_REQUIRED with the sign-in methods",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-credential-vanished-");
+      const gateway = startFakeGateway([]);
+      try {
+        writeSeededFxAuth(root.home, "team_123");
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: {
+            ...fakeGatewayEnv(root, gateway),
+            AI_GATEWAY_API_KEY: undefined,
+            VERCEL_OIDC_TOKEN: undefined,
+            FX_DISABLE_KEYCHAIN: "1",
+          },
+        });
+        await startAutoSession(client);
+        rmSync(join(root.home, ".fx", "auth.json"));
+        sendPrompt(client, 100, "Exercise the missing credential.");
+
+        const response = await readResponse(client, 100);
+        expect(response.result).toBeUndefined();
+        expect(response.error.code).toBe(-32000);
+        expect(response.error.message).toContain("fx login");
+        expect(response.error.data.authMethods.length).toBeGreaterThan(0);
+        expect(gateway.requests).toHaveLength(0);
+        await expectOneFrameFor(client, 100, 101);
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "running prompt rejects non-cancel requests",
     async () => {
       const root = createIsolatedRoot("fx-acp-running-prompt-");
