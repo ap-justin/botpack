@@ -9142,6 +9142,69 @@ describe("acp: model-independent", () => {
   );
 
   test(
+    "a turn that hits the step limit answers max_turn_requests with its fx stop reason",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-step-limit-");
+      writeFileSync(join(root.workspace, "a.txt"), "a\n");
+      const gateway = startFakeGateway([
+        fakeGatewayToolCall("read_1", "read_file", { path: "a.txt" }),
+        finalText("UNEXPECTED_CONTINUATION"),
+      ]);
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: { ...fakeGatewayEnv(root, gateway), FX_MAX_AGENT_STEPS: "1" },
+        });
+        await startAutoSession(client);
+        const result = await runPrompt(client, "Read the fixture file.", TIMEOUT);
+
+        expect(result.promptResult.error).toBeUndefined();
+        expect(result.promptResult.result.stopReason).toBe("max_turn_requests");
+        expect(result.promptResult.result._meta.fx.stopReason).toBe("max_model_turns");
+        expect(gateway.requests).toHaveLength(1);
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "_meta.fx.stopReason appears on a max_tokens turn and not on the end_turn after it",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-meta-pair-");
+      const gateway = startFakeGateway([
+        lengthLimitedCommandCall("printf executed > command-must-not-run.txt"),
+        finalText("pong"),
+      ]);
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: fakeGatewayEnv(root, gateway),
+        });
+        await startAutoSession(client);
+
+        const limited = await runPrompt(client, "Run the fixture command.", TIMEOUT);
+        expect(limited.promptResult.result.stopReason).toBe("max_tokens");
+        expect(limited.promptResult.result._meta.fx.stopReason).toBe("max_output_tokens");
+
+        const ended = await runPrompt(client, "Say exactly: pong", TIMEOUT);
+        expect(ended.promptResult.result.stopReason).toBe("end_turn");
+        expect(ended.promptResult.result._meta).toBeUndefined();
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "provider length after silent tools returns max output tokens without continuation",
     async () => {
       const root = createIsolatedRoot("fx-acp-silent-tools-length-");
@@ -9167,6 +9230,7 @@ describe("acp: model-independent", () => {
         );
 
         expect(result.promptResult.result.stopReason).toBe("max_tokens");
+        expect(result.promptResult.result._meta.fx.stopReason).toBe("max_output_tokens");
         // The empty reply's one retry sends the same request with an output
         // limit; neither request asks for a summary.
         expect(gateway.requests).toHaveLength(4);
