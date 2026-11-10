@@ -10791,6 +10791,45 @@ describe("acp: model-backed protocol", () => {
   );
 
   test(
+    "session/cancel with no active prompt, with or without a sessionId, keeps the server answering",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-idle-cancel-");
+      const gateway = startFakeGateway([]);
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: fakeGatewayEnv(root, gateway),
+        });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const created = await client.request("session/new", { mcpServers: [] }, 2) as any;
+        expect(created.error).toBeUndefined();
+
+        // The client fills in the active session id, so this is the idle
+        // cancel of a real session.
+        client.send({ jsonrpc: "2.0", method: "session/cancel", params: {} });
+        const afterIdle = await client.request("session/list", {}, 3) as any;
+        expect(afterIdle.error).toBeUndefined();
+        expect(Array.isArray(afterIdle.result.sessions)).toBe(true);
+
+        // Written to stdin directly, so the cancel carries no sessionId.
+        (client as any).proc.stdin!.write(
+          JSON.stringify({ jsonrpc: "2.0", method: "session/cancel", params: {} }) + "\n",
+        );
+        const afterBare = await client.request("session/list", {}, 4) as any;
+        expect(afterBare.error).toBeUndefined();
+        expect(Array.isArray(afterBare.result.sessions)).toBe(true);
+        expect(client.closed).toBe(false);
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "session/new model configOptions has multiple options",
     async () => {
       const root = createIsolatedRoot("fx-acp-model-options-");
