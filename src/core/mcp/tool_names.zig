@@ -83,6 +83,78 @@ pub fn matchesServer(name: []const u8, server_name: []const u8) bool {
     return segment.len > source.len and segment[source.len] == '_';
 }
 
+const QualifiedForm = struct { prefix: []const u8, sep: []const u8 };
+
+/// The ways a model writes a tool's server-qualified name besides fx's own
+/// `mcp_<server>_<tool>` alias.
+const qualified_forms = [_]QualifiedForm{
+    .{ .prefix = "", .sep = "." },
+    .{ .prefix = "", .sep = "/" },
+    .{ .prefix = "mcp__", .sep = "__" },
+    .{ .prefix = "mcp_", .sep = "_" },
+};
+
+/// Whether `text` is `raw` as written or as `writeSanitizedSegment` writes it.
+fn segmentEql(text: []const u8, raw: []const u8, fallback: []const u8) bool {
+    const source = if (raw.len == 0) fallback else raw;
+    if (text.len != source.len) return false;
+    if (std.mem.eql(u8, text, source)) return true;
+    for (text, source) |t, r| {
+        if (t != (if (isIdentifierByte(r)) r else '_')) return false;
+    }
+    return true;
+}
+
+/// Whether `name` is a qualified spelling of `tool` on `server`: the server
+/// and tool names as the server gives them, or as fx sanitizes them, joined as
+/// `<server>.<tool>`, `<server>/<tool>`, `mcp__<server>__<tool>`, or
+/// `mcp_<server>_<tool>`.
+pub fn namesQualifiedTool(name: []const u8, server: []const u8, tool: []const u8) bool {
+    const server_len = if (server.len == 0) "server".len else server.len;
+    for (qualified_forms) |form| {
+        const rest = std.mem.cutPrefix(u8, name, form.prefix) orelse continue;
+        const tool_start = server_len + form.sep.len;
+        if (rest.len < tool_start) continue;
+        if (!segmentEql(rest[0..server_len], server, "server")) continue;
+        if (!std.mem.eql(u8, rest[server_len..tool_start], form.sep)) continue;
+        if (segmentEql(rest[tool_start..], tool, "tool")) return true;
+    }
+    return false;
+}
+
+/// Whether `name` is a qualified spelling that begins with `server`'s name,
+/// whichever tool it goes on to name.
+pub fn namesQualifiedServer(name: []const u8, server: []const u8) bool {
+    const server_len = if (server.len == 0) "server".len else server.len;
+    for (qualified_forms) |form| {
+        const rest = std.mem.cutPrefix(u8, name, form.prefix) orelse continue;
+        if (rest.len <= server_len + form.sep.len) continue;
+        if (!segmentEql(rest[0..server_len], server, "server")) continue;
+        if (std.mem.startsWith(u8, rest[server_len..], form.sep)) return true;
+    }
+    return false;
+}
+
+/// Whether the model wrote `name` as a reference to an MCP tool rather than
+/// as a plain tool name.
+pub fn looksQualified(name: []const u8) bool {
+    return std.mem.startsWith(u8, name, "mcp_") or
+        std.mem.findAny(u8, name, "./") != null;
+}
+
+test "qualified spellings name the tool on its server, sanitized or not" {
+    try std.testing.expect(namesQualifiedTool("openbot.send_message", "openbot", "send_message"));
+    try std.testing.expect(namesQualifiedTool("openbot/send_message", "openbot", "send_message"));
+    try std.testing.expect(namesQualifiedTool("mcp__openbot__send_message", "openbot", "send_message"));
+    try std.testing.expect(namesQualifiedTool("mcp_openbot_send_message", "openbot", "send_message"));
+    try std.testing.expect(namesQualifiedTool("my_server.send_it", "my server", "send it"));
+    try std.testing.expect(!namesQualifiedTool("openbot.send_messages", "openbot", "send_message"));
+    try std.testing.expect(!namesQualifiedTool("other.send_message", "openbot", "send_message"));
+    try std.testing.expect(!namesQualifiedTool("send_message", "openbot", "send_message"));
+    try std.testing.expect(namesQualifiedServer("openbot.anything", "openbot"));
+    try std.testing.expect(!namesQualifiedServer("openbot", "openbot"));
+}
+
 fn buildBaseToolName(alloc: Allocator, server_name: []const u8, tool_name: []const u8) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();

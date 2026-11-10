@@ -173,6 +173,7 @@ pub const Catalog = struct {
         tc.mcp_search_tools = searchToolsFn;
         tc.mcp_tool_schema = toolSchemaFn;
         tc.mcp_snapshot_tool = snapshotToolFn;
+        tc.mcp_resolve_qualified = resolveQualifiedFn;
     }
 
     pub fn hasTool(c: *Catalog, name: []const u8, access: Access) bool {
@@ -316,9 +317,49 @@ pub const Catalog = struct {
         if (permissions.rulesDenyAllTargetsForPermission(permission_rules, name)) return null;
         const instructions = try c.runtime.instructions(alloc, c.servers[found.server].name);
         defer if (instructions) |text| alloc.free(text);
-        var projection = try selected_schema.project(alloc, found.tool.*, instructions, limits);
+        var projection = try selected_schema.project(alloc, found.tool.*, c.servers[found.server].name, instructions, limits);
         if (projection == .selected) projection.selected.mcp_binding = c.bindingLocked(found.server, found.tool.*);
         return projection;
+    }
+
+    /// The tools `name` may mean when it spells a tool as `server.tool`,
+    /// `server/tool`, `mcp__server__tool`, or `mcp_server_tool`, deferred
+    /// tools included. Tools the permission rules or `access` refuse are not
+    /// candidates. Any server the name begins with has its tool list loaded
+    /// first, so a name can resolve before the model has searched.
+    pub fn resolveQualified(
+        c: *Catalog,
+        alloc: Allocator,
+        name: []const u8,
+        permission_rules: types.PermissionRuleSet,
+        access: Access,
+        cancel: Cancel,
+    ) !tool_mcp_runtime.QualifiedLookup {
+        if (!c.mayAllow(access)) return .none;
+        for (c.currentServers()) |s| {
+            if (s.held != null or !tool_names.namesQualifiedServer(name, s.name)) continue;
+            c.mutex.lockUncancelable(c.io);
+            const loaded = if (c.indexLocked(s.name)) |i| c.lists[i].state == .loaded else true;
+            c.mutex.unlock(c.io);
+            if (!loaded) try c.refresh(s.name, cancel);
+        }
+        var found: std.ArrayList([]const u8) = .empty;
+        c.mutex.lockUncancelable(c.io);
+        defer c.mutex.unlock(c.io);
+        for (c.servers, c.lists, 0..) |s, l, server| {
+            if (l.state != .loaded) continue;
+            for (l.tools) |tool| {
+                if (!tool_names.namesQualifiedTool(name, s.name, tool.original_name)) continue;
+                if (permissions.rulesDenyAllTargetsForPermission(permission_rules, tool.prefixed_name)) continue;
+                if (!c.allowsLocked(access, server, tool.prefixed_name)) continue;
+                try found.append(alloc, try alloc.dupe(u8, tool.prefixed_name));
+            }
+        }
+        return switch (found.items.len) {
+            0 => .none,
+            1 => .{ .one = found.items[0] },
+            else => .{ .many = found.items },
+        };
     }
 
     /// Every tool of the always-loaded servers, so an editor's tools are
@@ -339,14 +380,27 @@ pub const Catalog = struct {
         errdefer loaded.deinit(alloc);
         c.mutex.lockUncancelable(c.io);
         defer c.mutex.unlock(c.io);
+        // The budget runs out in the order tools are added, so the servers
+        // with fewer tools go first and stay whole; one large server cannot
+        // push the small ones out. Servers of equal size keep their order.
+        const order = try alloc.alloc(usize, c.servers.len);
+        defer alloc.free(order);
+        var eligible: usize = 0;
         for (c.servers, c.lists, 0..) |s, l, i| {
             if (!s.always_loaded or l.state != .loaded) continue;
+            order[eligible] = i;
+            eligible += 1;
+        }
+        std.sort.insertion(usize, order[0..eligible], c.lists, fewerToolsFirst);
+        for (order[0..eligible]) |i| {
+            const s = c.servers[i];
+            const l = c.lists[i];
             const instructions = try c.runtime.instructions(alloc, s.name);
             defer if (instructions) |text| alloc.free(text);
             for (l.tools) |*tool| {
                 if (permissions.rulesDenyAllTargetsForPermission(permission_rules, tool.prefixed_name)) continue;
                 if (!c.allowsLocked(access, i, tool.prefixed_name)) continue;
-                try loaded.add(alloc, tool.*, instructions, c.bindingLocked(i, tool.*), limits);
+                try loaded.add(alloc, tool.*, s.name, instructions, c.bindingLocked(i, tool.*), limits);
             }
         }
         return loaded.finish(alloc);
@@ -372,7 +426,7 @@ pub const Catalog = struct {
         if (std.meta.eql(known_binding, current)) return .current;
         const instructions = try c.runtime.instructions(alloc, c.servers[found.server].name);
         defer if (instructions) |text| alloc.free(text);
-        var projection = try selected_schema.project(alloc, found.tool.*, instructions, limits);
+        var projection = try selected_schema.project(alloc, found.tool.*, c.servers[found.server].name, instructions, limits);
         if (projection == .rejected) {
             projection.deinit(alloc);
             return .unavailable;
@@ -942,6 +996,14 @@ fn toolSchemaFn(raw: *anyopaque, alloc: Allocator, name: []const u8, rules: type
     return catalog(raw).toolSchema(alloc, name, rules, limits, access, cancel);
 }
 
+fn fewerToolsFirst(lists: []const Catalog.List, a: usize, b: usize) bool {
+    return lists[a].tools.len < lists[b].tools.len;
+}
+
+fn resolveQualifiedFn(raw: *anyopaque, alloc: Allocator, name: []const u8, rules: types.PermissionRuleSet, access: Access, cancel: Cancel) anyerror!tool_mcp_runtime.QualifiedLookup {
+    return catalog(raw).resolveQualified(alloc, name, rules, access, cancel);
+}
+
 fn snapshotToolFn(raw: *anyopaque, alloc: Allocator, name: []const u8, known_binding: Binding, rules: types.PermissionRuleSet, limits: context_limits.Values, access: Access) anyerror!tool_mcp_runtime.DefinitionSnapshot {
     return catalog(raw).snapshotToolDefinition(alloc, name, known_binding, rules, limits, access);
 }
@@ -1089,6 +1151,81 @@ test "an MCP server's tools reach the model under fx's names" {
     defer snapshot.deinit(testing.allocator);
     try testing.expectEqual(model_catalog.Availability.ready, snapshot.servers[0].availability);
     try testing.expectEqual(@as(?usize, 1), snapshot.servers[0].tool_count);
+}
+
+test "a server-qualified name resolves to the exposed tools it fits" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    const configs = [_]mcp_contract.McpServerConfig{
+        .{ .name = "fake", .command = f.server },
+        .{ .name = "my server", .command = f.server },
+        .{ .name = "my_server", .command = f.server },
+    };
+    var r: Runtime = undefined;
+    try r.start(testing.allocator, testing.io, &configs, &f.inherited, f.options());
+    defer r.deinit();
+    var c: Catalog = undefined;
+    try c.init(testing.allocator, testing.io, &r, .{});
+    defer c.deinit();
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // No list is loaded yet: the name's server loads its own.
+    for ([_][]const u8{ "fake.echo", "fake/echo", "mcp__fake__echo" }) |spelling| {
+        const found = try c.resolveQualified(a, spelling, .{}, .unrestricted, null);
+        try testing.expectEqualStrings("mcp_fake_echo", found.one);
+    }
+    try testing.expect(try c.resolveQualified(a, "fake.nope", .{}, .unrestricted, null) == .none);
+    try testing.expect(try c.resolveQualified(a, "echo", .{}, .unrestricted, null) == .none);
+    try testing.expect(try c.resolveQualified(a, "fake.echo", .{}, .disabled, null) == .none);
+
+    // Two servers whose names fx writes alike fit one spelling.
+    const ambiguous = try c.resolveQualified(a, "my_server.echo", .{}, .unrestricted, null);
+    try testing.expectEqual(@as(usize, 2), ambiguous.many.len);
+    try testing.expectEqualStrings("mcp_my_server_echo", ambiguous.many[0]);
+    try testing.expectEqualStrings("mcp_my_server_echo_2", ambiguous.many[1]);
+    // A tool the permission rules deny is no candidate, so it cannot be
+    // reached by a spelling the rules never named.
+    var deny = [_]types.PermissionRule{.{ .permission = @constCast("mcp_my_server_echo"), .pattern = @constCast("*"), .action = .deny }};
+    const narrowed = try c.resolveQualified(a, "my_server.echo", .{ .rules = &deny }, .unrestricted, null);
+    try testing.expectEqualStrings("mcp_my_server_echo_2", narrowed.one);
+    // Only the server as it is written fits its own spelling.
+    try testing.expectEqualStrings("mcp_my_server_echo", (try c.resolveQualified(a, "my server.echo", .{}, .unrestricted, null)).one);
+}
+
+test "the always-loaded budget keeps the server with fewer tools whole, whatever the config order" {
+    var wide_fixture: Fixture = undefined;
+    try wide_fixture.initMode(.open_object);
+    defer wide_fixture.deinit();
+    var narrow_fixture: Fixture = undefined;
+    try narrow_fixture.init();
+    defer narrow_fixture.deinit();
+    const configs = [_]mcp_contract.McpServerConfig{
+        .{ .name = "wide", .command = wide_fixture.server, .always_loaded = true },
+        .{ .name = "narrow", .command = narrow_fixture.server, .always_loaded = true },
+    };
+    var r: Runtime = undefined;
+    try r.start(testing.allocator, testing.io, &configs, &wide_fixture.inherited, wide_fixture.options());
+    defer r.deinit();
+    var c: Catalog = undefined;
+    try c.init(testing.allocator, testing.io, &r, .{});
+    defer c.deinit();
+    var arena: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // Room for the narrow server's one tool and nothing beside it.
+    const narrow = (try c.toolSchema(a, "mcp_narrow_echo", .{}, .{}, .unrestricted, null)).?;
+    var limits: context_limits.Values = .{};
+    limits.mcp_selected_schema_bytes = .{ .value = .{ .bytes = narrow.selected.model_output.len + 16 }, .source = .command_line };
+
+    var loaded = try c.snapshotAlwaysLoadedTools(a, .{}, limits, .unrestricted, null);
+    defer loaded.deinit(a);
+    try testing.expectEqual(@as(usize, 1), loaded.tools.len);
+    try testing.expectEqualStrings("mcp_narrow_echo", loaded.tools[0].name);
+    try testing.expect(loaded.notice != null);
 }
 
 test "an open-object argument stays an object in the schema and reaches the server as one" {

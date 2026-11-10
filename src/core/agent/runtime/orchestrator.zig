@@ -31,6 +31,7 @@ const tool_dispatch = @import("../../tooling/tool_dispatch.zig");
 const model_tool_schema = @import("../../tooling/model_tool_schema.zig");
 const command_result_mapping = @import("../../tooling/command_result_mapping.zig");
 const tool_result_errors = @import("../../tooling/tool_result_errors.zig");
+const tool_names = @import("../../mcp/tool_names.zig");
 const tooling_tool_admission = @import("../../tooling/tool_admission.zig");
 const tool_args = @import("../../tooling/tool_args.zig");
 const hooks = @import("../../hooks/hooks.zig");
@@ -2571,11 +2572,25 @@ fn prepareAvailabilityTerminal(
     };
 }
 
+/// What `advertiseUnselectedMcpCalls` hands back for a step's calls.
+const UnselectedMcpCalls = struct {
+    /// The step's calls, a server-qualified name rewritten to the tool's
+    /// exposed name.
+    calls: []const ToolCall,
+    /// Per call, why a name that reads as an MCP tool's did not resolve.
+    unresolved: []const ?[]u8,
+};
+
 /// Advertises live MCP tools the model called without loading them first, so
 /// those calls reach normal validation and MCP permission instead of failing
-/// as unselected. Names that do not resolve, including lookups that fail or
-/// are cancelled, keep the unsupported-tool path, where the turn's normal
-/// cancellation handling still applies.
+/// as unselected. A server-qualified name (`server.tool`) is rewritten to the
+/// tool's exposed name first, so permissions, the transcript, and the call
+/// itself use the one name. A name written as an MCP reference (a `.` or `/`
+/// in it, or an `mcp_` prefix) that fits no tool, or more than one, is
+/// answered with the name format or the candidates. Other
+/// names that do not resolve, including lookups that fail or are cancelled,
+/// keep the unsupported-tool path, where the turn's normal cancellation
+/// handling still applies.
 fn advertiseUnselectedMcpCalls(
     deps: *const AgentRuntimeDeps,
     arena: Allocator,
@@ -2583,9 +2598,12 @@ fn advertiseUnselectedMcpCalls(
     selected: *std.ArrayList(agent_stream_provider.DynamicFunctionTool),
     advertised_tools: *[]const agent_stream_provider.DynamicFunctionTool,
     advertised_names: *[][]const u8,
-) !void {
-    const resolve = deps.resolve_unselected_mcp_tool orelse return;
-    for (calls) |call| {
+) !UnselectedMcpCalls {
+    const rewritten = try arena.dupe(ToolCall, calls);
+    const unresolved = try arena.alloc(?[]u8, calls.len);
+    @memset(unresolved, null);
+    const resolve = deps.resolve_unselected_mcp_tool orelse return .{ .calls = rewritten, .unresolved = unresolved };
+    for (rewritten, unresolved) |*call, *failure| {
         if (deps.tool_registry.lookup(call.name) != null) continue;
         if (containsString(advertised_names.*, call.name)) continue;
         const found = resolve(deps.ctx, arena, call.name) catch |err| switch (err) {
@@ -2597,9 +2615,22 @@ fn advertiseUnselectedMcpCalls(
         };
         const definition = switch (found) {
             .resolved => |tool| tool,
-            .missing, .server_unavailable => continue,
+            .ambiguous => |candidates| {
+                failure.* = try ambiguousMcpNameOutput(arena, call.name, candidates);
+                continue;
+            },
+            .missing => {
+                if (tool_names.looksQualified(call.name)) failure.* = try unknownMcpNameOutput(arena, call.name);
+                continue;
+            },
+            .server_unavailable => continue,
         };
-        if (!std.mem.eql(u8, definition.name, call.name) or definition.mcp_binding == null) continue;
+        if (definition.mcp_binding == null) continue;
+        if (!std.mem.eql(u8, definition.name, call.name)) {
+            debug_trace.logf("mcp", "qualified MCP tool name resolved from={s} to={s}", .{ call.name, definition.name });
+            call.name = definition.name;
+            if (containsString(advertised_names.*, call.name)) continue;
+        }
         try runtime_gateway_step.recordSelectedDynamicTool(arena, selected, definition);
         const tool = for (selected.items) |item| {
             if (std.mem.eql(u8, item.name, call.name)) break item;
@@ -2614,6 +2645,30 @@ fn advertiseUnselectedMcpCalls(
         advertised_names.* = names;
         debug_trace.logf("mcp", "loaded unselected MCP tool for direct call tool={s}", .{call.name});
     }
+    return .{ .calls = rewritten, .unresolved = unresolved };
+}
+
+const mcp_name_format = "MCP tools are named mcp_<server>_<tool>, with each name's characters other than letters, digits, '_' and '-' replaced by '_'";
+
+fn ambiguousMcpNameOutput(arena: Allocator, name: []const u8, candidates: []const []const u8) ![]u8 {
+    var list: std.Io.Writer.Allocating = .init(arena);
+    for (candidates, 0..) |candidate, index| {
+        if (index > 0) try list.writer.writeAll(", ");
+        try list.writer.writeAll(candidate);
+    }
+    return tool_result_errors.toolExecutionFailureJson(arena, .{
+        .tool_name = name,
+        .message = try arena.print("{s} fits more than one MCP tool: {s}.", .{ name, list.written() }),
+        .suggestion = try arena.print("Call one of them by its exact name, or use capability_search to choose. {s}.", .{mcp_name_format}),
+    });
+}
+
+fn unknownMcpNameOutput(arena: Allocator, name: []const u8) ![]u8 {
+    return tool_result_errors.toolExecutionFailureJson(arena, .{
+        .tool_name = name,
+        .message = try arena.print("Unsupported tool: {s}", .{name}),
+        .suggestion = try arena.print("Use capability_search to find the MCP tool and its exact name. {s}.", .{mcp_name_format}),
+    });
 }
 
 /// The most MCP tool lookups a turn makes to re-advertise tools from the
@@ -2664,7 +2719,7 @@ fn restoreAdvertisedMcpTools(
                     if (!std.mem.eql(u8, definition.name, name) or definition.mcp_binding == null) continue;
                     try runtime_gateway_step.recordSelectedDynamicTool(arena, selected, definition);
                 },
-                .missing => {},
+                .missing, .ambiguous => {},
                 .server_unavailable => |server| {
                     debug_trace.logf("mcp", "restoring MCP tools skips unavailable server={s} tool={s}", .{ server, name });
                     try unavailable_servers.append(arena, server);
@@ -9556,7 +9611,7 @@ fn processQueuedPromptLoop(
             }
         }
 
-        try advertiseUnselectedMcpCalls(
+        const unselected_mcp = try advertiseUnselectedMcpCalls(
             deps,
             arena,
             completion.tool_calls,
@@ -9564,11 +9619,20 @@ fn processQueuedPromptLoop(
             &advertised_dynamic_tools,
             &advertised_dynamic_tool_names,
         );
+        completion.tool_calls = unselected_mcp.calls;
         const prepared_tool_calls = try arena.alloc(
             PreparedToolCall,
             completion.tool_calls.len,
         );
         for (completion.tool_calls, 0..) |tool_call, tool_call_index| {
+            if (unselected_mcp.unresolved[tool_call_index]) |model_output| {
+                prepared_tool_calls[tool_call_index] = .{ .blocked = .{
+                    .call = try runtime_lifecycle.dupeBlockedToolCall(arena, tool_call),
+                    .model_output = model_output,
+                    .kind = .mcp_name_unresolved,
+                } };
+                continue;
+            }
             if (successful_vision_mode == .required and
                 !std.mem.eql(u8, tool_call.name, "vision"))
             {
@@ -10475,6 +10539,14 @@ fn processQueuedPromptLoop(
                         debug_trace.eventf(
                             "tool",
                             "route_tool_unavailable",
+                            step_ctx,
+                            "call_id={s} name={s}",
+                            .{ tool_call.id, tool_call.name },
+                        );
+                    } else if (blocked.kind == .mcp_name_unresolved) {
+                        debug_trace.eventf(
+                            "tool",
+                            "mcp_name_unresolved",
                             step_ctx,
                             "call_id={s} name={s}",
                             .{ tool_call.id, tool_call.name },
