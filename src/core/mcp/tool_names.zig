@@ -142,7 +142,7 @@ pub fn looksQualified(name: []const u8) bool {
         std.mem.findAny(u8, name, "./") != null;
 }
 
-test "qualified spellings name the tool on its server, sanitised or not" {
+test "qualified spellings name the tool on its server, sanitized or not" {
     try std.testing.expect(namesQualifiedTool("openbot.send_message", "openbot", "send_message"));
     try std.testing.expect(namesQualifiedTool("openbot/send_message", "openbot", "send_message"));
     try std.testing.expect(namesQualifiedTool("mcp__openbot__send_message", "openbot", "send_message"));
