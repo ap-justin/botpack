@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FX_BIN, runFx } from "../evals/eval-helpers";
+import { LIA_BIN, runLia } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
   type FakeGatewayOptions,
@@ -30,7 +30,7 @@ import {
 } from "./fake-gateway";
 import { childLines, compactionRecordPath, type LogLine, logLines, onlySessionId, rootSessionIds, savedSessionIds, sessionDir, storeRoot } from "./saved-sessions";
 
-// The session store: every `fx ask` entry and exit, the files it writes, and the faults a real disk and a real
+// The session store: every `lia ask` entry and exit, the files it writes, and the faults a real disk and a real
 // crash produce: kills mid-stream and mid-tool, a torn tail, a flipped
 // byte, a second process, a read-only folder and a full disk.
 
@@ -52,11 +52,11 @@ function env(fixture: Fixture, gateway: { baseUrl: string; chatUrl: string }) {
     HOME: fixture.home,
     AI_GATEWAY_API_KEY: "sessions-test-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_MODEL: FAKE_GATEWAY_MODEL,
-    FX_AUTO_UPGRADE: "0",
+    LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+    LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_MODEL: FAKE_GATEWAY_MODEL,
+    LIA_AUTO_UPGRADE: "0",
   };
 }
 
@@ -160,7 +160,7 @@ async function waitForLog(fixture: Fixture, id: string, needle: string, timeoutM
 }
 
 function spawnAsk(fixture: Fixture, gateway: any, args: string[]) {
-  const child = spawn(FX_BIN, ["ask", "--json", "--auto", ...args], {
+  const child = spawn(LIA_BIN, ["ask", "--json", "--auto", ...args], {
     cwd: fixture.workspace,
     env: { ...process.env, ...env(fixture, gateway) } as Record<string, string>,
     stdio: "ignore",
@@ -172,7 +172,7 @@ function spawnAsk(fixture: Fixture, gateway: any, args: string[]) {
 /// Bytes in one `ulimit -f` block of `/bin/sh`: bash, which is `/bin/sh` on
 /// macOS, counts 1024; dash on Linux counts 512. Measured once.
 const SH_LIMIT_BLOCK = (() => {
-  const probe = join(tmpdir(), `fx-v2-ulimit-${process.pid}`);
+  const probe = join(tmpdir(), `lia-v2-ulimit-${process.pid}`);
   Bun.spawnSync(["/bin/sh", "-c", `trap '' XFSZ; ulimit -f 1; head -c 4096 /dev/zero > '${probe}'`]);
   const bytes = statSync(probe).size;
   rmSync(probe, { force: true });
@@ -184,14 +184,14 @@ function blocksJustPast(path: string) {
   return Math.ceil(statSync(path).size / SH_LIMIT_BLOCK) + 1;
 }
 
-/// `fx ask` under a file-size limit of `blocks` shell blocks with SIGXFSZ
+/// `lia ask` under a file-size limit of `blocks` shell blocks with SIGXFSZ
 /// ignored, so a write past it fails with EFBIG the way a full disk fails
 /// with ENOSPC. The ignored signal survives the `exec`.
 function askWithSizeLimit(fixture: Fixture, gateway: any, blocks: number, args: string[]) {
   return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
     const child = spawn(
       "/bin/sh",
-      ["-c", `trap '' XFSZ; ulimit -f ${blocks}; exec "$0" "$@"`, FX_BIN, "ask", "--json", "--auto", ...args],
+      ["-c", `trap '' XFSZ; ulimit -f ${blocks}; exec "$0" "$@"`, LIA_BIN, "ask", "--json", "--auto", ...args],
       { cwd: fixture.workspace, env: { ...process.env, ...env(fixture, gateway) } as Record<string, string> },
     );
     let stdout = "";
@@ -216,9 +216,9 @@ function shape(lines: LogLine[]): string[] {
 /// The v1 sessions folder holds nothing but the v2 root: no dual writes.
 /// No v2 session ever makes a side folder either (D48).
 function expectNoV1Sessions(fixture: Fixture) {
-  const sessions = join(fixture.home, ".fx", "sessions");
+  const sessions = join(fixture.home, ".lia", "sessions");
   expect(readdirSync(sessions).filter((name) => name !== "v2")).toEqual([]);
-  expect(existsSync(join(fixture.home, ".fx", "session-files"))).toBe(false);
+  expect(existsSync(join(fixture.home, ".lia", "session-files"))).toBe(false);
 }
 
 /// The blob a v2 handle names: the hash at its end, in the session's own
@@ -238,13 +238,13 @@ function blobNames(fixture: Fixture, id: string): string[] {
   return names;
 }
 
-/// A local command such as `fx sessions`, run in the fixture's workspace.
+/// A local command such as `lia sessions`, run in the fixture's workspace.
 function command(fixture: Fixture, gateway: any, args: string[], cwd = fixture.workspace) {
-  return runFx(args, { cwd, env: env(fixture, gateway), timeoutMs: TIMEOUT });
+  return runLia(args, { cwd, env: env(fixture, gateway), timeoutMs: TIMEOUT });
 }
 
 async function ask(fixture: Fixture, gateway: any, args: string[]) {
-  const result = await runFx(["ask", "--json", "--auto", ...args], {
+  const result = await runLia(["ask", "--json", "--auto", ...args], {
     cwd: fixture.workspace,
     env: env(fixture, gateway),
     timeoutMs: TIMEOUT,
@@ -252,8 +252,8 @@ async function ask(fixture: Fixture, gateway: any, args: string[]) {
   return result;
 }
 
-test("fx ask saves to v2, resumes by id and by last, and never writes v1", async () => {
-  const fixture = createFixture("fx-v2-ask-");
+test("lia ask saves to v2, resumes by id and by last, and never writes v1", async () => {
+  const fixture = createFixture("lia-v2-ask-");
   const gateway = startFakeGateway([
     fakeGatewayFinalText("V2_FIRST_ANSWER"),
     fakeGatewayFinalText("V2_SECOND_ANSWER"),
@@ -310,7 +310,7 @@ test("fx ask saves to v2, resumes by id and by last, and never writes v1", async
 }, TIMEOUT * 3);
 
 test("an ask saves only to the store, and --no-save writes nothing", async () => {
-  const fixture = createFixture("fx-v2-flag-");
+  const fixture = createFixture("lia-v2-flag-");
   const gateway = startFakeGateway([
     fakeGatewayFinalText("SAVED_ANSWER"),
     fakeGatewayFinalText("NOT_SAVED"),
@@ -334,8 +334,8 @@ test("an ask saves only to the store, and --no-save writes nothing", async () =>
   }
 }, TIMEOUT * 3);
 
-test("fx ask keeps the conversation language when a resumed turn has no language of its own", async () => {
-  const fixture = createFixture("fx-v2-language-");
+test("lia ask keeps the conversation language when a resumed turn has no language of its own", async () => {
+  const fixture = createFixture("lia-v2-language-");
   const gateway = startFakeGateway([
     fakeGatewayFinalText("こんにちは。"),
     fakeGatewayFinalText("完了しました。"),
@@ -366,8 +366,8 @@ test("fx ask keeps the conversation language when a resumed turn has no language
 const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 for (const userHeavy of [false, true]) {
-  test(`fx ask compacts on its own, keeps what it summarized as blobs, and resumes from the summary, userHeavy=${userHeavy}`, async () => {
-    const fixture = createFixture("fx-v2-compaction-");
+  test(`lia ask compacts on its own, keeps what it summarized as blobs, and resumes from the summary, userHeavy=${userHeavy}`, async () => {
+    const fixture = createFixture("lia-v2-compaction-");
     const model = "fixture/compaction";
     const originalUser = "Keep café and the original constraint unchanged." +
       (userHeavy ? "\n" + "user_reference_abcdefghijklmnop ".repeat(10_000) + "USER_REFERENCE_END" : "");
@@ -375,7 +375,7 @@ for (const userHeavy of [false, true]) {
       Array.from({ length: 14_000 }, (_, n) => `Assistant reference ${n}: group ${n % 19}, historical data, not new completed work.\n`).join("") +
       "PENDING_CHECK=transport-resume\n";
     let phase: "seed" | "continue" | "read" = "seed";
-    // fx-compactor's notes request. A turn with nothing between its message
+    // lia-compactor's notes request. A turn with nothing between its message
     // and its final reply has nothing to note, so it may need none.
     let notesCalls = 0;
     const bodies: string[] = [];
@@ -391,9 +391,9 @@ for (const userHeavy of [false, true]) {
       }
       return fakeGatewayFinalText(phase === "seed" ? assistant : "CONTINUED_FROM_COMMITTED_MEMORY");
     }, { models: [{ id: model, type: "language", tags: ["tool-use"], context_window: userHeavy ? 256_000 : 128_000, max_tokens: 8192 }] });
-    const compactEnv = { ...env(fixture, gateway), FX_MODEL: model, FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models` };
+    const compactEnv = { ...env(fixture, gateway), LIA_MODEL: model, LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models` };
     const run = (args: string[], stdin?: string) =>
-      runFx(["ask", "--json", ...args], { cwd: fixture.workspace, env: compactEnv, stdin, timeoutMs: TIMEOUT });
+      runLia(["ask", "--json", ...args], { cwd: fixture.workspace, env: compactEnv, stdin, timeoutMs: TIMEOUT });
     try {
       const seed = await run([], originalUser);
       expect(seed.code).toBe(0);
@@ -415,7 +415,7 @@ for (const userHeavy of [false, true]) {
       const compactions = (logLines(fixture.home, id) as any[]).filter((line) => line.kind === "compacted");
       expect(compactions).toHaveLength(1);
       const data = typeof compactions[0].data === "string" ? JSON.parse(compactions[0].data) : compactions[0].data;
-      expect(data.summary.startsWith("fx-compactor-v1\n")).toBe(true);
+      expect(data.summary.startsWith("lia-compactor-v1\n")).toBe(true);
       const turnPath = compactionRecordPath(fixture.home, id, "compacted-M1.txt");
       expect(turnPath).toBeDefined();
       const savedTurn = readFileSync(turnPath!, "utf8");
@@ -476,7 +476,7 @@ for (const userHeavy of [false, true]) {
 }
 
 test("a tool turn keeps its result as a blob of the session", async () => {
-  const fixture = createFixture("fx-v2-tool-");
+  const fixture = createFixture("lia-v2-tool-");
   const gateway = startFakeGateway([
     fakeShellRun("v2-shell-1", "echo V2_TOOL_OUTPUT_7731"),
     fakeGatewayFinalText("V2_TOOL_DONE"),
@@ -513,7 +513,7 @@ test("a tool turn keeps its result as a blob of the session", async () => {
 }, TIMEOUT * 3);
 
 test("a long command output is kept as one read-only blob, and the model pages it after a resume", async () => {
-  const fixture = createFixture("fx-v2-replay-");
+  const fixture = createFixture("lia-v2-replay-");
   // Past the inline capture limit, the output spools outside the session
   // while the command runs and is kept with a chunked copy (D44).
   const lineCount = 200_000;
@@ -521,7 +521,7 @@ test("a long command output is kept as one read-only blob, and the model pages i
   const gateway = startDynamicFakeGateway(async (body) => {
     if (body.includes("Page the output again.")) {
       if (body.includes("replay-read-1")) return fakeGatewayFinalText("REPLAY_PAGED_DONE");
-      const handle = /fx-command-replay-[a-f0-9]{12}-[a-f0-9]{64}\.bin/.exec(body)?.[0] ?? "missing-handle";
+      const handle = /lia-command-replay-[a-f0-9]{12}-[a-f0-9]{64}\.bin/.exec(body)?.[0] ?? "missing-handle";
       return fakeGatewayToolCall("replay-read-1", "read_tool_result", {
         request: { handle, query: "150001" },
       });
@@ -535,9 +535,9 @@ test("a long command output is kept as one read-only blob, and the model pages i
     expect(JSON.parse(created.stdout).output).toBe("LONG_RUN_DONE");
     const id = JSON.parse(created.stdout).session_id;
 
-    const handle = /fx-command-replay-[a-f0-9]{12}-[a-f0-9]{64}\.bin/.exec(JSON.stringify(logLines(fixture.home, id)))?.[0] ?? "";
+    const handle = /lia-command-replay-[a-f0-9]{12}-[a-f0-9]{64}\.bin/.exec(JSON.stringify(logLines(fixture.home, id)))?.[0] ?? "";
     // A run id, then the hash that names the blob (D44, D91).
-    expect(handle).toMatch(/^fx-command-replay-[a-f0-9]{12}-[a-f0-9]{64}\.bin$/);
+    expect(handle).toMatch(/^lia-command-replay-[a-f0-9]{12}-[a-f0-9]{64}\.bin$/);
     const hash = /-([a-f0-9]{64})\./.exec(handle)![1]!;
     expect(blobNames(fixture, id)).toContain(hash);
     expect(blobNames(fixture, id).every((name) => /^[a-f0-9]{64}$/.test(name))).toBe(true);
@@ -576,8 +576,8 @@ test("a long command output is kept as one read-only blob, and the model pages i
   }
 }, TIMEOUT * 3);
 
-test("fx ask killed in the middle of a turn resumes with that turn interrupted", async () => {
-  const fixture = createFixture("fx-v2-kill-");
+test("lia ask killed in the middle of a turn resumes with that turn interrupted", async () => {
+  const fixture = createFixture("lia-v2-kill-");
   let stalled: () => void = () => {};
   const reachedStall = new Promise<void>((resolve) => (stalled = resolve));
   // Replies follow the request, not the call count: a fresh session also
@@ -595,7 +595,7 @@ test("fx ask killed in the middle of a turn resumes with that turn interrupted",
     expect(created.code).toBe(0);
     const id = JSON.parse(created.stdout).session_id;
 
-    const child = spawn(FX_BIN, ["ask", "--json", "--auto", "--resume", id, "This turn is killed."], {
+    const child = spawn(LIA_BIN, ["ask", "--json", "--auto", "--resume", id, "This turn is killed."], {
       cwd: fixture.workspace,
       env: { ...process.env, ...env(fixture, gateway) } as Record<string, string>,
       stdio: "ignore",
@@ -629,7 +629,7 @@ test("fx ask killed in the middle of a turn resumes with that turn interrupted",
 }, TIMEOUT * 3);
 
 test("a kill while a tool runs keeps the finished tool and answers the running one", async () => {
-  const fixture = createFixture("fx-v2-kill-tool-");
+  const fixture = createFixture("lia-v2-kill-tool-");
   let slowServed: () => void = () => {};
   const slowStarted = new Promise<void>((resolve) => (slowServed = resolve));
   const gateway = startDynamicFakeGateway(async (body) => {
@@ -680,7 +680,7 @@ test("a kill while a tool runs keeps the finished tool and answers the running o
 }, TIMEOUT * 3);
 
 test("a kill while a tool runs keeps the text of the message that issued it", async () => {
-  const fixture = createFixture("fx-v2-kill-text-");
+  const fixture = createFixture("lia-v2-kill-text-");
   let slowServed: () => void = () => {};
   const slowStarted = new Promise<void>((resolve) => (slowServed = resolve));
   const shell = (command: string) => JSON.stringify({ request: { yield_time_ms: 30_000, action: "run", command } });
@@ -734,7 +734,7 @@ test("a kill while a tool runs keeps the text of the message that issued it", as
 }, TIMEOUT * 3);
 
 test("a session whose first turn was killed takes its first prompt as title", async () => {
-  const fixture = createFixture("fx-v2-first-kill-title-");
+  const fixture = createFixture("lia-v2-first-kill-title-");
   let slowServed: () => void = () => {};
   const slowStarted = new Promise<void>((resolve) => (slowServed = resolve));
   const gateway = startDynamicFakeGateway(async (body) => {
@@ -773,7 +773,7 @@ test("a session whose first turn was killed takes its first prompt as title", as
 }, TIMEOUT * 3);
 
 test("a torn tail is cut on resume and the session goes on", async () => {
-  const fixture = createFixture("fx-v2-torn-");
+  const fixture = createFixture("lia-v2-torn-");
   const gateway = startFakeGateway([
     fakeGatewayFinalText("BEFORE_TORN_TAIL"),
     fakeGatewayFinalText("AFTER_TORN_TAIL"),
@@ -799,7 +799,7 @@ test("a torn tail is cut on resume and the session goes on", async () => {
 }, TIMEOUT * 3);
 
 test("a flipped byte inside the log stops resume and leaves the file as it was", async () => {
-  const fixture = createFixture("fx-v2-flip-");
+  const fixture = createFixture("lia-v2-flip-");
   const gateway = startFakeGateway([
     fakeGatewayFinalText("FLIP_FIRST"),
     fakeGatewayFinalText("FLIP_SECOND"),
@@ -828,7 +828,7 @@ test("a flipped byte inside the log stops resume and leaves the file as it was",
 }, TIMEOUT * 3);
 
 test("a blob that went missing stops resume as damage, not as a missing session", async () => {
-  const fixture = createFixture("fx-v2-lost-blob-");
+  const fixture = createFixture("lia-v2-lost-blob-");
   const big = "LOST_BLOB_START " + "blob-body ".repeat(30_000) + "LOST_BLOB_END";
   const gateway = startFakeGateway([fakeGatewayFinalText(big)]);
   try {
@@ -850,7 +850,7 @@ test("a blob that went missing stops resume as damage, not as a missing session"
 }, TIMEOUT * 2);
 
 test("a second process on an open session is refused and writes nothing", async () => {
-  const fixture = createFixture("fx-v2-busy-");
+  const fixture = createFixture("lia-v2-busy-");
   let stalled: () => void = () => {};
   const reachedStall = new Promise<void>((resolve) => (stalled = resolve));
   const gateway = startDynamicFakeGateway(async (body) => {
@@ -886,7 +886,7 @@ test("a second process on an open session is refused and writes nothing", async 
 }, TIMEOUT * 3);
 
 test("a read-only session folder fails cleanly and resumes once writable", async () => {
-  const fixture = createFixture("fx-v2-readonly-");
+  const fixture = createFixture("lia-v2-readonly-");
   const gateway = startFakeGateway([
     fakeGatewayFinalText("BEFORE_READ_ONLY"),
     fakeGatewayFinalText("AFTER_READ_ONLY"),
@@ -925,7 +925,7 @@ test("a read-only session folder fails cleanly and resumes once writable", async
 }, TIMEOUT * 3);
 
 test("a full disk fails the turn cleanly and the session resumes after", async () => {
-  const fixture = createFixture("fx-v2-full-");
+  const fixture = createFixture("lia-v2-full-");
   const gateway = startDynamicFakeGateway(async (body) => {
     if (body.includes("After the full disk.")) return fakeGatewayFinalText("AFTER_FULL_DISK");
     if (body.includes("The disk is full.")) return fakeGatewayFinalText("X".repeat(8192));
@@ -990,8 +990,8 @@ class AcpRpc {
   constructor(fixture: Fixture, gateway: any, extraEnv: Record<string, string | undefined> = {}, limitBlocks?: number) {
     // With `limitBlocks`, under a file-size limit as `askWithSizeLimit` sets.
     const [command, args] = limitBlocks === undefined
-      ? [FX_BIN, ["acp"]]
-      : ["/bin/sh", ["-c", `trap '' XFSZ; ulimit -f ${limitBlocks}; exec "$0" "$@"`, FX_BIN, "acp"]];
+      ? [LIA_BIN, ["acp"]]
+      : ["/bin/sh", ["-c", `trap '' XFSZ; ulimit -f ${limitBlocks}; exec "$0" "$@"`, LIA_BIN, "acp"]];
     this.proc = spawn(command, args, {
       cwd: fixture.workspace,
       env: { ...process.env, ...env(fixture, gateway), ...extraEnv } as Record<string, string>,
@@ -1070,7 +1070,7 @@ function acpPrompt(text: string) {
 }
 
 test("ACP keeps a session once prompted, lists it, and loads every turn after a restart", async () => {
-  const fixture = createFixture("fx-v2-acp-");
+  const fixture = createFixture("lia-v2-acp-");
   const gateway = replyToLatest([
     ["First ACP question.", "ACP_ONE"],
     ["Second ACP question.", "ACP_TWO"],
@@ -1124,7 +1124,7 @@ test("ACP keeps a session once prompted, lists it, and loads every turn after a 
 }, TIMEOUT * 4);
 
 test("ACP killed in the middle of a prompt loads with that turn interrupted", async () => {
-  const fixture = createFixture("fx-v2-acp-kill-");
+  const fixture = createFixture("lia-v2-acp-kill-");
   let held: () => void = () => {};
   const holding = new Promise<void>((resolve) => (held = resolve));
   const gateway = replyToLatest(
@@ -1163,10 +1163,10 @@ test("ACP killed in the middle of a prompt loads with that turn interrupted", as
 }, TIMEOUT * 3);
 
 test("ACP saves a model change with the session and loads it back", async () => {
-  const fixture = createFixture("fx-v2-acp-prefs-");
+  const fixture = createFixture("lia-v2-acp-prefs-");
   const gateway = replyToLatest([["Pick a model.", "ACP_MODEL"]]);
   // A process-wide model would win over the saved one on load, as on v1.
-  const noModel = { FX_MODEL: undefined };
+  const noModel = { LIA_MODEL: undefined };
   let client: AcpRpc | undefined;
   try {
     client = await AcpRpc.start(fixture, gateway, noModel);
@@ -1195,7 +1195,7 @@ test("ACP saves a model change with the session and loads it back", async () => 
 }, TIMEOUT * 3);
 
 test("ACP session/load with another cwd moves the session to that workspace", async () => {
-  const fixture = createFixture("fx-v2-acp-cwd-");
+  const fixture = createFixture("lia-v2-acp-cwd-");
   const elsewhere = join(fixture.root, "elsewhere");
   mkdirSync(elsewhere);
   const other = realpathSync(elsewhere);
@@ -1230,7 +1230,7 @@ test("ACP session/load with another cwd moves the session to that workspace", as
 }, TIMEOUT * 3);
 
 test("ACP keeps a tool result as a blob, and load replays the call with its result", async () => {
-  const fixture = createFixture("fx-v2-acp-tool-");
+  const fixture = createFixture("lia-v2-acp-tool-");
   const gateway = startDynamicFakeGateway(async (body) => {
     if (body.includes("After the ACP tool.")) return fakeGatewayFinalText("ACP_AFTER_TOOL");
     if (body.includes("Run an ACP tool.") && body.includes("ACP_TOOL_OUTPUT_77")) return fakeGatewayFinalText("ACP_TOOL_DONE");
@@ -1272,7 +1272,7 @@ test("ACP keeps a tool result as a blob, and load replays the call with its resu
 }, TIMEOUT * 3);
 
 test("ACP lists more than a page of sessions with a cursor, newest first, each once", async () => {
-  const fixture = createFixture("fx-v2-acp-page-");
+  const fixture = createFixture("lia-v2-acp-page-");
   const gateway = startDynamicFakeGateway(async () => fakeGatewayFinalText("ACP_PAGE"));
   let client: AcpRpc | undefined;
   try {
@@ -1303,13 +1303,13 @@ test("ACP lists more than a page of sessions with a cursor, newest first, each o
   }
 }, TIMEOUT * 4);
 
-/// A catalog whose model can see images, so fx sends them to it as they are.
+/// A catalog whose model can see images, so lia sends them to it as they are.
 const VISION_MODEL: FakeGatewayOptions = {
   models: [{ id: FAKE_GATEWAY_MODEL, type: "language", tags: ["vision", "file-input", "tool-use"] }],
 };
 const PNG_1X1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
-/// A piece's data: fx's JSON, which the log keeps as a string.
+/// A piece's data: lia's JSON, which the log keeps as a string.
 function itemData(line: any): any {
   return typeof line.data === "string" ? JSON.parse(line.data) : line.data;
 }
@@ -1349,8 +1349,8 @@ function notedImagePaths(body: string): string[] {
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
-test("fx ask saves an image as its session's blob, names it to the model, and resume sends it again (D89)", async () => {
-  const fixture = createFixture("fx-v2-image-");
+test("lia ask saves an image as its session's blob, names it to the model, and resume sends it again (D89)", async () => {
+  const fixture = createFixture("lia-v2-image-");
   const gateway = replyToLatest([
     ["Describe the image.", "IMAGE_SEEN"],
     ["And again.", "IMAGE_AGAIN"],
@@ -1385,7 +1385,7 @@ test("fx ask saves an image as its session's blob, names it to the model, and re
 }, TIMEOUT * 2);
 
 test("ACP keeps an image prompt and replays it with the image on load", async () => {
-  const fixture = createFixture("fx-v2-acp-image-");
+  const fixture = createFixture("lia-v2-acp-image-");
   const gateway = replyToLatest([["Describe this ACP image.", "ACP_IMAGE_SEEN"]], undefined, VISION_MODEL);
   let client: AcpRpc | undefined;
   try {
@@ -1420,7 +1420,7 @@ test("ACP keeps an image prompt and replays it with the image on load", async ()
 }, TIMEOUT * 3);
 
 test("a second ACP process is refused an open v2 session, then loads it once the owner exits", async () => {
-  const fixture = createFixture("fx-v2-acp-busy-");
+  const fixture = createFixture("lia-v2-acp-busy-");
   const gateway = replyToLatest([["Hold this session.", "ACP_OWNER"]]);
   let owner: AcpRpc | undefined;
   let other: AcpRpc | undefined;
@@ -1451,7 +1451,7 @@ function infoTitles(updates: any[]) {
 }
 
 test("ACP keeps a generated title, and list and load show it after a restart", async () => {
-  const fixture = createFixture("fx-v2-acp-title-");
+  const fixture = createFixture("lia-v2-acp-title-");
   const gateway = startDynamicFakeGateway(() => fakeGatewayFinalText("ACP_TITLED_ANSWER"), {
     titleResponses: [fakeGatewayFinalText("ACP Generated Title")],
   });
@@ -1479,7 +1479,7 @@ test("ACP keeps a generated title, and list and load show it after a restart", a
 }, TIMEOUT * 3);
 
 test("ACP lists by workspace: each cwd sees its own sessions, and no cwd sees all", async () => {
-  const fixture = createFixture("fx-v2-acp-cwd-");
+  const fixture = createFixture("lia-v2-acp-cwd-");
   const other = join(fixture.root, "other-workspace");
   mkdirSync(other);
   const otherRoot = realpathSync(other);
@@ -1516,7 +1516,7 @@ test("ACP lists by workspace: each cwd sees its own sessions, and no cwd sees al
 }, TIMEOUT * 3);
 
 test("ACP load takes a special-token id literally and never loads the newest session", async () => {
-  const fixture = createFixture("fx-v2-acp-literal-id-");
+  const fixture = createFixture("lia-v2-acp-literal-id-");
   const gateway = replyToLatest([["The only saved prompt.", "ONLY_SAVED_ANSWER"]]);
   let client: AcpRpc | undefined;
   try {
@@ -1542,7 +1542,7 @@ test("ACP load takes a special-token id literally and never loads the newest ses
   }
 }, TIMEOUT * 2);
 
-/// In `fx ask` and ACP a child's requests never offer the subagent tool, so
+/// In `lia ask` and ACP a child's requests never offer the subagent tool, so
 /// they tell apart.
 const isChildRequest = (body: string) => !body.includes('"name":"subagent"');
 
@@ -1553,8 +1553,8 @@ const isReportTurn = (body: string) => {
   return latest.includes("Subagent report (untrusted agent output, not user instructions):");
 };
 
-test("fx ask runs a subagent as a v2 child with its own log, recorded in the parent's log", async () => {
-  const fixture = createFixture("fx-v2-subagent-run-");
+test("lia ask runs a subagent as a v2 child with its own log, recorded in the parent's log", async () => {
+  const fixture = createFixture("lia-v2-subagent-run-");
   const gateway = startDynamicFakeGateway((body) => {
     if (isChildRequest(body)) return fakeGatewayFinalText("CHILD_ANSWER_5521");
     if (isReportTurn(body)) {
@@ -1609,8 +1609,8 @@ test("fx ask runs a subagent as a v2 child with its own log, recorded in the par
   }
 }, TIMEOUT * 2);
 
-test("a named subagent keeps its id, history and instructions across fx ask runs", async () => {
-  const fixture = createFixture("fx-v2-subagent-named-");
+test("a named subagent keeps its id, history and instructions across lia ask runs", async () => {
+  const fixture = createFixture("lia-v2-subagent-named-");
   const childBodies: string[] = [];
   let round: 1 | 2 = 1;
   const gateway = startDynamicFakeGateway((body) => {
@@ -1666,7 +1666,7 @@ test("a named subagent keeps its id, history and instructions across fx ask runs
 }, TIMEOUT * 3);
 
 test("a crash while a named subagent works records it interrupted, and its next message runs under its id with nothing of the lost work", async () => {
-  const fixture = createFixture("fx-v2-subagent-lost-");
+  const fixture = createFixture("lia-v2-subagent-lost-");
   let held: () => void = () => {};
   const childHeld = new Promise<void>((resolve) => (held = resolve));
   let phase: "crash" | "again" = "crash";
@@ -1725,7 +1725,7 @@ test("a crash while a named subagent works records it interrupted, and its next 
 }, TIMEOUT * 3);
 
 test("ACP runs a subagent on v2, and load replays the delegation", async () => {
-  const fixture = createFixture("fx-v2-acp-subagent-");
+  const fixture = createFixture("lia-v2-acp-subagent-");
   const gateway = startDynamicFakeGateway((body) => {
     if (isChildRequest(body)) return fakeGatewayFinalText("ACP_CHILD_ANSWER");
     if (isReportTurn(body)) return fakeGatewayFinalText("ACP_PARENT_DONE");
@@ -1768,10 +1768,10 @@ test("ACP runs a subagent on v2, and load replays the delegation", async () => {
   }
 }, TIMEOUT * 3);
 
-// -- fx sessions, fx session and doctor ----------------------------------------
+// -- lia sessions, lia session and doctor ----------------------------------------
 
-test("fx sessions and fx session show sessions by workspace and page them", async () => {
-  const fixture = createFixture("fx-v2-commands-");
+test("lia sessions and lia session show sessions by workspace and page them", async () => {
+  const fixture = createFixture("lia-v2-commands-");
   mkdirSync(join(fixture.root, "other"));
   const other = realpathSync(join(fixture.root, "other"));
   const gateway = startFakeGateway([
@@ -1783,7 +1783,7 @@ test("fx sessions and fx session show sessions by workspace and page them", asyn
   try {
     const a = JSON.parse((await ask(fixture, gateway, ["List question A."])).stdout).session_id;
     expect((await ask(fixture, gateway, ["--resume", a, "List question A two."])).code).toBe(0);
-    const inOther = await runFx(["ask", "--json", "--auto", "List question B."], { cwd: other, env: env(fixture, gateway), timeoutMs: TIMEOUT });
+    const inOther = await runLia(["ask", "--json", "--auto", "List question B."], { cwd: other, env: env(fixture, gateway), timeoutMs: TIMEOUT });
     const b = JSON.parse(inOther.stdout).session_id;
     const c = JSON.parse((await ask(fixture, gateway, ["List question C."])).stdout).session_id;
     const ids = (listed: any) => listed.sessions.map((summary: any) => summary.id);
@@ -1846,8 +1846,8 @@ test("fx sessions and fx session show sessions by workspace and page them", asyn
   }
 }, TIMEOUT * 4);
 
-test("fx session reads a session another process holds, and reads past a torn tail without cutting it", async () => {
-  const fixture = createFixture("fx-v2-peek-");
+test("lia session reads a session another process holds, and reads past a torn tail without cutting it", async () => {
+  const fixture = createFixture("lia-v2-peek-");
   let stalled: () => void = () => {};
   const reachedStall = new Promise<void>((resolve) => (stalled = resolve));
   const gateway = startDynamicFakeGateway(async (body) => {
@@ -1886,8 +1886,8 @@ test("fx session reads a session another process holds, and reads past a torn ta
   }
 }, TIMEOUT * 3);
 
-test("fx session recover copies the good turns and side files of a damaged session, which stays as it was", async () => {
-  const fixture = createFixture("fx-v2-recover-");
+test("lia session recover copies the good turns and side files of a damaged session, which stays as it was", async () => {
+  const fixture = createFixture("lia-v2-recover-");
   const gateway = startFakeGateway([
     fakeShellRun("recover-shell", "echo RECOVER_TOOL_OUTPUT_4410"),
     fakeGatewayFinalText("RECOVER_ONE"),
@@ -1950,7 +1950,7 @@ test("fx session recover copies the good turns and side files of a damaged sessi
 }, TIMEOUT * 4);
 
 const COMPACTION_MODEL = "fixture/compaction";
-const COMPACTOR_SUMMARY_MARKER = "fx-compactor-v1\n";
+const COMPACTOR_SUMMARY_MARKER = "lia-compactor-v1\n";
 /// About 300k estimated tokens, past the fixture model's 128k window, so the
 /// next prompt in the session compacts the reply it follows.
 const COMPACTING_REPLY_PADDING = Array.from(
@@ -1960,7 +1960,7 @@ const COMPACTING_REPLY_PADDING = Array.from(
 
 /// Answers each prompt with its pair's text, newest prompt first because a
 /// later request carries the earlier ones. The first pair's answer is padded
-/// to force a compaction at the next prompt, and fx-compactor's notes request
+/// to force a compaction at the next prompt, and lia-compactor's notes request
 /// gets "none" since a plain turn has nothing to note.
 function compactingGateway(pairs: [string, string][]) {
   return startDynamicFakeGateway((body: string) => {
@@ -1974,18 +1974,18 @@ function compactingGateway(pairs: [string, string][]) {
 }
 
 function compactionAsk(fixture: Fixture, gateway: any, args: string[]) {
-  return runFx(["ask", "--json", "--auto", ...args], {
+  return runLia(["ask", "--json", "--auto", ...args], {
     cwd: fixture.workspace,
     env: {
       ...env(fixture, gateway),
-      FX_MODEL: COMPACTION_MODEL,
-      FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+      LIA_MODEL: COMPACTION_MODEL,
+      LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
     },
     timeoutMs: TIMEOUT,
   });
 }
 
-/// One session through `fx ask`: the first reply is long, so the second
+/// One session through `lia ask`: the first reply is long, so the second
 /// prompt compacts it and later ones follow the summary. Returns its id.
 async function compactedSession(fixture: Fixture, gateway: any, prompts: string[]) {
   const first = await compactionAsk(fixture, gateway, [prompts[0]!]);
@@ -2000,7 +2000,7 @@ async function compactedSession(fixture: Fixture, gateway: any, prompts: string[
 }
 
 test("ACP load after a compaction shows every earlier turn and never the summary", async () => {
-  const fixture = createFixture("fx-v2-acp-compacted-");
+  const fixture = createFixture("lia-v2-acp-compacted-");
   const prompts = ["Earlier v2 request", "Middle v2 request", "Latest v2 request"];
   const gateway = compactingGateway([
     [prompts[0]!, "V2_EARLIER_VISIBLE"],
@@ -2020,7 +2020,7 @@ test("ACP load after a compaction shows every earlier turn and never the summary
       const visible = JSON.stringify(client.updates);
       expect(infoTitles(client.updates)).toEqual([prompts[0]]);
       expect(client.texts("user_message_chunk")).toEqual(prompts);
-      expect(visible).not.toContain("fx-compactor-v1");
+      expect(visible).not.toContain("lia-compactor-v1");
       const order = ["V2_EARLIER_VISIBLE", "V2_MIDDLE_VISIBLE", "V2_LATEST_VISIBLE"].map((text) => visible.indexOf(text));
       expect(order.every((at) => at >= 0)).toBe(true);
       expect(order).toEqual([...order].sort((a, b) => a - b));
@@ -2043,8 +2043,8 @@ test("ACP load after a compaction shows every earlier turn and never the summary
   }
 }, TIMEOUT * 6);
 
-test("fx session lists a compacted session's every turn and its summary", async () => {
-  const fixture = createFixture("fx-v2-detail-compacted-");
+test("lia session lists a compacted session's every turn and its summary", async () => {
+  const fixture = createFixture("lia-v2-detail-compacted-");
   const prompts = ["Earlier detail request", "Middle detail request", "Latest detail request"];
   const gateway = compactingGateway([
     [prompts[0]!, "DETAIL_EARLIER"],
@@ -2062,7 +2062,7 @@ test("fx session lists a compacted session's every turn and its summary", async 
     const summaryAt = shown.history.findIndex((entry: any) => entry.kind === "compacted_summary");
     expect(summaryAt).toBeGreaterThan(0);
     const summary = shown.history[summaryAt];
-    // The summary's text carries fx's own handles, so only its marker counts.
+    // The summary's text carries lia's own handles, so only its marker counts.
     expect(String(summary.summary).startsWith(COMPACTOR_SUMMARY_MARKER)).toBe(true);
     expect(summary.compaction_count).toBe(1);
     // It stands for exactly the turns listed before it.
@@ -2085,7 +2085,7 @@ test("fx session lists a compacted session's every turn and its summary", async 
 }, TIMEOUT * 6);
 
 test("a flipped byte in a turn the newest compaction kept stops resume and ACP load as damage, and recover still salvages it", async () => {
-  const fixture = createFixture("fx-v2-kept-flip-");
+  const fixture = createFixture("lia-v2-kept-flip-");
   const prompts = ["Kept flip first request.", "Kept flip second request.", "Kept flip third request."];
   const gateway = compactingGateway([
     [prompts[0]!, "KEPT_FLIP_FIRST"],
@@ -2132,7 +2132,7 @@ test("a flipped byte in a turn the newest compaction kept stops resume and ACP l
     expect(gateway.requests.length).toBe(requests);
     expect(readFileSync(path, "utf8").startsWith(damaged)).toBe(true);
 
-    // fx session recover still copies the good turns, and the copy resumes.
+    // lia session recover still copies the good turns, and the copy resumes.
     const result = await command(fixture, gateway, ["session", "recover", id, "--json"]);
     expect(result.code).toBe(0);
     const copy: string = JSON.parse(result.stdout).recovered_id;
@@ -2148,7 +2148,7 @@ test("a flipped byte in a turn the newest compaction kept stops resume and ACP l
 }, TIMEOUT * 8);
 
 test("ACP refuses a session whose blob went missing as damaged, not missing", async () => {
-  const fixture = createFixture("fx-v2-lost-blob-acp-");
+  const fixture = createFixture("lia-v2-lost-blob-acp-");
   const big = "ACP_BLOB_START " + "blob-body ".repeat(30_000) + "ACP_BLOB_END";
   const gateway = startFakeGateway([fakeGatewayFinalText(big)]);
   let client: AcpRpc | undefined;
@@ -2171,7 +2171,7 @@ test("ACP refuses a session whose blob went missing as damaged, not missing", as
 }, TIMEOUT * 3);
 
 test("an older session moves off its side folder on its next open, and the model still reads an old handle (D47)", async () => {
-  const fixture = createFixture("fx-v2-move-");
+  const fixture = createFixture("lia-v2-move-");
   const oldHandle = "result-shell-0011223344556677-8899aabbccddeeff.txt";
   const gateway = startFakeGateway([
     fakeGatewayFinalText("MOVE_FIRST"),
@@ -2183,8 +2183,8 @@ test("an older session moves off its side folder on its next open, and the model
     const created = await ask(fixture, gateway, ["First, before the move."]);
     expect(created.code).toBe(0);
     const id = JSON.parse(created.stdout).session_id;
-    // An older fx kept bodies and terminal state beside the log (D27).
-    const files = join(fixture.home, ".fx", "session-files");
+    // An older lia kept bodies and terminal state beside the log (D27).
+    const files = join(fixture.home, ".lia", "session-files");
     const side = join(files, id);
     mkdirSync(join(side, "tool-results"), { recursive: true, mode: 0o700 });
     writeFileSync(join(side, "tool-results", oldHandle), "MOVED_OLD_BODY_3301", { mode: 0o600 });
@@ -2198,7 +2198,7 @@ test("an older session moves off its side folder on its next open, and the model
     expect(gateway.requests.at(-1)!.body).toContain("MOVED_OLD_BODY_3301");
     expect(existsSync(side)).toBe(false);
     expect(readdirSync(files)).toEqual([]);
-    expect(existsSync(join(fixture.home, ".fx", "terminal", id, "terminal", "state", "note.json"))).toBe(true);
+    expect(existsSync(join(fixture.home, ".lia", "terminal", id, "terminal", "state", "note.json"))).toBe(true);
     const moved = logLines(fixture.home, id).filter((line) => line.kind === "set" && line.key === "moved_files");
     expect(moved).toHaveLength(1);
     expect(blobNames(fixture, id).length).toBeGreaterThanOrEqual(2);
@@ -2215,7 +2215,7 @@ test("an older session moves off its side folder on its next open, and the model
 }, TIMEOUT * 3);
 
 test("doctor reports a damaged session and removes only old terminal and side folders with no session", async () => {
-  const fixture = createFixture("fx-v2-doctor-");
+  const fixture = createFixture("lia-v2-doctor-");
   const gateway = startFakeGateway([
     fakeShellRun("doctor-shell", "echo DOCTOR_TOOL_OUTPUT"),
     fakeGatewayFinalText("DOCTOR_ONE"),
@@ -2227,9 +2227,9 @@ test("doctor reports a damaged session and removes only old terminal and side fo
     const path = join(storeRoot(fixture.home), damaged, "log.jsonl");
     writeFileSync(path, readFileSync(path, "utf8").replace("Doctor question two.", "Doctor question tw0."));
     const before = readFileSync(path);
-    // A side folder an older fx left (D48), and terminal folders (D45).
-    const files = join(fixture.home, ".fx", "session-files");
-    const terminals = join(fixture.home, ".fx", "terminal");
+    // A side folder an older lia left (D48), and terminal folders (D45).
+    const files = join(fixture.home, ".lia", "session-files");
+    const terminals = join(fixture.home, ".lia", "terminal");
     const old = join(files, "OldOrphan0001");
     const young = join(files, "NewOrphan0002");
     const oldTerminal = join(terminals, "OldOrphan0003");
@@ -2248,7 +2248,7 @@ test("doctor reports a damaged session and removes only old terminal and side fo
     const named = (name: string) => checks.filter((check) => check.name === name).map((check) => `${check.status}: ${check.detail}`);
     expect(named("state")).toEqual(["ok: sessions ready"]);
     expect(named("session")).toEqual([
-      `warn: session ${damaged} has a damaged log; \`fx session recover ${damaged}\` copies its good turns`,
+      `warn: session ${damaged} has a damaged log; \`lia session recover ${damaged}\` copies its good turns`,
       "ok: removed 2 terminal or side folder(s) whose session is gone",
     ]);
     expect(named("sessions")).toEqual([`ok: 2 saved session(s); latest=${damaged}`]);
@@ -2268,7 +2268,7 @@ test("doctor reports a damaged session and removes only old terminal and side fo
 }, TIMEOUT * 3);
 
 test("doctor reports a session whose blob went missing, and recover copies the turns before it", async () => {
-  const fixture = createFixture("fx-v2-lost-blob-recover-");
+  const fixture = createFixture("lia-v2-lost-blob-recover-");
   const big = "RECOVER_BLOB_START " + "blob-body ".repeat(30_000) + "RECOVER_BLOB_END";
   const gateway = startFakeGateway([
     fakeGatewayFinalText("RECOVER_TURN_ONE"),
@@ -2288,7 +2288,7 @@ test("doctor reports a session whose blob went missing, and recover copies the t
     // The log is intact, but a turn it holds is not: doctor says so.
     const checks = JSON.parse((await command(fixture, gateway, ["doctor", "--json"])).stdout).checks;
     expect(checks.filter((check: any) => check.name === "session").map((check: any) => `${check.status}: ${check.detail}`)).toEqual([
-      `warn: session ${id} has a damaged log; \`fx session recover ${id}\` copies its good turns`,
+      `warn: session ${id} has a damaged log; \`lia session recover ${id}\` copies its good turns`,
     ]);
 
     // Recover keeps the turn before the one whose blob is gone.
@@ -2317,8 +2317,8 @@ test("doctor reports a session whose blob went missing, and recover copies the t
 // Flows v1's suites check only through v1 files: a blob-sized piece, a
 // compacted app session, steering and cancelling an app turn.
 
-test("fx ask keeps a piece over 256 KB as a blob, and resume sends it whole", async () => {
-  const fixture = createFixture("fx-v2-blob-");
+test("lia ask keeps a piece over 256 KB as a blob, and resume sends it whole", async () => {
+  const fixture = createFixture("lia-v2-blob-");
   const big = "BLOB_PIECE_START " + "blob-body ".repeat(30_000) + "BLOB_PIECE_END";
   const gateway = startFakeGateway([fakeGatewayFinalText(big), fakeGatewayFinalText("AFTER_BLOB_RESUME")]);
   try {
@@ -2361,7 +2361,7 @@ async function until(check: () => boolean, what: string) {
 }
 
 test("a parent killed while a named child runs a tool records that work interrupted, stops the tool, and the child continues with its history", async () => {
-  const fixture = createFixture("fx-v2-child-crash-");
+  const fixture = createFixture("lia-v2-child-crash-");
   const started = join(fixture.root, "child-tool-pid");
   let phase: "first" | "crash" | "again" = "first";
   const childBodies: string[] = [];
@@ -2392,7 +2392,7 @@ test("a parent killed while a named child runs a tool records that work interrup
     const toolPid = Number(readFileSync(started, "utf8").trim());
     child.kill("SIGKILL");
     await exited;
-    // fx's own processes go with it.
+    // lia's own processes go with it.
     await until(() => { try { process.kill(toolPid, 0); return false; } catch { return true; } }, "the child's tool to stop");
 
     const last = await command(fixture, gateway, ["session", "last", "--json"]);
@@ -2430,7 +2430,7 @@ test("a parent killed while a named child runs a tool records that work interrup
 }, TIMEOUT * 4);
 
 // ---------------------------------------------------------------------------
-// The fault matrix beyond fx ask: kills between turns, a damaged or missing
+// The fault matrix beyond lia ask: kills between turns, a damaged or missing
 // piece, a read-only folder, a full disk and contention, for ACP, and a
 // damaged child log for subagents.
 
@@ -2446,7 +2446,7 @@ function flipMiddleByte(path: string) {
   writeFileSync(path, bytes);
 }
 
-/// Two saved `fx ask` turns, for a fault to damage.
+/// Two saved `lia ask` turns, for a fault to damage.
 async function savedTwoTurns(fixture: Fixture, gateway: any) {
   const first = await ask(fixture, gateway, ["Fault question one."]);
   expect(first.code).toBe(0);
@@ -2456,7 +2456,7 @@ async function savedTwoTurns(fixture: Fixture, gateway: any) {
 }
 
 test("ACP killed between prompts loads with its last turn whole", async () => {
-  const fixture = createFixture("fx-v2-acp-kill-idle-");
+  const fixture = createFixture("lia-v2-acp-kill-idle-");
   const gateway = replyToLatest([
     ["Before the idle ACP kill.", "ACP_BEFORE_IDLE_KILL"],
     ["After the idle ACP kill.", "ACP_AFTER_IDLE_KILL"],
@@ -2487,7 +2487,7 @@ test("ACP killed between prompts loads with its last turn whole", async () => {
 }, TIMEOUT * 3);
 
 test("ACP refuses a damaged or read-only session and leaves its log as it was", async () => {
-  const fixture = createFixture("fx-v2-acp-faults-");
+  const fixture = createFixture("lia-v2-acp-faults-");
   const gateway = startDynamicFakeGateway(() => fakeGatewayFinalText("FAULT_ANSWER"));
   let client: AcpRpc | undefined;
   try {
@@ -2526,7 +2526,7 @@ test("ACP refuses a damaged or read-only session and leaves its log as it was", 
 }, TIMEOUT * 3);
 
 test("ACP on a full disk fails the prompt, and the session loads and continues after", async () => {
-  const fixture = createFixture("fx-v2-acp-full-disk-");
+  const fixture = createFixture("lia-v2-acp-full-disk-");
   const gateway = replyToLatest([
     ["Before the ACP full disk.", "BEFORE_ACP_FULL_DISK"],
     ["The ACP disk is full.", "NEVER_SAVED_ACP"],
@@ -2606,9 +2606,9 @@ function tearTail(fixture: Fixture, id: string) {
 }
 
 test("ACP killed while a tool runs answers that call on load and goes on", async () => {
-  const fixture = createFixture("fx-v2-acp-kill-tool-");
+  const fixture = createFixture("lia-v2-acp-kill-tool-");
   const { gateway, slow } = twoToolGateway("ACP", "Run two ACP tools.", ["After the ACP tool kill.", "AFTER_ACP_TOOL_KILL"]);
-  const acpEnv = { FX_PERMISSION_MODE: "full-access" };
+  const acpEnv = { LIA_PERMISSION_MODE: "full-access" };
   let client: AcpRpc | undefined;
   try {
     client = await AcpRpc.start(fixture, gateway, acpEnv);
@@ -2620,7 +2620,7 @@ test("ACP killed while a tool runs answers that call on load and goes on", async
 
     client = await AcpRpc.start(fixture, gateway, acpEnv);
     await client.ok("session/load", { sessionId: id, cwd: fixture.workspace, mcpServers: [] });
-    // Load replays the text fx sent before the kill.
+    // Load replays the text lia sent before the kill.
     expect(client.texts("agent_message_chunk").join("")).toContain("ACP_RUNNING_PLAN");
     await client.ok("session/prompt", { sessionId: id, ...acpPrompt("After the ACP tool kill.") });
     expect(await client.close()).toBe(0);
@@ -2636,7 +2636,7 @@ test("ACP killed while a tool runs answers that call on load and goes on", async
 }, TIMEOUT * 3);
 
 test("ACP cuts a torn tail on load and the session goes on", async () => {
-  const fixture = createFixture("fx-v2-acp-torn-");
+  const fixture = createFixture("lia-v2-acp-torn-");
   const gateway = replyToLatest([
     ["Before the ACP torn tail.", "BEFORE_ACP_TORN"],
     ["After the ACP torn tail.", "AFTER_ACP_TORN"],
@@ -2666,7 +2666,7 @@ test("ACP cuts a torn tail on load and the session goes on", async () => {
 }, TIMEOUT * 3);
 
 test("a named child whose log is damaged fails that message, and the parent turn goes on", async () => {
-  const fixture = createFixture("fx-v2-child-damaged-");
+  const fixture = createFixture("lia-v2-child-damaged-");
   let phase = 1;
   const gateway = startDynamicFakeGateway(async (body) => {
     if (isChildRequest(body)) return fakeGatewayFinalText(`CHILD_ANSWER_${phase}`);
@@ -2737,7 +2737,7 @@ const GRID_SAYS: Record<"damaged" | "denied" | "busy" | "full", Record<GridHost,
 /// A first reply over the blob limit, so every base session has a blob.
 const GRID_BIG = `GRID_BIG_START ${"grid-body ".repeat(30_000)}GRID_BIG_END`;
 
-/// One saved home per exit, made by `fx ask` once and copied into every case.
+/// One saved home per exit, made by `lia ask` once and copied into every case.
 const gridBases = new Map<string, Promise<{ fixture: Fixture; id: string }>>();
 
 function gridBase(exit: GridExit, by: "ask") {
@@ -2751,7 +2751,7 @@ function gridBase(exit: GridExit, by: "ask") {
 }
 
 async function makeGridBase(exit: GridExit, by: "ask") {
-  const fixture = createFixture(`fx-v2-grid-${by}-${exit}-`);
+  const fixture = createFixture(`lia-v2-grid-${by}-${exit}-`);
   let stall: () => void = () => {};
   const stalled = new Promise<void>((resolve) => (stall = resolve));
   const gateway = startDynamicFakeGateway(async (body) => {
@@ -2923,7 +2923,7 @@ let gridTokens = 0;
 async function gridRow(exit: GridExit, entry: GridEntry) {
   const host = gridHost(entry);
   const base = await gridBase(exit, "ask");
-  const under = mkdtempSync(join(tmpdir(), `fx-v2-grid-${exit}-${entry}-`));
+  const under = mkdtempSync(join(tmpdir(), `lia-v2-grid-${exit}-${entry}-`));
   const { gateway, hold, asked } = gridGateway();
   const volume = join(under, "volume");
   const detach = REAL_FULL_DISK ? attachDiskImage(join(under, "disk.dmg"), volume) : () => {};
@@ -3042,7 +3042,7 @@ async function gridRow(exit: GridExit, entry: GridEntry) {
 async function gridNewRow(entry: GridEntry) {
   const host = gridHost(entry);
   const base = await gridBase("committed", "ask");
-  const under = mkdtempSync(join(tmpdir(), `fx-v2-grid-${entry}-`));
+  const under = mkdtempSync(join(tmpdir(), `lia-v2-grid-${entry}-`));
   const { gateway, asked } = gridGateway();
   const volume = join(under, "volume");
   const detach = REAL_FULL_DISK ? attachDiskImage(join(under, "disk.dmg"), volume) : () => {};

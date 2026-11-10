@@ -2,7 +2,7 @@
 //! host: its permission answers, its stderr sink, and what it does with each
 //! event. One run traces every server's machines into one file, the engine
 //! gate's under the server's name and each server's under "<name>.". Dev
-//! only; never moves into fx.
+//! only; never moves into lia.
 //!
 //! Usage: engine_lab <trace-path> <script> [--deny TOOL]... [--capabilities JSON]
 //!          [--max-attempts N] [--no-listen] [--preferred V1,V2] [--probe-ms N]

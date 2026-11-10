@@ -11,7 +11,7 @@
 (* no log, `interrupted` if it has one.                                    *)
 (*                                                                         *)
 (* A child has at most one unfinished work item (D22); its later work     *)
-(* items are new spawn/finish pairs with the next work number. fx's       *)
+(* items are new spawn/finish pairs with the next work number. lia's       *)
 (* `data` on these lines is opaque to the manager and not modeled.        *)
 (*                                                                         *)
 (* Design: system-design.md kinds table, "Reliability And Recovery" and   *)
@@ -25,7 +25,7 @@ VARIABLES
     plog,       \* parent log: a sequence of [k, c, w, o]
     childLog,   \* [Children -> BOOLEAN]: {c}/log.jsonl exists
     thread,     \* [Children -> {"none", "starting", "running"}], in memory
-    up,         \* the fx process is running
+    up,         \* the lia process is running
     repairing   \* reopen repair is in progress
 
 vars == <<plog, childLog, thread, up, repairing>>

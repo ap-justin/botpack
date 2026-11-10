@@ -12,9 +12,9 @@ pub const max_body_bytes: usize = 1024 * 1024;
 pub const max_models: usize = 256;
 const max_model_name_bytes: usize = 256;
 
-/// Whose spend a report covers, chosen by how fx is signed in.
+/// Whose spend a report covers, chosen by how lia is signed in.
 pub const Scope = enum {
-    /// fx login: the signed-in member, fx login and user-attributed keys both
+    /// lia login: the signed-in member, lia login and user-attributed keys both
     /// (`metered_scope=user` with the team header).
     member,
     /// AI Gateway API key: that key only (`api_key_id=self`).
@@ -439,7 +439,7 @@ test "the budget comes from the member's usage-report entry" {
     );
 }
 
-test "paths pick the filter for how fx is signed in" {
+test "paths pick the filter for how lia is signed in" {
     var buf: [256]u8 = undefined;
     const day = utcDay(1_791_676_800_000); // 2026-10-11
     try testing.expectEqualStrings(

@@ -1,4 +1,4 @@
-// Runtime driver: drives the real `fx acp` binary from a worktree through
+// Runtime driver: drives the real `lia acp` binary from a worktree through
 // directed and seeded-random speed scenarios, records what a client observes
 // (configOptions projections, JSON-RPC errors, and the lane each prompt sends
 // to a local fake Gateway), and asks TLC whether each observed run is a
@@ -123,14 +123,14 @@ type Helpers = {
 async function runPlan(plan: Plan, worktree: string, helpers: Helpers, dir: string) {
   mkdirSync(dir, { recursive: true });
   writeJson(join(dir, "plan.json"), plan);
-  const fxBin = join(worktree, "zig-out", "bin", "fx");
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-acp-speed-")));
+  const liaBin = join(worktree, "zig-out", "bin", "lia");
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-acp-speed-")));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+  mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
   mkdirSync(workspace, { recursive: true, mode: 0o700 });
   writeFileSync(
-    join(home, ".fx", "settings.json"),
+    join(home, ".lia", "settings.json"),
     `${JSON.stringify({ session_titles: false, fast_mode: plan.defaultFast, models: { gateway: plan.initialModel } })}\n`,
     { mode: 0o600 },
   );
@@ -150,28 +150,28 @@ async function runPlan(plan: Plan, worktree: string, helpers: Helpers, dir: stri
     NO_COLOR: "1",
     HOME: home,
     AI_GATEWAY_API_KEY: "acp-speed-fake-key",
-    FX_DISABLE_KEYCHAIN: "1",
-    FX_TEST_SKIP_ONBOARDING: "1",
-    FX_AUTO_UPGRADE: "0",
-    FX_SOUND: "0",
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
-    FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_TRACE_LOG: join(dir, "fx-trace.log"),
-    FX_TRACE_SCOPES: "acp,catalog",
+    LIA_DISABLE_KEYCHAIN: "1",
+    LIA_TEST_SKIP_ONBOARDING: "1",
+    LIA_AUTO_UPGRADE: "0",
+    LIA_SOUND: "0",
+    LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+    LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+    LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_TRACE_LOG: join(dir, "lia-trace.log"),
+    LIA_TRACE_SCOPES: "acp,catalog",
   })) {
     if (value === undefined) continue;
-    // FX_PROVIDER and FX_MODEL are process overrides: fx then resumes every
+    // LIA_PROVIDER and LIA_MODEL are process overrides: lia then resumes every
     // chat on the process's model instead of the chat's saved one, which no
-    // real ACP host (fx-plus included) does. The Gateway is already the default.
-    if (["VERCEL_OIDC_TOKEN", "FX_PROVIDER", "FX_MODEL", "FX_FAST", "FX_ULTRAFAST", "FX_PERMISSION_MODE", "FX_DEBUG_RECORD"].includes(key)) continue;
+    // real ACP host (lia-plus included) does. The Gateway is already the default.
+    if (["VERCEL_OIDC_TOKEN", "LIA_PROVIDER", "LIA_MODEL", "LIA_FAST", "LIA_ULTRAFAST", "LIA_PERMISSION_MODE", "LIA_DEBUG_RECORD"].includes(key)) continue;
     env[key] = value;
   }
 
   const processes: Array<{ exit: number; stderr: string }> = [];
   const spawn = () => new Acp(
-    Bun.spawn([fxBin, "acp"], { cwd: workspace, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" }),
+    Bun.spawn([liaBin, "acp"], { cwd: workspace, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" }),
     (entry) => acpLog.push({ process: processes.length + 1, ...entry }),
   );
   const observations: Observation[] = [];
@@ -292,8 +292,8 @@ function git(worktree: string, ...args: string[]): string {
 
 async function main() {
   const worktree = resolve(argValue("--worktree") ?? REPO_ROOT);
-  const fxBin = join(worktree, "zig-out", "bin", "fx");
-  if (!existsSync(fxBin)) throw new Error(`missing ${fxBin}; run zig build first`);
+  const liaBin = join(worktree, "zig-out", "bin", "lia");
+  if (!existsSync(liaBin)) throw new Error(`missing ${liaBin}; run zig build first`);
   const label = argValue("--label") ?? "run";
   const seed = Number(argValue("--seed") ?? "20261006");
   const randomCount = Number(argValue("--random") ?? "24");
@@ -309,7 +309,7 @@ async function main() {
     dirty: status.length > 0,
     status: status.split("\n").filter(Boolean),
     diff_sha256: status ? sha256Text(git(worktree, "diff", "HEAD")) : null,
-    fx_binary_sha256: sha256File(fxBin),
+    lia_binary_sha256: sha256File(liaBin),
     toolchain: tlcToolchain(),
     bun: Bun.version,
     seed,

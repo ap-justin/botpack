@@ -1,4 +1,4 @@
-//! The `/mcp` menu's logic: fx's picker
+//! The `/mcp` menu's logic: lia's picker
 //! showing servers. A server's actions are choices that run the `/mcp`
 //! verbs, so the menu adds nothing of its own. Pure: the shell's state owns
 //! one, and the footer draws it.
@@ -83,7 +83,7 @@ pub fn choices(row: Row, out: *[max_choices]Choice) []const Choice {
     return out[0..n];
 }
 
-/// Servers match by name, as fx's other menus match, and the list keeps its
+/// Servers match by name, as lia's other menus match, and the list keeps its
 /// own order (`fuzzy_match.Filter`); an empty filter keeps everything.
 const ServerMatches = struct {
     rows: []const Row,

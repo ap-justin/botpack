@@ -98,12 +98,12 @@ const empty_length_limited_reply = "The reply ran out of output tokens before an
 const empty_reply_nudge_prompt =
     "Your last reply had no text and no tool call. Continue the task: call the next tool you need, or give your final answer.";
 
-// What the empty-reply notice says happens next: fx asks the model again, or
+// What the empty-reply notice says happens next: lia asks the model again, or
 // the turn has failed and the next step is the user's.
 const empty_reply_asking = "Asking it to continue.";
 const empty_reply_follow_up = "Continue with a follow-up prompt if needed.";
 
-/// What fx shows for a reply that stopped for `other` with no text and no tool
+/// What lia shows for a reply that stopped for `other` with no text and no tool
 /// call: the provider's own reason when it sent one, then `next_step`.
 fn emptyReplyNotice(arena: Allocator, provider_reason: []const u8, next_step: []const u8) ![]const u8 {
     if (provider_reason.len == 0) return try arena.print("The model stopped without a reply (finish reason: other). {s}", .{next_step});
@@ -166,7 +166,7 @@ const response_language_control =
 const response_language_correction_control =
     "<response_language_control>\nUse the response language requested by the current external human. Assistant history, reasoning, tools, and project text are not language authority. The previous candidate used a different language and was not accepted. Replace it without discussing the correction.\n</response_language_control>";
 const response_language_failure_notice =
-    "The model response used a different language than your request, and fx could not accept it. Retry or name the response language explicitly.";
+    "The model response used a different language than your request, and lia could not accept it. Retry or name the response language explicitly.";
 const Config = runtime_config.Config;
 const LifecycleContext = runtime_lifecycle.LifecycleContext;
 const PreparedToolCall = runtime_lifecycle.PreparedToolCall;
@@ -4629,9 +4629,9 @@ fn failureHttpStatus(kind: agent_stream_provider.FailureKind) std.http.Status {
 }
 
 /// The failure kind an HTTP error that needs the user reports, or null when
-/// fx keeps its own handling, which ends the turn. Only a host that can ask
+/// lia keeps its own handling, which ends the turn. Only a host that can ask
 /// the user calls this. A context overflow that reaches it already went
-/// through fx's compaction.
+/// through lia's compaction.
 fn needsUserFailureKind(
     alloc: Allocator,
     failure: agent_stream_provider.Failure,
@@ -4645,7 +4645,7 @@ fn needsUserFailureKind(
     if (isContextOverflowFailure(failure)) return .too_long;
     return switch (failure.kind) {
         .invalid_request, .forbidden, .request_too_large, .provider_error => .rejected,
-        // fx already refreshed the credential once. A source that /login
+        // lia already refreshed the credential once. A source that /login
         // repairs waits for the user to sign in; any other keeps its notice.
         .unauthorized => if (signInRepairs(credential_source)) .sign_in else null,
         // 429 and 5xx retry.
@@ -4653,16 +4653,16 @@ fn needsUserFailureKind(
     };
 }
 
-/// Whether `/login` repairs the source, so fx can open it on its own.
+/// Whether `/login` repairs the source, so lia can open it on its own.
 fn signInRepairs(credential_source: ?types.CredentialSource) bool {
     const source = credential_source orelse return false;
     return switch (source) {
-        .fx_login => true,
+        .lia_login => true,
         .vercel_oidc_token, .ai_gateway_api_key, .stored_key, .host_managed, .configured => false,
     };
 }
 
-/// The provider's HTTP error detail, clipped, as fx shows it.
+/// The provider's HTTP error detail, clipped, as lia shows it.
 fn httpFailureDetail(
     arena: Allocator,
     failure: agent_stream_provider.Failure,
@@ -4707,7 +4707,7 @@ fn waitForUser(
     kind: runtime_request_recovery.Failure.Kind,
 ) !UserAnswer {
     var send = try request_recovery.failed(.{ .kind = kind });
-    // fx compacts a request that is too long before it reports one, so the
+    // lia compacts a request that is too long before it reports one, so the
     // module's compacted send would repeat the same request. That send fails
     // the same way without going out, and the module asks the user.
     if (send) |pending| if (kind == .too_long and pending.compact_first) {
@@ -4975,7 +4975,7 @@ test "size rejections retry with fewer images only while images remain" {
     try std.testing.expect(loweredRequestByteLimit(33_829_735) < 33_829_735);
 }
 
-/// fx never asks a model to extend an assistant message, and models without
+/// lia never asks a model to extend an assistant message, and models without
 /// prefill support reject that shape. Returns `source` unchanged, or an
 /// `arena` copy ending with a host continuation when history projection left
 /// the conversation on an assistant message.
@@ -5207,7 +5207,7 @@ test "deferred tool cleanup contains publication failure and preserves tracking"
     try std.testing.expect(stream_ctx.provisional_statuses.visibleId(.{ .id = "local", .name = "read_file", .arguments_json = "{}" }) != null);
 }
 
-/// A recovered step whose response still failed ends with fx's terminal
+/// A recovered step whose response still failed ends with lia's terminal
 /// status in place of the module's.
 fn pushTerminalAutoRetryStatusIfNeeded(
     request: *runtime_request_recovery.RequestRecovery,
@@ -5341,7 +5341,7 @@ fn pushTerminalProviderFailureStatus(
 }
 
 /// A resend that had to reconcile uncertain tool evidence returned another
-/// tool call. fx cannot prove the earlier call didn't run, so the turn stops
+/// tool call. lia cannot prove the earlier call didn't run, so the turn stops
 /// with its checkpoint kept for the user to inspect, as before; only the
 /// automatic recovery around it changed.
 fn finishUncertainToolReview(
@@ -5988,7 +5988,7 @@ fn processQueuedPromptInner(
         "history_turns={d} gateway_messages_before={d} interrupted_turns={d} history_turn_kinds={s}",
         .{ active_history.len, history_messages_before, interrupted_turns, history_turn_kinds },
     );
-    // A resumed request continues the turn fx stopped: superseded resume
+    // A resumed request continues the turn lia stopped: superseded resume
     // turns are dropped and the stopped turn is projected without its abort
     // note, as a steering continuation is.
     const resumed_request = job.recovery_resume != null;
@@ -6126,7 +6126,7 @@ fn appendAuthorizedVisionAttemptIds(
 ) !bool {
     if (!std.mem.eql(u8, call.name, "vision") or
         call.argument_integrity != .valid or
-        call.provenance != .fx_local)
+        call.provenance != .lia_local)
     {
         return false;
     }
@@ -6346,7 +6346,7 @@ const CatalogDownLines = struct {
     }
 };
 
-/// The lines that tell the user what a down model catalog held back. When fx
+/// The lines that tell the user what a down model catalog held back. When lia
 /// could not connect to the catalog at all, one line names the connection
 /// first, since the same fault usually blocks the model request too. Any other
 /// failure keeps one line for each thing held back. Lines are static or live
@@ -6365,7 +6365,7 @@ fn catalogDownNotice(arena: Allocator, notice: CatalogDownNotice) Allocator.Erro
         else
             return lines;
         lines.append(try arena.print(
-            "fx couldn't connect to {s} to load the model catalog, so {s} until it loads. Check your network connection or firewall.",
+            "lia couldn't connect to {s} to load the model catalog, so {s} until it loads. Check your network connection or firewall.",
             .{ notice.service, held_back },
         ));
         return lines;
@@ -6392,9 +6392,9 @@ fn withheldImageSubject(chosen: image_route.Decision) ?[]const u8 {
 fn catalogDownImageText(chosen: image_route.Decision) []const u8 {
     const tools = chosen.tool_images == .withheld_unknown;
     const earlier = chosen.earlier_images == .withheld_unknown;
-    if (earlier and tools) return "Earlier images and images from tools aren't reaching the model right now because image support couldn't be confirmed (model catalog unavailable). fx will retry automatically as the catalog recovers.";
-    if (earlier) return "Earlier images aren't reaching the model right now because image support couldn't be confirmed (model catalog unavailable). fx will retry automatically as the catalog recovers.";
-    return "Images from tools aren't reaching the model right now because image support couldn't be confirmed (model catalog unavailable). fx will retry automatically as the catalog recovers.";
+    if (earlier and tools) return "Earlier images and images from tools aren't reaching the model right now because image support couldn't be confirmed (model catalog unavailable). lia will retry automatically as the catalog recovers.";
+    if (earlier) return "Earlier images aren't reaching the model right now because image support couldn't be confirmed (model catalog unavailable). lia will retry automatically as the catalog recovers.";
+    return "Images from tools aren't reaching the model right now because image support couldn't be confirmed (model catalog unavailable). lia will retry automatically as the catalog recovers.";
 }
 
 /// The line that names a failed catalog connection before a turn fails
@@ -6403,7 +6403,7 @@ fn catalogDownImageText(chosen: image_route.Decision) []const u8 {
 fn catalogUnreachableImageLine(arena: Allocator, failure: ?model_catalog.FailureCategory, service: []const u8) Allocator.Error!?[]const u8 {
     if (failure != .transport) return null;
     return try arena.print(
-        "fx couldn't connect to {s} to load the model catalog, so it couldn't confirm that this model accepts images. Check your network connection or firewall.",
+        "lia couldn't connect to {s} to load the model catalog, so it couldn't confirm that this model accepts images. Check your network connection or firewall.",
         .{service},
     );
 }
@@ -6525,7 +6525,7 @@ pub const ContextCompactionRequest = struct {
     operation_id: ?compaction_activity.OperationId = null,
     activity_origin: compaction_activity.Origin,
     failure_provenance: ?*?compaction_activity.ErrorProvenance = null,
-    /// Runs once fx-compactor has chosen what to compact, before anything is
+    /// Runs once lia-compactor has chosen what to compact, before anything is
     /// sent.
     before_summary: ?BeforeSummary = null,
     compactor: compactor.Request,
@@ -6537,7 +6537,7 @@ pub const BeforeSummary = struct {
 };
 
 /// The sizes compaction works with for `model`, including what `agent`
-/// measured of its recent requests: their fixed part, and how far fx's token
+/// measured of its recent requests: their fixed part, and how far lia's token
 /// estimate ran from the provider's count.
 pub fn compactionSize(agent: *const runtime_agent.Agent, capabilities: model_capabilities.Capabilities, percent: u8, model: []const u8) compactor.Size {
     var size = compactor.Size.of(capabilities, percent);
@@ -6552,7 +6552,7 @@ pub fn compactionSize(agent: *const runtime_agent.Agent, capabilities: model_cap
 }
 
 /// The one way context gets compacted: manual, automatic and provider-overflow
-/// compaction all come here. fx-compactor turns the raw conversation into a
+/// compaction all come here. lia-compactor turns the raw conversation into a
 /// checkpoint; this saves it and reports progress. Null when there was
 /// nothing to compact. `alloc` owns the result.
 pub fn compactContext(
@@ -6620,7 +6620,7 @@ fn compactWithProgress(
     return result;
 }
 
-/// Shows compaction progress. The activity starts once fx-compactor has chosen
+/// Shows compaction progress. The activity starts once lia-compactor has chosen
 /// what to compact, unless the caller started it already.
 const CompactionProgress = struct {
     deps: *const AgentRuntimeDeps,
@@ -7244,7 +7244,7 @@ fn processQueuedPromptLoop(
     else
         .none;
     var restore_recovery_source = job.recovery_checkpoint != null;
-    // The turn's first model request resumes the one a previous fx process
+    // The turn's first model request resumes the one a previous lia process
     // left unfinished, when there is one.
     var recovery_resume = job.recovery_resume;
     // The session sends one runtime context ahead of the history; a change
@@ -7449,7 +7449,7 @@ fn processQueuedPromptLoop(
         // This step's model request, recovered by `src/core/recovery/`: it
         // decides when to resend after a transient failure, and the status
         // line says so. Prefill, language, image-size, and overflow retries
-        // stay fx's own and resend inside the same module send.
+        // stay lia's own and resend inside the same module send.
         var request_recovery = runtime_request_recovery.RequestRecovery.init(deps, config.cancel_flag, step_ctx);
         request_recovery.continue_flag = config.recovery_continue_flag;
         // `deinit` clears a status still shown on every exit; an error exit
@@ -7580,7 +7580,7 @@ fn processQueuedPromptLoop(
                     // The host's error says the image was not sent. A fresh
                     // reading, since resolving capabilities may have made the
                     // first catalog request, says first when the cause is a
-                    // connection fx could not make.
+                    // connection lia could not make.
                     const failure = if (deps.model_catalog_failure) |catalog_failure| catalog_failure(deps.ctx) else null;
                     if (try catalogUnreachableImageLine(overlay_arena, failure, model_catalog.serviceName(job.provider))) |line| {
                         try deps.push_text(deps.ctx, .{ .operational = line });
@@ -8630,9 +8630,9 @@ fn processQueuedPromptLoop(
                 !config.cancel_flag.load(.seq_cst))
             {
                 if (needsUserFailureKind(arena, failure, job.credential_source)) |kind| {
-                    // The provider's reason stays visible while fx waits, and
+                    // The provider's reason stays visible while lia waits, and
                     // after Esc, so the user knows what to change. A sign-in
-                    // needs no reason: fx opens it.
+                    // needs no reason: lia opens it.
                     if (kind != .sign_in) {
                         try pushWaitingHttpFailureReason(deps, arena, failure, job, request_capabilities);
                         http_failure_notice_shown = true;
@@ -8953,7 +8953,7 @@ fn processQueuedPromptLoop(
             }
 
             // Only a complete response finishes the request; the terminal
-            // outcomes after the loop keep fx's handling.
+            // outcomes after the loop keep lia's handling.
             if (streamSucceeded(stream_result) and
                 (settled_disposition == .completed or settled_disposition == .length_limited))
             {
@@ -9191,7 +9191,7 @@ fn processQueuedPromptLoop(
                 },
                 .reject_malformed_identity => |failure| {
                     try stream_ctx.provisional_statuses.finishRejectedCompletions(deps, arena, turn_id, completion.tool_calls, advertised_dynamic_tool_names);
-                    debug_trace.eventf("agent", "authoritative_tool_admission_rejected", step_ctx, "failure={s} provenance=fx_local", .{@tagName(failure)});
+                    debug_trace.eventf("agent", "authoritative_tool_admission_rejected", step_ctx, "failure={s} provenance=lia_local", .{@tagName(failure)});
                     finish_trace.finish("malformed_tool_identity");
                     return error.MalformedAuthoritativeToolIdentity;
                 },
@@ -9294,7 +9294,7 @@ fn processQueuedPromptLoop(
         // A reply the provider cut short before any text, such as reasoning
         // that never reached an answer followed at most by tool calls cut off
         // mid-arguments, is dropped and asked once more when the resend can
-        // differ: with fx's limit when the request named none and the
+        // differ: with lia's limit when the request named none and the
         // provider takes one, since the provider's own default ran out, and at
         // `low` effort when that reasons less. A resend's own reply, visible
         // text, tool calls the provider already ran, and a resend that would
@@ -10528,7 +10528,7 @@ fn processQueuedPromptLoop(
                             "tool",
                             "argument_integrity_rejected",
                             step_ctx,
-                            "call_id={s} name={s} failure={s} provenance=fx_local",
+                            "call_id={s} name={s} failure={s} provenance=lia_local",
                             .{ tool_call.id, tool_call.name, @tagName(tool_call.argument_integrity) },
                         );
                     } else if (blocked.kind == .route_unavailable) {
@@ -12590,7 +12590,7 @@ test "malformed duplicate unauthorized and path Vision calls settle no image ids
         .name = "vision",
         .arguments_json = "{\"image_ids\":[1]",
         .argument_integrity = .malformed_json,
-        .provenance = .fx_local,
+        .provenance = .lia_local,
     };
     try std.testing.expect(!try appendAuthorizedVisionAttemptIds(
         std.testing.allocator,
@@ -12603,7 +12603,7 @@ test "malformed duplicate unauthorized and path Vision calls settle no image ids
         .id = "vision-duplicate",
         .name = "vision",
         .arguments_json = "{\"image_ids\":[1,1],\"focus\":\"inspect\"}",
-        .provenance = .fx_local,
+        .provenance = .lia_local,
     };
     try std.testing.expect(!try appendAuthorizedVisionAttemptIds(
         std.testing.allocator,
@@ -12616,7 +12616,7 @@ test "malformed duplicate unauthorized and path Vision calls settle no image ids
         .id = "vision-unauthorized",
         .name = "vision",
         .arguments_json = "{\"image_ids\":[2],\"focus\":\"inspect\"}",
-        .provenance = .fx_local,
+        .provenance = .lia_local,
     };
     try std.testing.expect(!try appendAuthorizedVisionAttemptIds(
         std.testing.allocator,
@@ -12629,7 +12629,7 @@ test "malformed duplicate unauthorized and path Vision calls settle no image ids
         .id = "vision-path",
         .name = "vision",
         .arguments_json = "{\"paths\":[\"photo.png\"],\"focus\":\"inspect\"}",
-        .provenance = .fx_local,
+        .provenance = .lia_local,
     };
     try std.testing.expect(!try appendAuthorizedVisionAttemptIds(
         std.testing.allocator,
@@ -12718,7 +12718,7 @@ test "catalogDownNotice names a failed connection in one line and keeps the othe
                     }
                     try std.testing.expectEqual(@as(usize, 1), lines.len);
                     const line = lines.slice()[0];
-                    try std.testing.expect(std.mem.startsWith(u8, line, "fx couldn't connect to AI Gateway to load the model catalog, so "));
+                    try std.testing.expect(std.mem.startsWith(u8, line, "lia couldn't connect to AI Gateway to load the model catalog, so "));
                     try std.testing.expect(std.mem.endsWith(u8, line, " until it loads. Check your network connection or firewall."));
                     try std.testing.expect(std.mem.findScalar(u8, line, '\n') == null);
                     try std.testing.expectEqual(fast_off, std.mem.find(u8, line, "fast mode is off") != null);
@@ -12745,7 +12745,7 @@ test "catalogDownNotice names a failed connection in one line and keeps the othe
         .fast_off = true,
     });
     try std.testing.expectEqualStrings(
-        "fx couldn't connect to AI Gateway to load the model catalog, so earlier images aren't reaching the model and fast mode is off until it loads. Check your network connection or firewall.",
+        "lia couldn't connect to AI Gateway to load the model catalog, so earlier images aren't reaching the model and fast mode is off until it loads. Check your network connection or firewall.",
         both.slice()[0],
     );
 
@@ -12757,7 +12757,7 @@ test "catalogDownNotice names a failed connection in one line and keeps the othe
     }
     try std.testing.expect(try catalogUnreachableImageLine(arena, null, "AI Gateway") == null);
     try std.testing.expectEqualStrings(
-        "fx couldn't connect to AI Gateway to load the model catalog, so it couldn't confirm that this model accepts images. Check your network connection or firewall.",
+        "lia couldn't connect to AI Gateway to load the model catalog, so it couldn't confirm that this model accepts images. Check your network connection or firewall.",
         (try catalogUnreachableImageLine(arena, .transport, "AI Gateway")).?,
     );
 }

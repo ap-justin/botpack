@@ -1,4 +1,4 @@
-# Context: how fx menus match typed text
+# Context: how lia menus match typed text
 
 Line numbers refer to `origin/main` at `d4abfbd90`, which includes the Models menu matcher from #1477. `git show d4abfbd90:<path>` shows each file as cited.
 

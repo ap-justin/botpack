@@ -20,7 +20,7 @@
 (*                                                                         *)
 (* The constants choose the design: GuardLimit is the streak the guard     *)
 (* stops at, and Resets says which writes restart a streak ("ok" for a     *)
-(* successful one, "any" for any attempt, "none" for never). fx before     *)
+(* successful one, "any" for any attempt, "none" for never). lia before     *)
 (* this model (current.cfg) used GuardLimit 2 and "none".                  *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences

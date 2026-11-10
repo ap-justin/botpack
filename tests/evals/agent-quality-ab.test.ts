@@ -17,22 +17,22 @@ import { matrixRowById, type RecordedToolCall } from "./agent-quality-matrix";
 
 describe("agent quality A/B harness helpers", () => {
   test("custom evidence scoring preserves model and home isolation and cleans its home", async () => {
-    const root = mkdtempSync(join(tmpdir(), "fx-ab-oracle-"));
+    const root = mkdtempSync(join(tmpdir(), "lia-ab-oracle-"));
     let observedHome: string | undefined;
     try {
       const binary = join(root, "fixture");
       writeFileSync(binary, `#!${process.execPath}\nimport {writeFileSync} from "node:fs";
 if (process.argv.includes("--version")) { console.log("fixture"); process.exit(0); }
 writeFileSync("observed-home", process.env.HOME);
-console.log(JSON.stringify({exit_code:0, model:process.env.FX_TEST_NO_MODEL ? undefined : process.env.FX_MODEL, output:process.env.FX_EVIDENCE, session_id:"", steps:0, tool_calls:[]}));
-process.exit(Number(process.env.FX_TEST_EXIT ?? "0"));\n`, { mode: 0o755 });
+console.log(JSON.stringify({exit_code:0, model:process.env.LIA_TEST_NO_MODEL ? undefined : process.env.LIA_MODEL, output:process.env.LIA_EVIDENCE, session_id:"", steps:0, tool_calls:[]}));
+process.exit(Number(process.env.LIA_TEST_EXIT ?? "0"));\n`, { mode: 0o755 });
       const config = {
         baselineBin: binary, candidateBin: binary, model: "fixture/model", rowIds: [],
         trials: 1, outputDir: join(root, "artifacts"), workspaceRoot: root, timeoutMs: 5_000,
       };
       const row = matrixRowById("git-history-local")!;
       const options = {
-        env: { FX_EVIDENCE: "independent-proof", HOME: root, FX_MODEL: "wrong/model" },
+        env: { LIA_EVIDENCE: "independent-proof", HOME: root, LIA_MODEL: "wrong/model" },
         score: (result: { output: string }) => ({
           passed: result.output === "independent-proof", reason: "fixture receipt",
           forbiddenTools: [], predicatePassed: result.output === "independent-proof",
@@ -46,7 +46,7 @@ process.exit(Number(process.env.FX_TEST_EXIT ?? "0"));\n`, { mode: 0o755 });
       expect(existsSync(observedHome)).toBe(false);
 
       const failed = await runAbTrial(config, row, "candidate", 1, 0, {
-        ...options, env: { ...options.env, FX_TEST_EXIT: "17" },
+        ...options, env: { ...options.env, LIA_TEST_EXIT: "17" },
       });
       observedHome = readFileSync(join(root, "observed-home"), "utf8");
       expect(failed.code).toBe(17);
@@ -54,14 +54,14 @@ process.exit(Number(process.env.FX_TEST_EXIT ?? "0"));\n`, { mode: 0o755 });
       expect(failed.score.reason).toContain("process exit");
       expect(existsSync(observedHome)).toBe(false);
       const unidentified = await runAbTrial(config, row, "candidate", 2, 0, {
-        ...options, env: { ...options.env, FX_TEST_NO_MODEL: "1" },
+        ...options, env: { ...options.env, LIA_TEST_NO_MODEL: "1" },
       });
       observedHome = readFileSync(join(root, "observed-home"), "utf8");
       expect(unidentified.score.passed).toBe(false);
       expect(unidentified.score.reason).toContain("did not match");
       expect(existsSync(observedHome)).toBe(false);
     } finally {
-      if (observedHome?.startsWith(join(tmpdir(), "fx-ab-git-history-local-"))) {
+      if (observedHome?.startsWith(join(tmpdir(), "lia-ab-git-history-local-"))) {
         rmSync(observedHome, { recursive: true, force: true });
       }
       rmSync(root, { recursive: true, force: true });
@@ -84,14 +84,14 @@ process.exit(Number(process.env.FX_TEST_EXIT ?? "0"));\n`, { mode: 0o755 });
     expect(createTrialOrder(2)).toEqual(["baseline", "candidate"]);
   });
 
-  test("rejects bare fx and relative binary paths", () => {
-    expect(() => requireAbsoluteExecutableBinary("fx", "baseline")).toThrow(/absolute path/);
-    expect(() => requireAbsoluteExecutableBinary("./zig-out/bin/fx", "candidate")).toThrow(/absolute path/);
+  test("rejects bare lia and relative binary paths", () => {
+    expect(() => requireAbsoluteExecutableBinary("lia", "baseline")).toThrow(/absolute path/);
+    expect(() => requireAbsoluteExecutableBinary("./zig-out/bin/lia", "candidate")).toThrow(/absolute path/);
   });
 
   test("redacts credential-looking values", () => {
     expect(redactSensitiveValue("AI_GATEWAY_API_KEY", "secret-value")).toBe("[redacted]");
-    expect(redactSensitiveValue("FX_MODEL", "provider/test-model")).toBe("provider/test-model");
+    expect(redactSensitiveValue("LIA_MODEL", "provider/test-model")).toBe("provider/test-model");
   });
 
   test("scores focused rows using first tool forbidden tools and row predicate", () => {
@@ -182,9 +182,9 @@ process.exit(Number(process.env.FX_TEST_EXIT ?? "0"));\n`, { mode: 0o755 });
 });
 
 const hasLiveAbConfig = Boolean(
-  process.env.FX_AB_BASELINE_BIN &&
-    process.env.FX_AB_CANDIDATE_BIN &&
-    process.env.FX_AB_MODEL &&
+  process.env.LIA_AB_BASELINE_BIN &&
+    process.env.LIA_AB_CANDIDATE_BIN &&
+    process.env.LIA_AB_MODEL &&
     (process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN),
 );
 

@@ -883,7 +883,7 @@ const catalog_model_tests = struct {
             if (k.what == what and std.mem.eql(u8, k.id, id)) t.fault.kill();
         }
 
-        /// fx dies: owed index writes are forgotten.
+        /// lia dies: owed index writes are forgotten.
         fn crash(t: *CatTracer) void {
             t.pending = .{ "none", "none", "none" };
             t.emit("Crash", null);

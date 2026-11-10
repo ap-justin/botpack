@@ -1,32 +1,32 @@
 #!/bin/sh
 # Model-check PromptCache with TLC and require each config's expected verdict.
 #
-# PromptCache: how fx lays out a model request
+# PromptCache: how lia lays out a model request
 # (src/core/agent/runtime/prompt_context.zig, orchestrator.zig
 # appendStablePromptContext) and how an explicit-caching provider reuses it
-# through AI Gateway with caching "auto". proposed.cfg is fx: the two stable
+# through AI Gateway with caching "auto". proposed.cfg is lia: the two stable
 # markers and workspace-relative paths in the skill catalog and project rules;
-# it and current-holds.cfg must pass. Each current-*.cfg shows a reuse fx missed
+# it and current-holds.cfg must pass. Each current-*.cfg shows a reuse lia missed
 # before the markers. gap-history.cfg shows reuse the markers cannot give: the
 # turn context sits ahead of the history. Each mutant-*.cfg plants a known-bad
 # design that its property must catch; mutant-absolute-paths.cfg is the
-# absolute paths fx sent before, which no worktree of the same repository reuses.
+# absolute paths lia sent before, which no worktree of the same repository reuses.
 #
 # p6-remind.cfg and p6-openai-remind.cfg add the reminder a later turn puts on a
 # tool result that reaches a folder again; p6-mutant-remind-old-result.cfg puts it
 # on the result that carried the rules instead, which PreviousFullyReused catches.
 #
 # p6-resume.cfg and p6-openai-resume.cfg add the notice a resumed turn carries when
-# fx restarted with shell handles in the history; p6-mutant-stale-in-instructions.cfg
-# puts it in the instructions, as fx did, which MidSessionKeepsHistory catches.
+# lia restarted with shell handles in the history; p6-mutant-stale-in-instructions.cfg
+# puts it in the instructions, as lia did, which MidSessionKeepsHistory catches.
 # p6-overlay.cfg and p6-openai-overlay.cfg add outside changes: the turn context and
-# runtime block stay as the session started and a change rides on the message where fx
+# runtime block stay as the session started and a change rides on the message where lia
 # noticed it. p6-mutant-overlay-rebuilt.cfg follows the current values on every request,
-# as fx did, and p6-mutant-overlay-not-saved.cfg recaptures them when fx restarts;
+# as lia did, and p6-mutant-overlay-not-saved.cfg recaptures them when lia restarts;
 # MidSessionKeepsHistory catches both. p6-implicit-context.cfg checks that
-# with a change carried on a message, even a family fx sends no markers to
+# with a change carried on a message, even a family lia sends no markers to
 # reads the stable instructions after it, which openai-current-context.cfg
-# shows fx did not before.
+# shows lia did not before.
 #
 # The openai-*.cfg configs check the same designs under OpenAI GPT-5.6 and later
 # rules (Family = "openai"). openai-mutant-explicit-only.cfg is the agent request

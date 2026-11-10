@@ -394,7 +394,7 @@ export const scenarios: Scenario[] = [
   }),
   engineScenario({
     name: "u12-elicit-withdrawn",
-    description: "A 2025 server withdraws its elicitation and asks another, which takes the same slot: the host's answer to the first is refused and reaches no one, and its answer to the second reaches the second (fx P0 bug 8)",
+    description: "A 2025 server withdraws its elicitation and asks another, which takes the same slot: the host's answer to the first is refused and reaches no one, and its answer to the second reaches the second (lia P0 bug 8)",
     servers: {
       b: {
         rules: legacy({

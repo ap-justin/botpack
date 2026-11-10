@@ -1,6 +1,6 @@
 # macOS arm64 PGSO candidate pipeline
 
-This directory owns the non-publishing Stage 1 build for a smaller macOS arm64 `fx` candidate. It preserves Zig ReleaseSafe semantics and the complete product feature set, then uses native LLVM profiles to keep measured hot code speed-oriented and compile profile-proven cold functions for size.
+This directory owns the non-publishing Stage 1 build for a smaller macOS arm64 `lia` candidate. It preserves Zig ReleaseSafe semantics and the complete product feature set, then uses native LLVM profiles to keep measured hot code speed-oriented and compile profile-proven cold functions for size.
 
 The candidate is accepted only when it is no larger than its platform's ceiling, **6.500 MiB** for macOS arm64, **6.750 MiB** for Linux arm64, and **8.750 MiB** for Linux x86_64, has the preferred **0.250 MiB** of size headroom under that ceiling, passes the deterministic product corpus, and stays within a **10%** p50 and p95 performance regression limit. The ordinary ReleaseSafe binary remains the control and recovery path.
 
@@ -23,9 +23,9 @@ The target-specific steps live in a platform module, which [`platforms.py`](plat
 
 The Linux platforms, `aarch64-linux` and `x86_64-linux`, run on a Linux host of the same architecture and need `ld.lld`, `llvm-readelf`, the profile runtime for that architecture (`aarch64-unknown-linux-gnu` or `x86_64-unknown-linux-gnu`), and `lib/libLLVM.so` from the same LLVM root. Zig links the static musl control with its own `ld.lld`, so the control build records that exact link (`--verbose-link`), and the instrumented and candidate links rerun it with only the Zig object replaced. The candidate must match the control's ELF class, type, machine, OS ABI, segment types, first load address, stack segment, and whether it has interpreter, dynamic, TLS, and note segments. It must contain no profile sections.
 
-Profile use compiles the functions it judges cold for size, which slows Linux's short commands such as `fx help`. So training keeps a profile for each of the startup scenarios `direct-help`, `direct-version`, `direct-status`, `direct-doctor`, and `direct-sessions`. Before profile use, a first pass applies the production profile to find the startup functions marked `minsize`, and their records are removed from the production profile. Startup functions that stay hot, those the build inlines away, and those any heavy benchmark runs keep their records: the benchmarks build from the production profile, so removing a record they rely on would slow them. Every startup function is also marked `nooutline`, so neither outliner moves its code into shared helpers far from the rest of the startup code. The candidate link places the startup functions first, in the order they first run. lld orders by symbol, and Zig emits every function private, which leaves it no symbol in the object, so before code generation `ir_size.py name-functions` gives the fx candidate's private functions internal linkage: the same code, plus a local symbol that the final link strips. The link fails if any fx function section still has no symbol. Distributed builds don't carry the startup profiles, so they reject Linux. `.github/workflows/pgso-linux-arm64.yml` runs `all` for `aarch64-linux` in one job on a GitHub-hosted arm64 runner and uploads the manifest, logs, measurements, and candidate. The stable release calls it and ships that candidate as the Linux arm64 binary once the binary's SHA-256 matches the qualified candidate in the manifest. `.github/workflows/pgso-linux-x86_64.yml` does the same for `x86_64-linux` on a GitHub-hosted x86_64 runner, and differs from the arm64 workflow only in those architecture values. The stable release ships its candidate as the Linux x86_64 binary the same way.
+Profile use compiles the functions it judges cold for size, which slows Linux's short commands such as `lia help`. So training keeps a profile for each of the startup scenarios `direct-help`, `direct-version`, `direct-status`, `direct-doctor`, and `direct-sessions`. Before profile use, a first pass applies the production profile to find the startup functions marked `minsize`, and their records are removed from the production profile. Startup functions that stay hot, those the build inlines away, and those any heavy benchmark runs keep their records: the benchmarks build from the production profile, so removing a record they rely on would slow them. Every startup function is also marked `nooutline`, so neither outliner moves its code into shared helpers far from the rest of the startup code. The candidate link places the startup functions first, in the order they first run. lld orders by symbol, and Zig emits every function private, which leaves it no symbol in the object, so before code generation `ir_size.py name-functions` gives the lia candidate's private functions internal linkage: the same code, plus a local symbol that the final link strips. The link fails if any lia function section still has no symbol. Distributed builds don't carry the startup profiles, so they reject Linux. `.github/workflows/pgso-linux-arm64.yml` runs `all` for `aarch64-linux` in one job on a GitHub-hosted arm64 runner and uploads the manifest, logs, measurements, and candidate. The stable release calls it and ships that candidate as the Linux arm64 binary once the binary's SHA-256 matches the qualified candidate in the manifest. `.github/workflows/pgso-linux-x86_64.yml` does the same for `x86_64-linux` on a GitHub-hosted x86_64 runner, and differs from the arm64 workflow only in those architecture values. The stable release ships its candidate as the Linux x86_64 binary the same way.
 
-Without another check, the behavior corpus is the only test of code after the IR passes and outliners, so a miscompile in code it doesn't reach goes unnoticed. On Linux, `python3 -m scripts.pgso unit-tests --llvm-bin <path> --output-dir <path> --target <target>` runs fx's Zig unit tests on code built through the candidate's transforms. It builds the unit test executable with `zig build install-test`, records that link, and emits the executable's bitcode with `outline-helpers` applied. It then marks every function `minsize` and runs the candidate's profile-use passes without a profile, so the size-only paths, the AArch64 homogeneous prologue and epilogue, and both outliners reach as much code as they can. It applies the candidate's outlining chain, including the outliner guards and retry rounds described below, then its cleanup and size passes, and compiles with the candidate's code generation flags. Finally it relinks the result with the recorded link and runs it from the repository root with an open stdin, as `zig build test` does. When a test fails or the run aborts, the step runs the executable once more, as CI retries a failed E2E file once, and passes only if that run passes. The logs directory keeps both runs' complete output in `unit-tests.json` and `unit-tests-retry.json`. A pass on the retry prints a warning and keeps the first run's failed tests in the step's summary, so a test that passes only on retry stays visible. A failed build or link is never retried. The step also fails when `zero-fill-globals` or `compact-error-names` skips the module, so neither pass drops out of the check unnoticed. A test there defines the wasm host's `extern "fx"` functions itself, and Zig rejects such an extern in a static executable that is not position independent. So the test executable is a static PIE and its object adds `-relocation-model=pic`. Both Linux PGSO workflows run this step after the driver tests and upload its `logs`.
+Without another check, the behavior corpus is the only test of code after the IR passes and outliners, so a miscompile in code it doesn't reach goes unnoticed. On Linux, `python3 -m scripts.pgso unit-tests --llvm-bin <path> --output-dir <path> --target <target>` runs lia's Zig unit tests on code built through the candidate's transforms. It builds the unit test executable with `zig build install-test`, records that link, and emits the executable's bitcode with `outline-helpers` applied. It then marks every function `minsize` and runs the candidate's profile-use passes without a profile, so the size-only paths, the AArch64 homogeneous prologue and epilogue, and both outliners reach as much code as they can. It applies the candidate's outlining chain, including the outliner guards and retry rounds described below, then its cleanup and size passes, and compiles with the candidate's code generation flags. Finally it relinks the result with the recorded link and runs it from the repository root with an open stdin, as `zig build test` does. When a test fails or the run aborts, the step runs the executable once more, as CI retries a failed E2E file once, and passes only if that run passes. The logs directory keeps both runs' complete output in `unit-tests.json` and `unit-tests-retry.json`. A pass on the retry prints a warning and keeps the first run's failed tests in the step's summary, so a test that passes only on retry stays visible. A failed build or link is never retried. The step also fails when `zero-fill-globals` or `compact-error-names` skips the module, so neither pass drops out of the check unnoticed. A test there defines the wasm host's `extern "lia"` functions itself, and Zig rejects such an extern in a static executable that is not position independent. So the test executable is a static PIE and its object adds `-relocation-model=pic`. Both Linux PGSO workflows run this step after the driver tests and upload its `logs`.
 
 Training records execution counts and first-use function timestamps in the same
 continuous profiles. Counter supplements preserve the temporal traces. The
@@ -49,15 +49,15 @@ brew install llvm@22
 
 python3 -m scripts.pgso build \
   --llvm-bin "$(brew --prefix llvm@22)/bin" \
-  --output-dir /tmp/fx-pgso-build
+  --output-dir /tmp/lia-pgso-build
 
 python3 -m scripts.pgso train \
   --llvm-bin "$(brew --prefix llvm@22)/bin" \
-  --output-dir /tmp/fx-pgso-train
+  --output-dir /tmp/lia-pgso-train
 
 python3 -m scripts.pgso all \
   --llvm-bin "$(brew --prefix llvm@22)/bin" \
-  --output-dir /tmp/fx-pgso-candidate \
+  --output-dir /tmp/lia-pgso-candidate \
   --target aarch64-macos \
   --update-channel stable \
   --samples 50
@@ -77,29 +77,29 @@ non-overlapping candidate assignments. The six startup and six heavy-workload
 comparisons run on twelve fresh machines. Every performance job measures its
 immutable control and candidate on the same machine.
 
-The fx candidate applies the accepted whole-program profile-use pipeline, then
+The lia candidate applies the accepted whole-program profile-use pipeline, then
 runs LLVM's IR outliner once over the whole optimized program. Generated IR
 helpers are kept in one dense linker cluster ordered by their hottest profiled
 caller so outlining does not scatter startup code across cold pages.
 
-Code generation for the fx candidate runs the machine outliner a second time,
+Code generation for the lia candidate runs the machine outliner a second time,
 which can fold sequences the first round exposed. The second round runs
 wherever the outliner runs: on AArch64, and on Linux x86_64 for the cold code
 described below. On AArch64, code generation also enables LLVM's homogeneous
 prologue and epilogue. Each function that profile use compiled for size then
 saves and restores its callee-saved registers by calling one of a few dozen
 shared frame helpers instead of repeating those loads and stores inline.
-Functions compiled for speed keep inline prologues. fx builds without frame
+Functions compiled for speed keep inline prologues. lia builds without frame
 pointers or unwind tables, so the helpers change no stack walking. The measured
 heavy benchmark candidates use the same profile-use flags and code generation
-as the fx candidate, so the heavy gates measure the code fx ships. A benchmark
+as the lia candidate, so the heavy gates measure the code lia ships. A benchmark
 trained on its own workload keeps the default code generation and a higher cold
 cutoff, because its profile-use IR only selects the functions to transfer into
 the production profile.
 
 LLVM runs the machine outliner by default only on AArch64, where it outlines
 the functions profile use compiled for size. Linux x86_64 asks for it with
-`-enable-machine-outliner=conservative-pgo` on every candidate object, fx and
+`-enable-machine-outliner=conservative-pgo` on every candidate object, lia and
 benchmark alike, so it outlines only code the profile marks cold. Code without
 profile data counts as hot, and the startup functions are `nooutline`, so
 neither moves into shared helpers.
@@ -143,7 +143,7 @@ store the same outputs in two different ways, it needs a switch to pick the
 stores, but it builds the switch only when the stored outputs differ, and the
 release build skips the assertion that catches the case. The stores are left
 in blocks nothing branches to, so each caller reads its output uninitialized.
-A transformed unit test read a garbage error code this way, and an fx
+A transformed unit test read a garbage error code this way, and an lia
 candidate had one such function on the out-of-memory path of its footer rows.
 After each outliner run, `ir_size.py dropped-outputs` lists the outlined
 functions with a block nothing branches to and the functions that call them.
@@ -199,7 +199,7 @@ pair goes to a stack slot laid out like the entry. Any entry or use the pass
 does not recognize leaves
 the table unchanged. `globaldce,verify` then drops the dead constants. Benchmark artifacts receive every pass so their candidates keep
 the production code shape. The candidate link passes
-`-no_compact_unwind`: fx builds without unwind tables, and newer Apple linkers
+`-no_compact_unwind`: lia builds without unwind tables, and newer Apple linkers
 otherwise emit about 160 KB of compact unwind data.
 
 `python3 -m scripts.pgso.distributed plan` emits deterministic, non-empty
@@ -223,7 +223,7 @@ release. Overwrite applies only to an identical attempt-qualified name.
 
 Every root `tests/e2e/*.test.ts` file must be classified as training, verification-only, or intentionally excluded. The corpus loader fails on missing, duplicate, stale, or unclassified files, so a new E2E owner cannot silently bypass release qualification. New tests added to an already classified file inherit that file's classification.
 
-Live-model and live-network files are forbidden. Corpus processes receive per-scenario homes and isolated tmux sockets and cannot inherit model credentials, the caller's tmux session, an external LLVM profile destination, or caller-selected fx tracing. The CLI and MCP authentication suites explicitly link the host Keychains directory into only their scenario homes so their uniquely named fake macOS Keychain assertions can run; no other scenario receives that access.
+Live-model and live-network files are forbidden. Corpus processes receive per-scenario homes and isolated tmux sockets and cannot inherit model credentials, the caller's tmux session, an external LLVM profile destination, or caller-selected lia tracing. The CLI and MCP authentication suites explicitly link the host Keychains directory into only their scenario homes so their uniquely named fake macOS Keychain assertions can run; no other scenario receives that access.
 
 Each training scenario must create a new nonempty raw profile. The driver merges that batch into the accumulator atomically, deletes only the successfully merged raw files, and stops before profile use on any missing scenario, timeout, warning, merge failure, or cleanup failure.
 
@@ -237,7 +237,7 @@ Candidate behavior qualification records each scenario's debug trace under `cand
 
 ## Qualification policy
 
-Startup compares `help`, `--version`, `status --json`, `doctor --json`, and `sessions --json`. It first copies each verified immutable artifact into the measurement directory and checks that the copy's SHA-256 matches, so both binaries start from the same page-cache state: on Linux a binary whose pages were read back from disk can start 10 to 15 percent slower than one written moments ago. It then executes each copy once to require successful output and empty stderr. Timing then uses pinned Hyperfine with no intermediate shell, ten warmups per artifact in each of at least 100 alternating rounds, and at least 1,000 measured samples per artifact. No contiguous block exceeds ten measured runs, so short machine-noise bursts are distributed between control and candidate while p95 retains 50 tail observations. Startup measurement sets `FX_DISABLE_KEYCHAIN=1` so the compiler comparison cannot be dominated by host-global macOS Keychain subprocess latency; the deterministic behavior corpus remains responsible for exercising Keychain integration. No per-sample Python process management or evidence-file write is included in the timed boundary, and measurement never replaces `zig-out/bin/fx`. Heavy qualification compares file indexing at 100,000 paths, UI activity, and approval transcript, diff, combined, and large-payload workloads.
+Startup compares `help`, `--version`, `status --json`, `doctor --json`, and `sessions --json`. It first copies each verified immutable artifact into the measurement directory and checks that the copy's SHA-256 matches, so both binaries start from the same page-cache state: on Linux a binary whose pages were read back from disk can start 10 to 15 percent slower than one written moments ago. It then executes each copy once to require successful output and empty stderr. Timing then uses pinned Hyperfine with no intermediate shell, ten warmups per artifact in each of at least 100 alternating rounds, and at least 1,000 measured samples per artifact. No contiguous block exceeds ten measured runs, so short machine-noise bursts are distributed between control and candidate while p95 retains 50 tail observations. Startup measurement sets `LIA_DISABLE_KEYCHAIN=1` so the compiler comparison cannot be dominated by host-global macOS Keychain subprocess latency; the deterministic behavior corpus remains responsible for exercising Keychain integration. No per-sample Python process management or evidence-file write is included in the timed boundary, and measurement never replaces `zig-out/bin/lia`. Heavy qualification compares file indexing at 100,000 paths, UI activity, and approval transcript, diff, combined, and large-payload workloads.
 
 Heavy comparisons use at least 50 measured samples for each artifact and alternate pair order AB then BA. Command failures and timeouts fail qualification and are never replaced. A candidate fails when either p50 or p95 is more than 10% slower than its matching control. When only that speed comparison fails, the startup command or heavy workload is measured once more, into a `retry` subdirectory of its logs, and the second measurement decides. Shared CI runners have brief slow periods that can push one measurement's p95 over the limit while its median is faster; a real regression fails both measurements. The first measurement's failed comparison stays in the evidence as `first_attempt`. A command failure or timeout is never measured again. The existing Linux startup workflow remains the authority for the repository's absolute 2 ms command budget.
 
@@ -264,9 +264,9 @@ binary hashes, and aggregation rejects any mismatch.
 The output root contains:
 
 ```text
-control/bin/fx
-instrumented/fx
-candidate/fx
+control/bin/lia
+instrumented/lia
+candidate/lia
 profiles/merged.profdata
 profiles/supplements/
 heavy/
@@ -302,11 +302,11 @@ These checks supplement the production PGSO gate; they do not replace it or
 prove performance for every workload. Legacy aggregate names are accepted only
 from a first-attempt run; attempt-qualified names must match the run attempt.
 
-Corpus scenarios inherit only a small operating-system environment allowlist. Credentials, live-test flags, tracing settings, and repository dotenv files are excluded unless a value is explicitly declared in the versioned corpus. The runner temporarily installs the assigned artifact at `zig-out/bin/fx` for E2E compatibility, then restores the prior file (or prior absence) after success, failure, timeout, or cancellation.
+Corpus scenarios inherit only a small operating-system environment allowlist. Credentials, live-test flags, tracing settings, and repository dotenv files are excluded unless a value is explicitly declared in the versioned corpus. The runner temporarily installs the assigned artifact at `zig-out/bin/lia` for E2E compatibility, then restores the prior file (or prior absence) after success, failure, timeout, or cancellation.
 
 The native workflow uploads bounded phase evidence rather than caches or
 intermediate compiler objects. Pull requests and manual runs have read-only
 repository permissions and do not change release, dev-channel, CDN, tag, or
 GitHub Release state. The stable release workflow may call the same gate with
 release packaging enabled; only the candidate copied by the successful final
-aggregate is packaged as `fx-macos-aarch64.tar.gz`.
+aggregate is packaged as `lia-macos-aarch64.tar.gz`.

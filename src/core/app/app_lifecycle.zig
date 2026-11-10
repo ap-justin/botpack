@@ -33,7 +33,7 @@ pub const StartupState = struct {
     credential_source_preference: ?credentials.Source = null,
     credential_onboarding_skipped: bool = false,
     stored_key_status: credentials.StoredKeyReadStatus = .not_attempted,
-    fx_login_status: credentials.FxLoginReadStatus = .not_attempted,
+    lia_login_status: credentials.LiaLoginReadStatus = .not_attempted,
     configured_providers: @import("../config/configured_provider.zig").Registry = .{},
     model_requests_blocked: bool = false,
     provider: model_provider.ProviderId = .gateway,
@@ -142,7 +142,7 @@ pub const StartupState = struct {
         return value;
     }
 
-    /// Applies an interactive launch `--model` override. Like FX_MODEL, it
+    /// Applies an interactive launch `--model` override. Like LIA_MODEL, it
     /// marks a process override and drops compiled-default fast mode; an
     /// explicit --fast restores fast separately in applyLaunchTurnOverrides.
     pub fn applyLaunchModelOverride(self: *StartupState, alloc: Allocator, model: []const u8) !void {
@@ -211,7 +211,7 @@ pub const StartupState = struct {
     }
 };
 
-/// Where `fx status` found the selected model.
+/// Where `lia status` found the selected model.
 pub const ModelOrigin = enum {
     env,
     settings,
@@ -219,7 +219,7 @@ pub const ModelOrigin = enum {
 
     pub fn label(self: ModelOrigin) []const u8 {
         return switch (self) {
-            .env => "FX_MODEL",
+            .env => "LIA_MODEL",
             .settings => "settings",
             .default => "default",
         };
@@ -292,7 +292,7 @@ pub fn loadStartupStateWithAuthMode(
     return loadStartupStateForRun(alloc, transport, secret_store, default_model, default_agent_step_limit, auth_mode, null, null);
 }
 
-/// `provider_override` is the run's `--provider`; it wins over FX_PROVIDER and
+/// `provider_override` is the run's `--provider`; it wins over LIA_PROVIDER and
 /// settings and binds configured provider names like the launch flag does.
 /// `model_override` is the run's `--model`. It stands in for a provider without
 /// a saved model; callers still apply it over the selected or resumed model.
@@ -310,7 +310,7 @@ pub fn loadStartupStateForRun(
 }
 
 /// `loadStartupStateForRun` with one run's `--config` values applied as the top
-/// settings layer (`fx ask --config key=value`).
+/// settings layer (`lia ask --config key=value`).
 pub fn loadStartupStateForRunWithOverrides(
     alloc: Allocator,
     transport: oauth_transport.Provider,
@@ -499,7 +499,7 @@ fn keychainReadDeferrable(
     if (!is_macos or keychain_disabled or provider != .gateway) return false;
     const source = preferred orelse return !env_credential_present;
     return switch (source) {
-        .fx_login, .stored_key => true,
+        .lia_login, .stored_key => true,
         .vercel_oidc_token, .ai_gateway_api_key, .host_managed, .configured => false,
     };
 }
@@ -590,7 +590,7 @@ fn loadStartupStateWithKeychainRead(
     try skill_runtime.setConfiguredSymlinkAuthorities(settings.skill_symlink_authorities orelse &.{});
 
     // A launch --provider override must bind configured provider names against
-    // the registry just like the settings and FX_PROVIDER paths do.
+    // the registry just like the settings and LIA_PROVIDER paths do.
     const bound_override = if (provider_override) |override|
         try override.bind(settings.providers orelse .{})
     else
@@ -637,7 +637,7 @@ fn loadStartupStateWithKeychainRead(
             state.credential = resolution.credential;
             state.credential_load_failure = resolution.failure;
             state.stored_key_status = resolution.stored_key_status;
-            state.fx_login_status = resolution.fx_login_status;
+            state.lia_login_status = resolution.lia_login_status;
         }
     }
     try resolveSettings(alloc, &state, &detailed);
@@ -645,8 +645,8 @@ fn loadStartupStateWithKeychainRead(
     return state;
 }
 
-/// Turns merged settings into the values a run uses, defaults and `FX_*`
-/// overrides included. The session and `fx config get` both read settings
+/// Turns merged settings into the values a run uses, defaults and `LIA_*`
+/// overrides included. The session and `lia config get` both read settings
 /// through it, so the two can't disagree. Call it with `state.agent_step_limit`
 /// holding the default and `state.model_source` already set.
 pub fn resolveSettings(alloc: Allocator, state: *StartupState, detailed: *const config_runtime.DetailedSettings) !void {
@@ -657,7 +657,7 @@ pub fn resolveSettings(alloc: Allocator, state: *StartupState, detailed: *const 
     state.permission_rules = try types.dupePermissionRuleSet(alloc, settings.permission_rules);
     state.agent_step_limit = loadAgentStepLimit(state.agent_step_limit, settings.max_agent_steps);
     state.max_tool_result_bytes = tool_result_limits.resolveMaxToolResultBytes(settings.max_tool_result_bytes, tool_result_limits.default_max_tool_result_bytes);
-    state.auto_compact_percent = compactor.resolvePercent(settings.auto_compact_percent, io_mod.getenv("FX_AUTO_COMPACT_PERCENT"));
+    state.auto_compact_percent = compactor.resolvePercent(settings.auto_compact_percent, io_mod.getenv("LIA_AUTO_COMPACT_PERCENT"));
     state.context_limits = config_runtime.resolveContextLimits(settings, &.{});
     state.context_enabled = settings.context orelse true;
     const fast_mode = resolveStartupFastMode(
@@ -702,9 +702,9 @@ pub fn resolveSettings(alloc: Allocator, state: *StartupState, detailed: *const 
     state.notification_max = max_override orelse settings.notification_max orelse false;
 }
 
-/// `FX_THEME`, which beats the `theme` setting. An empty value counts as unset.
+/// `LIA_THEME`, which beats the `theme` setting. An empty value counts as unset.
 pub fn themeEnvOverride() ?[]const u8 {
-    const value = io_mod.getenv("FX_THEME") orelse return null;
+    const value = io_mod.getenv("LIA_THEME") orelse return null;
     return if (value.len > 0) value else null;
 }
 
@@ -734,13 +734,13 @@ fn resolveStartupFastMode(
 
 fn loadPermissionMode(configured: ?PermissionMode) PermissionMode {
     const fallback = configured orelse default_permission_mode;
-    const mode = io_mod.getenv("FX_PERMISSION_MODE") orelse return fallback;
+    const mode = io_mod.getenv("LIA_PERMISSION_MODE") orelse return fallback;
     return config_runtime.parsePermissionMode(mode) orelse fallback;
 }
 
-/// The permission mode startup would load now, including `FX_PERMISSION_MODE`.
+/// The permission mode startup would load now, including `LIA_PERMISSION_MODE`.
 /// Long-running hosts read it when a session starts, so a mode saved by
-/// another fx process since startup applies. `home_dir` defaults to `HOME`.
+/// another lia process since startup applies. `home_dir` defaults to `HOME`.
 pub fn loadSavedPermissionMode(alloc: Allocator, home_dir: ?[]const u8, workspace_root: []const u8) !PermissionMode {
     var paths = if (home_dir) |home|
         try config_runtime.discoverPathsFromHome(alloc, home, workspace_root)
@@ -756,7 +756,7 @@ test "loadSavedPermissionMode reads the mode saved after startup" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
     const home_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
     defer alloc.free(home_root);
@@ -767,25 +767,25 @@ test "loadSavedPermissionMode reads the mode saved after startup" {
     defer env.deinit();
     try std.testing.expectEqual(default_permission_mode, try loadSavedPermissionMode(alloc, null, workspace_root));
 
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", "{\"permission_mode\":\"ask\"}\n");
+    try writeFixtureFile(tmp.dir, "home/.lia/settings.json", "{\"permission_mode\":\"ask\"}\n");
     try std.testing.expectEqual(PermissionMode.ask, try loadSavedPermissionMode(alloc, null, workspace_root));
 
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", "{\"permission_mode\":\"yolo\"}\n");
+    try writeFixtureFile(tmp.dir, "home/.lia/settings.json", "{\"permission_mode\":\"yolo\"}\n");
     try std.testing.expectEqual(PermissionMode.yolo, try loadSavedPermissionMode(alloc, home_root, workspace_root));
 }
 
-test "loadSavedPermissionMode keeps the FX_PERMISSION_MODE override" {
+test "loadSavedPermissionMode keeps the LIA_PERMISSION_MODE override" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
     const home_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
     defer alloc.free(home_root);
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", "{\"permission_mode\":\"yolo\"}\n");
+    try writeFixtureFile(tmp.dir, "home/.lia/settings.json", "{\"permission_mode\":\"yolo\"}\n");
 
     var env = try TestEnv.install(alloc, &.{
         .{ .key = "HOME", .value = home_root },
-        .{ .key = "FX_PERMISSION_MODE", .value = "ask" },
+        .{ .key = "LIA_PERMISSION_MODE", .value = "ask" },
     });
     defer env.deinit();
     try std.testing.expectEqual(PermissionMode.ask, try loadSavedPermissionMode(alloc, null, home_root));
@@ -795,7 +795,7 @@ fn loadAgentStepLimit(fallback: usize, configured: ?usize) usize {
     return agent_steps.resolveMaxAgentStepsWithOverride(
         configured,
         fallback,
-        io_mod.getenv("FX_MAX_AGENT_STEPS"),
+        io_mod.getenv("LIA_MAX_AGENT_STEPS"),
     );
 }
 
@@ -817,14 +817,14 @@ fn loadStartupStatusModel(alloc: Allocator, default_model: []const u8, configure
 }
 
 fn credentialOnboardingDisabled() bool {
-    const value = io_mod.getenv("FX_TEST_SKIP_ONBOARDING") orelse return false;
+    const value = io_mod.getenv("LIA_TEST_SKIP_ONBOARDING") orelse return false;
     const trimmed = std.mem.trim(u8, value, " \t\r\n");
     if (trimmed.len == 0) return false;
     return !std.mem.eql(u8, trimmed, "0") and !std.ascii.eqlIgnoreCase(trimmed, "false");
 }
 
 fn soundEnvOverride() ?env_settings.SoundPreset {
-    return env_settings.soundPreset(io_mod.getenv("FX_SOUND") orelse return null);
+    return env_settings.soundPreset(io_mod.getenv("LIA_SOUND") orelse return null);
 }
 
 const EnvEntry = struct {
@@ -879,7 +879,7 @@ test "permission mode loader defaults to auto" {
 
 test "permission mode environment accepts yolo without changing fallback" {
     var env = try TestEnv.install(std.testing.allocator, &.{
-        .{ .key = "FX_PERMISSION_MODE", .value = "yolo" },
+        .{ .key = "LIA_PERMISSION_MODE", .value = "yolo" },
     });
     defer env.deinit();
 
@@ -923,10 +923,10 @@ test "startup credential modes select a refresh policy, never a narrower source 
 
 test "loadStartupState applies core env overrides" {
     var env = try TestEnv.install(std.testing.allocator, &.{
-        .{ .key = "FX_MODEL", .value = "  env-model  " },
+        .{ .key = "LIA_MODEL", .value = "  env-model  " },
         .{ .key = "AI_GATEWAY_API_KEY", .value = "gateway-key" },
-        .{ .key = "FX_PERMISSION_MODE", .value = "auto" },
-        .{ .key = "FX_MAX_AGENT_STEPS", .value = "37" },
+        .{ .key = "LIA_PERMISSION_MODE", .value = "auto" },
+        .{ .key = "LIA_MAX_AGENT_STEPS", .value = "37" },
     });
     defer env.deinit();
 
@@ -954,7 +954,7 @@ test "ultrafast startup separates profile preferences from process overrides" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
     try tmp.dir.createDirPath(io_mod.getIo(), "profile-off");
     try tmp.dir.createDirPath(io_mod.getIo(), "profile-on");
     const home_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
@@ -968,11 +968,11 @@ test "ultrafast startup separates profile preferences from process overrides" {
         .{ profile_off_root, profile_on_root },
     );
     defer alloc.free(settings);
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", settings);
+    try writeFixtureFile(tmp.dir, "home/.lia/settings.json", settings);
 
     const env = try TestEnv.install(alloc, &.{
         .{ .key = "HOME", .value = home_root },
-        .{ .key = "FX_ULTRAFAST", .value = "1" },
+        .{ .key = "LIA_ULTRAFAST", .value = "1" },
     });
     defer env.deinit();
     var profile_off_env_on = try loadStartupStateForWorkspace(alloc, profile_off_root, "default/model", 25);
@@ -981,14 +981,14 @@ test "ultrafast startup separates profile preferences from process overrides" {
     try std.testing.expect(profile_off_env_on.ultrafast_mode);
     try std.testing.expectEqual(@as(?bool, true), profile_off_env_on.ultrafast_process_override);
 
-    try env.map.put("FX_ULTRAFAST", "0");
+    try env.map.put("LIA_ULTRAFAST", "0");
     var profile_on_env_off = try loadStartupStateForWorkspace(alloc, profile_on_root, "default/model", 25);
     defer profile_on_env_off.deinit(alloc);
     try std.testing.expect(profile_on_env_off.configured_ultrafast_mode);
     try std.testing.expect(!profile_on_env_off.ultrafast_mode);
     try std.testing.expectEqual(@as(?bool, false), profile_on_env_off.ultrafast_process_override);
 
-    try env.map.put("FX_ULTRAFAST", "paid");
+    try env.map.put("LIA_ULTRAFAST", "paid");
     try std.testing.expectError(
         error.InvalidUltrafastOverride,
         loadStartupStateForWorkspace(alloc, profile_on_root, "default/model", 25),
@@ -1021,7 +1021,7 @@ test "loadStartupState starts with a profile that still sets the terminal UI set
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
 
     const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
@@ -1031,7 +1031,7 @@ test "loadStartupState starts with a profile that still sets the terminal UI set
 
     try writeFixtureFile(
         tmp.dir,
-        "home/.fx/settings.json",
+        "home/.lia/settings.json",
         "{\"session_titles\":false,\"collapse_tool_calls\":\"off\",\"slash_menu_categories\":false,\"startup_scrollback\":1,\"status_line\":{\"context\":true},\"statusLine\":7}\n",
     );
 
@@ -1040,7 +1040,7 @@ test "loadStartupState starts with a profile that still sets the terminal UI set
 
     var state = try loadStartupStateForWorkspace(std.testing.allocator, workspace_root, "default-model", 25);
     defer state.deinit(std.testing.allocator);
-    // A profile fx discarded as malformed would leave the default, true.
+    // A profile lia discarded as malformed would leave the default, true.
     try std.testing.expect(!state.session_title_generation);
 }
 
@@ -1054,8 +1054,8 @@ test "loadStartupState resolves max_agent_steps default zero and positive values
     try tmp.dir.createDirPath(io_mod.getIo(), "absent");
     try tmp.dir.createDirPath(io_mod.getIo(), "zero");
     try tmp.dir.createDirPath(io_mod.getIo(), "positive");
-    try writeFixtureFile(tmp.dir, "zero/.fx.json", "{\"max_agent_steps\":0}");
-    try writeFixtureFile(tmp.dir, "positive/.fx.json", "{\"max_agent_steps\":50}");
+    try writeFixtureFile(tmp.dir, "zero/.lia.json", "{\"max_agent_steps\":0}");
+    try writeFixtureFile(tmp.dir, "positive/.lia.json", "{\"max_agent_steps\":50}");
 
     const absent_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "absent");
     defer std.testing.allocator.free(absent_root);
@@ -1086,7 +1086,7 @@ test "loadStartupState resolves max_tool_result_bytes default and explicit value
 
     try tmp.dir.createDirPath(io_mod.getIo(), "absent");
     try tmp.dir.createDirPath(io_mod.getIo(), "explicit");
-    try writeFixtureFile(tmp.dir, "explicit/.fx.json", "{\"max_tool_result_bytes\":131072}");
+    try writeFixtureFile(tmp.dir, "explicit/.lia.json", "{\"max_tool_result_bytes\":131072}");
 
     const absent_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "absent");
     defer std.testing.allocator.free(absent_root);
@@ -1110,7 +1110,7 @@ test "loadStartupState falls back to auto for invalid first_call_tool_choice" {
     defer tmp.cleanup();
 
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
-    try writeFixtureFile(tmp.dir, "workspace/.fx.json", "{\"first_call_tool_choice\":\"required\"}");
+    try writeFixtureFile(tmp.dir, "workspace/.lia.json", "{\"first_call_tool_choice\":\"required\"}");
 
     const workspace_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "workspace");
     defer std.testing.allocator.free(workspace_root);
@@ -1124,7 +1124,7 @@ test "loadStartupState falls back to auto for invalid first_call_tool_choice" {
 test "loadStartupState diagnoses the retired fuzzy skill setting" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
 
     const home_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "home");
@@ -1132,7 +1132,7 @@ test "loadStartupState diagnoses the retired fuzzy skill setting" {
     const workspace_root = try io_mod.dirRealpathAlloc(std.testing.allocator, tmp.dir, "workspace");
     defer std.testing.allocator.free(workspace_root);
 
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", "{\"skill_match_fuzzy\":true}");
+    try writeFixtureFile(tmp.dir, "home/.lia/settings.json", "{\"skill_match_fuzzy\":true}");
 
     var env = try TestEnv.install(std.testing.allocator, &.{.{ .key = "HOME", .value = home_root }});
     defer env.deinit();
@@ -1145,8 +1145,8 @@ test "loadStartupState diagnoses the retired fuzzy skill setting" {
 
 test "credential onboarding can be skipped independently from Keychain" {
     var env = try TestEnv.install(std.testing.allocator, &.{
-        .{ .key = "FX_TEST_SKIP_ONBOARDING", .value = "1" },
-        .{ .key = "FX_DISABLE_KEYCHAIN", .value = "1" },
+        .{ .key = "LIA_TEST_SKIP_ONBOARDING", .value = "1" },
+        .{ .key = "LIA_DISABLE_KEYCHAIN", .value = "1" },
     });
     defer env.deinit();
 
@@ -1162,9 +1162,9 @@ test "interactive launch leaves a Keychain credential unresolved for the caller"
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", "{\"credential_source\":\"fx_login\"}");
+    try writeFixtureFile(tmp.dir, "home/.lia/settings.json", "{\"credential_source\":\"lia_login\"}");
     const home_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
     defer alloc.free(home_root);
     const workspace_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
@@ -1172,8 +1172,8 @@ test "interactive launch leaves a Keychain credential unresolved for the caller"
     // The real Keychain stays off; the fake store below reports it enabled.
     var env = try TestEnv.install(alloc, &.{
         .{ .key = "HOME", .value = home_root },
-        .{ .key = "FX_PROVIDER", .value = "" },
-        .{ .key = "FX_DISABLE_KEYCHAIN", .value = "1" },
+        .{ .key = "LIA_PROVIDER", .value = "" },
+        .{ .key = "LIA_DISABLE_KEYCHAIN", .value = "1" },
     });
     defer env.deinit();
 
@@ -1186,12 +1186,12 @@ test "interactive launch leaves a Keychain credential unresolved for the caller"
         if (keychain_read == .deferred and builtin.target.os.tag == .macos) {
             const request = state.deferred_credential orelse return error.TestExpectedDeferredCredential;
             try std.testing.expectEqual(model_provider.ProviderId.gateway, request.provider);
-            try std.testing.expectEqual(@as(?credentials.Source, .fx_login), request.preferred);
-            try std.testing.expectEqual(credentials.FxLoginReadStatus.not_attempted, state.fx_login_status);
+            try std.testing.expectEqual(@as(?credentials.Source, .lia_login), request.preferred);
+            try std.testing.expectEqual(credentials.LiaLoginReadStatus.not_attempted, state.lia_login_status);
         } else {
-            // Test builds keep the fx login in the profile, where it is absent.
+            // Test builds keep the lia login in the profile, where it is absent.
             try std.testing.expect(state.deferred_credential == null);
-            try std.testing.expectEqual(credentials.FxLoginReadStatus.absent, state.fx_login_status);
+            try std.testing.expectEqual(credentials.LiaLoginReadStatus.absent, state.lia_login_status);
         }
     }
 }
@@ -1206,14 +1206,14 @@ test "loadStartupStatus reports where the selected model came from" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
     const home_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
     defer alloc.free(home_root);
 
     {
         var env = try TestEnv.install(alloc, &.{
             .{ .key = "HOME", .value = home_root },
-            .{ .key = "FX_MODEL", .value = "gpt-env" },
+            .{ .key = "LIA_MODEL", .value = "gpt-env" },
         });
         defer env.deinit();
         var status = try loadStartupStatusWithAuthMode(alloc, host.unavailable_secret_store, "default/model", 25, .host_managed);
@@ -1229,7 +1229,7 @@ test "loadStartupStatus reports where the selected model came from" {
         try std.testing.expectEqualStrings("default/model", status.selected_model);
         try std.testing.expectEqual(ModelOrigin.default, status.model_origin);
     }
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", "{\"models\":{\"gateway\":\"gpt-saved\"}}\n");
+    try writeFixtureFile(tmp.dir, "home/.lia/settings.json", "{\"models\":{\"gateway\":\"gpt-saved\"}}\n");
     {
         var env = try TestEnv.install(alloc, &.{.{ .key = "HOME", .value = home_root }});
         defer env.deinit();
@@ -1244,7 +1244,7 @@ test "loadStartupState defaults fast mode off and requires bound explicit prefer
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
     try tmp.dir.createDirPath(io_mod.getIo(), "absent");
     try tmp.dir.createDirPath(io_mod.getIo(), "configured");
     try tmp.dir.createDirPath(io_mod.getIo(), "disabled");
@@ -1269,7 +1269,7 @@ test "loadStartupState defaults fast mode off and requires bound explicit prefer
         .{ configured_root, disabled_root, legacy_fast_root, bound_fast_root },
     );
     defer std.testing.allocator.free(fixture);
-    try writeFixtureFile(tmp.dir, "home/.fx/settings.json", fixture);
+    try writeFixtureFile(tmp.dir, "home/.lia/settings.json", fixture);
 
     var env = try TestEnv.install(std.testing.allocator, &.{.{ .key = "HOME", .value = home_root }});
     defer env.deinit();
@@ -1307,13 +1307,13 @@ test "loadStartupState defaults fast mode off and requires bound explicit prefer
 }
 
 test "only a Keychain-backed Gateway credential is deferred past the first frame" {
-    try std.testing.expect(keychainReadDeferrable(true, false, .gateway, .fx_login, false));
+    try std.testing.expect(keychainReadDeferrable(true, false, .gateway, .lia_login, false));
     try std.testing.expect(keychainReadDeferrable(true, false, .gateway, .stored_key, true));
     try std.testing.expect(keychainReadDeferrable(true, false, .gateway, null, false));
     // An environment credential wins automatic precedence without the Keychain.
     try std.testing.expect(!keychainReadDeferrable(true, false, .gateway, null, true));
     try std.testing.expect(!keychainReadDeferrable(true, false, .gateway, .ai_gateway_api_key, false));
     try std.testing.expect(!keychainReadDeferrable(true, false, .gateway, .vercel_oidc_token, false));
-    try std.testing.expect(!keychainReadDeferrable(true, true, .gateway, .fx_login, false));
-    try std.testing.expect(!keychainReadDeferrable(false, false, .gateway, .fx_login, false));
+    try std.testing.expect(!keychainReadDeferrable(true, true, .gateway, .lia_login, false));
+    try std.testing.expect(!keychainReadDeferrable(false, false, .gateway, .lia_login, false));
 }

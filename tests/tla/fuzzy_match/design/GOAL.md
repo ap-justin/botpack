@@ -2,7 +2,7 @@
 
 ## Problem
 
-Twelve places in fx filter a list as the user types, and each one has its own matcher (`CONTEXT.md`, Surfaces). They disagree. The Models menu matches words across the provider and model and accepts fuzzy letters, `/` commands match only a case-sensitive prefix or substring, skills rank a name prefix above other text, `/resume` and `/mcp` need the query as one unbroken substring, and `/help` and `/settings` need each word to appear somewhere. A query that finds a model finds nothing in the next menu, and every new surface invites another matcher.
+Twelve places in lia filter a list as the user types, and each one has its own matcher (`CONTEXT.md`, Surfaces). They disagree. The Models menu matches words across the provider and model and accepts fuzzy letters, `/` commands match only a case-sensitive prefix or substring, skills rank a name prefix above other text, `/resume` and `/mcp` need the query as one unbroken substring, and `/help` and `/settings` need each word to appear somewhere. A query that finds a model finds nothing in the next menu, and every new surface invites another matcher.
 
 ## Outcome
 
@@ -136,6 +136,6 @@ Every item passes for the exact commit that ships.
 
 1. `tests/tla/fuzzy_match/check.sh` exits 0 with every stage enabled.
 2. `zig fmt --check src/`, `zig build`, and `zig build test` exit 0.
-3. The E2E files that cover the changed surfaces pass with `FX_SOUND=0`.
-4. The built `./zig-out/bin/fx` shows the fuzzy matches in the Models menu, the `/` menu, the skills menu, `/resume`, `/mcp`, `/help`, and `/settings`, with clean stderr.
+3. The E2E files that cover the changed surfaces pass with `LIA_SOUND=0`.
+4. The built `./zig-out/bin/lia` shows the fuzzy matches in the Models menu, the `/` menu, the skills menu, `/resume`, `/mcp`, `/help`, and `/settings`, with clean stderr.
 5. `tests/tla/README.md` lists `fuzzy_match/`.

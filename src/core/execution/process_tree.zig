@@ -921,10 +921,10 @@ fn openLinuxProcFile(path: []const u8) !?std.Io.File {
 test "Linux proc helpers treat missing process data as vanished" {
     if (builtin.target.os.tag != .linux) return error.SkipZigTest;
     try std.testing.expect(
-        (try openLinuxProcDir("/proc/self/fx-process-tree-missing")) == null,
+        (try openLinuxProcDir("/proc/self/lia-process-tree-missing")) == null,
     );
     try std.testing.expect(
-        (try openLinuxProcFile("/proc/self/fx-process-tree-missing")) == null,
+        (try openLinuxProcFile("/proc/self/lia-process-tree-missing")) == null,
     );
 }
 

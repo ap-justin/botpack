@@ -172,7 +172,7 @@ const Phase = union(enum) {
 
 /// The last written seq, which `syncThrough` reads without `mutex` so that
 /// appends go on during an fsync. A 64-bit atomic where the target has one;
-/// on 32-bit targets such as fx's wasm build, a value behind its own brief
+/// on 32-bit targets such as lia's wasm build, a value behind its own brief
 /// lock (never held across an fsync).
 const SeqCell = if (@bitSizeOf(usize) >= 64) struct {
     value: std.atomic.Value(u64) = .init(0),
@@ -986,7 +986,7 @@ pub const Session = struct {
     }
 };
 
-/// Blobs above this size are refused; the adapter keeps fx's own, smaller limits.
+/// Blobs above this size are refused; the adapter keeps lia's own, smaller limits.
 pub const max_blob_bytes: usize = 512 << 20;
 
 /// An I/O fault as one byte, so a sync on another thread can hand its cause
@@ -1097,9 +1097,9 @@ fn hasTurnStart(bodies: []const schema.Body) bool {
 fn needsSync(bodies: []const schema.Body) bool {
     for (bodies) |body| switch (body) {
         .turn_committed, .turn_interrupted, .child_spawned, .child_finished => return true,
-        // Usage is durable before fx clears its usage-recovery marker
+        // Usage is durable before lia clears its usage-recovery marker
         // (`tests/tla/session_manager/Wiring.tla` UsageNeverSilent).
-        // fx removes the side folder only once the move is durable (D47).
+        // lia removes the side folder only once the move is durable (D47).
         // Compactor records need no sync of their own: the compaction line
         // that cites them comes later in the log, which keeps a prefix (D50).
         .set => |s| switch (s.key) {
@@ -1694,7 +1694,7 @@ fn blobIsWhole(env: *const Env, id_: []const u8, hash: []const u8) (error{OutOfM
 pub const ForkPoint = union(enum) {
     /// The end of this turn; 0 means before the first turn.
     turn: u64,
-    /// The last turn that ended before any damage (`fx session recover`, D15).
+    /// The last turn that ended before any damage (`lia session recover`, D15).
     last_good,
 };
 
@@ -2140,7 +2140,7 @@ const session_tests = struct {
         }
     };
 
-    /// fx dies: nothing more is written, and the kernel drops the flock.
+    /// lia dies: nothing more is written, and the kernel drops the flock.
     fn crash(t: *TestEnv, s: *Session) void {
         t.crashed = true;
         s.abandon();
@@ -3042,7 +3042,7 @@ const session_model_tests = struct {
             t.emit(m[1], labels[i]);
         }
 
-        /// fx dies: every unfinished publish stops for good.
+        /// lia dies: every unfinished publish stops for good.
         fn crashed(t: *LifecycleTracer, event: []const u8) void {
             for (&t.step) |*step| {
                 if (!std.mem.eql(u8, step.*, "idle") and !std.mem.eql(u8, step.*, "done")) step.* = "dead";

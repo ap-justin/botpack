@@ -1,4 +1,4 @@
-// Connects agent turns of the real fx binary to TLC. One turn's
+// Connects agent turns of the real lia binary to TLC. One turn's
 // observations become TurnStreamObserved.tla, and
 // tests/tla/session/TurnStreamTrace.tla replays them through TurnStream's
 // own actions. ACCEPTED needs TLC's exit 12 on the NotAllMatched sentinel
@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { runTlc, sha256File, sha256Text, TLA_ROOT, writeJson } from "../lib/tlc";
 
-/// One `sessions_v2_stream` decision, or the session log fx left ("disk").
+/// One `sessions_v2_stream` decision, or the session log lia left ("disk").
 /// Fields a phase does not use are false, 0 or empty.
 export interface Observation {
   phase: "stream" | "commit" | "disk";
@@ -21,7 +21,7 @@ export interface Observation {
   reparsed: number;
   /// The fewest and most tool results that can have arrived by this
   /// decision: the calls the driver issued before the request this decision
-  /// followed, and before fx's next request.
+  /// followed, and before lia's next request.
   least: number;
   arrived: number;
   /// The live turn's tool results on disk, by call id, in order.
@@ -46,7 +46,7 @@ const SPECS = ["TurnStream.tla", "TurnStreamTrace.tla"];
 
 const DECISION = /event=sessions_v2_stream session=\S+ phase=(stream|commit) held=(\d+) kept=(\d+) results=(\d+) reparsed=(\d+)/;
 
-/// Each stream and commit decision in fx's session trace, in order.
+/// Each stream and commit decision in lia's session trace, in order.
 export function decisions(trace: string): Observation[] {
   return trace.split("\n").flatMap((line) => {
     const match = DECISION.exec(line);
@@ -65,9 +65,9 @@ export function decisions(trace: string): Observation[] {
   });
 }
 
-/// The only session a profile saved: its folder under ~/.fx/sessions/v2.
+/// The only session a profile saved: its folder under ~/.lia/sessions/v2.
 export function sessionFolder(home: string): string {
-  const store = join(home, ".fx", "sessions", "v2");
+  const store = join(home, ".lia", "sessions", "v2");
   const ids = existsSync(store) ? readdirSync(store).filter((id) => !id.startsWith(".") && existsSync(join(store, id, "log.jsonl"))) : [];
   if (ids.length !== 1) throw new Error(`expected one saved session under ${store}, found ${ids.length}`);
   return join(store, ids[0]!);
@@ -82,7 +82,7 @@ function pieceData(folder: string, data: any): any {
 }
 
 /// What the session log holds: the live turn's tool results (call id, stamp,
-/// and when fx wrote the line, in order) and the superseded markers.
+/// and when lia wrote the line, in order) and the superseded markers.
 export function diskTurn(folder: string): { calls: string[]; stamps: number[]; written: number[]; superseded: number; ended: boolean } {
   let calls: string[] = [];
   let stamps: number[] = [];

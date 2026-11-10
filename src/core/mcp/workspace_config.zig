@@ -8,7 +8,7 @@ const max_config_bytes: usize = 1024 * 1024;
 /// The workspace's `.mcp.json` bytes: a regular file of at most 1 MiB, never
 /// through a symlink or a hard link, so a FIFO or a device in a cloned repo
 /// can't block the read. Null when there is none, and
-/// `error.UnreadableConfig` when it exists but fx won't read it. Caller owns
+/// `error.UnreadableConfig` when it exists but lia won't read it. Caller owns
 /// the bytes.
 pub fn readFile(alloc: std.mem.Allocator, workspace_root: []const u8) !?[]u8 {
     var dir = std.Io.Dir.openDirAbsolute(io_mod.getIo(), workspace_root, .{}) catch |err| switch (err) {

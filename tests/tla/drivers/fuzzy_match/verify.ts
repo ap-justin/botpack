@@ -14,9 +14,9 @@
 //   7. every surface calls the engine, and the matchers it replaced are gone;
 //   8. traceability: design/GOAL.md and the checks name each other.
 //
-// Settings: FX_FUZZY_SEED (default 20261028), FX_FUZZY_RANDOM (random cases,
-// default 1500), FX_FUZZY_DIFFERENTIAL (engine against oracle, default
-// 20000), FX_TLA_OUT (where the report goes).
+// Settings: LIA_FUZZY_SEED (default 20261028), LIA_FUZZY_RANDOM (random cases,
+// default 1500), LIA_FUZZY_DIFFERENTIAL (engine against oracle, default
+// 20000), LIA_TLA_OUT (where the report goes).
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { REPO_ROOT, outDir, writeJson } from "../lib/tlc.ts";
@@ -26,9 +26,9 @@ import { MODEL_DIR, PINNED_TLC_VERSION, SPEC_DIR, checkTlc, configInfo, engineEx
 import { judgeOracle, loadMutations, oracleMutations, pool, specMutations } from "./mutations.ts";
 import { judgeCases, modelMatch } from "./tlc-cases.ts";
 
-const seed = Number(process.env.FX_FUZZY_SEED ?? "20261028");
-const randomCount = Number(process.env.FX_FUZZY_RANDOM ?? "1500");
-const differentialCount = Number(process.env.FX_FUZZY_DIFFERENTIAL ?? "20000");
+const seed = Number(process.env.LIA_FUZZY_SEED ?? "20261028");
+const randomCount = Number(process.env.LIA_FUZZY_RANDOM ?? "1500");
+const differentialCount = Number(process.env.LIA_FUZZY_DIFFERENTIAL ?? "20000");
 const out = outDir("fuzzy-match");
 const report: Record<string, unknown> = { started: new Date().toISOString(), seed, randomCount, differentialCount, out };
 const failures: string[] = [];

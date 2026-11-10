@@ -1,14 +1,14 @@
 ---- MODULE MixedBuilds ----
-\* fx processes running an older build beside this one, sharing one profile
+\* lia processes running an older build beside this one, sharing one profile
 \* and one MCP server's login (src/core/mcp_host/credentials.zig, the store's
 \* location; runtime.zig restoreCredentials, tryRefresh and saveCredential).
 \*
 \* Two documents can hold the login:
-\*   v2  `credentials-v2.json`, Keychain item FX_MCP_OAUTH_CREDENTIALS_V2. An
+\*   v2  `credentials-v2.json`, Keychain item LIA_MCP_OAUTH_CREDENTIALS_V2. An
 \*       older build reads and writes it. Builds from before version 2 of the
 \*       document read only version 1: a version-2 document reads as empty,
 \*       so their next write replaces it with version 1 and their own login.
-\*   v3  `credentials-v3.json`, FX_MCP_OAUTH_CREDENTIALS_V3, which only this
+\*   v3  `credentials-v3.json`, LIA_MCP_OAUTH_CREDENTIALS_V3, which only this
 \*       build opens.
 \* `Loc` is where this build keeps its logins and `Copy` whether it carries
 \* the v2 login over; the code has Loc = "v3" and Copy = FALSE.

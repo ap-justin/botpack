@@ -1,14 +1,14 @@
-# Goal: `fx mcp call`
+# Goal: `lia mcp call`
 
 ## The problem
 
-An MCP tool's result goes into the model's context. A long list, such as every open issue in a Linear team, costs thousands of tokens on every call, crowds out the work, and is the wrong tool for questions like "how many of these are assigned to Malte". Today fx inlines up to 16 KiB of a tool result and keeps the rest behind a handle the model can only page through with `read_tool_result` (`src/core/session/result_store.zig:14-15`, `:66-96`). An MCP result is also cut to 64 KiB before it gets there, so the rest of a larger list is lost (`src/core/mcp/tool_result.zig:245-267`).
+An MCP tool's result goes into the model's context. A long list, such as every open issue in a Linear team, costs thousands of tokens on every call, crowds out the work, and is the wrong tool for questions like "how many of these are assigned to Malte". Today lia inlines up to 16 KiB of a tool result and keeps the rest behind a handle the model can only page through with `read_tool_result` (`src/core/session/result_store.zig:14-15`, `:66-96`). An MCP result is also cut to 64 KiB before it gets there, so the rest of a larger list is lost (`src/core/mcp/tool_result.zig:245-267`).
 
-The request, from a user of fx: let a tool call's output go to a file instead of through context, or let the shell call MCP tools directly, as in `call_mcp linear_list '{...}' > /tmp/linear_list`. The shell version was preferred because it composes with pipes, `jq`, loops, and files. It is "code mode" for bash.
+The request, from a user of lia: let a tool call's output go to a file instead of through context, or let the shell call MCP tools directly, as in `call_mcp linear_list '{...}' > /tmp/linear_list`. The shell version was preferred because it composes with pipes, `jq`, loops, and files. It is "code mode" for bash.
 
 ## What this design covers
 
-The bridge that lets a command run by the agent's shell tool, inside a running fx session, call that session's MCP tools: `fx mcp call <tool> '<json>'`. The result goes to the command's standard output, so the command decides whether it goes to a file, a pipe, or the screen. Only what the agent prints reaches its context.
+The bridge that lets a command run by the agent's shell tool, inside a running lia session, call that session's MCP tools: `lia mcp call <tool> '<json>'`. The result goes to the command's standard output, so the command decides whether it goes to a file, a pipe, or the screen. Only what the agent prints reaches its context.
 
 This workspace designs and verifies the bridge's pure core, `src/core/mcp_host/mcp_call.zig`: which requests are admitted, the order of the permission check and the call, at most one call and one reply per request, what happens when a client, a subagent, or the session goes away, and what is logged when data is dropped. The shell around it (socket, client, permission and catalog adapters, environment, UI) is specified here and tracked in `FINISH.md`.
 
@@ -16,10 +16,10 @@ This workspace designs and verifies the bridge's pure core, `src/core/mcp_host/m
 
 | Question | Decision |
 | --- | --- |
-| Name | `fx mcp call`, beside `fx mcp list` and `fx mcp show` |
+| Name | `lia mcp call`, beside `lia mcp list` and `lia mcp show` |
 | A call needs approval while the command runs | Pause the command and ask |
-| Where it works | Inside fx sessions only, for now |
-| Load the tool's definition first? | No; `fx mcp call help <tool>` is enough |
+| Where it works | Inside lia sessions only, for now |
+| Load the tool's definition first? | No; `lia mcp call help <tool>` is enough |
 | What it prints | Just the data |
 | Subagents | Allowed, with the parent's limits |
 | When the agent uses it | Big or filtered results; normal MCP calls for small answers |
@@ -39,7 +39,7 @@ This workspace designs and verifies the bridge's pure core, `src/core/mcp_host/m
 ## Non-goals
 
 - A "save to file" option on each MCP call. The bash version subsumes it.
-- `fx mcp call` from a terminal outside an fx session. It would need its own logins and permissions.
+- `lia mcp call` from a terminal outside an lia session. It would need its own logins and permissions.
 - A JavaScript or TypeScript code-mode sandbox.
 - Retrying calls automatically, queueing requests, or streaming partial results.
 - Raising the MCP client's own message and result limits.
@@ -50,7 +50,7 @@ This workspace designs and verifies the bridge's pure core, `src/core/mcp_host/m
 Each item is a check that passes. `FINISH.md` lists each one.
 
 1. `bun run verify` in `tests/tla/mcp_call/` exits 0: model check, core tests, harness, spec to code, code to spec, spec mutations, code mutations, and traceability all pass.
-2. `zig build test` passes with the `fx mcp call` tests included (`src/main.zig` lists them in its test block).
+2. `zig build test` passes with the `lia mcp call` tests included (`src/main.zig` lists them in its test block).
 3. The shell items in `FINISH.md` (B1 to B8) and the client items (C1, C2) each have their named test passing.
-4. A binary stage in `verify` drives the built `zig-out/bin/fx` with a fake MCP server and checks each recorded bridge run against `McpCall.tla` (D1).
+4. A binary stage in `verify` drives the built `zig-out/bin/lia` with a fake MCP server and checks each recorded bridge run against `McpCall.tla` (D1).
 5. CI passes for the exact commit, including `macOS arm64`, and the startup latency budget holds.

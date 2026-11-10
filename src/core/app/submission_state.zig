@@ -76,7 +76,7 @@ pub const PendingSkillRefresh = enum {
 
 pub const State = struct {
     pending: ?PendingSubmission = null,
-    /// The prompt from `fx "<prompt>"`, sent once the first frame is on
+    /// The prompt from `lia "<prompt>"`, sent once the first frame is on
     /// screen. Owned by the app allocator.
     launch_prompt: ?[]u8 = null,
     retry_after_auth: bool = false,

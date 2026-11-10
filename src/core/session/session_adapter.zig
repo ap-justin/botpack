@@ -1,11 +1,11 @@
-//! The one door between fx and the session manager (sessions v2), fx's only
+//! The one door between lia and the session manager (sessions v2), lia's only
 //! session store.
 //!
-//! Hosts call this file; it is the only fx file that imports
+//! Hosts call this file; it is the only lia file that imports
 //! `session_manager`, and the boundary test at the bottom keeps it so. v1
 //! code is never called from here except for its encoders and its turn
 //! builder, so a session converted from v1 holds the same bytes for the same
-//! history as one fx started here.
+//! history as one lia started here.
 //!
 //! What goes where:
 //! - each completed piece of a turn is one `item` whose `type` is the v1
@@ -17,12 +17,12 @@
 //! - large bodies (tool results, tool images, command replay, web-fetch
 //!   downloads) are blobs of the session, each named by its hash (D44); an
 //!   ACP client's prompt and tool identities are settings (D46); hosted
-//!   terminal state lives in `~/.fx/terminal/{id}/` (D45). An older session
-//!   with a `~/.fx/session-files/{id}/` side folder moves on its first
+//!   terminal state lives in `~/.lia/terminal/{id}/` (D45). An older session
+//!   with a `~/.lia/session-files/{id}/` side folder moves on its first
 //!   writable open (D47, `tests/tla/session_manager/MoveSideFiles.tla`).
 //!
 //! Models of the sessions v2 rollout, one per step that changed this file:
-//! - `tests/tla/session_manager/rollout/pr-1072/PR1072Ask.tla`: `fx ask`
+//! - `tests/tla/session_manager/rollout/pr-1072/PR1072Ask.tla`: `lia ask`
 //! - `tests/tla/session_manager/rollout/pr-1073/PR1073Interactive.tla`: resume and switch
 //! - `tests/tla/session_manager/rollout/pr-1076/PR1076RunningTools.tla`: running tool calls
 //! - `tests/tla/session_manager/rollout/pr-1079/PR1079ACP.tla`: ACP sessions
@@ -69,12 +69,12 @@ const Allocator = std.mem.Allocator;
 const Event = session_event.ConversationEvent;
 const PieceKind = std.meta.Tag(Event);
 
-/// Folder of the side files older v2 sessions kept, under `~/.fx`; a
+/// Folder of the side files older v2 sessions kept, under `~/.lia`; a
 /// session moves out of it on its first writable open (D47).
 pub const files_dir_name = profile_paths.session_files_dir_name;
-/// Folder of v2 sessions' hosted terminal state, under `~/.fx` (D45).
+/// Folder of v2 sessions' hosted terminal state, under `~/.lia` (D45).
 pub const terminal_dir_name = profile_paths.terminal_dir_name;
-/// The profile's home folder, opened for listing: creating `~/.fx` in it
+/// The profile's home folder, opened for listing: creating `~/.lia` in it
 /// syncs it, and Linux cannot sync a folder opened any other way (`O_PATH`).
 fn openHome(home: []const u8) !io_mod.VerifiedDir {
     return .{ .dir = try std.Io.Dir.openDirAbsolute(io_mod.getIo(), home, .{ .iterate = true, .follow_symlinks = false }) };
@@ -97,7 +97,7 @@ pub const Child = struct {
     open: bool,
     /// How the newest finished work item ended; null before the first.
     outcome: ?ChildOutcome,
-    /// fx's data on the newest `child_spawned` and `child_finished`.
+    /// lia's data on the newest `child_spawned` and `child_finished`.
     spawn_data: ?[]u8,
     finish_data: ?[]u8,
     /// Seq of the newest line about this child.
@@ -151,7 +151,7 @@ fn processId() i64 {
 
 pub const Store = struct {
     manager: *sm.Manager,
-    /// `$HOME`, owned: the base of `~/.fx/sessions/v2` and of the side folders.
+    /// `$HOME`, owned: the base of `~/.lia/sessions/v2` and of the side folders.
     home: []u8,
     /// Read once, for the wiring trace: not a call per append.
     pid: i64,
@@ -194,12 +194,12 @@ pub const Store = struct {
         return .{ .manager = manager, .home = owned_home, .pid = pid };
     }
 
-    /// Refuses, before any session is asked for, a `~/.fx`, `~/.fx/sessions`
+    /// Refuses, before any session is asked for, a `~/.lia`, `~/.lia/sessions`
     /// or `v2` folder that is not a real folder, such as a file or a symlink
     /// (D67): every write would fail on it. One that is missing is made by
     /// the first write; one that others can read converts (D61).
     fn checkSessionsPath(home: []const u8) !void {
-        // Start from the folder that holds fx's folder, so FX_HOME is checked.
+        // Start from the folder that holds lia's folder, so LIA_HOME is checked.
         var parent = openHome(profile_paths.rootParent(home)) catch |err| switch (err) {
             error.FileNotFound => return,
             else => return err,
@@ -228,9 +228,9 @@ pub const Store = struct {
         store.* = undefined;
     }
 
-    /// `~/.fx/{name}`, or null when nothing has made it yet.
-    /// Every caller is about to change the folder, so an existing `~/.fx` is
-    /// made `0700` as every other fx writer makes it: one made by hand or an
+    /// `~/.lia/{name}`, or null when nothing has made it yet.
+    /// Every caller is about to change the folder, so an existing `~/.lia` is
+    /// made `0700` as every other lia writer makes it: one made by hand or an
     /// install script keeps the default mode, and refusing it would refuse
     /// every resume.
     fn openProfileFolder(store: *Store, name: []const u8) !?io_mod.VerifiedDir {
@@ -240,19 +240,19 @@ pub const Store = struct {
             error.FileNotFound => return null,
             else => return err,
         };
-        var fx = try io_mod.openOrCreateVerifiedPrivateDir(&home, profile_paths.rootName());
-        defer fx.close();
-        return io_mod.openVerifiedPrivateDirIfPresent(&fx, name);
+        var lia = try io_mod.openOrCreateVerifiedPrivateDir(&home, profile_paths.rootName());
+        defer lia.close();
+        return io_mod.openVerifiedPrivateDirIfPresent(&lia, name);
     }
 
-    /// `~/.fx/{name}`, made `0700` when missing; `~/.fx` too, as v1's
+    /// `~/.lia/{name}`, made `0700` when missing; `~/.lia` too, as v1's
     /// writable root makes it.
     fn makeProfileFolder(store: *Store, name: []const u8) !io_mod.VerifiedDir {
         var home = try openHome(profile_paths.rootParent(store.home));
         defer home.close();
-        var fx = try io_mod.openOrCreateVerifiedPrivateDir(&home, profile_paths.rootName());
-        defer fx.close();
-        return io_mod.openOrCreateVerifiedPrivateDir(&fx, name);
+        var lia = try io_mod.openOrCreateVerifiedPrivateDir(&home, profile_paths.rootName());
+        defer lia.close();
+        return io_mod.openOrCreateVerifiedPrivateDir(&lia, name);
     }
 
     /// The folders of `id` outside the manager: its terminal state (D45)
@@ -393,9 +393,9 @@ fn traceDiagnostic(_: ?*anyopaque, event: sm.Diagnostic) void {
 }
 
 // ---------------------------------------------------------------------------
-// Commands: `fx session {id}`, `fx session recover`, doctor
+// Commands: `lia session {id}`, `lia session recover`, doctor
 
-/// What the session commands report, in the names fx's CLI knows.
+/// What the session commands report, in the names lia's CLI knows.
 pub const CommandError = error{
     SessionNotFound,
     InvalidSessionId,
@@ -442,7 +442,7 @@ pub fn commandError(err: anyerror) CommandError {
 }
 
 /// A saved root session as v1's state, read without its lock while another
-/// process may hold it (D37), for `fx session {id}`: every turn, with each
+/// process may hold it (D37), for `lia session {id}`: every turn, with each
 /// compaction's summary where it happened (D32). A missing session, a
 /// child, or an id that cannot name one is `error.SessionNotFound`. Caller
 /// owns the result.
@@ -608,7 +608,7 @@ pub const Recovered = struct {
     }
 };
 
-/// `fx session recover` (D15): a new root session copied from `id` up to
+/// `lia session recover` (D15): a new root session copied from `id` up to
 /// its last turn that ended before any damage, with a copy of its side
 /// files. The source is never changed, and may be held by another process.
 /// A v1 session is salvaged as v1's recover salvaged it (D64). Caller owns
@@ -642,7 +642,7 @@ pub fn recover(store: *Store, alloc: Allocator, id: []const u8) !Recovered {
     return .{ .id = copy_id, .history_len = restored.history.len, .files_complete = store.copyFiles(id, copy_id) };
 }
 
-/// `fx session recover` on a session only v1 holds (D64). Caller owns the
+/// `lia session recover` on a session only v1 holds (D64). Caller owns the
 /// result.
 fn salvageV1(store: *Store, alloc: Allocator, id: []const u8) !Recovered {
     var conversion: Conversion = .{ .store = store, .alloc = alloc, .host = .ask, .started = io_mod.nanoTimestamp() };
@@ -663,7 +663,7 @@ pub const Doctor = struct {
     removed: usize = 0,
     /// Side folders with no session that could not be removed.
     kept: usize = 0,
-    /// Roots an older fx saved that v2 does not hold yet; each converts
+    /// Roots an older lia saved that v2 does not hold yet; each converts
     /// when it is first opened (D73).
     unconverted: usize = 0,
     /// v1 folders of converted sessions and subagents, kept subagents among
@@ -678,7 +678,7 @@ pub const Doctor = struct {
         id: []u8,
         /// The file and the reason the conversion refuses it.
         reason: []u8,
-        /// What `fx session recover` copies of it.
+        /// What `lia session recover` copies of it.
         recover: enum { without_rules, good_turns, nothing },
     };
 
@@ -700,7 +700,7 @@ pub const Doctor = struct {
 /// turn has not created its log yet (D36).
 const orphan_min_age_ms: i64 = 24 * std.time.ms_per_hour;
 
-/// `fx doctor` on v2 (D36): verifies up to `limit` sessions and removes side
+/// `lia doctor` on v2 (D36): verifies up to `limit` sessions and removes side
 /// folders whose session is gone. Rebuilds nothing. Caller owns the report.
 pub fn doctor(store: *Store, alloc: Allocator, limit: usize, now_ms: i64) !Doctor {
     var report: Doctor = .{};
@@ -741,8 +741,8 @@ pub fn doctor(store: *Store, alloc: Allocator, limit: usize, now_ms: i64) !Docto
     return report;
 }
 
-/// Counts the roots an older fx saved that v2 does not hold yet, and names
-/// each checked one that can't be converted with what `fx session recover`
+/// Counts the roots an older lia saved that v2 does not hold yet, and names
+/// each checked one that can't be converted with what `lia session recover`
 /// copies of it (D73). Reads only; a busy family is left out.
 fn doctorV1(store: *Store, alloc: Allocator, report: *Doctor, limit: usize) !void {
     const roots = v1_conversion.rootIds(alloc, store.home) catch |err| switch (err) {
@@ -873,7 +873,7 @@ pub const Target = union(enum) {
     id: []const u8,
     /// The newest updated root session in the workspace.
     last,
-    /// The session this host last opened in the workspace (`fx -c`).
+    /// The session this host last opened in the workspace (`lia -c`).
     last_opened,
 };
 
@@ -909,7 +909,7 @@ pub const Resumed = struct {
     }
 };
 
-/// A session's blobs as fx's stores reach them (D44), shared by every
+/// A session's blobs as lia's stores reach them (D44), shared by every
 /// capability over the session, including the copies a background reader or
 /// a running command keeps. It lives until the last holder releases it.
 /// Once the session closes it stores nothing more; reads go to the
@@ -1209,9 +1209,9 @@ fn movedFolder(kind: session_child_store.ManagedChildKind) ?[]const u8 {
 /// A moved name's key: a folder of a few bytes and a handle of at most 160.
 const movedKeyMax = 256;
 
-/// Whether the session `fx -c` opens in `workspace` left its newest turn
+/// Whether the session `lia -c` opens in `workspace` left its newest turn
 /// unfinished: still open, or ended by a crash or a closed window. A session
-/// another fx has open is working, not interrupted. Reads the index, the
+/// another lia has open is working, not interrupted. Reads the index, the
 /// session's lock, and its log tail, and writes nothing.
 pub fn hasInterruptedTurn(store: *Store, alloc: Allocator, workspace: []const u8) bool {
     const id = (store.manager.lastOpened(alloc, workspace, .app) catch return false) orelse return false;
@@ -1229,7 +1229,7 @@ pub const Session = struct {
     alloc: Allocator,
     store: *Store,
     handle: sm.Session,
-    /// `~/.fx/session-files/{id}`, owned: where an older session kept its
+    /// `~/.lia/session-files/{id}`, owned: where an older session kept its
     /// side files, read once by the move (D47).
     files_path: []u8,
     /// The session's blobs, shared with every capability over it (D44).
@@ -1251,10 +1251,10 @@ pub const Session = struct {
     turn_open: bool = false,
     /// Highest turn number started; the manager numbers turns the same way.
     last_turn: u64 = 0,
-    /// The v2 turn behind each of fx's history turns, in order; null for a
+    /// The v2 turn behind each of lia's history turns, in order; null for a
     /// compacted summary.
     turn_numbers: std.ArrayList(?u64) = .empty,
-    /// What fx's history leaves out of its first kept turn (D87).
+    /// What lia's history leaves out of its first kept turn (D87).
     trim: Trim = .{},
     /// The language tag last written, owned.
     language: ?[]u8 = null,
@@ -1529,14 +1529,14 @@ pub const Session = struct {
         return lines.items;
     }
 
-    /// The session is on disk, so `fx --resume` opens it: from its first
+    /// The session is on disk, so `lia --resume` opens it: from its first
     /// turn, ended or open, or from its open when it was resumed or forked.
     /// A fork before the first prompt holds no turn and is saved (D90).
     pub fn saved(self: *const Session) bool {
         return self.handle.onDisk();
     }
 
-    /// The session's folder under `~/.fx/sessions/v2`, for display. Caller owns it.
+    /// The session's folder under `~/.lia/sessions/v2`, for display. Caller owns it.
     pub fn folderPath(self: *const Session, alloc: Allocator) ![]u8 {
         return profile_paths.rootPath(alloc, self.store.home, &.{ profile_paths.sessions_dir_name, session_layout.sessions_v2_dir, self.id() });
     }
@@ -1614,7 +1614,7 @@ pub const Session = struct {
     // -- bodies --------------------------------------------------------------
 
     /// The capability over this session's blobs (D44): it stores and reads
-    /// large bodies, routes terminal state to `~/.fx/terminal/{id}` (D45),
+    /// large bodies, routes terminal state to `~/.lia/terminal/{id}` (D45),
     /// and has no side folder. Borrowed until `close`.
     pub fn childCapability(self: *Session) !*session_child_store.SessionChildCapability {
         self.mutex.lockUncancelable(io_mod.getIo());
@@ -2226,7 +2226,7 @@ pub const Session = struct {
             keep_from = self.last_turn;
             cut_turn = true;
         }
-        // A cut inside a turn counts from where fx's view of that turn starts,
+        // A cut inside a turn counts from where lia's view of that turn starts,
         // past what an earlier compaction inside it covered (D87).
         const trim: Trim = if (!cut_turn) .{} else if (self.trim.turn == keep_from) .{
             .turn = keep_from,
@@ -2246,7 +2246,7 @@ pub const Session = struct {
         };
         _ = try self.write(&.{.{ .compacted = try jsonValue(arena.allocator(), data) }});
         self.trim = if (trim.tool_steps != 0 or trim.steering != 0) trim else .{};
-        // fx's history is now the summary, then the retained turns.
+        // lia's history is now the summary, then the retained turns.
         var kept: std.ArrayList(?u64) = .empty;
         errdefer kept.deinit(self.alloc);
         try kept.append(self.alloc, null);
@@ -2255,7 +2255,7 @@ pub const Session = struct {
         self.turn_numbers = kept;
     }
 
-    /// Where fx's raw history turn `turn` sits in `numbers`. A compaction cut
+    /// Where lia's raw history turn `turn` sits in `numbers`. A compaction cut
     /// counts only raw turns, while `numbers` also holds the summary's slot.
     /// Returns `numbers.len` when the history has no such turn.
     fn turnSlot(numbers: []const ?u64, turn: usize) usize {
@@ -2400,7 +2400,7 @@ pub const Session = struct {
     }
 
     /// The totals the log's newest `set usage` holds. A value written
-    /// before D92, or one fx cannot read, counts from zero.
+    /// before D92, or one lia cannot read, counts from zero.
     fn savedUsage(self: *Session, sa: Allocator) !types.Usage {
         const raw = (try self.handle.state(sa)).usage orelse return .{};
         return json_decode.parseFromSliceLeaky(types.Usage, sa, raw, .{ .ignore_unknown_fields = true }) catch |err| switch (err) {
@@ -2449,7 +2449,7 @@ pub const Session = struct {
 
     // -- resume --------------------------------------------------------------
 
-    /// Rebuilds fx's history and settings from the open log (`restoreFrom`),
+    /// Rebuilds lia's history and settings from the open log (`restoreFrom`),
     /// and keeps what later appends compare against: the last turn, the turn
     /// behind each history entry, and the stored usage and language.
     pub fn restore(self: *Session, alloc: Allocator) !Restored {
@@ -2620,7 +2620,7 @@ pub const Session = struct {
     }
 
     /// What this session's log says about its subagents' reports, oldest
-    /// first: every work spawned and finished, with fx's data, and every
+    /// first: every work spawned and finished, with lia's data, and every
     /// report it took (`child_report`). Read from the start, past any
     /// compaction, since a report can stay owed across one. Strings live in
     /// `arena`.
@@ -2775,7 +2775,7 @@ pub const Session = struct {
     /// in the side folder becomes a blob, the map from each old name to its
     /// blob is one more blob, and one batch records the map, every moved
     /// blob, and the client's settings from the old files.
-    /// Then the terminal folder moves to `~/.fx/terminal/{id}` and the side
+    /// Then the terminal folder moves to `~/.lia/terminal/{id}` and the side
     /// folder goes. Each step can be repeated, so a crash at any point
     /// redoes the move on the next open.
     fn openMoved(self: *Session) !void {
@@ -2816,7 +2816,7 @@ pub const Session = struct {
         return lines.bodies;
     }
 
-    /// Renames `side/terminal` to `~/.fx/terminal/{id}/terminal`, the layout
+    /// Renames `side/terminal` to `~/.lia/terminal/{id}/terminal`, the layout
     /// the terminal store keeps (D45). A terminal folder already there was
     /// moved by an earlier try.
     fn moveTerminalFolder(self: *Session, side: *io_mod.VerifiedDir) !void {
@@ -2986,7 +2986,7 @@ const Body = struct {
 };
 
 /// Lists each regular file of `side/{folder}`, keeping the folder open in
-/// `dirs`. Anything else there is not fx's and is left for the side
+/// `dirs`. Anything else there is not lia's and is left for the side
 /// folder's removal, with a trace.
 fn listFolder(a: Allocator, handle: sm.Session, side: *io_mod.VerifiedDir, folder: []const u8, dirs: *std.ArrayList(std.Io.Dir), bodies: *std.ArrayList(Body)) !void {
     const io = io_mod.getIo();
@@ -3238,7 +3238,7 @@ const slow_conversion_text = "Converting this session from the previous session 
 /// fingerprint its removal checks (D60), and what its copy left out (D56,
 /// D62), the first `max_records` files by name and how many in all, which
 /// its v1 folder keeps and no removal then takes. The fingerprint is empty
-/// then, so an older fx, which removes a v1 folder whose fingerprint
+/// then, so an older lia, which removes a v1 folder whose fingerprint
 /// matches, never takes that folder either.
 const V1Source = struct {
     fingerprint: []const u8 = "",
@@ -3297,8 +3297,8 @@ pub const LeftOut = struct {
         const why = try entry.reason(alloc);
         defer alloc.free(why);
         if (std.mem.eql(u8, entry.member, root_id))
-            return alloc.print("This session was converted without {s} because {s}. Its earlier folder ~/.fx/sessions/{s} keeps it.", .{ entry.file, why, entry.member });
-        return alloc.print("This session was converted without {s} of its subagent {s} because {s}. Its earlier folder ~/.fx/sessions/{s} keeps it.", .{ entry.file, entry.member, why, entry.member });
+            return alloc.print("This session was converted without {s} because {s}. Its earlier folder ~/.lia/sessions/{s} keeps it.", .{ entry.file, why, entry.member });
+        return alloc.print("This session was converted without {s} of its subagent {s} because {s}. Its earlier folder ~/.lia/sessions/{s} keeps it.", .{ entry.file, entry.member, why, entry.member });
     }
 
     /// Why the copy left it out, as a clause. Caller owns it.
@@ -3494,7 +3494,7 @@ const Conversion = struct {
         };
     }
 
-    /// Copies `<v1>/terminal` to `~/.fx/terminal/{id}/terminal` (D45), over
+    /// Copies `<v1>/terminal` to `~/.lia/terminal/{id}/terminal` (D45), over
     /// what a crashed try left there, whatever its folders' modes, as v1
     /// opened them (it made each private). An entry the copy can't take is
     /// left out, and the member's v1 folder keeps it (D56, D62). A copy, not
@@ -4032,7 +4032,7 @@ fn newestListed(store: *Store, alloc: Allocator, workspace: []const u8) !?[]u8 {
     return try alloc.dupe(u8, page.summaries.items[0].id);
 }
 
-/// What `fx sessions convert` did (D61).
+/// What `lia sessions convert` did (D61).
 pub const ConvertReport = struct {
     converted: usize = 0,
     busy: usize = 0,
@@ -4163,8 +4163,8 @@ pub fn convertAll(store: *Store, alloc: Allocator) !ConvertReport {
     return report;
 }
 
-/// A session an older fx saved as a subagent that no conversion takes, and
-/// why no fx opens it (D88). Its v1 folder is kept as it is.
+/// A session an older lia saved as a subagent that no conversion takes, and
+/// why no lia opens it (D88). Its v1 folder is kept as it is.
 pub const KeptChild = struct {
     id: []u8,
     reason: []u8,
@@ -4181,7 +4181,7 @@ pub fn freeKeptChildren(alloc: Allocator, kept: []KeptChild) void {
     alloc.free(kept);
 }
 
-/// Each v1 child whose parent is not a v1 root, with why no fx opens it
+/// Each v1 child whose parent is not a v1 root, with why no lia opens it
 /// (D88): one v2 already holds, whose folder a cleanup kept (D60), a child
 /// of an earlier subagent, which v1 never let a subagent message, or one
 /// whose parent is gone or does not list it. Reads only. Caller owns the
@@ -4218,7 +4218,7 @@ fn keptChildren(store: *Store, alloc: Allocator) ![]KeptChild {
 
 const StrayVerdict = struct { reason: []u8, keeps: bool = false };
 
-/// Why no fx opens `stray`, for `keptChildren`, and whether its folder
+/// Why no lia opens `stray`, for `keptChildren`, and whether its folder
 /// keeps something its converted copy left out. Caller owns the reason.
 fn strayReason(store: *Store, alloc: Allocator, stray: v1_conversion.Stray) !StrayVerdict {
     if (store.manager.peek(alloc, stray.id)) |peeked_value| {
@@ -4231,20 +4231,20 @@ fn strayReason(store: *Store, alloc: Allocator, stray: v1_conversion.Stray) !Str
     } else |err| switch (err) {
         error.NotFound, error.InvalidArgument => {},
         error.OutOfMemory => return err,
-        else => return .{ .reason = try alloc.print("fx can't read its converted copy ({s}), so this folder stays as it is", .{@errorName(err)}) },
+        else => return .{ .reason = try alloc.print("lia can't read its converted copy ({s}), so this folder stays as it is", .{@errorName(err)}) },
     }
-    const parent = stray.parent orelse return .{ .reason = try alloc.dupe(u8, "it names no parent session, so no fx opens it") };
+    const parent = stray.parent orelse return .{ .reason = try alloc.dupe(u8, "it names no parent session, so no lia opens it") };
     return .{ .reason = try switch (stray.parent_kind) {
-        .child => alloc.print("it is a subagent of the earlier subagent {s}, which no fx opens", .{parent}),
+        .child => alloc.print("it is a subagent of the earlier subagent {s}, which no lia opens", .{parent}),
         .unreadable => alloc.print("its parent session {s} can't be read, so it stays with it", .{parent}),
         .absent => if (store.manager.peek(alloc, parent)) |peeked_value| blk: {
             var peeked = peeked_value;
             defer peeked.deinit(alloc);
             break :blk switch (peeked.role) {
-                .child => alloc.print("it is a subagent of the earlier subagent {s}, which no fx opens", .{parent}),
-                .root => alloc.print("its parent {s} does not list it, so no fx opens it", .{parent}),
+                .child => alloc.print("it is a subagent of the earlier subagent {s}, which no lia opens", .{parent}),
+                .root => alloc.print("its parent {s} does not list it, so no lia opens it", .{parent}),
             };
-        } else |_| alloc.print("its parent session {s} is gone, so no fx opens it", .{parent}),
+        } else |_| alloc.print("its parent session {s} is gone, so no lia opens it", .{parent}),
     } };
 }
 
@@ -4253,9 +4253,9 @@ fn strayReason(store: *Store, alloc: Allocator, stray: v1_conversion.Stray) !Str
 fn convertedReason(alloc: Allocator, source: ?V1Source) ![]u8 {
     const known = source orelse V1Source{};
     const count = known.leftOutCount();
-    if (count == 1 and known.left_out.len == 1) return alloc.print("fx converted it already without {s}, so this folder keeps it", .{known.left_out[0].file});
-    if (count > 0) return alloc.print("fx converted it already without {d} of its files, so this folder keeps them", .{count});
-    return alloc.dupe(u8, "fx converted it already, so anything an older fx added since stays only in this folder");
+    if (count == 1 and known.left_out.len == 1) return alloc.print("lia converted it already without {s}, so this folder keeps it", .{known.left_out[0].file});
+    if (count > 0) return alloc.print("lia converted it already without {d} of its files, so this folder keeps them", .{count});
+    return alloc.dupe(u8, "lia converted it already, so anything an older lia added since stays only in this folder");
 }
 
 const ConversionStorageError = error{ NoSpaceLeft, AccessDenied, ReadOnlyFileSystem, FileTooBig, SessionStoreUnavailable };
@@ -4279,7 +4279,7 @@ fn copyFailed(id: []const u8, err: anyerror) bool {
 }
 
 /// Side folders are a few levels deep (a kind, then files); deeper trees
-/// are not fx's and are left out.
+/// are not lia's and are left out.
 const max_copy_depth = 8;
 
 /// `openSource` opens each folder below `source`, never through a symlink.
@@ -4341,7 +4341,7 @@ const TurnNumbers = struct {
     trim: *Trim,
 };
 
-/// Rebuilds fx's history and settings from `state` and its log: the newest
+/// Rebuilds lia's history and settings from `state` and its log: the newest
 /// compaction's summary, then every turn after it (or after the turn it
 /// kept). A turn a crash or close ended has no `interruption` item and
 /// comes back interrupted: `failed` after a crash, `cancelled` after a
@@ -4394,7 +4394,7 @@ fn restoreFrom(src: Source, alloc: Allocator, sa: Allocator, state: sm.State, nu
 }
 
 /// Leaves out of the first kept turn the steps and steering messages a
-/// compaction inside it summarized, as fx's history leaves them out when it
+/// compaction inside it summarized, as lia's history leaves them out when it
 /// compacts (D87). A turn that does not have them stays whole, with a trace
 /// line, so a resume is never refused for it. Returns whether it trimmed.
 fn trimFirstKept(alloc: Allocator, sa: Allocator, history: *std.ArrayList(types.HistoryTurn), covered: types.ContextHistoryCut, id: []const u8) !bool {
@@ -4412,7 +4412,7 @@ fn trimFirstKept(alloc: Allocator, sa: Allocator, history: *std.ArrayList(types.
     return true;
 }
 
-/// fx's settings from `state`, with an empty history. Caller owns the result.
+/// lia's settings from `state`, with an empty history. Caller owns the result.
 fn settingsFrom(alloc: Allocator, sa: Allocator, state: sm.State) !Restored {
     const language = if (state.language) |raw| try decodeLanguage(sa, raw) else types.ConversationLanguage.default();
     var restored: Restored = .{
@@ -4429,7 +4429,7 @@ fn settingsFrom(alloc: Allocator, sa: Allocator, state: sm.State) !Restored {
 }
 
 /// Every turn in the log, oldest first, with each compaction's summary where
-/// its line sits, as v1's archive lists them for `fx session {id}` (D32).
+/// its line sits, as v1's archive lists them for `lia session {id}` (D32).
 /// Pages are freed as they are read. Caller owns the result.
 fn detailHistory(src: Source, alloc: Allocator) ![]types.HistoryTurn {
     var history: std.ArrayList(types.HistoryTurn) = .empty;
@@ -4652,7 +4652,7 @@ noinline fn replay(
                         builder.user.?.sent_at_ms = std.math.cast(i64, entry.ts_ms) orelse 0;
                         continue;
                     }
-                    // A call record only shows in Ctrl+O, so one fx can't
+                    // A call record only shows in Ctrl+O, so one lia can't
                     // read costs that record, never the session.
                     if (kind == .model_call) {
                         if (decodeModelCall(pa, data)) |record| {
@@ -5001,7 +5001,7 @@ fn resumeError(err: sm.OpenError, target: Target) ResumeError {
             .last => error.NoSavedSessions,
             .last_opened => error.NoRememberedSession,
         },
-        // A child is resumed only through its parent, and fx says so, as v1
+        // A child is resumed only through its parent, and lia says so, as v1
         // did (D71).
         error.ChildSession => error.OneOffSessionNotResumable,
         error.Busy => error.SessionBusy,
@@ -5017,13 +5017,13 @@ const superseded_type = "superseded";
 /// A tool call saved before it runs (D28); its data is a `tool_call` piece.
 /// The item after a turn's user piece when someone other than the user
 /// wrote that message, such as a subagent's report that woke its parent.
-/// Older fx drops it as an unknown item and reads the turn as before.
+/// Older lia drops it as an unknown item and reads the turn as before.
 const author_type = "author";
 
 /// The item after a piece that carries a subagent's report into this
 /// session's history, `{"child":…,"work_id":…}`: the opening message of a
 /// turn the report started, or the steering a boundary took. It marks the
-/// report taken (`reportLines`). Older fx drops it as an unknown item.
+/// report taken (`reportLines`). Older lia drops it as an unknown item.
 const child_report_type = "child_report";
 
 const ChildReportData = struct { child: []const u8, work_id: []const u8 };
@@ -5092,7 +5092,7 @@ fn parseRecoveryRecord(data: []const u8) ?[32]u8 {
 }
 
 /// An edit's full-diff rows, saved right after its `tool_result` item rather
-/// than inside it. Older fx versions reject unknown fields in a piece but
+/// than inside it. Older lia versions reject unknown fields in a piece but
 /// skip unknown item types, so they still read the result and show the
 /// edit's preview; its data is a `FileReview`.
 const file_review_type = "file_review";
@@ -5104,7 +5104,7 @@ const FileReview = struct {
 };
 
 /// `result` without its edit's rows and their lifecycle id, which
-/// `encodeFileReview` saves beside it, so the piece has the shape older fx
+/// `encodeFileReview` saves beside it, so the piece has the shape older lia
 /// versions read. Checks the whole result first.
 fn withoutReviewLines(result: session_event.ConversationToolResult) !session_event.ConversationToolResult {
     var presentation = result.committed_file_presentation orelse return result;
@@ -5161,7 +5161,7 @@ fn attachFileReview(src: Source, a: Allocator, builder: *session_log.Conversatio
     }
 }
 /// What the model reads for a call that was running when its turn ended.
-pub const unfinished_tool_output = "fx stopped while this tool was running, so it may have partly run. Check its effects before running it again.";
+pub const unfinished_tool_output = "lia stopped while this tool was running, so it may have partly run. Check its effects before running it again.";
 const blob_ref_key = "$blob";
 const blob_ref_prefix = "{\"" ++ blob_ref_key ++ "\":\"";
 
@@ -5180,14 +5180,14 @@ const CompactedData = struct {
     /// The first turn the compaction kept, read back to on resume.
     keep_from_turn: ?u64 = null,
     /// The steps and steering messages of the first kept turn that the
-    /// summary covers, which fx's history leaves out of that turn, as it
+    /// summary covers, which lia's history leaves out of that turn, as it
     /// does when it compacts inside a turn (D87). Older lines have neither,
     /// and keep the turn whole.
     keep_tool_steps: usize = 0,
     keep_steering: usize = 0,
 };
 
-/// What fx's history leaves out of its first kept turn (D87): none, or the
+/// What lia's history leaves out of its first kept turn (D87): none, or the
 /// steps and steering messages of `turn` a compaction covers.
 const Trim = struct {
     turn: ?u64 = null,
@@ -5222,7 +5222,7 @@ fn itemType(kind: PieceKind) ?[]const u8 {
         .turn_completed => "turn_end",
         .interrupted => "interruption",
         .context_checkpoint => null,
-        // An older fx leaves out an item type it does not know (D17, D93, D94).
+        // An older lia leaves out an item type it does not know (D17, D93, D94).
         .context_note => "context_note",
         .runtime_context => "runtime_context",
         .model_call => "model_call",
@@ -5294,7 +5294,7 @@ fn encodePiece(alloc: Allocator, event: Event) ![]u8 {
 }
 
 /// A call record from the log, or null when it can't be parsed or fails its
-/// checks. A newer fx's extra fields are ignored. Strings are in `arena`.
+/// checks. A newer lia's extra fields are ignored. Strings are in `arena`.
 fn decodeModelCall(arena: Allocator, data: []const u8) ?types.ModelCallRecord {
     const record = json_decode.parseFromSliceLeaky(types.ModelCallRecord, arena, data, .{
         .allocate = .alloc_always,
@@ -5329,9 +5329,9 @@ test "v2 conversation pieces stay bounded under fuzzed bytes" {
             // A context note (D93) and a saved runtime context (D94), as v2 writes them.
             "{\"text\":\"<scoped-rules from=\\\"sub/AGENTS.md\\\" scope=\\\"sub\\\">\\nR\\n</scoped-rules>\",\"sources\":[{\"path\":\"/w/sub/AGENTS.md\",\"stamp\":7}]}",
             "{\"text\":\"n\",\"sources\":[{\"path\":\"\",\"stamp\":0}]}",
-            "{\"messages\":[\"<fx-turn-context>\\ngit_branch: main\\n</fx-turn-context>\",\"Runtime context: permission mode is auto.\"]}",
+            "{\"messages\":[\"<lia-turn-context>\\ngit_branch: main\\n</lia-turn-context>\",\"Runtime context: permission mode is auto.\"]}",
             "{\"messages\":[]}",
-            // Model call records: as fx writes one, one with a newer fx's
+            // Model call records: as lia writes one, one with a newer lia's
             // extra field, and ones whose provider text must be refused.
             "{\"at_ms\":1762300000000,\"elapsed_ms\":2140,\"purpose\":\"turn\",\"outcome\":\"completed\",\"provider\":\"gateway\",\"model\":\"anthropic/claude-opus-4.8\",\"served_by\":null,\"generation_id\":\"gen_01JC7P5XQ2M8VZ000000000001\",\"finish\":\"stop\",\"failure\":null,\"retry_after_s\":null,\"input_tokens\":1204,\"output_tokens\":188,\"after_tool_step_count\":0}",
             "{\"at_ms\":1,\"provider\":\"gateway\",\"model\":\"m\",\"cost_usd\":0.01}",
@@ -5604,7 +5604,7 @@ const TestHome = struct {
 
     fn init(t: *TestHome) !void {
         // Iterable, so Linux gives a real descriptor that `fsync` accepts
-        // when a test makes `.fx` here (`io_mod.syncVerifiedDir`).
+        // when a test makes `.lia` here (`io_mod.syncVerifiedDir`).
         t.tmp = testing.tmpDir(.{ .iterate = true });
         errdefer t.tmp.cleanup();
         t.home = try io_mod.dirRealpathAlloc(testing.allocator, t.tmp.dir, ".");
@@ -5629,13 +5629,13 @@ test "the store refuses a sessions folder that is a file or a symlink, and opens
     var missing = try Store.open(testing.allocator, home);
     missing.deinit(testing.allocator);
 
-    try tmp.dir.createDirPath(io, ".fx");
-    try tmp.dir.writeFile(io, .{ .sub_path = ".fx/sessions", .data = "not a folder" });
+    try tmp.dir.createDirPath(io, ".lia");
+    try tmp.dir.writeFile(io, .{ .sub_path = ".lia/sessions", .data = "not a folder" });
     try testing.expectError(error.SessionPathUnsafe, Store.open(testing.allocator, home));
 
-    try tmp.dir.deleteFile(io, ".fx/sessions");
+    try tmp.dir.deleteFile(io, ".lia/sessions");
     try tmp.dir.createDirPath(io, "elsewhere");
-    try tmp.dir.symLink(io, "../elsewhere", ".fx/sessions", .{ .is_directory = true });
+    try tmp.dir.symLink(io, "../elsewhere", ".lia/sessions", .{ .is_directory = true });
     try testing.expectError(error.SessionPathUnsafe, Store.open(testing.allocator, home));
 }
 
@@ -5726,7 +5726,7 @@ test "a result the model saw whole comes back whole after a resume, or says its 
     for ([_]bool{ false, true }) |lost| {
         if (lost) {
             // Its blob gone, the result says so rather than show a preview.
-            const path = try std.mem.concat(testing.allocator, u8, &.{ ".fx/sessions/v2/", id, "/blobs/", artifact_digest.blobHash(handle).? });
+            const path = try std.mem.concat(testing.allocator, u8, &.{ ".lia/sessions/v2/", id, "/blobs/", artifact_digest.blobHash(handle).? });
             defer testing.allocator.free(path);
             try t.tmp.dir.deleteFile(io_mod.getIo(), path);
         }
@@ -6157,7 +6157,7 @@ test "a send's record rides with the turn's first write, and a reopen finds the 
     try testing.expectEqualStrings("go", restored.history[0].interrupted.user.text);
 }
 
-test "an unfinished newest turn is interrupted unless another fx has the session open" {
+test "an unfinished newest turn is interrupted unless another lia has the session open" {
     var t: TestHome = undefined;
     try t.init();
     defer t.deinit();
@@ -6429,7 +6429,7 @@ test "a session whose first turn never ended takes its first prompt as title at 
     try s.appendProgress(.{ .text = @constCast("Why is the sky orange at dusk?") }, .{}, .{});
     const id = try testing.allocator.dupe(u8, s.id());
     defer testing.allocator.free(id);
-    // The first turn never ends through fx, as when fx is killed.
+    // The first turn never ends through lia, as when lia is killed.
     s.close();
     try testing.expectEqual(@as(usize, 0), try countTitleSets(t.store.manager, id));
 
@@ -6576,7 +6576,7 @@ test "a damaged line in a compaction cycle shows that cycle's turns before it an
     // One byte of cycle 1's second prompt changes while the session is open,
     // so that line's checksum fails.
     const io = io_mod.getIo();
-    const log_path = try std.Io.Dir.path.join(testing.allocator, &.{ ".fx", "sessions", "v2", s.id(), "log.jsonl" });
+    const log_path = try std.Io.Dir.path.join(testing.allocator, &.{ ".lia", "sessions", "v2", s.id(), "log.jsonl" });
     defer testing.allocator.free(log_path);
     const bytes = try t.tmp.dir.readFileAlloc(io, log_path, testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(bytes);
@@ -6820,7 +6820,7 @@ test "a tool result backed only by its command replay streams as it commits" {
         .output = @constCast("REPLAY_ONLY_OUTPUT"),
         .output_bytes = 18,
         .stored_output_bytes = 18,
-        .command_output_replay = .{ .available = .{ .handle = "fx-command-replay-0-0.bin", .framed_bytes = 27 } },
+        .command_output_replay = .{ .available = .{ .handle = "lia-command-replay-0-0.bin", .framed_bytes = 27 } },
     }};
     var steps = [_]types.ToolExecutionStep{.{ .tool_calls = &calls, .tool_results = &results }};
     const execution: types.ExecutionMemory = .{ .tool_steps = &steps };
@@ -6847,7 +6847,7 @@ test "a tool result backed only by its command replay streams as it commits" {
     try testing.expectEqual(@as(usize, 1), try countItems(t.store.manager, id, "tool_result"));
 }
 
-test "an edit's review rows are saved beside its tool result in the shape older fx reads" {
+test "an edit's review rows are saved beside its tool result in the shape older lia reads" {
     var t: TestHome = undefined;
     try t.init();
     defer t.deinit();
@@ -6899,7 +6899,7 @@ test "an edit's review rows are saved beside its tool result in the shape older 
     try testing.expectEqual(@as(usize, 1), try countItems(t.store.manager, id, "tool_result"));
     try testing.expectEqual(@as(usize, 1), try countItems(t.store.manager, id, file_review_type));
 
-    // The result's presentation has only the fields older fx versions know,
+    // The result's presentation has only the fields older lia versions know,
     // and no lifecycle id: the preview-only shape they write themselves.
     const data = try firstItemData(t.store.manager, id, "tool_result");
     defer testing.allocator.free(data);
@@ -7155,7 +7155,7 @@ test "each later compaction keeps only the turns after its cut" {
     try s.commitTurn(assistantTurn("two", "2"), language);
     var first = "turn one".*;
     try s.commitCompaction(.{ .summary = &first, .removed_turn_count = 1, .compaction_count = 1 }, false, .{ .turns = 1 });
-    // From here fx's history starts with the summary, and each cut counts
+    // From here lia's history starts with the summary, and each cut counts
     // only the raw turns after it, so `.turns = 1` keeps the newest turn.
     try s.commitTurn(assistantTurn("three", "3"), language);
     var second = "turns one and two".*;
@@ -7219,7 +7219,7 @@ test "a compaction inside a turn leaves the steps it covers out of that turn on 
     defer testing.allocator.free(id);
     s.close();
 
-    // As fx's history after the compaction: the summary, then the turn's
+    // As lia's history after the compaction: the summary, then the turn's
     // prompt and what came after the cut.
     {
         const r = try Session.resumeSession(testing.allocator, &t.store, .{ .id = id }, "/w", .ask);
@@ -7235,7 +7235,7 @@ test "a compaction inside a turn leaves the steps it covers out of that turn on 
         try testing.expectEqual(@as(usize, 1), kept.execution.steering.len);
         try testing.expectEqualStrings("after two", kept.execution.steering[0].text);
         try testing.expectEqual(@as(usize, 0), kept.execution.steering[0].after_tool_step_count);
-        // fx's cut counts from the turn as its history now shows it.
+        // lia's cut counts from the turn as its history now shows it.
         var second = "all three steps".*;
         try r.commitCompaction(.{ .summary = &second, .removed_turn_count = 0, .compaction_count = 2 }, false, .{ .tool_steps = 1, .steering = 1 });
     }
@@ -7305,7 +7305,7 @@ test "a turn's context notes come back on resume at their boundaries, before tha
     // Each note is its own `context_note` item, written before the steering
     // at its boundary.
     const io = io_mod.getIo();
-    const log_path = try std.Io.Dir.path.join(testing.allocator, &.{ ".fx", "sessions", "v2", id, "log.jsonl" });
+    const log_path = try std.Io.Dir.path.join(testing.allocator, &.{ ".lia", "sessions", "v2", id, "log.jsonl" });
     defer testing.allocator.free(log_path);
     const bytes = try t.tmp.dir.readFileAlloc(io, log_path, testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(bytes);
@@ -7346,7 +7346,7 @@ test "a turn's runtime context comes back on resume, saved once right after its 
     const s = try Session.create(testing.allocator, &t.store, "/w", .ask, testSeed(&model));
     var fixture: NoteTestSteps = .{};
     fixture.init();
-    var captured = [_][]u8{ @constCast("<fx-turn-context>\ngit_branch: main\n</fx-turn-context>"), @constCast("Runtime context: permission mode is ask.") };
+    var captured = [_][]u8{ @constCast("<lia-turn-context>\ngit_branch: main\n</lia-turn-context>"), @constCast("Runtime context: permission mode is ask.") };
     var notes = [_]types.PersistedContextNote{.{ .text = @constCast("note at start"), .after_tool_step_count = 0 }};
     const user: types.UserTurn = .{ .text = @constCast("two steps") };
     // Every save of the turn carries it, so the streamed pieces stay a prefix
@@ -7363,7 +7363,7 @@ test "a turn's runtime context comes back on resume, saved once right after its 
     s.close();
 
     const io = io_mod.getIo();
-    const log_path = try std.Io.Dir.path.join(testing.allocator, &.{ ".fx", "sessions", "v2", id, "log.jsonl" });
+    const log_path = try std.Io.Dir.path.join(testing.allocator, &.{ ".lia", "sessions", "v2", id, "log.jsonl" });
     defer testing.allocator.free(log_path);
     const bytes = try t.tmp.dir.readFileAlloc(io, log_path, testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(bytes);
@@ -7414,7 +7414,7 @@ test "a turn's model call records come back on resume at their steps, each saved
     s.close();
 
     const io = io_mod.getIo();
-    const log_path = try std.Io.Dir.path.join(testing.allocator, &.{ ".fx", "sessions", "v2", id, "log.jsonl" });
+    const log_path = try std.Io.Dir.path.join(testing.allocator, &.{ ".lia", "sessions", "v2", id, "log.jsonl" });
     defer testing.allocator.free(log_path);
     const bytes = try t.tmp.dir.readFileAlloc(io, log_path, testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(bytes);
@@ -7468,7 +7468,7 @@ test "steering delivered after a saved call at the same step goes after it, so t
     defer testing.allocator.free(id);
     s.close();
     const io = io_mod.getIo();
-    const log_path = try std.Io.Dir.path.join(testing.allocator, &.{ ".fx", "sessions", "v2", id, "log.jsonl" });
+    const log_path = try std.Io.Dir.path.join(testing.allocator, &.{ ".lia", "sessions", "v2", id, "log.jsonl" });
     defer testing.allocator.free(log_path);
     const bytes = try t.tmp.dir.readFileAlloc(io, log_path, testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(bytes);
@@ -7489,13 +7489,13 @@ test "steering delivered after a saved call at the same step goes after it, so t
     try testing.expectEqual(@as(usize, 1), saved[1].after_steering_count);
 }
 
-test "replay keeps a model call record a newer fx wrote and leaves out one it can't show" {
+test "replay keeps a model call record a newer lia wrote and leaves out one it can't show" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
     const newer = decodeModelCall(a, "{\"at_ms\":1,\"provider\":\"gateway\",\"model\":\"m\",\"cost_usd\":0.01}").?;
     try testing.expectEqualStrings("gateway", newer.provider);
-    // Escape bytes from a provider, an outcome this fx doesn't know, a
+    // Escape bytes from a provider, an outcome this lia doesn't know, a
     // negative time, and bytes that aren't JSON.
     try testing.expect(decodeModelCall(a, "{\"at_ms\":1,\"provider\":\"gateway\",\"model\":\"m\",\"generation_id\":\"gen_\\u001b[2J\"}") == null);
     try testing.expect(decodeModelCall(a, "{\"at_ms\":1,\"provider\":\"gateway\",\"model\":\"m\",\"outcome\":\"exploded\"}") == null);
@@ -7579,7 +7579,7 @@ test "resume refuses a session whose compaction line is damaged" {
     // One byte of the summary changes, so its line fails its check. Open
     // reads past it: a snapshot follows every compaction.
     const io = io_mod.getIo();
-    const log_path = try std.Io.Dir.path.join(testing.allocator, &.{ ".fx", "sessions", "v2", id, "log.jsonl" });
+    const log_path = try std.Io.Dir.path.join(testing.allocator, &.{ ".lia", "sessions", "v2", id, "log.jsonl" });
     defer testing.allocator.free(log_path);
     const bytes = try t.tmp.dir.readFileAlloc(io, log_path, testing.allocator, .limited(1 << 20));
     defer testing.allocator.free(bytes);
@@ -7592,7 +7592,7 @@ test "resume refuses a session whose compaction line is damaged" {
     try testing.expectError(error.InvalidSessionFormat, r.restore(testing.allocator));
 }
 
-test "fx session lists every turn with each summary where it happened, as v1 counts it (D32)" {
+test "lia session lists every turn with each summary where it happened, as v1 counts it (D32)" {
     var t: TestHome = undefined;
     try t.init();
     defer t.deinit();
@@ -7601,7 +7601,7 @@ test "fx session lists every turn with each summary where it happened, as v1 cou
     const s = try Session.create(testing.allocator, &t.store, "/w", .ask, testSeed(&model));
     try s.commitTurn(assistantTurn("one", "1"), language);
     try s.commitTurn(assistantTurn("two", "2"), language);
-    // fx's own count differs from the log's; the listing counts the log.
+    // lia's own count differs from the log's; the listing counts the log.
     var first = "turn one".*;
     try s.commitCompaction(.{ .summary = &first, .removed_turn_count = 1, .compaction_count = 1 }, false, .{ .turns = 1 });
     try s.commitTurn(assistantTurn("three", "3"), language);
@@ -7826,7 +7826,7 @@ test "a v2 session keeps its bodies as blobs its items list, and never makes a s
     defer testing.allocator.free(id);
     s.close();
 
-    try testing.expect(!pathExists(&t, &.{ ".fx", files_dir_name }));
+    try testing.expect(!pathExists(&t, &.{ ".lia", files_dir_name }));
     const hash = artifact_digest.blobHash(handle).?;
     const body = try t.store.manager.getBlob(testing.allocator, id, hash);
     defer testing.allocator.free(body);
@@ -7885,9 +7885,9 @@ test "a session that never reached the disk takes its terminal folder, and a sav
     try t.init();
     defer t.deinit();
     var model = "m".*;
-    var fx = try io_mod.openOrCreateVerifiedPrivateDirFromDir(t.tmp.dir, ".fx");
-    defer fx.close();
-    var terminal_root = try io_mod.openOrCreateVerifiedPrivateDir(&fx, terminal_dir_name);
+    var lia = try io_mod.openOrCreateVerifiedPrivateDirFromDir(t.tmp.dir, ".lia");
+    defer lia.close();
+    var terminal_root = try io_mod.openOrCreateVerifiedPrivateDir(&lia, terminal_dir_name);
     defer terminal_root.close();
 
     const unsaved = try Session.create(testing.allocator, &t.store, "/w", .ask, testSeed(&model));
@@ -7896,7 +7896,7 @@ test "a session that never reached the disk takes its terminal folder, and a sav
     var made = try io_mod.openOrCreateVerifiedPrivateDir(&terminal_root, unsaved_id);
     made.close();
     unsaved.close();
-    try testing.expect(!pathExists(&t, &.{ ".fx", terminal_dir_name, unsaved_id }));
+    try testing.expect(!pathExists(&t, &.{ ".lia", terminal_dir_name, unsaved_id }));
 
     const saved = try Session.create(testing.allocator, &t.store, "/w", .ask, testSeed(&model));
     const saved_id = try testing.allocator.dupe(u8, saved.id());
@@ -7905,7 +7905,7 @@ test "a session that never reached the disk takes its terminal folder, and a sav
     kept.close();
     try saved.commitTurn(assistantTurn("q", "a"), types.ConversationLanguage.default());
     saved.close();
-    try testing.expect(pathExists(&t, &.{ ".fx", terminal_dir_name, saved_id }));
+    try testing.expect(pathExists(&t, &.{ ".lia", terminal_dir_name, saved_id }));
 
     // A first write that landed although the adapter never saw it succeed
     // keeps its folder.
@@ -7916,7 +7916,7 @@ test "a session that never reached the disk takes its terminal folder, and a sav
     landed_dir.close();
     _ = try landed.handle.append(&.{ .turn_started, .turn_committed });
     landed.close();
-    try testing.expect(pathExists(&t, &.{ ".fx", terminal_dir_name, landed_id }));
+    try testing.expect(pathExists(&t, &.{ ".lia", terminal_dir_name, landed_id }));
 }
 
 test "recover copies the folders outside the manager, never a link, and says when it left one out" {
@@ -7931,9 +7931,9 @@ test "recover copies the folders outside the manager, never a link, and says whe
     defer testing.allocator.free(id);
     s.close();
     {
-        var fx = try io_mod.openOrCreateVerifiedPrivateDirFromDir(t.tmp.dir, ".fx");
-        defer fx.close();
-        var root = try io_mod.openOrCreateVerifiedPrivateDir(&fx, terminal_dir_name);
+        var lia = try io_mod.openOrCreateVerifiedPrivateDirFromDir(t.tmp.dir, ".lia");
+        defer lia.close();
+        var root = try io_mod.openOrCreateVerifiedPrivateDir(&lia, terminal_dir_name);
         defer root.close();
         var owner = try io_mod.openOrCreateVerifiedPrivateDir(&root, id);
         defer owner.close();
@@ -7948,7 +7948,7 @@ test "recover copies the folders outside the manager, never a link, and says whe
     defer recovered.deinit(testing.allocator);
     try testing.expect(!recovered.files_complete);
     try testing.expectEqual(@as(usize, 1), recovered.history_len);
-    const copy = try std.Io.Dir.path.join(testing.allocator, &.{ ".fx", terminal_dir_name, recovered.id });
+    const copy = try std.Io.Dir.path.join(testing.allocator, &.{ ".lia", terminal_dir_name, recovered.id });
     defer testing.allocator.free(copy);
     var dir = try t.tmp.dir.openDir(io, copy, .{});
     defer dir.close(io);
@@ -7969,7 +7969,7 @@ test "recover copies the folders outside the manager, never a link, and says whe
     try testing.expectError(error.SessionNotFound, recover(&t.store, testing.allocator, "NoSuchSession1"));
 }
 
-test "a resume makes a hand-made ~/.fx private instead of refusing the session" {
+test "a resume makes a hand-made ~/.lia private instead of refusing the session" {
     var t: TestHome = undefined;
     try t.init();
     defer t.deinit();
@@ -7979,11 +7979,11 @@ test "a resume makes a hand-made ~/.fx private instead of refusing the session" 
     defer testing.allocator.free(id);
     try OldSideFolder.commitTurn(&t, s);
     s.close();
-    try t.tmp.dir.setFilePermissions(io_mod.getIo(), ".fx", .fromMode(0o755), .{});
+    try t.tmp.dir.setFilePermissions(io_mod.getIo(), ".lia", .fromMode(0o755), .{});
 
     const r = try Session.resumeSession(testing.allocator, &t.store, .{ .id = id }, "/w", .ask);
     r.close();
-    const stat = try t.tmp.dir.statFile(io_mod.getIo(), ".fx", .{ .follow_symlinks = false });
+    const stat = try t.tmp.dir.statFile(io_mod.getIo(), ".lia", .{ .follow_symlinks = false });
     try testing.expectEqual(@as(u32, 0o700), @as(u32, @intCast(stat.permissions.toMode() & 0o777)));
 }
 
@@ -7991,15 +7991,15 @@ test "a resume makes a hand-made ~/.fx private instead of refusing the session" 
 /// kind the move carries, the client's settings, and terminal state.
 const OldSideFolder = struct {
     const result_handle = "result-shell-0011223344556677-8899aabbccddeeff.txt";
-    const replay_handle = "fx-command-replay-00000000000000000000000000000000-0123456789abcdef.bin";
+    const replay_handle = "lia-command-replay-00000000000000000000000000000000-0123456789abcdef.bin";
     const image_name = "image-1.png";
     const png = [_]u8{ 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 13, 'I', 'H', 'D', 'R', 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89 };
 
     fn write(t: *TestHome, id: []const u8) !void {
         const io = io_mod.getIo();
-        var fx = try io_mod.openOrCreateVerifiedPrivateDirFromDir(t.tmp.dir, ".fx");
-        defer fx.close();
-        var files = try io_mod.openOrCreateVerifiedPrivateDir(&fx, files_dir_name);
+        var lia = try io_mod.openOrCreateVerifiedPrivateDirFromDir(t.tmp.dir, ".lia");
+        defer lia.close();
+        var files = try io_mod.openOrCreateVerifiedPrivateDir(&lia, files_dir_name);
         defer files.close();
         var side = try io_mod.openOrCreateVerifiedPrivateDir(&files, id);
         defer side.close();
@@ -8022,7 +8022,7 @@ const OldSideFolder = struct {
         var digest: [32]u8 = undefined;
         std.crypto.hash.sha2.Sha256.hash(&png, &digest, .{});
         var digest_hex = std.fmt.bytesToHex(digest, .lower);
-        const snapshot_path = try std.Io.Dir.path.join(testing.allocator, &.{ t.home, ".fx", files_dir_name, s.id(), "images", image_name });
+        const snapshot_path = try std.Io.Dir.path.join(testing.allocator, &.{ t.home, ".lia", files_dir_name, s.id(), "images", image_name });
         defer testing.allocator.free(snapshot_path);
         var images = [_]types.ImageAttachment{.{
             .id = 1,
@@ -8063,8 +8063,8 @@ test "an older session moves off its side folder on its first writable open, and
     const r = try Session.resumeSession(testing.allocator, &t.store, .{ .id = id }, "/w", .acp);
     defer r.close();
     // One manager folder, and terminal state where the terminal store looks.
-    try testing.expect(!pathExists(&t, &.{ ".fx", files_dir_name, id }));
-    try testing.expect(pathExists(&t, &.{ ".fx", terminal_dir_name, id, "terminal", "state", "terminal-1.json" }));
+    try testing.expect(!pathExists(&t, &.{ ".lia", files_dir_name, id }));
+    try testing.expect(pathExists(&t, &.{ ".lia", terminal_dir_name, id, "terminal", "state", "terminal-1.json" }));
     // Old handles resolve through the map.
     const capability = try r.childCapability();
     const body = try capability.readBlob(testing.allocator, .tool_results, OldSideFolder.result_handle, 1024);
@@ -8156,7 +8156,7 @@ test "compactor records on v2 are recorded by one setting with the next write, a
     const id = try testing.allocator.dupe(u8, s.id());
     defer testing.allocator.free(id);
     s.close();
-    try testing.expect(!pathExists(&t, &.{ ".fx", files_dir_name }));
+    try testing.expect(!pathExists(&t, &.{ ".lia", files_dir_name }));
     try testing.expectEqual(@as(u64, 0), (try t.store.manager.verify(id)).bad_blobs);
 
     // A new process reads them back by name, and lists them.
@@ -8208,7 +8208,7 @@ test "a web-fetch download on v2 is a read-only blob the model opens by its path
     try testing.expectEqualStrings("%PDF-1.7 a download", buffer[0..len]);
     const stat = try file.stat(io_mod.getIo());
     try testing.expectEqual(@as(u32, 0o400), @as(u32, @intCast(stat.permissions.toMode() & 0o777)));
-    try testing.expect(!pathExists(&t, &.{ ".fx", files_dir_name }));
+    try testing.expect(!pathExists(&t, &.{ ".lia", files_dir_name }));
 }
 
 test "a move cut short is redone on the next open, and old names still resolve (D47)" {
@@ -8232,14 +8232,14 @@ test "a move cut short is redone on the next open, and old names still resolve (
         try testing.expectEqual(@as(usize, 4), try s.moveOut(&side));
     }
     s.close();
-    try testing.expect(pathExists(&t, &.{ ".fx", files_dir_name, id }));
+    try testing.expect(pathExists(&t, &.{ ".lia", files_dir_name, id }));
     try testing.expectEqual(@as(usize, 1), try countSettings(t.store.manager, id, .moved_files));
 
     const r = try Session.resumeSession(testing.allocator, &t.store, .{ .id = id }, "/w", .ask);
     defer r.close();
-    try testing.expect(!pathExists(&t, &.{ ".fx", files_dir_name, id }));
+    try testing.expect(!pathExists(&t, &.{ ".lia", files_dir_name, id }));
     try testing.expectEqual(@as(usize, 2), try countSettings(t.store.manager, id, .moved_files));
-    try testing.expect(pathExists(&t, &.{ ".fx", terminal_dir_name, id, "terminal", "state", "terminal-1.json" }));
+    try testing.expect(pathExists(&t, &.{ ".lia", terminal_dir_name, id, "terminal", "state", "terminal-1.json" }));
     const body = try (try r.childCapability()).readBlob(testing.allocator, .tool_results, OldSideFolder.result_handle, 1024);
     defer testing.allocator.free(body);
     try testing.expectEqualStrings("an old result body", body);
@@ -8300,12 +8300,12 @@ test "a prompt image's bytes ride inside the user's item, and an image without t
         .id = 1,
         .path = @constCast("/Users/example/shot.png"),
         .media_type = @constCast("image/png"),
-        .snapshot_path = @constCast("/tmp/fx-snapshots/image-1.png"),
+        .snapshot_path = @constCast("/tmp/lia-snapshots/image-1.png"),
         .snapshot_sha256 = &digest_hex,
         .inline_data = @constCast(&bytes),
     }};
     const v1_image_prefix = "{\"text\":\"look\",\"images\":[{\"id\":1,\"path\":\"/Users/example/shot.png\",\"media_type\":\"image/png\"," ++
-        "\"snapshot_path\":\"/tmp/fx-snapshots/image-1.png\"," ++
+        "\"snapshot_path\":\"/tmp/lia-snapshots/image-1.png\"," ++
         "\"snapshot_sha256\":\"5a84b42e05f3301948f95fb3f8255a8f5c2c51c70551b1726afd8e435def96d0\",\"inline_data\":null";
     for ([_]?[]const u8{ null, "host:original" }) |source_ref| {
         images[0].inline_data = @constCast(&bytes);
@@ -8388,7 +8388,7 @@ test "a prompt image is saved as its own blob before the request, named in the u
         .id = 1,
         .path = @constCast("/Users/example/shot.png"),
         .media_type = @constCast("image/png"),
-        .snapshot_path = @constCast("/tmp/fx-image-snapshots-0000000000000001/image-1.bin"),
+        .snapshot_path = @constCast("/tmp/lia-image-snapshots-0000000000000001/image-1.bin"),
         .snapshot_sha256 = &digest_hex,
         .inline_data = @constCast(&bytes),
     }};
@@ -8437,7 +8437,7 @@ test "a prompt image is saved as its own blob before the request, named in the u
     try testing.expect(std.mem.find(u8, item.data, blob_field) != null);
     // Neither the bytes nor the process's temporary snapshot are written.
     try testing.expect(std.mem.find(u8, item.data, "inline_data") == null);
-    try testing.expect(std.mem.find(u8, item.data, "fx-image-snapshots") == null);
+    try testing.expect(std.mem.find(u8, item.data, "lia-image-snapshots") == null);
     try testing.expectEqual(@as(u64, 0), (try t.store.manager.verify(id)).bad_blobs);
 
     // Resumed, and in a fork that hard-links the blob, the image has only
@@ -8484,7 +8484,7 @@ test "a prompt image the store does not save keeps its bytes inline and gets no 
     var images = [_]types.ImageAttachment{
         .{ .id = 1, .path = @constCast("/Users/example/a.png"), .media_type = @constCast("image/png"), .snapshot_sha256 = &wrong, .inline_data = @constCast(&bytes) },
         // Bytes the session does not hold are not its to save.
-        .{ .id = 2, .path = @constCast("/Users/example/b.png"), .media_type = @constCast("image/png"), .snapshot_path = @constCast("/Users/example/.fx/sessions/s/images/image-2.bin") },
+        .{ .id = 2, .path = @constCast("/Users/example/b.png"), .media_type = @constCast("image/png"), .snapshot_path = @constCast("/Users/example/.lia/sessions/s/images/image-2.bin") },
     };
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
@@ -8551,7 +8551,7 @@ test "an image that arrives with another session's blob path is saved here or wr
     var digest_hex = std.fmt.bytesToHex(digest, .lower);
     const other_digest: [32]u8 = @splat(0xcd);
     var other_hex = std.fmt.bytesToHex(other_digest, .lower);
-    const elsewhere = "/Users/example/.fx/sessions/v2/other/blobs/elsewhere";
+    const elsewhere = "/Users/example/.lia/sessions/v2/other/blobs/elsewhere";
     const original = [_]types.ImageAttachment{
         .{ .id = 1, .path = @constCast("/Users/example/a.png"), .media_type = @constCast("image/png"), .snapshot_sha256 = &digest_hex, .inline_data = @constCast(&bytes), .blob_path = @constCast(elsewhere) },
         // No bytes here to save, only another session's blob.
@@ -8623,7 +8623,7 @@ const V1Home = struct {
     }
 
     /// Copies the first `count` sessions of the fixture `kind`, root first,
-    /// into the home's `~/.fx`, private as v1 left them, with what the kind
+    /// into the home's `~/.lia`, private as v1 left them, with what the kind
     /// keeps outside its sessions, and returns their ids.
     fn fixture(v1: *V1Home, kind: []const u8, count: usize) ![]const []const u8 {
         const io = io_mod.getIo();
@@ -8641,8 +8641,8 @@ const V1Home = struct {
         const ids = all[0..count];
         var source = try fixtures.openDir(io, kind, .{ .iterate = true });
         defer source.close(io);
-        var fx = try io_mod.openOrCreateVerifiedPrivateDirFromDir(v1.t.tmp.dir, profile_paths.root_dir_name);
-        defer fx.close();
+        var lia = try io_mod.openOrCreateVerifiedPrivateDirFromDir(v1.t.tmp.dir, profile_paths.root_dir_name);
+        defer lia.close();
         var walker = try source.walk(a);
         defer walker.deinit();
         while (try walker.next(io)) |entry| {
@@ -8656,11 +8656,11 @@ const V1Home = struct {
             };
             switch (entry.kind) {
                 // Another kind may have made it.
-                .directory => fx.dir.createDir(io, entry.path, .fromMode(0o700)) catch |err| switch (err) {
+                .directory => lia.dir.createDir(io, entry.path, .fromMode(0o700)) catch |err| switch (err) {
                     error.PathAlreadyExists => {},
                     else => return err,
                 },
-                .file => try fx.dir.writeFile(io, .{
+                .file => try lia.dir.writeFile(io, .{
                     .sub_path = entry.path,
                     .data = try source.readFileAlloc(io, entry.path, a, .limited(1 << 24)),
                     .flags = .{ .permissions = .fromMode(0o600) },
@@ -8673,16 +8673,16 @@ const V1Home = struct {
         // would order the copies by when they were made.
         for (ids) |id| {
             const folder = try std.Io.Dir.path.join(a, &.{ profile_paths.sessions_dir_name, id });
-            const saved_json = try fx.dir.readFileAlloc(io, try std.Io.Dir.path.join(a, &.{ folder, "session.json" }), a, .limited(1 << 20));
+            const saved_json = try lia.dir.readFileAlloc(io, try std.Io.Dir.path.join(a, &.{ folder, "session.json" }), a, .limited(1 << 20));
             const Saved = struct { updated_at_ms: ?i64 = null };
             const saved = (try json_decode.parseFromSliceLeaky(Saved, a, saved_json, .{ .ignore_unknown_fields = true })).updated_at_ms orelse continue;
             const at: std.Io.Timestamp = .{ .nanoseconds = @as(i96, saved) * std.time.ns_per_ms };
             const log = try std.Io.Dir.path.join(a, &.{ folder, "events.jsonl" });
-            _ = fx.dir.statFile(io, log, .{}) catch |err| switch (err) {
+            _ = lia.dir.statFile(io, log, .{}) catch |err| switch (err) {
                 error.FileNotFound => continue,
                 else => return err,
             };
-            try fx.dir.setTimestamps(io, log, .{ .modify_timestamp = .{ .new = at } });
+            try lia.dir.setTimestamps(io, log, .{ .modify_timestamp = .{ .new = at } });
         }
         return ids;
     }
@@ -8690,9 +8690,9 @@ const V1Home = struct {
     /// Writes `bytes` to `{folder}/{name}` in v1's folder of `id`, the
     /// folders and the file private as v1 makes them.
     fn put(v1: *V1Home, id: []const u8, folder: ?[]const u8, name: []const u8, bytes: []const u8) !void {
-        var fx = try io_mod.openOrCreateVerifiedPrivateDirFromDir(v1.t.tmp.dir, profile_paths.root_dir_name);
-        defer fx.close();
-        var sessions = try io_mod.openOrCreateVerifiedPrivateDir(&fx, profile_paths.sessions_dir_name);
+        var lia = try io_mod.openOrCreateVerifiedPrivateDirFromDir(v1.t.tmp.dir, profile_paths.root_dir_name);
+        defer lia.close();
+        var sessions = try io_mod.openOrCreateVerifiedPrivateDir(&lia, profile_paths.sessions_dir_name);
         defer sessions.close();
         var dir = try io_mod.openOrCreateVerifiedPrivateDir(&sessions, id);
         defer dir.close();
@@ -8704,7 +8704,7 @@ const V1Home = struct {
     /// v1's `session.json` of `id`. The arena's.
     fn metadata(v1: *V1Home, id: []const u8) !std.json.ObjectMap {
         const a = v1.arena.allocator();
-        const path = try std.Io.Dir.path.join(a, &.{ ".fx", "sessions", id, "session.json" });
+        const path = try std.Io.Dir.path.join(a, &.{ ".lia", "sessions", id, "session.json" });
         const bytes = try v1.t.tmp.dir.readFileAlloc(io_mod.getIo(), path, a, .limited(1 << 20));
         return (try std.json.parseFromSliceLeaky(std.json.Value, a, bytes, .{})).object;
     }
@@ -8712,7 +8712,7 @@ const V1Home = struct {
     /// When v1 logged each prompt of `id`: the times its turns start.
     fn promptTimes(v1: *V1Home, id: []const u8) ![]const u64 {
         const a = v1.arena.allocator();
-        const path = try std.Io.Dir.path.join(a, &.{ ".fx", "sessions", id, "events.jsonl" });
+        const path = try std.Io.Dir.path.join(a, &.{ ".lia", "sessions", id, "events.jsonl" });
         const bytes = try v1.t.tmp.dir.readFileAlloc(io_mod.getIo(), path, a, .limited(1 << 24));
         var times: std.ArrayList(u64) = .empty;
         var lines = std.mem.splitScalar(u8, bytes, '\n');
@@ -8727,7 +8727,7 @@ const V1Home = struct {
     /// The one file in `folder` of v1's `id`. The arena's.
     fn only(v1: *V1Home, id: []const u8, folder: []const u8) ![]const u8 {
         const a = v1.arena.allocator();
-        var dir = try v1.t.tmp.dir.openDir(io_mod.getIo(), try std.Io.Dir.path.join(a, &.{ ".fx", "sessions", id, folder }), .{ .iterate = true });
+        var dir = try v1.t.tmp.dir.openDir(io_mod.getIo(), try std.Io.Dir.path.join(a, &.{ ".lia", "sessions", id, folder }), .{ .iterate = true });
         defer dir.close(io_mod.getIo());
         var entries = dir.iterate();
         const first = (try entries.next(io_mod.getIo())) orelse return error.FileNotFound;
@@ -8738,7 +8738,7 @@ const V1Home = struct {
     /// The bytes of `{folder}/{name}` in v1's `id`. The arena's.
     fn file(v1: *V1Home, id: []const u8, folder: []const u8, name: []const u8) ![]const u8 {
         const a = v1.arena.allocator();
-        return v1.t.tmp.dir.readFileAlloc(io_mod.getIo(), try std.Io.Dir.path.join(a, &.{ ".fx", "sessions", id, folder, name }), a, .limited(1 << 24));
+        return v1.t.tmp.dir.readFileAlloc(io_mod.getIo(), try std.Io.Dir.path.join(a, &.{ ".lia", "sessions", id, folder, name }), a, .limited(1 << 24));
     }
 
     /// Every file under `folder` of v1's `id`, by its path there, with its
@@ -8746,7 +8746,7 @@ const V1Home = struct {
     fn tree(v1: *V1Home, id: []const u8, folder: []const u8) !std.array_hash_map.String([]const u8) {
         const io = io_mod.getIo();
         const a = v1.arena.allocator();
-        var dir = try v1.t.tmp.dir.openDir(io, try std.Io.Dir.path.join(a, &.{ ".fx", "sessions", id, folder }), .{ .iterate = true });
+        var dir = try v1.t.tmp.dir.openDir(io, try std.Io.Dir.path.join(a, &.{ ".lia", "sessions", id, folder }), .{ .iterate = true });
         defer dir.close(io);
         var files: std.array_hash_map.String([]const u8) = .empty;
         var walker = try dir.walk(a);
@@ -8757,14 +8757,14 @@ const V1Home = struct {
         return files;
     }
 
-    /// `.fx/sessions/{id}/{rest}`, relative to the home. The arena's.
+    /// `.lia/sessions/{id}/{rest}`, relative to the home. The arena's.
     fn sessionPath(v1: *V1Home, id: []const u8, rest: []const u8) ![]const u8 {
-        return std.Io.Dir.path.join(v1.arena.allocator(), &.{ ".fx", "sessions", id, rest });
+        return std.Io.Dir.path.join(v1.arena.allocator(), &.{ ".lia", "sessions", id, rest });
     }
 
     fn exists(t: *TestHome, id: []const u8) bool {
         var buffer: [64]u8 = undefined;
-        const path = std.mem.print(&buffer, ".fx/sessions/{s}", .{id}) catch unreachable;
+        const path = std.mem.print(&buffer, ".lia/sessions/{s}", .{id}) catch unreachable;
         _ = t.tmp.dir.statFile(io_mod.getIo(), path, .{}) catch return false;
         return true;
     }
@@ -8789,7 +8789,7 @@ const V1Copy = struct {
         var copy: V1Copy = .{};
         errdefer copy.deinit();
         var buffer: [64]u8 = undefined;
-        var dir = try t.tmp.dir.openDir(io, try std.mem.print(&buffer, ".fx/sessions/{s}", .{id}), .{ .iterate = true });
+        var dir = try t.tmp.dir.openDir(io, try std.mem.print(&buffer, ".lia/sessions/{s}", .{id}), .{ .iterate = true });
         defer dir.close(io);
         var it = dir.iterate();
         while (try it.next(io)) |entry| {
@@ -8951,7 +8951,7 @@ test "a converted v1 session's hosted terminal state lands where v2 keeps it (D4
     const s = try openConverted(&t, id);
     defer s.close();
     for (saved.keys(), saved.values()) |path, bytes| {
-        const moved = try std.Io.Dir.path.join(alloc, &.{ ".fx", terminal_dir_name, id, terminal_dir_name, path });
+        const moved = try std.Io.Dir.path.join(alloc, &.{ ".lia", terminal_dir_name, id, terminal_dir_name, path });
         defer alloc.free(moved);
         const state = try V1Home.read(&t, moved);
         defer alloc.free(state);
@@ -8959,7 +8959,7 @@ test "a converted v1 session's hosted terminal state lands where v2 keeps it (D4
     }
 }
 
-test "a v1 session's hosted terminal folders an old fx left readable by others convert, private (D45)" {
+test "a v1 session's hosted terminal folders an old lia left readable by others convert, private (D45)" {
     const alloc = testing.allocator;
     const io = io_mod.getIo();
     var t: TestHome = undefined;
@@ -8982,13 +8982,13 @@ test "a v1 session's hosted terminal folders an old fx left readable by others c
     const s = try openConverted(&t, id);
     defer s.close();
     for (saved.keys(), saved.values()) |path, bytes| {
-        const moved = try std.Io.Dir.path.join(alloc, &.{ ".fx", terminal_dir_name, id, terminal_dir_name, path });
+        const moved = try std.Io.Dir.path.join(alloc, &.{ ".lia", terminal_dir_name, id, terminal_dir_name, path });
         defer alloc.free(moved);
         const state = try V1Home.read(&t, moved);
         defer alloc.free(state);
         try testing.expectEqualSlices(u8, bytes, state);
     }
-    const moved = try std.Io.Dir.path.join(alloc, &.{ ".fx", terminal_dir_name, id, terminal_dir_name, "state" });
+    const moved = try std.Io.Dir.path.join(alloc, &.{ ".lia", terminal_dir_name, id, terminal_dir_name, "state" });
     defer alloc.free(moved);
     const stat = try t.tmp.dir.statFile(io, moved, .{ .follow_symlinks = false });
     try testing.expectEqual(@as(u32, 0o700), @as(u32, @intCast(stat.permissions.toMode() & 0o777)));
@@ -9017,8 +9017,8 @@ test "a v1 session whose hosted terminal state holds an entry the copy can't tak
     try testing.expectEqualStrings("terminal/state/stray-link", left.file);
     try testing.expectEqual(LeftOut.Cause.not_regular, left.cause);
     // The rest of its terminal state is copied, the link is not.
-    try testing.expect(pathExists(&t, &.{ ".fx", terminal_dir_name, id, "terminal", "state", "record-shell-P1Rx7ZvNXwWFA8DxO1uT2w.json" }));
-    try testing.expect(!pathExists(&t, &.{ ".fx", terminal_dir_name, id, "terminal", "state", "stray-link" }));
+    try testing.expect(pathExists(&t, &.{ ".lia", terminal_dir_name, id, "terminal", "state", "record-shell-P1Rx7ZvNXwWFA8DxO1uT2w.json" }));
+    try testing.expect(!pathExists(&t, &.{ ".lia", terminal_dir_name, id, "terminal", "state", "stray-link" }));
 
     // Its v1 folder keeps the link, and a later run's cleanup keeps the
     // folder by what the copy recorded, even once the link is gone.
@@ -9058,7 +9058,7 @@ fn writeRecovery(v1: *V1Home, id: []const u8, seq: u64, user: []const u8, partia
 
 test "a v1 turn left open comes back unfinished exactly as v1 shows it (D56)" {
     const alloc = testing.allocator;
-    // A turn v1 left open when fx was killed mid-reply, its unfinished reply
+    // A turn v1 left open when lia was killed mid-reply, its unfinished reply
     // in recovery.json; that turn without the checkpoint; and a finished
     // session whose checkpoint names a turn the log has since ended.
     for ([_]enum { checkpoint, open, stale }{ .checkpoint, .open, .stale }) |variant| {
@@ -9070,7 +9070,7 @@ test "a v1 turn left open comes back unfinished exactly as v1 shows it (D56)" {
         const id = (try v1.fixture(if (variant == .stale) "plain" else "unfinished", 1))[0];
         switch (variant) {
             .checkpoint => {},
-            .open => try t.tmp.dir.deleteFile(io_mod.getIo(), try std.Io.Dir.path.join(v1.arena.allocator(), &.{ ".fx", "sessions", id, "recovery.json" })),
+            .open => try t.tmp.dir.deleteFile(io_mod.getIo(), try std.Io.Dir.path.join(v1.arena.allocator(), &.{ ".lia", "sessions", id, "recovery.json" })),
             // v1 drops a checkpoint inside a turn that ended at seq 3.
             .stale => try writeRecovery(&v1, id, 2, "CONV_FIRST 1", "never shown"),
         }
@@ -9188,7 +9188,7 @@ test "an unreadable v1 session is refused with its file and reason, and nothing 
     try testing.expectEqualStrings(try std.mem.print(&buffer, "events.jsonl line {d} is not valid JSON", .{line}), t.store.conversionProblem().?);
     try testing.expectError(error.NotFound, t.store.manager.peek(alloc, v1_torn_id));
     // No staging left behind, if any was made.
-    if (t.tmp.dir.openDir(io_mod.getIo(), ".fx/sessions/v2/.tmp", .{ .iterate = true })) |opened_staging| {
+    if (t.tmp.dir.openDir(io_mod.getIo(), ".lia/sessions/v2/.tmp", .{ .iterate = true })) |opened_staging| {
         var staging = opened_staging;
         defer staging.close(io_mod.getIo());
         var it = staging.iterate();
@@ -9257,7 +9257,7 @@ test "recover copies a v1 conversation without saved rules it can't read and lea
     }
 }
 
-test "doctor counts sessions an older fx saved and names each that can't be converted with what recover copies (D73)" {
+test "doctor counts sessions an older lia saved and names each that can't be converted with what recover copies (D73)" {
     const alloc = testing.allocator;
     var t: TestHome = undefined;
     try t.init();
@@ -9320,7 +9320,7 @@ test "recover leaves out a kept side file that is gone or not the bytes its name
     changed[0] ^= 1;
     for ([_]bool{ false, true }) |gone| {
         if (gone) {
-            const path = try std.mem.concat(alloc, u8, &.{ ".fx/sessions/", id, "/tool-results/", artifact });
+            const path = try std.mem.concat(alloc, u8, &.{ ".lia/sessions/", id, "/tool-results/", artifact });
             defer alloc.free(path);
             try t.tmp.dir.deleteFile(io_mod.getIo(), path);
         } else try v1.put(id, "tool-results", artifact, changed);
@@ -9454,7 +9454,7 @@ test "-c says the remembered session cannot be read when v1's bookmark is not a 
     try testing.expectError(error.RememberedSessionUnavailable, Session.resumeSession(testing.allocator, &t.store, .last_opened, v1.workspace, .app));
 }
 
-test "the listing shows v1 sessions not converted yet, and fx session reads one without converting it (D59, D61)" {
+test "the listing shows v1 sessions not converted yet, and lia session reads one without converting it (D59, D61)" {
     const alloc = testing.allocator;
     var t: TestHome = undefined;
     try t.init();
@@ -9786,7 +9786,7 @@ test "a conversion past its slow mark tells the host once (D61)" {
     try testing.expectEqual(@as(usize, 1), told);
 }
 
-test "fx sessions convert keeps a v1 subagent's own subagent as it is, and fx doctor names it too (D88)" {
+test "lia sessions convert keeps a v1 subagent's own subagent as it is, and lia doctor names it too (D88)" {
     const alloc = testing.allocator;
     var t: TestHome = undefined;
     try t.init();
@@ -9802,7 +9802,7 @@ test "fx sessions convert keeps a v1 subagent's own subagent as it is, and fx do
     defer report.deinit(alloc);
     try testing.expectEqual(@as(usize, 1), report.converted);
     try testing.expectEqual(@as(usize, 0), report.skipped.items.len);
-    const reason = try a.print("it is a subagent of the earlier subagent {s}, which no fx opens", .{family[1]});
+    const reason = try a.print("it is a subagent of the earlier subagent {s}, which no lia opens", .{family[1]});
     try testing.expectEqual(@as(usize, 1), report.kept_children.len);
     try testing.expectEqualStrings(family[2], report.kept_children[0].id);
     try testing.expectEqualStrings(reason, report.kept_children[0].reason);
@@ -9818,7 +9818,7 @@ test "fx sessions convert keeps a v1 subagent's own subagent as it is, and fx do
     try testing.expectEqualStrings(reason, doctor_report.kept_children[0].reason);
 }
 
-test "fx sessions convert says a v1 subagent's own subagent stays with a parent it can't read (D88)" {
+test "lia sessions convert says a v1 subagent's own subagent stays with a parent it can't read (D88)" {
     const alloc = testing.allocator;
     const io = io_mod.getIo();
     var t: TestHome = undefined;
@@ -9846,7 +9846,7 @@ test "fx sessions convert says a v1 subagent's own subagent stays with a parent 
     try testing.expectEqualStrings(try std.mem.print(&expected, "its parent session {s} can't be read, so it stays with it", .{family[1]}), report.kept_children[0].reason);
 }
 
-/// Makes `family`'s third member the second's own subagent, as fx made
+/// Makes `family`'s third member the second's own subagent, as lia made
 /// them before a subagent lost the subagent tool.
 fn nestThirdChild(v1: *V1Home, family: []const []const u8) !void {
     const a = v1.arena.allocator();
@@ -9862,7 +9862,7 @@ fn nestThirdChild(v1: *V1Home, family: []const []const u8) !void {
     try v1.put(family[2], "subagent", "owner.json", try a.print("{{\"schema_version\":1,\"parent_id\":\"{s}\"}}", .{family[1]}));
 }
 
-test "fx sessions convert says a converted v1 child whose folder a cleanup kept is converted already (D60, D88)" {
+test "lia sessions convert says a converted v1 child whose folder a cleanup kept is converted already (D60, D88)" {
     const alloc = testing.allocator;
     var t: TestHome = undefined;
     try t.init();
@@ -9877,7 +9877,7 @@ test "fx sessions convert says a converted v1 child whose folder a cleanup kept 
     const s = try openConverted(&t, family[0]);
     s.close();
     try testing.expect(!V1Home.exists(&t, child));
-    // The child's folder as a cleanup keeps it when an older fx changed it
+    // The child's folder as a cleanup keeps it when an older lia changed it
     // after its conversion: its parent's folder is gone.
     try copy.restore(&v1, child);
     try v1.put(child, "subagent", "owner.json", owner);
@@ -9886,7 +9886,7 @@ test "fx sessions convert says a converted v1 child whose folder a cleanup kept 
     defer report.deinit(alloc);
     try testing.expectEqual(@as(usize, 1), report.kept_children.len);
     try testing.expectEqualStrings(child, report.kept_children[0].id);
-    try testing.expectEqualStrings("fx converted it already, so anything an older fx added since stays only in this folder", report.kept_children[0].reason);
+    try testing.expectEqualStrings("lia converted it already, so anything an older lia added since stays only in this folder", report.kept_children[0].reason);
 }
 
 test "a kept subagent's reason names what its copy left out, one file by name and more by count (D62)" {
@@ -9894,13 +9894,13 @@ test "a kept subagent's reason names what its copy left out, one file by name an
     const one = [_]V1Source.Record{.{ .file = "logs/commands/replay.bin", .cause = .too_large }};
     const two = [_]V1Source.Record{ one[0], .{ .file = "terminal/state/link", .cause = .not_regular } };
     const cases = [_]struct { source: ?V1Source, reason: []const u8 }{
-        .{ .source = null, .reason = "fx converted it already, so anything an older fx added since stays only in this folder" },
-        .{ .source = .{ .fingerprint = "f" }, .reason = "fx converted it already, so anything an older fx added since stays only in this folder" },
-        .{ .source = .{ .left_out = &one, .left_out_total = 1 }, .reason = "fx converted it already without logs/commands/replay.bin, so this folder keeps it" },
-        .{ .source = .{ .left_out = &two, .left_out_total = 2 }, .reason = "fx converted it already without 2 of its files, so this folder keeps them" },
+        .{ .source = null, .reason = "lia converted it already, so anything an older lia added since stays only in this folder" },
+        .{ .source = .{ .fingerprint = "f" }, .reason = "lia converted it already, so anything an older lia added since stays only in this folder" },
+        .{ .source = .{ .left_out = &one, .left_out_total = 1 }, .reason = "lia converted it already without logs/commands/replay.bin, so this folder keeps it" },
+        .{ .source = .{ .left_out = &two, .left_out_total = 2 }, .reason = "lia converted it already without 2 of its files, so this folder keeps them" },
         // A copy names the first files only; the count is all of them.
-        .{ .source = .{ .left_out = &two, .left_out_total = 33 }, .reason = "fx converted it already without 33 of its files, so this folder keeps them" },
-        .{ .source = .{ .left_out_total = 1 }, .reason = "fx converted it already without 1 of its files, so this folder keeps them" },
+        .{ .source = .{ .left_out = &two, .left_out_total = 33 }, .reason = "lia converted it already without 33 of its files, so this folder keeps them" },
+        .{ .source = .{ .left_out_total = 1 }, .reason = "lia converted it already without 1 of its files, so this folder keeps them" },
     };
     for (cases) |case| {
         const reason = try convertedReason(alloc, case.source);
@@ -9940,7 +9940,7 @@ test "a copy names the first files it left out and counts them all (D56, D62)" {
     try testing.expect(V1Home.exists(&t, id));
 }
 
-test "fx doctor counts each v1 folder a family's conversion kept, a subagent's included (D62)" {
+test "lia doctor counts each v1 folder a family's conversion kept, a subagent's included (D62)" {
     const alloc = testing.allocator;
     const io = io_mod.getIo();
     var t: TestHome = undefined;
@@ -9966,7 +9966,7 @@ test "fx doctor counts each v1 folder a family's conversion kept, a subagent's i
     defer doctor_report.deinit(alloc);
     try testing.expectEqual(@as(usize, 2), doctor_report.keeps_left_out);
     // Each copy names what it left out and keeps no fingerprint, which an
-    // older fx would match to remove the folder.
+    // older lia would match to remove the folder.
     var scratch = std.heap.ArenaAllocator.init(alloc);
     defer scratch.deinit();
     for (family) |id| {
@@ -9980,7 +9980,7 @@ test "fx doctor counts each v1 folder a family's conversion kept, a subagent's i
     }
 }
 
-test "fx sessions convert says when it can't read a kept v1 child's converted copy (D88)" {
+test "lia sessions convert says when it can't read a kept v1 child's converted copy (D88)" {
     const alloc = testing.allocator;
     const io = io_mod.getIo();
     var t: TestHome = undefined;
@@ -9998,7 +9998,7 @@ test "fx sessions convert says when it can't read a kept v1 child's converted co
     try copy.restore(&v1, child);
     try v1.put(child, "subagent", "owner.json", owner);
     // The converted copy is damaged since.
-    var copied = try t.tmp.dir.openDir(io, try std.Io.Dir.path.join(v1.arena.allocator(), &.{ ".fx", "sessions", "v2", child }), .{});
+    var copied = try t.tmp.dir.openDir(io, try std.Io.Dir.path.join(v1.arena.allocator(), &.{ ".lia", "sessions", "v2", child }), .{});
     defer copied.close(io);
     try copied.writeFile(io, .{ .sub_path = "log.jsonl", .data = "not a log\n" });
 
@@ -10006,10 +10006,10 @@ test "fx sessions convert says when it can't read a kept v1 child's converted co
     defer report.deinit(alloc);
     try testing.expectEqual(@as(usize, 1), report.kept_children.len);
     try testing.expectEqualStrings(child, report.kept_children[0].id);
-    try testing.expect(std.mem.startsWith(u8, report.kept_children[0].reason, "fx can't read its converted copy ("));
+    try testing.expect(std.mem.startsWith(u8, report.kept_children[0].reason, "lia can't read its converted copy ("));
 }
 
-test "fx sessions convert converts every v1 family, and counts what it skipped (D61)" {
+test "lia sessions convert converts every v1 family, and counts what it skipped (D61)" {
     const alloc = testing.allocator;
     var t: TestHome = undefined;
     try t.init();
@@ -10051,7 +10051,7 @@ test "a v1 profile an old release left readable by others converts (D61)" {
     defer v1.deinit();
     const roots = try v1.fixture("plain", 1);
     const v1_open_id = roots[0];
-    for ([_][]const u8{ ".fx", ".fx/sessions", try v1.sessionPath(v1_open_id, "") }) |path| {
+    for ([_][]const u8{ ".lia", ".lia/sessions", try v1.sessionPath(v1_open_id, "") }) |path| {
         var dir = try t.tmp.dir.openDir(io, path, .{});
         defer dir.close(io);
         dir.setPermissions(io, .fromMode(0o755)) catch return error.SkipZigTest;
@@ -10234,13 +10234,13 @@ test "a child an earlier try published keeps its v1 folder when that try left a 
     var expected: [320]u8 = undefined;
     try testing.expect(std.mem.find(u8, told.items, try std.mem.print(&expected, "converted without logs/commands/replay.bin of its subagent {s} because", .{child})) != null);
 
-    // fx sessions convert names the kept folder and what it keeps.
+    // lia sessions convert names the kept folder and what it keeps.
     var report = try convertAll(&t.store, alloc);
     defer report.deinit(alloc);
     try testing.expectEqual(@as(usize, 1), report.kept_children.len);
     try testing.expectEqualStrings(child, report.kept_children[0].id);
-    try testing.expectEqualStrings("fx converted it already without logs/commands/replay.bin, so this folder keeps it", report.kept_children[0].reason);
-    // fx doctor counts that folder, though its root's folder is gone.
+    try testing.expectEqualStrings("lia converted it already without logs/commands/replay.bin, so this folder keeps it", report.kept_children[0].reason);
+    // lia doctor counts that folder, though its root's folder is gone.
     var doctor_report = try doctor(&t.store, alloc, 64, 0);
     defer doctor_report.deinit(alloc);
     try testing.expectEqual(@as(usize, 1), doctor_report.keeps_left_out);
@@ -10310,7 +10310,7 @@ test "the sweep drops what an earlier try staged for a child whose folder is gon
     _ = try staging.putBlob("staged before the folder went");
     staging.release();
     try t.tmp.dir.deleteTree(io_mod.getIo(), try v1.sessionPath(went, ""));
-    const staged = try std.Io.Dir.path.join(v1.arena.allocator(), &.{ ".fx", "sessions", "v2", ".tmp", went });
+    const staged = try std.Io.Dir.path.join(v1.arena.allocator(), &.{ ".lia", "sessions", "v2", ".tmp", went });
     _ = try t.tmp.dir.statFile(io_mod.getIo(), staged, .{});
 
     (try openConverted(&t, parent)).close();
@@ -10436,8 +10436,8 @@ test "a new session never takes an id v1's folder could not be checked for (D61)
     try t.init();
     defer t.deinit();
     const io = io_mod.getIo();
-    try t.tmp.dir.createDirPath(io, ".fx/sessions");
-    var sessions = try t.tmp.dir.openDir(io, ".fx/sessions", .{});
+    try t.tmp.dir.createDirPath(io, ".lia/sessions");
+    var sessions = try t.tmp.dir.openDir(io, ".lia/sessions", .{});
     defer sessions.close(io);
     sessions.setPermissions(io, .fromMode(0o000)) catch return error.SkipZigTest;
     defer sessions.setPermissions(io, .fromMode(0o700)) catch {};
@@ -10535,7 +10535,7 @@ test "a v1 side file larger than one v2 blob is left out and named, its v1 folde
     const s = try openConverted(&t, roots[0]);
     defer s.close();
     var expected: [320]u8 = undefined;
-    try testing.expectEqualStrings(try std.mem.print(&expected, "This session was converted without logs/commands/replay.bin because it is {d} bytes, more than the {d} the new store keeps in one file. Its earlier folder ~/.fx/sessions/{s} keeps it.", .{ sm.max_blob_bytes + 1, sm.max_blob_bytes, roots[0] }), told.items);
+    try testing.expectEqualStrings(try std.mem.print(&expected, "This session was converted without logs/commands/replay.bin because it is {d} bytes, more than the {d} the new store keeps in one file. Its earlier folder ~/.lia/sessions/{s} keeps it.", .{ sm.max_blob_bytes + 1, sm.max_blob_bytes, roots[0] }), told.items);
     try testing.expect(s.host.moved.get("logs/commands/small.bin") != null);
     try testing.expect(s.host.moved.get("logs/commands/replay.bin") == null);
     try s.commitTurn(assistantTurn("next", "reply"), types.ConversationLanguage.default());
@@ -10543,7 +10543,7 @@ test "a v1 side file larger than one v2 blob is left out and named, its v1 folde
     defer restored.deinit(alloc);
     try testing.expectEqual(@as(usize, 2), restored.history.len);
 
-    // Converted by `fx sessions convert`: the report names it.
+    // Converted by `lia sessions convert`: the report names it.
     var report = try convertAll(&t.store, alloc);
     defer report.deinit(alloc);
     try testing.expectEqual(@as(usize, 1), report.converted);

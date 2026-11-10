@@ -151,7 +151,7 @@ fn parseProviderOrderFlag(alloc: Allocator, raw: []const u8, previous: ?[][]cons
 
 pub const InteractiveLaunch = struct {
     modifiers: LaunchModifiers = .{},
-    /// `fx "<prompt>"`: parsed so the launch can be refused, and never sent.
+    /// `lia "<prompt>"`: parsed so the launch can be refused, and never sent.
     /// Owned by the allocator that parsed the launch.
     initial_prompt: ?[]u8 = null,
 
@@ -169,10 +169,10 @@ pub const RunResult = union(enum) {
     handled_exit: u8,
 };
 
-/// Result for a command line fx can't accept; see `output_contracts.usage_exit_code`.
+/// Result for a command line lia can't accept; see `output_contracts.usage_exit_code`.
 const usage_failure: RunResult = .{ .handled_exit = output_contracts.usage_exit_code };
 
-const version_usage = "usage: fx --version\n";
+const version_usage = "usage: lia --version\n";
 
 pub const Config = struct {
     version: []const u8 = "",
@@ -230,7 +230,7 @@ const LoginArgs = struct {
 const LoginFlag = enum { api_key };
 const login_flag_ids = cli_flags.idTable(LoginFlag, &builtin_commands.login_options);
 
-/// `fx login [vercel] [--api-key]`, in either order.
+/// `lia login [vercel] [--api-key]`, in either order.
 fn parseLoginArgs(rest: []const [:0]const u8) error{ InvalidLoginProviderArgs, ApiKeyNeedsVercel }!LoginArgs {
     var parsed: LoginArgs = .{};
     var provider_arg: ?[]const u8 = null;
@@ -356,7 +356,7 @@ fn applyAgentFlag(
 }
 
 fn writeBadAgentValue(alloc: Allocator, deps: RunDeps, command: []const u8, bad: BadAgentValue) !void {
-    const message = try alloc.print("fx {s}: invalid value for {s}: {f}\n", .{ command, bad.flag, text_utils.terminalSafe(bad.value) });
+    const message = try alloc.print("lia {s}: invalid value for {s}: {f}\n", .{ command, bad.flag, text_utils.terminalSafe(bad.value) });
     defer alloc.free(message);
     try writeStderr(deps, message);
 }
@@ -391,7 +391,7 @@ const RunDeps = struct {
 const GlobalLaunchArgs = struct {
     remaining: []const [:0]const u8,
     modifiers: LaunchModifiers = .{},
-    /// The one positional argument of `fx [flags] "<prompt>" [flags]`, borrowed
+    /// The one positional argument of `lia [flags] "<prompt>" [flags]`, borrowed
     /// from the arguments. Only set by `parseLaunchFlags(.around_prompt)`.
     prompt: ?[]const u8 = null,
 
@@ -440,10 +440,10 @@ fn parseGlobalLaunchArgs(alloc: Allocator, args: []const [:0]const u8) !GlobalLa
 }
 
 const LaunchFlagMode = enum {
-    /// `fx [flags] <command> ...`: stop at the first argument that isn't a
+    /// `lia [flags] <command> ...`: stop at the first argument that isn't a
     /// launch flag, since it and everything after belong to the command.
     before_command,
-    /// `fx [flags] "<prompt>" [flags]`: launch flags anywhere, and exactly one
+    /// `lia [flags] "<prompt>" [flags]`: launch flags anywhere, and exactly one
     /// positional argument, the first prompt.
     around_prompt,
 };
@@ -533,7 +533,7 @@ pub fn commandAfterGlobalLaunchArgs(args: []const [:0]const u8) ?[]const u8 {
 }
 
 /// Why the global flags in `args` failed to parse, or null when they parse.
-/// A flag after a first prompt, as in `fx "fix it" --jsno`, is past the
+/// A flag after a first prompt, as in `lia "fix it" --jsno`, is past the
 /// launch prefix, so the whole line is checked as well.
 fn launchFlagFailure(args: []const [:0]const u8) ?cli_flags.Failure {
     var parser: cli_flags.Parser = .initPrefix(&builtin_commands.launch_options, args);
@@ -541,14 +541,14 @@ fn launchFlagFailure(args: []const [:0]const u8) ?cli_flags.Failure {
     return cli_flags.firstFailure(&builtin_commands.launch_options, args);
 }
 
-/// Every flag plain `fx` reads, so an unknown one can get a suggestion.
+/// Every flag plain `lia` reads, so an unknown one can get a suggestion.
 const launch_suggestion_options = builtin_commands.launch_options ++ [_]command_specs.OptionDoc{
     .{ .flag = "--help", .description = "" },
     .{ .flag = "--version", .description = "" },
 };
 
 /// The unknown flag that follows the launch flags in `args`, with the
-/// nearest flag `fx` knows. Slices borrow from `args`.
+/// nearest flag `lia` knows. Slices borrow from `args`.
 fn unknownLaunchFlagFailure(args: []const [:0]const u8) ?cli_flags.Failure {
     const remaining = argsAfterGlobalLaunchArgs(args);
     if (remaining.len == 0) return null;
@@ -556,7 +556,7 @@ fn unknownLaunchFlagFailure(args: []const [:0]const u8) ?cli_flags.Failure {
         .{ .unknown = .{ .flag = remaining[0], .suggestion = null } };
 }
 
-/// Writes the line for a first argument that plain `fx` can't take as a
+/// Writes the line for a first argument that plain `lia` can't take as a
 /// command, a flag, or a prompt.
 fn writeLaunchWordProblem(
     writer: *std.Io.Writer,
@@ -569,7 +569,7 @@ fn writeLaunchWordProblem(
     switch (err) {
         error.PrintFlagUseAsk => {
             const flag = if (std.mem.findScalar(u8, word, '=')) |at| word[0..at] else word;
-            try writer.print("fx: {s} isn't an fx flag; to run one request and exit, use fx ask ", .{flag});
+            try writer.print("lia: {s} isn't an lia flag; to run one request and exit, use lia ask ", .{flag});
             if (printFlagPrompt(remaining)) |prompt| {
                 try writer.print("\"{f}\"\n", .{text_utils.terminalSafe(prompt)});
             } else {
@@ -577,16 +577,16 @@ fn writeLaunchWordProblem(
             }
         },
         error.UnknownCommandTypo => {
-            try writer.print("fx: unknown command {f}", .{text_utils.terminalSafe(word)});
+            try writer.print("lia: unknown command {f}", .{text_utils.terminalSafe(word)});
             if (launchWordSuggestion(command_catalog, word)) |suggestion| {
                 try writer.print(" (did you mean {s}?)", .{suggestion});
             }
             try writer.writeAll("\n");
         },
-        error.EmptyLaunchPrompt => try writer.writeAll("fx: the prompt is empty\n"),
+        error.EmptyLaunchPrompt => try writer.writeAll("lia: the prompt is empty\n"),
         error.UnquotedPrompt => {
             // The shell split the prompt into words; show them quoted.
-            try writer.writeAll("fx: put the prompt in quotes: fx \"");
+            try writer.writeAll("lia: put the prompt in quotes: lia \"");
             var parser: cli_flags.Parser = .init(&builtin_commands.launch_options, args);
             var first = true;
             while (parser.next() catch null) |item| switch (item) {
@@ -603,7 +603,7 @@ fn writeLaunchWordProblem(
     }
 }
 
-/// The prompt given with `-p` or `--print`, for the `fx ask` hint.
+/// The prompt given with `-p` or `--print`, for the `lia ask` hint.
 fn printFlagPrompt(remaining: []const [:0]const u8) ?[]const u8 {
     if (remaining.len == 0) return null;
     if (std.mem.startsWith(u8, remaining[0], "--print=")) {
@@ -731,7 +731,7 @@ pub fn parseInteractiveLaunch(
             .command_typo => return error.UnknownCommandTypo,
             .prompt => {
                 // Read the whole line again so launch flags may also follow
-                // the prompt, as in `fx "fix the bug" --model x`.
+                // the prompt, as in `lia "fix the bug" --model x`.
                 var with_prompt = try parseLaunchFlags(alloc, args, .around_prompt);
                 errdefer with_prompt.deinit(alloc);
                 var initial_prompt: ?[]u8 = null;
@@ -767,9 +767,9 @@ const LaunchWord = enum {
     prompt,
 };
 
-/// Decides what plain `fx` does with a first argument that isn't a command.
+/// Decides what plain `lia` does with a first argument that isn't a command.
 fn classifyLaunchWord(command_catalog: CommandCatalog, word: []const u8) LaunchWord {
-    // `fx -- "-x"` lets a prompt start with a dash.
+    // `lia -- "-x"` lets a prompt start with a dash.
     if (std.mem.eql(u8, word, "--")) return .prompt;
     if (word.len > 0 and word[0] == '-') {
         if (isVersionFlag(word)) return .command_line;
@@ -810,8 +810,8 @@ fn launchWordSuggestion(command_catalog: CommandCatalog, word: []const u8) ?[]co
     return nearest.best;
 }
 
-/// Detects `fx <subcommand> --help` / `-h` and returns the subcommand kind so the
-/// caller can render command-specific help. Top-level `fx --help`/`fx help` are
+/// Detects `lia <subcommand> --help` / `-h` and returns the subcommand kind so the
+/// caller can render command-specific help. Top-level `lia --help`/`lia help` are
 /// handled separately and intentionally excluded here.
 fn topLevelHelpRequest(command_catalog: CommandCatalog, args: []const [:0]const u8) ?TopLevelKind {
     if (args.len < 2) return null;
@@ -823,7 +823,7 @@ fn topLevelHelpRequest(command_catalog: CommandCatalog, args: []const [:0]const 
     return null;
 }
 
-/// Runs the command `args` name. A command that ends because fx couldn't
+/// Runs the command `args` name. A command that ends because lia couldn't
 /// write its own output, stdout or stderr, returns `error.OutputWriteFailed`
 /// in place of the `error.WriteFailed` a failed write gives, which on its own
 /// reads as a dropped connection, and one whose output reader went away, as
@@ -835,7 +835,7 @@ pub fn runIfRequested(alloc: Allocator, args: []const [:0]const u8, cfg: Config)
     };
 }
 
-/// Whether a write to fx's own stdout or stderr failed during a command, or
+/// Whether a write to lia's own stdout or stderr failed during a command, or
 /// found its reader gone.
 const OwnOutput = struct {
     failed: std.atomic.Value(bool) = .init(false),
@@ -863,7 +863,7 @@ const OwnOutput = struct {
     }
 };
 
-test "a command that ends because fx couldn't write its output reports that write" {
+test "a command that ends because lia couldn't write its output reports that write" {
     var output: OwnOutput = .{};
     // A failed write elsewhere, such as to the network, keeps its name.
     try std.testing.expectEqual(@as(anyerror, error.WriteFailed), output.commandError(error.WriteFailed));
@@ -936,7 +936,7 @@ fn writeProviderActivationError(
 ) !void {
     const message = try alloc.print(
         "{s}: {s}\n",
-        .{ if (caller == .provider_login) "fx login" else "fx provider", detail },
+        .{ if (caller == .provider_login) "lia login" else "lia provider", detail },
     );
     defer alloc.free(message);
     try writeStderr(deps, message);
@@ -988,9 +988,9 @@ fn writeProviderLoginFailure(alloc: Allocator, deps: RunDeps, provider: model_pr
         return;
     }
     try writeProviderActivationError(alloc, deps, caller, switch (err) {
-        error.ClientIdMissing => "missing FX_OAUTH_CLIENT_ID; configure the fx Vercel App client id first",
+        error.ClientIdMissing => "missing LIA_OAUTH_CLIENT_ID; configure the lia Vercel App client id first",
         error.AccessDenied => "authorization denied",
-        error.ExpiredToken, error.LoginTimedOut => "authorization expired; run fx login again",
+        error.ExpiredToken, error.LoginTimedOut => "authorization expired; run lia login again",
         else => "failed to sign in",
     });
 }
@@ -1018,7 +1018,7 @@ fn activateProviderSelectionFallible(
                 const detail = try config_runtime.unknownProviderMessage(alloc, target.label());
                 defer alloc.free(detail);
                 try writeProviderActivationError(alloc, deps, caller, detail);
-                // A name fx doesn't know is a bad argument, so the caller
+                // A name lia doesn't know is a bad argument, so the caller
                 // exits as a usage error.
                 return error.UnknownConfiguredProvider;
             },
@@ -1057,7 +1057,7 @@ fn activateProviderSelectionFallible(
 
     const already_selected = (settings.provider orelse @as(model_provider.ProviderId, .gateway)).eql(target);
     // A selected provider without a persisted model still needs one chosen
-    // below; FX_MODEL only covers a single run, so it does not count here.
+    // below; LIA_MODEL only covers a single run, so it does not count here.
     const has_persisted_model = if (config_runtime.selectProviderModel(cfg.default_model, &settings, target, null)) |_| true else |_| false;
     if (caller == .provider_command and already_selected and has_persisted_model and
         (cfg.auth_mode == .host_managed or prepared_credential != null))
@@ -1198,14 +1198,14 @@ fn runIfRequestedWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Con
             else => {},
         }
         if (err == error.InvalidFlag or err == error.UnknownLaunchFlag) {
-            try writer.writer.writeAll("fx: ");
+            try writer.writer.writeAll("lia: ");
             const failure = if (err == error.InvalidFlag) launchFlagFailure(args) else unknownLaunchFlagFailure(args);
             if (failure) |found| try found.write(&writer.writer);
             try writer.writer.writeAll("\n");
         } else if (globalLaunchErrorMessage(err)) |message| {
-            try writer.writer.print("fx: {s}\n", .{message});
+            try writer.writer.print("lia: {s}\n", .{message});
         } else {
-            try writer.writer.print("fx: invalid global launch option: {s}\n", .{@errorName(err)});
+            try writer.writer.print("lia: invalid global launch option: {s}\n", .{@errorName(err)});
         }
         try writer.writer.writeAll(builtin_commands.launch_usage);
         try writeStderr(deps, writer.written());
@@ -1289,7 +1289,7 @@ fn runNonInteractiveWithDeps(
                     } else {
                         try writeFlagFailure(alloc, deps, .acp, rest);
                     }
-                    try writeStderr(deps, "usage: fx " ++ builtin_commands.acp_usage ++ "\n");
+                    try writeStderr(deps, "usage: lia " ++ builtin_commands.acp_usage ++ "\n");
                     return usage_failure;
                 },
             };
@@ -1334,10 +1334,10 @@ fn runNonInteractiveWithDeps(
         .login => |rest| {
             const login_args = parseLoginArgs(rest) catch |err| {
                 switch (err) {
-                    error.ApiKeyNeedsVercel => try writeStderr(deps, "fx login: --api-key works only with vercel\n"),
+                    error.ApiKeyNeedsVercel => try writeStderr(deps, "lia login: --api-key works only with vercel\n"),
                     error.InvalidLoginProviderArgs => {
                         try writeFlagFailure(alloc, deps, .login, rest);
-                        try writeStderr(deps, "usage: fx login [vercel] [--api-key]\n");
+                        try writeStderr(deps, "usage: lia login [vercel] [--api-key]\n");
                     },
                 }
                 return usage_failure;
@@ -1347,9 +1347,9 @@ fn runNonInteractiveWithDeps(
                 return .handled_success;
             }
             if (login_args.api_key) {
-                return if (try runPasteSetup(alloc, cfg.secret_store, deps, "fx login")) .handled_success else .handled_failure;
+                return if (try runPasteSetup(alloc, cfg.secret_store, deps, "lia login")) .handled_success else .handled_failure;
             }
-            // Preserve the original `fx login` behavior for scripts and users.
+            // Preserve the original `lia login` behavior for scripts and users.
             const login_provider = login_args.provider orelse .gateway;
             runProviderLogin(alloc, cfg, login_provider) catch |err| {
                 try writeProviderLoginFailure(alloc, deps, login_provider, .provider_login, err);
@@ -1361,7 +1361,7 @@ fn runNonInteractiveWithDeps(
                 deps,
                 login_provider,
                 .provider_login,
-                if (login_provider == .gateway) .fx_login else null,
+                if (login_provider == .gateway) .lia_login else null,
             )) return .handled_failure;
             try writeStdout(deps, switch (login_provider) {
                 .gateway => "Signed in to Vercel.\nAI Gateway access may still require billing or API setup for the selected account.\n",
@@ -1371,7 +1371,7 @@ fn runNonInteractiveWithDeps(
         },
         .logout => |rest| {
             _ = parseLoginProvider(rest) catch {
-                try writeStderr(deps, "usage: fx logout [vercel]\n");
+                try writeStderr(deps, "usage: lia logout [vercel]\n");
                 return usage_failure;
             };
             if (cfg.auth_mode == .host_managed) {
@@ -1380,7 +1380,7 @@ fn runNonInteractiveWithDeps(
             }
             const result = login_flow.logout(alloc, cfg.gateway_provider.oauth_transport) catch |err| switch (err) {
                 error.SessionDeleteFailed => {
-                    try writeStderr(deps, "fx logout: failed to durably remove saved fx login\n");
+                    try writeStderr(deps, "lia logout: failed to durably remove saved lia login\n");
                     return .handled_failure;
                 },
             };
@@ -1398,17 +1398,17 @@ fn runNonInteractiveWithDeps(
                             "logout credential preference clear failed err={s}",
                             .{@errorName(failure.err)},
                         );
-                        try writeStderr(deps, "fx logout: signed out, but failed to clear the saved fx login selection\n");
+                        try writeStderr(deps, "lia logout: signed out, but failed to clear the saved lia login selection\n");
                         return .handled_failure;
                     },
                 }
             }
             if (result.local_durability_failed) {
-                try writeStderr(deps, "fx logout: failed to durably remove saved fx login\n");
+                try writeStderr(deps, "lia logout: failed to durably remove saved lia login\n");
             } else {
                 try writeStdout(
                     deps,
-                    if (result.session_deleted) "Signed out of fx.\n" else "No fx login session found.\n",
+                    if (result.session_deleted) "Signed out of lia.\n" else "No lia login session found.\n",
                 );
             }
             if (result.remote_revocation_failed) {
@@ -1419,7 +1419,7 @@ fn runNonInteractiveWithDeps(
         },
         .teams => |rest| {
             if (rest.len != 0) {
-                try writeStderr(deps, "usage: fx teams\n");
+                try writeStderr(deps, "usage: lia teams\n");
                 return usage_failure;
             }
             if (cfg.auth_mode == .host_managed) {
@@ -1436,13 +1436,13 @@ fn runNonInteractiveWithDeps(
                 },
             ) catch |err| {
                 const message = switch (err) {
-                    error.NoSession => "fx teams: run fx login first\n",
-                    error.SessionChanged => "fx teams: authentication changed; try again\n",
-                    error.TeamRequestFailed => "fx teams: failed to list Vercel teams\n",
-                    error.InvalidTeamSelection => "fx teams: no team selected\n",
-                    error.AccessDenied => "fx teams: authorization denied\n",
-                    error.TeamValidationFailed => "fx teams: selected team could not access AI Gateway\n",
-                    else => "fx teams: failed to switch team\n",
+                    error.NoSession => "lia teams: run lia login first\n",
+                    error.SessionChanged => "lia teams: authentication changed; try again\n",
+                    error.TeamRequestFailed => "lia teams: failed to list Vercel teams\n",
+                    error.InvalidTeamSelection => "lia teams: no team selected\n",
+                    error.AccessDenied => "lia teams: authorization denied\n",
+                    error.TeamValidationFailed => "lia teams: selected team could not access AI Gateway\n",
+                    else => "lia teams: failed to switch team\n",
                 };
                 try writeStderr(deps, message);
                 return .handled_failure;
@@ -1453,17 +1453,17 @@ fn runNonInteractiveWithDeps(
                 deps,
                 .gateway,
                 .provider_login,
-                .fx_login,
+                .lia_login,
             )) return .handled_failure;
             return .handled_success;
         },
         .provider => |rest| {
             if (rest.len != 1) {
-                try writeStderr(deps, "usage: fx provider <name>\n");
+                try writeStderr(deps, "usage: lia provider <name>\n");
                 return usage_failure;
             }
             const target = model_provider.parse(rest[0]) orelse {
-                try writeStderr(deps, "fx provider: expected gateway or a configured name\n");
+                try writeStderr(deps, "lia provider: expected gateway or a configured name\n");
                 return usage_failure;
             };
             const activated = activateProviderSelection(alloc, cfg, deps, target, .provider_command, null) catch |err| switch (err) {
@@ -1485,7 +1485,7 @@ fn runNonInteractiveWithDeps(
                 try writeHostManagedAuthResult(deps);
                 return .handled_success;
             }
-            return if (try runPasteSetup(alloc, cfg.secret_store, deps, "fx setup")) .handled_success else .handled_failure;
+            return if (try runPasteSetup(alloc, cfg.secret_store, deps, "lia setup")) .handled_success else .handled_failure;
         },
         .status => |rest| {
             const opts = parseLocalSurfaceArgs(rest) catch |err| {
@@ -1523,9 +1523,9 @@ fn runNonInteractiveWithDeps(
             snapshot.mcp = localMcpView(&mcp_inspection);
             snapshot.provider_endpoint = startup.provider_endpoint;
             snapshot.modes = statusModes(cfg.mode_registry, snapshot.permission_mode);
-            const fx_home = try profile_paths.activeRoot(alloc, io_mod.homeDir());
-            defer if (fx_home) |path| alloc.free(path);
-            snapshot.fx_home = fx_home;
+            const lia_home = try profile_paths.activeRoot(alloc, io_mod.homeDir());
+            defer if (lia_home) |path| alloc.free(path);
+            snapshot.lia_home = lia_home;
             if (opts.format == .json) {
                 try writeStatusJsonLine(alloc, deps, snapshot);
                 return .handled_success;
@@ -1593,8 +1593,8 @@ fn runNonInteractiveWithDeps(
             available_providers.definitions = startup.configured_providers.definitions;
             const catalog_provider = available_providers.select(startup.provider).cli_model_catalog orelse {
                 try writeStderr(deps, switch (startup.provider) {
-                    .gateway => "fx models: Gateway model catalog is unavailable\n",
-                    .configured => "fx models: Configured model catalog is unavailable\n",
+                    .gateway => "lia models: Gateway model catalog is unavailable\n",
+                    .configured => "lia models: Configured model catalog is unavailable\n",
                 });
                 return .handled_failure;
             };
@@ -1616,7 +1616,7 @@ fn runNonInteractiveWithDeps(
                             message,
                         );
                     } else {
-                        try writeStderr(deps, "fx models: ");
+                        try writeStderr(deps, "lia models: ");
                         try writeStderr(deps, message);
                         try writeStderr(deps, "\n");
                     }
@@ -1889,7 +1889,7 @@ fn runNonInteractiveWithDeps(
             const shell = if (rest.len == 1) completion.parseShell(rest[0]) else null;
             if (shell == null) {
                 if (rest.len == 1) {
-                    try writeStderrLine(alloc, deps, "fx completion: unknown shell {s}; choose bash, zsh, or fish\n", rest[0]);
+                    try writeStderrLine(alloc, deps, "lia completion: unknown shell {s}; choose bash, zsh, or fish\n", rest[0]);
                 }
                 try writeTopLevelUsage(cfg.command_catalog, deps, .completion);
                 return usage_failure;
@@ -1909,15 +1909,15 @@ fn runNonInteractiveWithDeps(
                         try writeJsonCommandFailure(alloc, deps, "config", err, text);
                         return usage_failure;
                     }
-                    try writeStderrLine(alloc, deps, "fx config: {s}\n", text);
+                    try writeStderrLine(alloc, deps, "lia config: {s}\n", text);
                 }
                 if (!argsContainJson(rest)) {
                     if (unknown_key) |part| {
                         const message = try settings_messages.formatUnknownPath(alloc, part);
                         defer alloc.free(message);
-                        try writeStderrLine(alloc, deps, "fx config: {s}\n", message);
+                        try writeStderrLine(alloc, deps, "lia config: {s}\n", message);
                     } else if (err == error.WorkspaceConfigWrite) {
-                        try writeStderr(deps, "fx config: " ++ workspace_write_message ++ "\n");
+                        try writeStderr(deps, "lia config: " ++ workspace_write_message ++ "\n");
                     }
                 }
                 try writeUsageOrJsonError(alloc, cfg.command_catalog, deps, .config, "config", err, rest);
@@ -1930,7 +1930,7 @@ fn runNonInteractiveWithDeps(
             };
         },
         .unknown => |command| {
-            try writeStderr(deps, "fx: unknown subcommand: ");
+            try writeStderr(deps, "lia: unknown subcommand: ");
             try writeStderr(deps, command);
             try writeStderr(deps, "\n\n");
             try writeTopLevelHelp(alloc, cfg.command_catalog, deps, cfg.version, .stderr);
@@ -1991,7 +1991,7 @@ fn runGithubWorkflow(
     const prompt = switch (workflow) {
         .pull_request => github_workflows.buildPrompt(alloc, workflow, workflowLanguagePlaceholder(), opts.context) catch |err| switch (err) {
             error.NotGitRepository => {
-                try writeStderr(deps, "fx pr: requires running inside a git repository\n");
+                try writeStderr(deps, "lia pr: requires running inside a git repository\n");
                 return .handled_failure;
             },
             else => return err,
@@ -2014,7 +2014,7 @@ fn writeStderr(deps: RunDeps, text: []const u8) !void {
 }
 
 /// Reads and stores an AI Gateway API key. `command` names the command in
-/// failure messages: `fx login` for `fx login --api-key`, `fx setup` for the
+/// failure messages: `lia login` for `lia login --api-key`, `lia setup` for the
 /// deprecated spelling.
 fn runPasteSetup(
     alloc: Allocator,
@@ -2023,7 +2023,7 @@ fn runPasteSetup(
     command: []const u8,
 ) !bool {
     if (secret_store.isDisabled()) {
-        try writePasteFailure(alloc, deps, command, "stored API keys are disabled by FX_DISABLE_KEYCHAIN");
+        try writePasteFailure(alloc, deps, command, "stored API keys are disabled by LIA_DISABLE_KEYCHAIN");
         return false;
     }
     if (!deps.setup_terminal_available(deps.setup_ctx)) {
@@ -2179,10 +2179,10 @@ fn writeConfigDiagnostics(
         var notice_writer: std.Io.Writer.Allocating = .init(alloc);
         defer notice_writer.deinit();
         if (note) |text| {
-            try notice_writer.writer.print("fx: note: {s}", .{text});
+            try notice_writer.writer.print("lia: note: {s}", .{text});
         } else {
             try notice_writer.writer.print(
-                "fx: config {s}: {s}",
+                "lia: config {s}: {s}",
                 .{ @tagName(diagnostic.layer), @tagName(diagnostic.cause) },
             );
             try config_runtime.writeDiagnosticMetadata(&notice_writer.writer, diagnostic);
@@ -2277,7 +2277,7 @@ fn statusSnapshotFromStartupWithBuild(
         .session_permission_grants = 0,
         .agent_step_limit = startup.agent_step_limit,
         .ultrafast_requested = startup.ultrafast_mode,
-        // No setting chooses a channel, so fx follows the one it was built for.
+        // No setting chooses a channel, so lia follows the one it was built for.
         .update_channel = build.channel,
         .build_channel = build.channel,
         .build_revision = build.revision,
@@ -2350,7 +2350,7 @@ fn environMapDefault(_: ?*anyopaque) ?*const std.process.Environ.Map {
 }
 
 fn writeTopLevelUsage(command_catalog: CommandCatalog, deps: RunDeps, kind: TopLevelKind) !void {
-    try writeStderr(deps, "usage: fx ");
+    try writeStderr(deps, "usage: lia ");
     try writeStderr(deps, command_specs.topLevelUsage(command_catalog, kind));
     try writeStderr(deps, "\n");
 }
@@ -2374,15 +2374,15 @@ fn runTopLevelMcp(
     return runMcpVerbs(alloc, rest, cfg, deps);
 }
 
-/// `fx mcp`: the verbs `/mcp` shares.
+/// `lia mcp`: the verbs `/mcp` shares.
 fn runMcpVerbs(alloc: Allocator, rest: []const [:0]const u8, cfg: Config, deps: RunDeps) !RunResult {
     const home = io_mod.homeDir() orelse {
-        try writeStderr(deps, "fx mcp: " ++ io_mod.no_home_dir_reason ++ "\n");
+        try writeStderr(deps, "lia mcp: " ++ io_mod.no_home_dir_reason ++ "\n");
         return .handled_failure;
     };
     const workspace_root = try io_mod.realpathAlloc(alloc, ".");
     defer alloc.free(workspace_root);
-    // `FX_TRACE` and `FX_TRACE_LOG` keep a trace here, as in the shell.
+    // `LIA_TRACE` and `LIA_TRACE_LOG` keep a trace here, as in the shell.
     debug_trace.configureFromEnv(alloc, workspace_root);
     const args = try alloc.alloc([]const u8, rest.len);
     defer alloc.free(args);
@@ -2408,7 +2408,7 @@ fn runMcpVerbs(alloc: Allocator, rest: []const [:0]const u8, cfg: Config, deps: 
     };
 }
 
-/// A host made for one `fx mcp` command.
+/// A host made for one `lia mcp` command.
 const CliMcpHosts = struct {
     alloc: Allocator,
     cfg: Config,
@@ -2420,7 +2420,7 @@ const CliMcpHosts = struct {
         return load(self.alloc, self.workspace_root, self.cfg.tool_set.registry, .{ .notify = notify });
     }
 
-    /// `fx mcp` exits after its one command, so nothing waits for the
+    /// `lia mcp` exits after its one command, so nothing waits for the
     /// servers; a logout already waited for its revocation.
     fn release(_: *anyopaque, _: *mcp_host.Host) void {
         mcp_host.signalServersForExit();
@@ -2479,7 +2479,7 @@ fn openTopLevelMcpUrl(
     try writeStdout(presentation.deps, "Open this URL to authenticate the MCP server:\n");
     try writeStdout(presentation.deps, encoded_url.bytes);
     try writeStdout(presentation.deps, "\n\nWaiting for browser authorization...\n");
-    if (io_mod.getenv("FX_NO_OPEN_BROWSER") == null) {
+    if (io_mod.getenv("LIA_NO_OPEN_BROWSER") == null) {
         _ = try presentation.opener.open(alloc, url);
     }
     return true;
@@ -2506,7 +2506,7 @@ fn writeMcpProfileWarning(
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
     try out.writer.print(
-        "fx: {s}/mcp.json warning: {s}",
+        "lia: {s}/mcp.json warning: {s}",
         .{ profile_paths.displayRoot(), @tagName(warning.cause) },
     );
     if (warning.key()) |key| {
@@ -2560,11 +2560,11 @@ fn parsedOptions(kind: TopLevelKind) ?[]const command_specs.OptionDoc {
     };
 }
 
-/// Writes `fx <command>: <problem>` when `flagProblem` finds one.
+/// Writes `lia <command>: <problem>` when `flagProblem` finds one.
 fn writeFlagFailure(alloc: Allocator, deps: RunDeps, kind: TopLevelKind, args: anytype) !void {
     const problem = try flagProblem(alloc, kind, args) orelse return;
     defer alloc.free(problem);
-    try writeStderrLine(alloc, deps, "fx {s}: ", @tagName(kind));
+    try writeStderrLine(alloc, deps, "lia {s}: ", @tagName(kind));
     try writeStderr(deps, problem);
     try writeStderr(deps, "\n");
 }
@@ -2574,7 +2574,7 @@ fn writeFlagFailure(alloc: Allocator, deps: RunDeps, kind: TopLevelKind, args: a
 /// Null when the flags are fine. The caller frees the result.
 fn flagProblem(alloc: Allocator, kind: TopLevelKind, args: anytype) !?[]u8 {
     const docs = parsedOptions(kind) orelse return null;
-    // `fx session` and `fx config` read operands that may start with a dash,
+    // `lia session` and `lia config` read operands that may start with a dash,
     // such as an ID or `-5`; report what their parsers hit.
     const parser: cli_flags.Parser = switch (kind) {
         .session, .config => .initDashOperands(docs, args),
@@ -2610,7 +2610,7 @@ fn writeUsageCommandFailure(
             message,
         );
     }
-    try writeStderr(deps, "fx usage: ");
+    try writeStderr(deps, "lia usage: ");
     try writeStderr(deps, message);
     try writeStderr(deps, "\n");
 }
@@ -2620,8 +2620,8 @@ fn usageFailureMessage(err: anyerror) []const u8 {
         error.HomeNotSet => io_mod.no_home_dir_reason,
         error.DurablePathUnsafe,
         error.PrivateStatePermissionsUnsupported,
-        => "the ~/.fx folder is unsafe",
-        else => "couldn't load the fx profile",
+        => "the ~/.lia folder is unsafe",
+        else => "couldn't load the lia profile",
     };
 }
 
@@ -2634,7 +2634,7 @@ fn writeWorkspaceCommandError(
 ) !void {
     if (!argsContainJson(args)) {
         if (output_contracts.workspaceErrorMessage(err)) |message| {
-            try writeStderr(deps, "fx workspace: ");
+            try writeStderr(deps, "lia workspace: ");
             try writeStderr(deps, message);
             try writeStderr(deps, "\n");
             return;
@@ -2667,7 +2667,7 @@ fn writeWorkspaceIndeterminateError(
         .unconfirmed => "settings durability is uncertain; reloaded settings match neither the requested nor previous state",
     };
     if (!argsContainJson(args)) {
-        try writeStderr(deps, "fx workspace: ");
+        try writeStderr(deps, "lia workspace: ");
         try writeStderr(deps, message);
         try writeStderr(deps, "\n");
         return;
@@ -2692,7 +2692,7 @@ fn workflowLanguagePlaceholder() types.ConversationLanguage {
     return types.ConversationLanguage.default();
 }
 
-/// The session modes `fx status` reports, so a client can show the mode
+/// The session modes `lia status` reports, so a client can show the mode
 /// choice before an ACP session exists. Null for a registry without modes.
 fn statusModes(registry: mode_registry.Registry, permission_mode: types.PermissionMode) ?output_contracts.StatusSnapshot.SessionModes {
     if (registry.modes.len == 0) return null;
@@ -2777,7 +2777,7 @@ fn modelDetails(
     return details;
 }
 
-/// What `fx models` says when it could not load the catalog. A connection fx
+/// What `lia models` says when it could not load the catalog. A connection lia
 /// could not make is named as one. The caller owns the text.
 fn modelListFailureMessage(alloc: Allocator, failure: model_catalog.Failure, provider: model_provider.ProviderId) Allocator.Error![]u8 {
     if (failure.category == .transport) {
@@ -2906,7 +2906,7 @@ fn writeSessionRecovery(
     return if (result.status == .recovered) .handled_success else .handled_failure;
 }
 
-/// `fx sessions` on v2: the page v1 shows, from the v2 catalog.
+/// `lia sessions` on v2: the page v1 shows, from the v2 catalog.
 fn runSessionList(alloc: Allocator, deps: RunDeps, opts: SessionListOptions) !RunResult {
     var store = session_adapter.Store.openFromEnv(alloc) catch |err| {
         try writeLookupFailure(alloc, deps, "sessions", session_adapter.commandError(err), opts.format);
@@ -2950,7 +2950,7 @@ test "sessions convert reads its flags through the shared parser" {
     try std.testing.expectError(error.InvalidLocalSurfaceArgs, parseSessionConvertArgs(&.{"extra"}));
 }
 
-/// `fx sessions convert`: converts every v1 session v2 does not hold yet,
+/// `lia sessions convert`: converts every v1 session v2 does not hold yet,
 /// and fails when it skipped any (D61).
 fn runSessionConvert(alloc: Allocator, deps: RunDeps, format: output_contracts.OutputFormat) !RunResult {
     // Each conversion is traced (`[convert]`), as an open's is.
@@ -3000,7 +3000,7 @@ fn runSessionConvert(alloc: Allocator, deps: RunDeps, format: output_contracts.O
     return if (skipped.len == 0) .handled_success else .handled_failure;
 }
 
-/// `fx session last|{id}` on v2, read without the session's lock (D37).
+/// `lia session last|{id}` on v2, read without the session's lock (D37).
 fn runSessionDetail(
     alloc: Allocator,
     deps: RunDeps,
@@ -3038,7 +3038,7 @@ fn runSessionDetail(
     }
 }
 
-/// `fx session recover` on v2 (D15): a copy up to the last good turn.
+/// `lia session recover` on v2 (D15): a copy up to the last good turn.
 fn runSessionRecovery(alloc: Allocator, deps: RunDeps, recovery: SessionRecoveryOptions) !RunResult {
     var store = session_adapter.Store.openFromEnv(alloc) catch |err| {
         try writeLookupFailure(alloc, deps, "session", session_adapter.commandError(err), recovery.format);
@@ -3079,58 +3079,58 @@ fn writeLookupFailure(
 
     switch (err) {
         error.NoSavedSessions => {
-            try writeStderr(deps, "fx session: no saved sessions for this workspace\n");
+            try writeStderr(deps, "lia session: no saved sessions for this workspace\n");
         },
         error.NoReadableSessions => {
-            try writeStderr(deps, "fx session: saved sessions are unreadable; run `fx doctor` for recovery guidance\n");
+            try writeStderr(deps, "lia session: saved sessions are unreadable; run `lia doctor` for recovery guidance\n");
         },
         error.SessionNotFound => {
-            try writeStderr(deps, "fx session: record not found\n");
+            try writeStderr(deps, "lia session: record not found\n");
         },
         error.InvalidSessionFormat => {
             try writeStderr(
                 deps,
-                "fx session: record is corrupt; run `fx doctor` for recovery guidance\n",
+                "lia session: record is corrupt; run `lia doctor` for recovery guidance\n",
             );
         },
         error.UnsupportedSessionSchema => {
             try writeStderr(
                 deps,
-                "fx session: record uses an unsupported session version\n",
+                "lia session: record uses an unsupported session version\n",
             );
         },
         error.InvalidSessionId => {
-            try writeStderr(deps, "fx session: invalid session id\n");
+            try writeStderr(deps, "lia session: invalid session id\n");
         },
         error.SessionRecoveryNotNeeded => {
             try writeStderr(
                 deps,
-                "fx session: recovery was refused because the session has a valid commit boundary; resume it normally\n",
+                "lia session: recovery was refused because the session has a valid commit boundary; resume it normally\n",
             );
         },
         error.SessionRecoveryBoundaryInvalid => {
             try writeStderr(
                 deps,
-                "fx session: no exact trustworthy recovery boundary was found; the source was left unchanged\n",
+                "lia session: no exact trustworthy recovery boundary was found; the source was left unchanged\n",
             );
         },
         error.SessionBusy => {
             try writeStderr(
                 deps,
-                "fx session: session is busy or the filesystem cannot provide the required lock\n",
+                "lia session: session is busy or the filesystem cannot provide the required lock\n",
             );
         },
         error.DurablePathUnsafe => {
             try writeStderr(
                 deps,
-                "fx session: durable session storage is unsafe or does not support required private permissions\n",
+                "lia session: durable session storage is unsafe or does not support required private permissions\n",
             );
         },
         error.SessionStoreUnavailable => {
-            try writeStderr(deps, "fx session: durable session store is unavailable\n");
+            try writeStderr(deps, "lia session: durable session store is unavailable\n");
         },
         error.HomeNotSet => {
-            try writeStderr(deps, "fx ");
+            try writeStderr(deps, "lia ");
             try writeStderr(deps, kind);
             try writeStderr(deps, ": " ++ io_mod.no_home_dir_reason ++ "\n");
         },
@@ -3150,10 +3150,10 @@ fn writeSessionDetailFailure(
 ) !void {
     const message = switch (err) {
         error.InvalidSessionFormat => if (reason.len > 0) try alloc.print(
-            "session {s} can't be read: {s}; run `fx doctor`",
+            "session {s} can't be read: {s}; run `lia doctor`",
             .{ session_id, reason },
         ) else try alloc.print(
-            "session {s} is corrupt; run `fx session recover {s}`",
+            "session {s} is corrupt; run `lia session recover {s}`",
             .{ session_id, session_id },
         ),
         error.UnsupportedSessionSchema => try alloc.print(
@@ -3178,7 +3178,7 @@ fn writeSessionDetailFailure(
             message,
         );
     }
-    try writeStderr(deps, "fx session: ");
+    try writeStderr(deps, "lia session: ");
     try writeStderr(deps, message);
     try writeStderr(deps, "\n");
 }
@@ -3202,9 +3202,9 @@ fn commandFailureMessage(err: anyerror) ?[]const u8 {
 fn lookupFailureMessage(err: anyerror) ?[]const u8 {
     return switch (err) {
         error.NoSavedSessions => "no saved sessions for this workspace",
-        error.NoReadableSessions => "saved sessions are unreadable; run `fx doctor` for recovery guidance",
+        error.NoReadableSessions => "saved sessions are unreadable; run `lia doctor` for recovery guidance",
         error.SessionNotFound => "record not found",
-        error.InvalidSessionFormat => "record is corrupt; run `fx doctor` for recovery guidance",
+        error.InvalidSessionFormat => "record is corrupt; run `lia doctor` for recovery guidance",
         error.UnsupportedSessionSchema => "record uses an unsupported session version",
         error.InvalidSessionId => "invalid session id",
         error.SessionRecoveryNotNeeded => "recovery was refused because the session has a valid commit boundary; resume it normally",
@@ -3220,19 +3220,19 @@ fn lookupFailureMessage(err: anyerror) ?[]const u8 {
     };
 }
 
-test "session detail failure names an older fx's damaged file and points at doctor (D78)" {
+test "session detail failure names an older lia's damaged file and points at doctor (D78)" {
     var text = CaptureOutput.init(std.testing.allocator);
     defer text.deinit();
     try writeSessionDetailFailure(std.testing.allocator, text.deps(), "old-session", error.InvalidSessionFormat, "events.jsonl can't be read (AccessDenied)", .text);
     try std.testing.expectEqualStrings(
-        "fx session: session old-session can't be read: events.jsonl can't be read (AccessDenied); run `fx doctor`\n",
+        "lia session: session old-session can't be read: events.jsonl can't be read (AccessDenied); run `lia doctor`\n",
         text.stderr.written(),
     );
     var json = CaptureOutput.init(std.testing.allocator);
     defer json.deinit();
     try writeSessionDetailFailure(std.testing.allocator, json.deps(), "old-session", error.InvalidSessionFormat, "events.jsonl can't be read (AccessDenied)", .json);
     try std.testing.expect(std.mem.find(u8, json.stdout.written(), "\"code\":\"InvalidSessionFormat\"") != null);
-    try std.testing.expect(std.mem.find(u8, json.stdout.written(), "run `fx doctor`") != null);
+    try std.testing.expect(std.mem.find(u8, json.stdout.written(), "run `lia doctor`") != null);
 }
 
 test "session detail failures separate corruption from unsupported schema" {
@@ -3248,7 +3248,7 @@ test "session detail failures separate corruption from unsupported schema" {
     );
     try std.testing.expectEqualStrings("", corrupt_text.stdout.written());
     try std.testing.expectEqualStrings(
-        "fx session: session broken-session is corrupt; run `fx session recover broken-session`\n",
+        "lia session: session broken-session is corrupt; run `lia session recover broken-session`\n",
         corrupt_text.stderr.written(),
     );
 
@@ -3267,7 +3267,7 @@ test "session detail failures separate corruption from unsupported schema" {
         std.mem.find(
             u8,
             corrupt_json.stdout.written(),
-            "\"error\":\"session broken-session is corrupt; run `fx session recover broken-session`\"",
+            "\"error\":\"session broken-session is corrupt; run `lia session recover broken-session`\"",
         ) != null,
     );
     try std.testing.expect(
@@ -3290,7 +3290,7 @@ test "session detail failures separate corruption from unsupported schema" {
     );
     try std.testing.expectEqualStrings("", unsupported_text.stdout.written());
     try std.testing.expectEqualStrings(
-        "fx session: session future-session uses an unsupported session version\n",
+        "lia session: session future-session uses an unsupported session version\n",
         unsupported_text.stderr.written(),
     );
 }
@@ -3307,7 +3307,7 @@ test "session recovery boundary failures keep stable text and json guidance" {
     );
     try std.testing.expectEqualStrings("", text_output.stdout.written());
     try std.testing.expectEqualStrings(
-        "fx session: no exact trustworthy recovery boundary was found; the source was left unchanged\n",
+        "lia session: no exact trustworthy recovery boundary was found; the source was left unchanged\n",
         text_output.stderr.written(),
     );
 
@@ -3386,12 +3386,12 @@ fn commandSupportsWorkspaceModifiers(command: Command) bool {
 fn writeWorkspaceModifierUsage(deps: RunDeps) !void {
     try writeStderr(
         deps,
-        "fx: --add-dir and --no-additional-dirs are only supported for ask, ACP, PR, and issue launches\n",
+        "lia: --add-dir and --no-additional-dirs are only supported for ask, ACP, PR, and issue launches\n",
     );
 }
 
 /// For an agent-run flag before a command, says where it goes, as in
-/// `fx: put agent-run flags after the command, as in fx ask --model <id>`.
+/// `lia: put agent-run flags after the command, as in lia ask --model <id>`.
 fn writeModelModifierUsage(alloc: Allocator, deps: RunDeps, command: Command, modifiers: LaunchModifiers) !void {
     const example = firstAgentRunFlag(modifiers);
     const routing = modifiers.provider_order_override != null or modifiers.provider_strict_override != null;
@@ -3404,9 +3404,9 @@ fn writeModelModifierUsage(alloc: Allocator, deps: RunDeps, command: Command, mo
         else => null,
     };
     const message = if (target) |name|
-        try alloc.print("fx: put agent-run flags after the command, as in fx {s} {s}\n", .{ name, example })
+        try alloc.print("lia: put agent-run flags after the command, as in lia {s} {s}\n", .{ name, example })
     else
-        try alloc.print("fx: agent-run flags such as {s} apply to a session and to fx ask, fx pr, fx issue, and fx acp\n", .{example[0 .. std.mem.findScalar(u8, example, ' ') orelse example.len]});
+        try alloc.print("lia: agent-run flags such as {s} apply to a session and to lia ask, lia pr, lia issue, and lia acp\n", .{example[0 .. std.mem.findScalar(u8, example, ' ') orelse example.len]});
     defer alloc.free(message);
     try writeStderr(deps, message);
 }
@@ -3499,7 +3499,7 @@ test "pr and issue take the agent-run flags before their context" {
     try std.testing.expectEqualStrings("--permission-mode", bad.?.flag);
 }
 
-/// Prints the settings `fx config list` or `fx config get` asks for. `get` of a
+/// Prints the settings `lia config list` or `lia config get` asks for. `get` of a
 /// key that isn't set prints nothing and fails, as `git config get` does.
 fn runConfigSchema(alloc: Allocator, deps: RunDeps, opts: cli_config.Options) !RunResult {
     var out: std.Io.Writer.Allocating = .init(alloc);
@@ -3523,7 +3523,7 @@ fn runConfig(alloc: Allocator, cfg: Config, deps: RunDeps, opts: cli_config.Opti
         if (opts.format == .json) {
             try writeJsonCommandFailure(alloc, deps, "config", err, message);
         } else {
-            try writeStderrLine(alloc, deps, "fx config: {s}\n", message);
+            try writeStderrLine(alloc, deps, "lia config: {s}\n", message);
         }
         return .handled_failure;
     };
@@ -3559,7 +3559,7 @@ fn runConfig(alloc: Allocator, cfg: Config, deps: RunDeps, opts: cli_config.Opti
         for (snapshot.unknown) |unknown| {
             const message = try settings_messages.formatUnknownSetting(alloc, unknown.key, unknown.file);
             defer alloc.free(message);
-            try writeStderrLine(alloc, deps, "fx config: {s}\n", message);
+            try writeStderrLine(alloc, deps, "lia config: {s}\n", message);
         }
     }
 
@@ -3577,7 +3577,7 @@ fn runConfig(alloc: Allocator, cfg: Config, deps: RunDeps, opts: cli_config.Opti
     return if (opts.key != null and entries.len == 0) .handled_failure else .handled_success;
 }
 
-/// The entries `fx config get` looks a key up in without a scope: each value
+/// The entries `lia config get` looks a key up in without a scope: each value
 /// as a run resolves it, through the same `resolveSettings` the session uses.
 fn resolvedConfigEntries(
     alloc: Allocator,
@@ -3590,7 +3590,7 @@ fn resolvedConfigEntries(
 ) ![]settings_entries.Entry {
     var detailed = try config_runtime.loadMergedSettingsDetailed(alloc, workspace_root);
     defer detailed.deinit(alloc);
-    // The same warnings fx status prints, such as a profile fx rejects, which
+    // The same warnings lia status prints, such as a profile lia rejects, which
     // explain a value shown as the default.
     if (format == .text) try writeConfigDiagnostics(alloc, deps, detailed.diagnostics);
     var state = app_lifecycle.StartupState{ .agent_step_limit = cfg.default_agent_step_limit };
@@ -3619,17 +3619,17 @@ fn dupeJsonValue(arena: Allocator, value: std.json.Value) !std.json.Value {
 
 const workspace_write_message = "preferences apply to every workspace, so set and unset don't take --workspace";
 
-/// Saves what `fx config set` or `fx config unset` asks for to the profile's
+/// Saves what `lia config set` or `lia config unset` asks for to the profile's
 /// top level and prints one line naming the key, the value, and the file.
 fn runConfigWrite(alloc: Allocator, deps: RunDeps, opts: cli_config.Options) !RunResult {
     var problem: cli_config.WriteProblem = .none;
     const planned = cli_config.change(opts, &problem) catch |err| {
-        const message = try cli_config.formatWriteProblem(alloc, opts.key.?, opts.value, problem, "fx config");
+        const message = try cli_config.formatWriteProblem(alloc, opts.key.?, opts.value, problem, "lia config");
         defer alloc.free(message);
         if (opts.format == .json) {
             try writeJsonCommandFailure(alloc, deps, "config", err, message);
         } else {
-            try writeStderrLine(alloc, deps, "fx config: {s}\n", message);
+            try writeStderrLine(alloc, deps, "lia config: {s}\n", message);
         }
         return usage_failure;
     };
@@ -3640,7 +3640,7 @@ fn runConfigWrite(alloc: Allocator, deps: RunDeps, opts: cli_config.Options) !Ru
         if (opts.format == .json) {
             try writeJsonCommandFailure(alloc, deps, "config", err, message);
         } else {
-            try writeStderrLine(alloc, deps, "fx config: {s}\n", message);
+            try writeStderrLine(alloc, deps, "lia config: {s}\n", message);
         }
         return .handled_failure;
     };
@@ -3796,8 +3796,8 @@ fn parseWorkspaceArgs(args: []const [:0]const u8) !WorkspaceOptions {
 const SessionFlag = enum { id, json };
 const session_flag_ids = cli_flags.idTable(SessionFlag, &builtin_commands.session_options);
 
-/// The flags and the one target shared by `fx session` and
-/// `fx session recover`. A repeated `--id` keeps its last value; two
+/// The flags and the one target shared by `lia session` and
+/// `lia session recover`. A repeated `--id` keeps its last value; two
 /// targets, or a positional target with `--id`, are an error.
 const SessionTargetArgs = struct {
     format: output_contracts.OutputFormat = .text,
@@ -3858,7 +3858,7 @@ fn parseSessionRecoveryArgs(
 }
 
 const WorkflowFlag = enum { permission_mode, ask, auto, full_access, yolo, provider, model, effort, fast, no_fast, ultrafast, no_ultrafast, provider_order, provider_strict, no_provider_strict };
-// `fx issue` documents the same flags as `fx pr`.
+// `lia issue` documents the same flags as `lia pr`.
 const workflow_flag_ids = cli_flags.idTable(WorkflowFlag, &builtin_commands.pr_options);
 
 /// Reads the agent-run flags, then joins the rest into the context.
@@ -4256,10 +4256,10 @@ test "additional directory flags fail closed when malformed" {
 test "parse acp args extracts known flags and rejects invalid arguments" {
     const alloc = std.testing.allocator;
     var bad: ?BadAgentValue = null;
-    var opts = try parseAcpArgs(alloc, &.{ "--model", "openai/gpt-4o", "--log-file", "/tmp/fx.log" }, &bad);
+    var opts = try parseAcpArgs(alloc, &.{ "--model", "openai/gpt-4o", "--log-file", "/tmp/lia.log" }, &bad);
     defer opts.deinit(alloc);
     try std.testing.expectEqualStrings("openai/gpt-4o", opts.agent.model.?);
-    try std.testing.expectEqualStrings("/tmp/fx.log", opts.log_file.?);
+    try std.testing.expectEqualStrings("/tmp/lia.log", opts.log_file.?);
 
     try std.testing.expectError(error.InvalidAcpArgs, parseAcpArgs(alloc, &.{"--unknown"}, &bad));
     try std.testing.expectError(error.InvalidAcpArgs, parseAcpArgs(alloc, &.{"--model"}, &bad));
@@ -4581,7 +4581,7 @@ test "runIfRequested help writes top-level help" {
     try std.testing.expectEqualStrings("", capture.stderr.written());
 }
 
-// `builtins/mcp.zig` "fx mcp approve saves the approval of a project server"
+// `builtins/mcp.zig` "lia mcp approve saves the approval of a project server"
 // checks what approving saves.
 test "top-level MCP approve runs without interactive startup" {
     const alloc = std.testing.allocator;
@@ -4648,7 +4648,7 @@ test "workspace launch modifiers preserve supported command help" {
         deps,
     );
     try std.testing.expectEqual(RunResult.handled_success, result);
-    try std.testing.expect(std.mem.startsWith(u8, capture.stdout.written(), "fx ask\n\n"));
+    try std.testing.expect(std.mem.startsWith(u8, capture.stdout.written(), "lia ask\n\n"));
     try std.testing.expectEqualStrings("", capture.stderr.written());
 }
 
@@ -4675,15 +4675,15 @@ test "global workspace launch option errors use user-facing copy" {
     }{
         .{
             .args = &.{@constCast("--add-dir")},
-            .expected = "fx: --add-dir needs a value\n",
+            .expected = "lia: --add-dir needs a value\n",
         },
         .{
             .args = &.{@constCast("--add-dir=")},
-            .expected = "fx: --add-dir requires a directory path\n",
+            .expected = "lia: --add-dir requires a directory path\n",
         },
         .{
             .args = &.{@constCast("--fast=on")},
-            .expected = "fx: --fast doesn't take a value\n",
+            .expected = "lia: --fast doesn't take a value\n",
         },
     };
 
@@ -4730,7 +4730,7 @@ test "runIfRequested version flags reject extra args" {
         const result = try runIfRequestedWithDeps(std.testing.allocator, args, testConfig(), capture.deps());
         try std.testing.expectEqual(usage_failure, result);
         try std.testing.expectEqualStrings("", capture.stdout.written());
-        try std.testing.expectEqualStrings("usage: fx --version\n", capture.stderr.written());
+        try std.testing.expectEqualStrings("usage: lia --version\n", capture.stderr.written());
     }
 }
 
@@ -4794,8 +4794,8 @@ test "setup preserves the disabled secret-store failure" {
     try std.testing.expectEqual(@as(usize, 0), capture.setup_store_calls);
     try std.testing.expectEqual(@as(usize, 0), capture.setup_read_calls);
     try std.testing.expectEqualStrings(
-        "fx setup is deprecated and stops working in fx 0.0.18; use fx login vercel --api-key\n" ++
-            "fx setup: stored API keys are disabled by FX_DISABLE_KEYCHAIN\n",
+        "lia setup is deprecated and stops working in lia 0.0.18; use lia login vercel --api-key\n" ++
+            "lia setup: stored API keys are disabled by LIA_DISABLE_KEYCHAIN\n",
         capture.stderr.written(),
     );
 }
@@ -4829,7 +4829,7 @@ test "login --api-key stores a pasted key like setup, without the deprecation wa
     cfg.secret_store = capture.secretStore();
     const result = try runIfRequestedWithDeps(std.testing.allocator, &.{ "login", "--api-key" }, cfg, capture.deps());
     try std.testing.expectEqual(RunResult.handled_failure, result);
-    try std.testing.expectEqualStrings("fx login: stored API keys are disabled by FX_DISABLE_KEYCHAIN\n", capture.stderr.written());
+    try std.testing.expectEqualStrings("lia login: stored API keys are disabled by LIA_DISABLE_KEYCHAIN\n", capture.stderr.written());
 }
 
 test "login arguments take one provider and --api-key only for vercel" {
@@ -4916,7 +4916,7 @@ test "runIfRequested rejects removed record flag as unknown input" {
         capture.deps(),
     );
     try std.testing.expectEqual(usage_failure, result);
-    try std.testing.expect(std.mem.startsWith(u8, capture.stderr.written(), "fx: unknown flag --record\nusage: fx "));
+    try std.testing.expect(std.mem.startsWith(u8, capture.stderr.written(), "lia: unknown flag --record\nusage: lia "));
 }
 
 test "global ultrafast launch modifier is ACP-only" {
@@ -5010,7 +5010,7 @@ test "CLI surface uses the supplied command catalog for parsing usage and help" 
         usage_capture.deps(),
     );
     try std.testing.expectEqual(usage_failure, result);
-    try std.testing.expectEqualStrings("usage: fx start\n", usage_capture.stderr.written());
+    try std.testing.expectEqualStrings("usage: lia start\n", usage_capture.stderr.written());
 }
 
 test "workflow config does not carry placeholder gateway tools" {
@@ -5037,7 +5037,7 @@ test "runIfRequested invalid local flags write usage" {
     const result = try runIfRequestedWithDeps(std.testing.allocator, &.{ @constCast("status"), @constCast("--wat") }, testConfig(), capture.deps());
     try std.testing.expectEqual(usage_failure, result);
     try std.testing.expectEqualStrings("", capture.stdout.written());
-    try std.testing.expectEqualStrings("fx status: unknown flag --wat\nusage: fx status [--json]\n", capture.stderr.written());
+    try std.testing.expectEqualStrings("lia status: unknown flag --wat\nusage: lia status [--json]\n", capture.stderr.written());
 }
 
 test "runIfRequested names the bad flag after a session id that starts with a dash" {
@@ -5051,7 +5051,7 @@ test "runIfRequested names the bad flag after a session id that starts with a da
         capture.deps(),
     );
     try std.testing.expectEqual(usage_failure, result);
-    try std.testing.expect(std.mem.startsWith(u8, capture.stderr.written(), "fx session: unknown flag --jsno (did you mean --json?)\n"));
+    try std.testing.expect(std.mem.startsWith(u8, capture.stderr.written(), "lia session: unknown flag --jsno (did you mean --json?)\n"));
 }
 
 test "runIfRequested invalid json local flags write json error" {
@@ -5107,28 +5107,28 @@ test "runIfRequested explains a first argument that is neither a command nor a p
     }{
         .{
             .args = &.{ @constCast("fix"), @constCast("the"), @constCast("login"), @constCast("bug") },
-            .stderr = "fx: put the prompt in quotes: fx \"fix the login bug\"\n",
+            .stderr = "lia: put the prompt in quotes: lia \"fix the login bug\"\n",
         },
         .{
             .args = &.{ @constCast("--fast"), @constCast("fix"), @constCast("it") },
-            .stderr = "fx: put the prompt in quotes: fx \"fix it\"\n",
+            .stderr = "lia: put the prompt in quotes: lia \"fix it\"\n",
         },
-        .{ .args = &.{@constCast("stauts")}, .stderr = "fx: unknown command stauts (did you mean status?)\n" },
-        .{ .args = &.{ @constCast("sesions"), @constCast("--json") }, .stderr = "fx: unknown command sesions (did you mean sessions?)\n" },
-        .{ .args = &.{@constCast("version")}, .stderr = "fx: unknown command version (did you mean --version?)\n" },
+        .{ .args = &.{@constCast("stauts")}, .stderr = "lia: unknown command stauts (did you mean status?)\n" },
+        .{ .args = &.{ @constCast("sesions"), @constCast("--json") }, .stderr = "lia: unknown command sesions (did you mean sessions?)\n" },
+        .{ .args = &.{@constCast("version")}, .stderr = "lia: unknown command version (did you mean --version?)\n" },
         .{
             .args = &.{ @constCast("-p"), @constCast("fix the bug") },
-            .stderr = "fx: -p isn't an fx flag; to run one request and exit, use fx ask \"fix the bug\"\n",
+            .stderr = "lia: -p isn't an lia flag; to run one request and exit, use lia ask \"fix the bug\"\n",
         },
         .{
             .args = &.{@constCast("--print")},
-            .stderr = "fx: --print isn't an fx flag; to run one request and exit, use fx ask \"<prompt>\"\n",
+            .stderr = "lia: --print isn't an lia flag; to run one request and exit, use lia ask \"<prompt>\"\n",
         },
         .{
             .args = &.{@constCast("--print=fix it")},
-            .stderr = "fx: --print isn't an fx flag; to run one request and exit, use fx ask \"fix it\"\n",
+            .stderr = "lia: --print isn't an lia flag; to run one request and exit, use lia ask \"fix it\"\n",
         },
-        .{ .args = &.{@constCast(" ")}, .stderr = "fx: the prompt is empty\n" },
+        .{ .args = &.{@constCast(" ")}, .stderr = "lia: the prompt is empty\n" },
     };
     for (cases) |case| {
         var capture = CaptureOutput.init(std.testing.allocator);
@@ -5146,9 +5146,9 @@ test "runIfRequested suggests the nearest flag for an unknown one, before or aft
         args: []const [:0]const u8,
         first_line: []const u8,
     }{
-        .{ .args = &.{ @constCast("--modle"), @constCast("x") }, .first_line = "fx: unknown flag --modle (did you mean --model?)\n" },
-        .{ .args = &.{@constCast("--verison")}, .first_line = "fx: unknown flag --verison (did you mean --version?)\n" },
-        .{ .args = &.{ @constCast("fix it"), @constCast("--modle=x") }, .first_line = "fx: unknown flag --modle (did you mean --model?)\n" },
+        .{ .args = &.{ @constCast("--modle"), @constCast("x") }, .first_line = "lia: unknown flag --modle (did you mean --model?)\n" },
+        .{ .args = &.{@constCast("--verison")}, .first_line = "lia: unknown flag --verison (did you mean --version?)\n" },
+        .{ .args = &.{ @constCast("fix it"), @constCast("--modle=x") }, .first_line = "lia: unknown flag --modle (did you mean --model?)\n" },
     };
     for (cases) |case| {
         var capture = CaptureOutput.init(std.testing.allocator);
@@ -5173,7 +5173,7 @@ test "runIfRequested model fetch failure is handled" {
     const result = try runIfRequestedWithDeps(std.testing.allocator, &.{@constCast("models")}, cfg, deps);
     try std.testing.expectEqual(RunResult.handled_failure, result);
     try std.testing.expectEqualStrings(
-        "fx models: could not list models: Unavailable\n",
+        "lia models: could not list models: Unavailable\n",
         capture.stderr.written(),
     );
 }
@@ -5215,7 +5215,7 @@ test "runIfRequested model provider cancellation is handled" {
     const result = try runIfRequestedWithDeps(std.testing.allocator, &.{@constCast("models")}, cfg, deps);
     try std.testing.expectEqual(RunResult.handled_failure, result);
     try std.testing.expectEqualStrings(
-        "fx models: could not list models: the request was cancelled\n",
+        "lia models: could not list models: the request was cancelled\n",
         capture.stderr.written(),
     );
 }
@@ -5333,7 +5333,7 @@ test "runIfRequested local json success appends exactly one newline" {
     const result = try runIfRequestedWithDeps(std.testing.allocator, &.{ @constCast("status"), @constCast("--json") }, testConfig(), deps);
     try std.testing.expectEqual(RunResult.handled_success, result);
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"status\",\"model\":\"test-model\",\"model_origin\":\"default\",\"effort\":\"auto\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"auto\",\"workspace\":\"/tmp/fx\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":42,\"ultrafast_requested\":false,\"mcp\":{\"connection_check\":\"not_checked\",\"servers\":[],\"configuration_issues\":[],\"inspection_error\":null}}\n",
+        "{\"kind\":\"status\",\"model\":\"test-model\",\"model_origin\":\"default\",\"effort\":\"auto\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"lia needs access to Vercel AI Gateway. Run lia login to sign in, lia login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"auto\",\"workspace\":\"/tmp/lia\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":42,\"ultrafast_requested\":false,\"mcp\":{\"connection_check\":\"not_checked\",\"servers\":[],\"configuration_issues\":[],\"inspection_error\":null}}\n",
         capture.stdout.written(),
     );
     try std.testing.expect(!std.mem.endsWith(u8, capture.stdout.written(), "\n\n"));
@@ -5397,7 +5397,7 @@ test "status and doctor inspect MCP configuration once per command" {
     try std.testing.expect(std.mem.find(
         u8,
         doctor_capture.stdout.written(),
-        "\"detail\":\"failed to load ~/.fx/mcp.json: McpConfigInvalidJson\"",
+        "\"detail\":\"failed to load ~/.lia/mcp.json: McpConfigInvalidJson\"",
     ) != null);
 }
 
@@ -5407,7 +5407,7 @@ test "writeRenderedJsonLine falls back to heap and appends exactly one newline" 
 
     var tiny_buf: [8]u8 = undefined;
     const startup = app_lifecycle.StartupStatus{
-        .workspace_root = @constCast("/tmp/fx"),
+        .workspace_root = @constCast("/tmp/lia"),
         .selected_model = "test-model",
         .permission_mode = .ask,
         .agent_step_limit = 42,
@@ -5422,7 +5422,7 @@ test "writeRenderedJsonLine falls back to heap and appends exactly one newline" 
     );
 
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"status\",\"model\":\"test-model\",\"model_origin\":\"default\",\"effort\":\"auto\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/fx\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":42,\"ultrafast_requested\":true}\n",
+        "{\"kind\":\"status\",\"model\":\"test-model\",\"model_origin\":\"default\",\"effort\":\"auto\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"lia needs access to Vercel AI Gateway. Run lia login to sign in, lia login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/lia\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":42,\"ultrafast_requested\":true}\n",
         capture.stdout.written(),
     );
 }
@@ -5436,7 +5436,7 @@ test "writeRenderedJsonLine renders doctor json through output contract" {
         .{ .name = "git", .status = .warn, .detail = "not a git repository; pr/issue workflows will be limited" },
     };
     const snapshot = doctor_runtime.Snapshot{
-        .workspace_root = @constCast("/tmp/fx"),
+        .workspace_root = @constCast("/tmp/lia"),
         .model = "test-model",
         .auth = .{ .active_source = .ai_gateway_api_key },
         .permission_mode = .auto,
@@ -5453,7 +5453,7 @@ test "writeRenderedJsonLine renders doctor json through output contract" {
     );
 
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"doctor\",\"ok_count\":1,\"warn_count\":1,\"fail_count\":0,\"workspace\":\"/tmp/fx\",\"model\":\"test-model\",\"auth\":\"AI_GATEWAY_API_KEY\",\"auth_refreshable\":false,\"permission_mode\":\"auto\",\"agent_step_limit\":42,\"checks\":[{\"name\":\"auth\",\"status\":\"ok\",\"detail\":\"AI_GATEWAY_API_KEY is configured\"},{\"name\":\"git\",\"status\":\"warn\",\"detail\":\"not a git repository; pr/issue workflows will be limited\"}]}\n",
+        "{\"kind\":\"doctor\",\"ok_count\":1,\"warn_count\":1,\"fail_count\":0,\"workspace\":\"/tmp/lia\",\"model\":\"test-model\",\"auth\":\"AI_GATEWAY_API_KEY\",\"auth_refreshable\":false,\"permission_mode\":\"auto\",\"agent_step_limit\":42,\"checks\":[{\"name\":\"auth\",\"status\":\"ok\",\"detail\":\"AI_GATEWAY_API_KEY is configured\"},{\"name\":\"git\",\"status\":\"warn\",\"detail\":\"not a git repository; pr/issue workflows will be limited\"}]}\n",
         capture.stdout.written(),
     );
 }
@@ -5617,7 +5617,7 @@ fn testConfig() Config {
         .url_opener = host.unavailable_url_opener,
         .secret_store = host.unavailable_secret_store,
         .prompt_policy = .{ .system_prompt = "system" },
-        .skill_root_policy = .{ .managed_root_source = .global_fx },
+        .skill_root_policy = .{ .managed_root_source = .global_lia },
         .ignored_list_entries = &.{},
         .max_list_entries = 10,
         .max_read_file_bytes = 1024,
@@ -5647,7 +5647,7 @@ fn stubLoadStartupState(
 ) !app_lifecycle.StartupState {
     var state = app_lifecycle.StartupState{ .agent_step_limit = default_agent_step_limit };
     errdefer state.deinit(alloc);
-    state.workspace_root = try alloc.dupe(u8, "/tmp/fx");
+    state.workspace_root = try alloc.dupe(u8, "/tmp/lia");
     state.selected_model = try alloc.dupe(u8, default_model);
     state.credential = .{
         .token = try alloc.dupe(u8, "test-key"),
@@ -5666,7 +5666,7 @@ fn stubLoadStartupStateWithoutCredentials(
         .agent_step_limit = default_agent_step_limit,
     };
     errdefer state.deinit(alloc);
-    state.workspace_root = try alloc.dupe(u8, "/tmp/fx");
+    state.workspace_root = try alloc.dupe(u8, "/tmp/lia");
     return state;
 }
 
@@ -5684,7 +5684,7 @@ fn stubLoadStartupStatus(
     default_model: []const u8,
     default_agent_step_limit: usize,
 ) !app_lifecycle.StartupStatus {
-    const workspace_root = try alloc.dupe(u8, "/tmp/fx");
+    const workspace_root = try alloc.dupe(u8, "/tmp/lia");
     errdefer alloc.free(workspace_root);
     const selected_model = try alloc.dupe(u8, default_model);
     errdefer alloc.free(selected_model);

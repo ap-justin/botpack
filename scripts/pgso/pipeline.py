@@ -90,18 +90,18 @@ BENCHMARK_USE_FLAGS = (
     f"-passes={PROFILE_PREPARATION_PASSES},default<O2>,mergefunc",
 )
 
-FX_CODEGEN_FLAGS = (
+LIA_CODEGEN_FLAGS = (
     "-machine-outliner-reruns=1",
     "-homogeneous-prolog-epilog",
 )
 
 
 ARTIFACT_LAYOUTS = {
-    "fx": (None, "fx", "fx.bc"),
+    "lia": (None, "lia", "lia.bc"),
     "file_index": ("bench-file-index", "file-index-bench", "file-index.bc"),
     # Linux only: scripts/pgso/unit_tests.py runs the unit tests on
     # transformed code.
-    "unit_tests": ("install-test", "fx-test", "unit-tests.bc"),
+    "unit_tests": ("install-test", "lia-test", "unit-tests.bc"),
 }
 
 
@@ -111,7 +111,7 @@ class ArtifactSpec:
     target: str = DEFAULT_TARGET
     optimize: str = "ReleaseSafe"
     update_channel: str = "stable"
-    selector: str = "fx"
+    selector: str = "lia"
 
     def __post_init__(self) -> None:
         # Platform modules import this one, so load the registry here.
@@ -169,7 +169,7 @@ class PipelinePaths:
         cls,
         root: pathlib.Path,
         *,
-        selector: str = "fx",
+        selector: str = "lia",
     ) -> "PipelinePaths":
         return cls._initialize(root, selector=selector, require_empty=True)
 
@@ -178,7 +178,7 @@ class PipelinePaths:
         cls,
         root: pathlib.Path,
         *,
-        selector: str = "fx",
+        selector: str = "lia",
     ) -> "PipelinePaths":
         root = root.resolve()
         if not root.is_dir():
@@ -324,9 +324,9 @@ def _runtime_environment(paths: PipelinePaths) -> dict[str, str]:
     environment = hermetic_environment(paths.runtime_home)
     environment.update(
         {
-            "FX_AUTO_UPGRADE": "0",
-            "FX_TEST_SKIP_ONBOARDING": "1",
-            "FX_SOUND": "0",
+            "LIA_AUTO_UPGRADE": "0",
+            "LIA_TEST_SKIP_ONBOARDING": "1",
+            "LIA_SOUND": "0",
             "HOME": str(paths.runtime_home),
         }
     )
@@ -416,9 +416,9 @@ def profile_use_argv(
 ) -> tuple[str, ...]:
     # A benchmark trained on its own workload uses the higher cold cutoff, so
     # its IR keeps the functions that workload runs speed-shaped. The measured
-    # benchmark candidates pass `production_flags` to build the way fx does.
+    # benchmark candidates pass `production_flags` to build the way lia does.
     profile = profile_path or paths.merged_profile
-    production = production_flags or paths.selector == "fx"
+    production = production_flags or paths.selector == "lia"
     flags = USE_FLAGS if production else BENCHMARK_USE_FLAGS
     return (
         str(toolchain.opt),
@@ -476,10 +476,10 @@ def candidate_object_argv(
     # AArch64, each size-optimized function also saves and restores its
     # callee-saved registers through a shared frame helper instead of inline.
     # The measured benchmark candidates pass `production_flags` so the heavy
-    # gates measure the code generation fx ships. A benchmark trained on its
+    # gates measure the code generation lia ships. A benchmark trained on its
     # own workload keeps the default code generation.
-    production = production_flags or paths.selector == "fx"
-    codegen_flags = FX_CODEGEN_FLAGS if production else ()
+    production = production_flags or paths.selector == "lia"
+    codegen_flags = LIA_CODEGEN_FLAGS if production else ()
     return (
         str(toolchain.llc),
         "-filetype=obj",
@@ -492,7 +492,7 @@ def candidate_object_argv(
     )
 
 
-# A ReleaseSafe build of fx takes about 7 minutes on the PGSO runners and the
+# A ReleaseSafe build of lia takes about 7 minutes on the PGSO runners and the
 # unit test executable up to about 13, so this only ends a build that hangs.
 ZIG_BUILD_TIMEOUT_S = 1800
 
@@ -969,7 +969,7 @@ def exempt_cold_startup_functions(
     """Keep profile use from compiling the cold startup functions for size.
 
     Profile use marks the functions it judges cold `minsize`, and that slows
-    short commands such as `fx help`. This applies the production profile
+    short commands such as `lia help`. This applies the production profile
     once, then removes from `paths.merged_profile` the records of the startup
     functions that came out `minsize`, so the real profile use and the
     benchmark relinks treat them as unprofiled. Hot startup functions, those
@@ -1168,7 +1168,7 @@ def apply_profile(
         )
         _require_bitcode_header(marked)
         os.replace(marked, paths.profile_use_base_bitcode)
-    if paths.selector != "fx":
+    if paths.selector != "lia":
         _outline_without_folded_constants(
             toolchain,
             paths,

@@ -1,4 +1,4 @@
-// `bun run verify` from tests/tla/mcp_call/: the one gate for the `fx mcp
+// `bun run verify` from tests/tla/mcp_call/: the one gate for the `lia mcp
 // call` bridge design. In order, and every step must pass:
 //
 //   1. the pinned TLC and the Java that runs it;
@@ -14,11 +14,11 @@
 //   9. traceability: DESIGN.md accounts for every question, rule, and law,
 //      and rejects designs that drop one.
 //
-// The shell around the core has not landed, so nothing here runs the fx
+// The shell around the core has not landed, so nothing here runs the lia
 // binary yet; design/FINISH.md tracks the binary stage.
 //
-// Settings: FX_MCP_CALL_SEED (default 20261029), FX_MCP_CALL_TRACES (random
-// traces, default 300), FX_TLA_OUT (where the report goes).
+// Settings: LIA_MCP_CALL_SEED (default 20261029), LIA_MCP_CALL_TRACES (random
+// traces, default 300), LIA_TLA_OUT (where the report goes).
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { REPO_ROOT, outDir, writeJson } from "../lib/tlc.ts";
@@ -28,8 +28,8 @@ import { codeMutations, specMutations } from "./mutations.ts";
 import { specToCode } from "./spec-to-code.ts";
 import { checkTraceability } from "./traceability.ts";
 
-const seed = Number(process.env.FX_MCP_CALL_SEED ?? "20261029");
-const randomTraces = Number(process.env.FX_MCP_CALL_TRACES ?? "300");
+const seed = Number(process.env.LIA_MCP_CALL_SEED ?? "20261029");
+const randomTraces = Number(process.env.LIA_MCP_CALL_TRACES ?? "300");
 // TLC's distinct-state count does not depend on the worker count.
 const workers = ["-workers", "auto"];
 const out = outDir("mcp-call");

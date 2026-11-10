@@ -153,7 +153,7 @@ pub const TurnReviewCache = struct {
 
 fn permissionActionId(call: ToolCall) PermissionActionId {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.permission-action.v1\x00");
+    hash.update("lia.permission-action.v1\x00");
     hash.update(call.name);
     hash.update("\x00");
     hash.update(call.arguments_json);
@@ -333,7 +333,7 @@ pub const IdenticalFailureEscalationState = struct {
 
     fn failureDigest(call: ToolCall) [32]u8 {
         var hash = std.crypto.hash.sha2.Sha256.init(.{});
-        hash.update("fx.identical-failure.v1\x00");
+        hash.update("lia.identical-failure.v1\x00");
         hash.update(call.name);
         hash.update("\x00");
         hash.update(call.arguments_json);
@@ -628,7 +628,7 @@ test "identical failure escalation counts exact repeats within one turn" {
     // Successes never escalate and never reset an existing count.
     try std.testing.expectEqual(@as(u32, 0), try state.observe(alloc, edit_call, false));
     try std.testing.expectEqual(@as(u32, 4), try state.observe(alloc, edit_call, true));
-    // Provider-supplied results are not fx-executed and never count.
+    // Provider-supplied results are not lia-executed and never count.
     const provider_call: ToolCall = .{
         .id = "edit-4",
         .name = "edit_file",

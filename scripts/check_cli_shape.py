@@ -1,11 +1,11 @@
-"""Fail CI when fx's user-facing controls drift from the shape rules.
+"""Fail CI when lia's user-facing controls drift from the shape rules.
 
 The check reads the real source rather than a model of it:
 
-  env       every FX_* name in src/ is registered with a job and a stability,
-            test hooks and only test hooks start with FX_TEST_, every other
+  env       every LIA_* name in src/ is registered with a job and a stability,
+            test hooks and only test hooks start with LIA_TEST_, every other
             env var read by name is listed, nothing is stale, and the
-            overrides fx config list reports are stable
+            overrides lia config list reports are stable
   flags     flags are kebab-case and carry no value inside their name
   parsing   CLI code reads flags through cli_flags and the option lists help
             renders, so no command compares an argument with a flag by hand
@@ -13,7 +13,7 @@ The check reads the real source rather than a model of it:
             src/core/config/settings_keys.zig marks exactly the keys
             parseProjectSafeFields reads as project-safe
   warnings  every key the profile parser reads is in the settings list as
-            profile-only, so fx doctor knows it and a project .fx.json that
+            profile-only, so lia doctor knows it and a project .lia.json that
             sets it gets a warning
 
 Known exceptions live in scripts/cli_shape_registry.json, each with the reason
@@ -59,13 +59,13 @@ STABILITIES = {"stable", "experimental", "deprecated", "internal"}
 KEBAB_FLAG = re.compile(r"^--[a-z0-9]+(?:-[a-z0-9]+)*$")
 SHORT_FLAG = re.compile(r"^-[A-Za-z0-9]$")
 SNAKE_KEY = re.compile(r"^[a-z][a-z0-9_]*$")
-FX_LITERAL = re.compile(r'"(FX_[A-Z0-9_]+)"')
+LIA_LITERAL = re.compile(r'"(LIA_[A-Z0-9_]+)"')
 GETENV_LITERAL = re.compile(r'getenv\("([A-Za-z_][A-Za-z0-9_]*)"\)')
 FLAG_LITERAL = re.compile(r'"(--?[A-Za-z0-9][A-Za-z0-9_<>-]*)=?"')
 KEY_READ = re.compile(r'\.(?:get|getPtr|contains)\("([^"]+)"\)')
 # An ACP config option as sessions.zig writes it: {\"id\":\"model\",\"name\":...
 ACP_CONFIG_ID = re.compile(r'\\"id\\":\\"([a-z_]+)\\",\\"name\\"')
-# fx's version, and the release that drops the old spellings.
+# lia's version, and the release that drops the old spellings.
 VERSION = re.compile(r'^pub const version = "(\d+)\.(\d+)\.(\d+)";', re.M)
 OLD_SPELLING_REMOVAL = re.compile(r'^pub const old_spelling_removal = "(\d+)\.(\d+)\.(\d+)";', re.M)
 # A config option ID that session/set_config_option accepts.
@@ -239,11 +239,11 @@ class Checker:
         for source in sorted((self.root / "src").rglob("*.zig")):
             path = source.relative_to(self.root).as_posix()
             for line in self.lines(path):
-                for match in FX_LITERAL.finditer(line.text):
+                for match in LIA_LITERAL.finditer(line.text):
                     seen.setdefault(match.group(1), line)
                 for match in GETENV_LITERAL.finditer(line.text):
                     name = match.group(1)
-                    if not name.startswith("FX_"):
+                    if not name.startswith("LIA_"):
                         seen_external.setdefault(name, line)
         for name in sorted(set(not_env) - set(seen)):
             self.report(None, "env", f"not_env lists {name}, which src/ no longer contains; remove it")
@@ -253,19 +253,19 @@ class Checker:
                     line,
                     "env",
                     f"{name} is not in {REGISTRY}. Register it with a job and a "
-                    "stability, or reuse an existing variable (Env vars in .fx/skills/fx-cli-shape/references/rules.md).",
+                    "stability, or reuse an existing variable (Env vars in .lia/skills/lia-cli-shape/references/rules.md).",
                 )
         for name, entry in sorted(registered.items()):
             if name not in seen:
                 self.report(None, "env", f"{name} is registered but no longer appears in src/; remove it")
             if entry.get("job") not in JOBS:
                 self.report(None, "env", f"{name} has job {entry.get('job')!r}; use one of {sorted(JOBS)}")
-            if (entry.get("job") == "test") != name.startswith("FX_TEST_"):
+            if (entry.get("job") == "test") != name.startswith("LIA_TEST_"):
                 self.report(
                     None,
                     "env",
                     f"{name} has job {entry.get('job')!r}, but test hooks and only test hooks "
-                    "start with FX_TEST_; rename it or change its job",
+                    "start with LIA_TEST_; rename it or change its job",
                 )
             if entry.get("stability") not in STABILITIES:
                 self.report(
@@ -278,20 +278,20 @@ class Checker:
                 self.report(
                     line,
                     "env",
-                    f"{name} is read but is neither an FX_* variable nor listed in "
-                    f"external_env in {REGISTRY}. fx's own variables use the FX_ prefix.",
+                    f"{name} is read but is neither an LIA_* variable nor listed in "
+                    f"external_env in {REGISTRY}. lia's own variables use the LIA_ prefix.",
                 )
         for name in sorted(external - set(seen_external)):
             self.report(None, "env", f"external_env lists {name}, which src/ no longer reads; remove it")
 
     def check_documented_overrides(self) -> None:
-        """fx config list shows the variables env_settings.collect reads as the
-        documented FX_* setting overrides, and every variable fx.sh documents is
+        """lia config list shows the variables env_settings.collect reads as the
+        documented LIA_* setting overrides, and every variable the user manual documents is
         stable. An unregistered name is check_env's to report."""
         registered = self.registry.get("env", {})
         overrides: dict[str, Line] = {}
         for line in function_body(self.lines(ENV_SETTINGS), "collect"):
-            for match in FX_LITERAL.finditer(line.text):
+            for match in LIA_LITERAL.finditer(line.text):
                 overrides.setdefault(match.group(1), line)
         for name, line in sorted(overrides.items()):
             stability = registered.get(name, {}).get("stability")
@@ -299,7 +299,7 @@ class Checker:
                 self.report(
                     line,
                     "env",
-                    f"{name} is an override fx config list reports, so fx.sh documents it; "
+                    f"{name} is an override lia config list reports, so the user manual documents it; "
                     f"its stability is {stability!r}, and documented variables are stable",
                 )
 
@@ -318,7 +318,7 @@ class Checker:
                 line,
                 "flags",
                 f'"{flag}" must be kebab-case with no value inside the name; '
-                "pass values as an argument (Flags in .fx/skills/fx-cli-shape/references/rules.md)",
+                "pass values as an argument (Flags in .lia/skills/lia-cli-shape/references/rules.md)",
             )
 
     def check_parsing(self) -> None:
@@ -348,7 +348,7 @@ class Checker:
                         "parsing",
                         f"{flag} is compared with an argument by hand. Add it to the "
                         f"command's option list in {COMMANDS} and read it through "
-                        "cli_flags (Flags and One source of truth in .fx/skills/fx-cli-shape/references/rules.md), or list it in "
+                        "cli_flags (Flags and One source of truth in .lia/skills/lia-cli-shape/references/rules.md), or list it in "
                         f"hand_parsed_flags in {REGISTRY} with the reason.",
                     )
         for flag in sorted(set(allowed) - seen):
@@ -365,7 +365,7 @@ class Checker:
                 key = match.group(1)
                 if SNAKE_KEY.match(key) or self.excepted("setting_keys", key):
                     continue
-                self.report(line, "settings", f'settings key "{key}" must be snake_case (Settings in .fx/skills/fx-cli-shape/references/rules.md)')
+                self.report(line, "settings", f'settings key "{key}" must be snake_case (Settings in .lia/skills/lia-cli-shape/references/rules.md)')
         listed = {
             match.group(1): (line, match.group(2))
             for line in self.lines(SETTINGS_KEYS)
@@ -383,9 +383,9 @@ class Checker:
                 self.report(
                     line,
                     "warnings",
-                    f'"{key}" is profile-only, so a project .fx.json that sets it is '
+                    f'"{key}" is profile-only, so a project .lia.json that sets it is '
                     f"ignored. List it in {SETTINGS_KEYS} with .where = .profile so the "
-                    "user is told and fx doctor knows the key.",
+                    "user is told and lia doctor knows the key.",
                 )
         project_reads: set[str] = set()
         for line in project:
@@ -398,7 +398,7 @@ class Checker:
                 self.report(
                     line,
                     "settings",
-                    f'.fx.json may set "{key}", so list it in {SETTINGS_KEYS} with .where = .project_safe.',
+                    f'.lia.json may set "{key}", so list it in {SETTINGS_KEYS} with .where = .project_safe.',
                 )
         for key, (line, where) in sorted(listed.items()):
             if where == "project_safe" and key not in project_reads:
@@ -453,8 +453,8 @@ class Checker:
             self.report(None, "names", f'run_options names ACP config option "{config_id}", which set_config_option in {ACP_SERVER} doesn\'t take')
 
     def check_removal(self) -> None:
-        """Old spellings, such as `fx setup`, keep working with a warning until
-        old_spelling_removal; once fx reaches that version they must go."""
+        """Old spellings, such as `lia setup`, keep working with a warning until
+        old_spelling_removal; once lia reaches that version they must go."""
         version = version_tuple(VERSION, (self.root / MAIN).read_text(), MAIN)
         removal = version_tuple(OLD_SPELLING_REMOVAL, (self.root / COMMAND_SPECS).read_text(), COMMAND_SPECS)
         if version >= removal:
@@ -462,8 +462,8 @@ class Checker:
             self.report(
                 None,
                 "removal",
-                f"fx {shown} drops the old spellings that warn they stop working in it: remove them, then old_spelling_removal "
-                f"(see decided-names.md in .fx/skills/fx-cli-shape/references)",
+                f"lia {shown} drops the old spellings that warn they stop working in it: remove them, then old_spelling_removal "
+                f"(see decided-names.md in .lia/skills/lia-cli-shape/references)",
                 COMMAND_SPECS,
             )
 
@@ -488,7 +488,7 @@ def main(argv: list[str] | None = None) -> int:
     for problem in problems:
         print(problem.render())
     if problems:
-        print(f"{len(problems)} shape problem(s). See .fx/skills/fx-cli-shape/SKILL.md.")
+        print(f"{len(problems)} shape problem(s). See .lia/skills/lia-cli-shape/SKILL.md.")
         return 1
     print("CLI shape: ok")
     return 0

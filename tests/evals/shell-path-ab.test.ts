@@ -6,27 +6,27 @@
  * marker directory to PATH, so whichever login shell passwd selects loads it.
  * The agent runs `echo $PATH` in 10 separate shell calls and replies DONE. A
  * trial passes when it makes at least 10 successful shell calls, uses no other
- * tool, and every printed PATH contains the marker directory. `fx ask --json`
+ * tool, and every printed PATH contains the marker directory. `lia ask --json`
  * reports no command output, so outputs are read from the raw command output
- * that `fx ask` streams to stderr.
+ * that `lia ask` streams to stderr.
  *
  * The comparison is report-only like agent-quality-ab: it prints and saves
  * per-side pass counts and per-trial wall time, and does not fail on model
- * noise. Per-trial wall time also includes one `fx --version` call.
+ * noise. Per-trial wall time also includes one `lia --version` call.
  *
  * It makes real model calls, so run it only on the test billing lane, with
  * absolute paths to the two binaries:
  *
  *   cd tests/evals
- *   FX_AB_BASELINE_BIN=/abs/path/baseline/zig-out/bin/fx \
- *   FX_AB_CANDIDATE_BIN=/abs/path/candidate/zig-out/bin/fx \
+ *   LIA_AB_BASELINE_BIN=/abs/path/baseline/zig-out/bin/lia \
+ *   LIA_AB_CANDIDATE_BIN=/abs/path/candidate/zig-out/bin/lia \
  *   ~/.local/bin/aig test bun test shell-path-ab.test.ts
  *
- * The harness gives every fx run a fresh HOME and passes AI_GATEWAY_API_KEY
+ * The harness gives every lia run a fresh HOME and passes AI_GATEWAY_API_KEY
  * from the environment, so the test-lane key from `aig test` is the one billed.
  *
- * Optional: FX_AB_MODEL (defaults to EVAL_MODEL), FX_AB_TRIALS (default 3),
- * FX_AB_OUTPUT_DIR, FX_AB_TIMEOUT_MS, FX_AB_WORKSPACE_ROOT (defaults to an
+ * Optional: LIA_AB_MODEL (defaults to EVAL_MODEL), LIA_AB_TRIALS (default 3),
+ * LIA_AB_OUTPUT_DIR, LIA_AB_TIMEOUT_MS, LIA_AB_WORKSPACE_ROOT (defaults to an
  * empty temporary directory).
  */
 import { describe, expect, test } from "bun:test";
@@ -73,7 +73,7 @@ const SHELL_PATH_ROW: AgentQualityMatrixRow = {
   targetResult: "The candidate passes every trial the baseline passes, with lower wall time.",
   coveredEntrypoints: [
     {
-      entrypoint: "fx ask",
+      entrypoint: "lia ask",
       contextContract: SHARED_MODEL_CONTEXT_CONTRACT,
       notes: "Captured shell calls under the default user profile.",
     },
@@ -81,7 +81,7 @@ const SHELL_PATH_ROW: AgentQualityMatrixRow = {
 };
 
 function writeStartupFiles(home: string): string {
-  const marker = join(home, `fx-shell-path-marker-${randomUUID().slice(0, 8)}`);
+  const marker = join(home, `lia-shell-path-marker-${randomUUID().slice(0, 8)}`);
   mkdirSync(marker);
   const line = `export PATH="${marker}:$PATH"\n`;
   writeFileSync(join(home, ".zshrc"), line);
@@ -234,7 +234,7 @@ async function runShellPathComparison(config: AbConfig): Promise<void> {
 }
 
 describe("shell PATH A/B scoring", () => {
-  const marker = "/tmp/home/fx-shell-path-marker-test";
+  const marker = "/tmp/home/lia-shell-path-marker-test";
   const shell = { name: "shell", status: "success", command_result: { command: "echo $PATH", exit_code: 0 } };
   const headless = (tool_calls: HeadlessResult["tool_calls"]): HeadlessResult => ({
     output: "DONE", exit_code: 0, model: "fixture/model", session_id: "", steps: tool_calls.length, tool_calls,
@@ -257,8 +257,8 @@ describe("shell PATH A/B scoring", () => {
 });
 
 const hasLiveConfig = Boolean(
-  process.env.FX_AB_BASELINE_BIN &&
-    process.env.FX_AB_CANDIDATE_BIN &&
+  process.env.LIA_AB_BASELINE_BIN &&
+    process.env.LIA_AB_CANDIDATE_BIN &&
     (process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN),
 );
 
@@ -266,13 +266,13 @@ describe("shell PATH A/B live comparison", () => {
   (hasLiveConfig ? test : test.skip)(
     "compares startup-file PATH visibility and wall time between binaries",
     async () => {
-      const workspace = mkdtempSync(join(tmpdir(), "fx-shell-path-ab-workspace-"));
+      const workspace = mkdtempSync(join(tmpdir(), "lia-shell-path-ab-workspace-"));
       try {
         await runShellPathComparison(
           loadAbConfigFromEnv({
             ...process.env,
-            FX_AB_MODEL: process.env.FX_AB_MODEL ?? EVAL_MODEL,
-            FX_AB_WORKSPACE_ROOT: process.env.FX_AB_WORKSPACE_ROOT ?? workspace,
+            LIA_AB_MODEL: process.env.LIA_AB_MODEL ?? EVAL_MODEL,
+            LIA_AB_WORKSPACE_ROOT: process.env.LIA_AB_WORKSPACE_ROOT ?? workspace,
           }),
         );
       } finally {

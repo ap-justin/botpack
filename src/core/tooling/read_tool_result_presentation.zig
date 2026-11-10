@@ -184,7 +184,7 @@ fn expectDisplayTarget(arguments_json: []const u8, source: ?[]const u8, expected
 }
 
 test "read_tool_result rows name what each request reads" {
-    const replay = "fx-command-replay-0123.bin";
+    const replay = "lia-command-replay-0123.bin";
     try expectPresentation("{\"request\":{\"handle\":\"" ++ replay ++ "\"}}", "Reading", "Read", "more command output");
     try expectPresentation("{\"handle\":\"result-x.txt\",\"start_byte\":9}", "Reading", "Read", "more output");
     try expectPresentation("{\"request\":{\"handle\":\"" ++ replay ++ "\",\"query\":\"error:\"}}", "Searching", "Searched", "command output");
@@ -201,7 +201,7 @@ test "read_tool_result rows name what each request reads" {
 }
 
 test "read_tool_result display targets name the source, query, and record" {
-    const replay = "fx-command-replay-0123.bin";
+    const replay = "lia-command-replay-0123.bin";
     try expectDisplayTarget("{\"request\":{\"handle\":\"" ++ replay ++ "\"}}", "zig build test", "more output from zig build test");
     try expectDisplayTarget("{\"request\":{\"handle\":\"" ++ replay ++ "\"}}", null, null);
     try expectDisplayTarget(
@@ -232,9 +232,9 @@ test "read_tool_result requested handles match what validate opens" {
     const restored = (try requestedHandle(alloc, "{\"request\":{\"handle\":\" result-shell-abc \"}}")).?;
     defer alloc.free(restored);
     try std.testing.expectEqualStrings("result-shell-abc.txt", restored);
-    const replay = (try requestedHandle(alloc, "{\"handle\":\"fx-command-replay-0123.bin\",\"query\":\"x\"}")).?;
+    const replay = (try requestedHandle(alloc, "{\"handle\":\"lia-command-replay-0123.bin\",\"query\":\"x\"}")).?;
     defer alloc.free(replay);
-    try std.testing.expectEqualStrings("fx-command-replay-0123.bin", replay);
+    try std.testing.expectEqualStrings("lia-command-replay-0123.bin", replay);
     try std.testing.expect(try requestedHandle(alloc, "{\"request\":{\"handle\":\"T5\"}}") == null);
     try std.testing.expect(try requestedHandle(alloc, "{\"request\":{\"search\":[\"x\"]}}") == null);
     try std.testing.expect(try requestedHandle(alloc, "[]") == null);

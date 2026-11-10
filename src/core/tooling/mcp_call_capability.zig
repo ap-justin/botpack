@@ -1,6 +1,6 @@
-//! What a running tool call lends the `fx mcp call` bridge
+//! What a running tool call lends the `lia mcp call` bridge
 //! (`src/core/mcp_host/mcp_call_bridge.zig`): the permission check and the
-//! MCP call of that tool call's own context. A shell command's `fx mcp call`
+//! MCP call of that tool call's own context. A shell command's `lia mcp call`
 //! therefore meets the same rules, prompt, automatic review, and MCP access
 //! as a direct call by the agent that ran the command, a subagent included.
 //!
@@ -12,7 +12,7 @@ const types = @import("../shared/types.zig");
 
 const Allocator = std.mem.Allocator;
 
-/// Where the bridge exists. Elsewhere a command's `fx mcp call` finds no
+/// Where the bridge exists. Elsewhere a command's `lia mcp call` finds no
 /// shell call, and the model is not told about it.
 pub const supported = switch (builtin.target.os.tag) {
     .linux, .macos => true,
@@ -38,7 +38,7 @@ pub const CallOutcome = struct {
     bytes: []const u8,
 };
 
-/// A question about the MCP tools themselves: `fx mcp call list`, `search`,
+/// A question about the MCP tools themselves: `lia mcp call list`, `search`,
 /// and `help`. It reads tool metadata only, as the agent's own
 /// `capability_search` does, so it needs no permission check; it sees only
 /// the tools the agent may use.

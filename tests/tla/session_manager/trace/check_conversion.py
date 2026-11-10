@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check what real fx runs did against V1Conversion.tla, with TLC.
+"""Check what real lia runs did against V1Conversion.tla, with TLC.
 
     check_conversion.py --request REQUEST.json --report DIR
     check_conversion.py --selftest
@@ -33,7 +33,7 @@ REQUESTS = {"open", "all", "crash", "open2", "recover"}
 ANSWERS = {"none", "opened", "converted", "busy", "unreadable", "notfound",
            "recovered", "healthy", "unsalvageable", "inv2"}
 STATUS = {"none", "import", "fresh", "salvage"}
-# A member's damage, as the v1 writer's own `fx session recover` judges it.
+# A member's damage, as the v1 writer's own `lia session recover` judges it.
 DAMAGES = {"ok", "salvage", "lost"}
 EXIT = {"ACCEPTED": 0, "REJECTED": 1, "INCONCLUSIVE": 2, "TOOL_ERROR": 3}
 

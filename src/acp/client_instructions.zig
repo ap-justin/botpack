@@ -1,7 +1,7 @@
 //! Client-provided system prompt for ACP sessions, following the ACP
 //! client system prompt RFD in append mode. The prompt is validated before a
 //! session exists, persisted with the session, restored on load and resume,
-//! and delivered in the system slot after fx's own instructions.
+//! and delivered in the system slot after lia's own instructions.
 
 const std = @import("std");
 const acp_types = @import("types.zig");
@@ -29,7 +29,7 @@ pub const ParseError = Allocator.Error || error{
 };
 
 /// Returns the owned prompt from `session/new` params, or null when absent.
-/// `systemPrompt` is the RFD field. `_meta.fx.systemPrompt` carries the same
+/// `systemPrompt` is the RFD field. `_meta.lia.systemPrompt` carries the same
 /// content for clients whose SDK drops unknown request fields.
 pub fn parse(alloc: Allocator, params_raw: ?[]const u8) ParseError!?[]u8 {
     const raw = params_raw orelse return null;
@@ -42,7 +42,7 @@ pub fn parse(alloc: Allocator, params_raw: ?[]const u8) ParseError!?[]u8 {
     const params = parsed.value.object;
 
     const standard = params.get("systemPrompt");
-    const extension = acp_types.fxMetaField(params, "systemPrompt");
+    const extension = acp_types.liaMetaField(params, "systemPrompt");
     if (standard != null and extension != null) return error.DuplicateSystemPrompt;
     const blocks = standard orelse extension;
 
@@ -65,7 +65,7 @@ pub fn parseErrorMessage(err: ParseError) []const u8 {
         error.UnsupportedSystemPromptBlock => "systemPrompt supports text content blocks only",
         error.SystemPromptTooLarge => "systemPrompt exceeds the 64 KiB limit",
         error.InvalidSystemPromptText => "systemPrompt text must be valid UTF-8 without NUL bytes",
-        error.DuplicateSystemPrompt => "Send systemPrompt or _meta.fx.systemPrompt, not both",
+        error.DuplicateSystemPrompt => "Send systemPrompt or _meta.lia.systemPrompt, not both",
         error.SystemPromptModeWithoutPrompt => "systemPromptMode requires systemPrompt",
         error.UnsupportedSystemPromptMode => "systemPromptMode supports only \"append\"",
     };
@@ -128,7 +128,7 @@ pub fn load(
 }
 
 /// Joins host instructions with the client prompt for the system slot, after
-/// fx's built-in instructions. Caller owns the result.
+/// lia's built-in instructions. Caller owns the result.
 pub fn compose(alloc: Allocator, host_instructions: []const u8, client_prompt: []const u8) ![]u8 {
     if (client_prompt.len == 0) return alloc.dupe(u8, host_instructions);
     const separator = if (host_instructions.len > 0) "\n\n" else "";
@@ -150,7 +150,7 @@ test "client system prompt parses RFD text blocks in append mode" {
     try std.testing.expectEqualStrings("You run inside Mini.\n\nUse browser tools.", text);
 
     const meta = (try parse(alloc,
-        \\{"_meta":{"fx":{"systemPrompt":[{"type":"text","text":"From meta."}]}}}
+        \\{"_meta":{"lia":{"systemPrompt":[{"type":"text","text":"From meta."}]}}}
     )).?;
     defer alloc.free(meta);
     try std.testing.expectEqualStrings("From meta.", meta);
@@ -167,7 +167,7 @@ test "client system prompt rejects invalid combinations before a session exists"
         .{ .json = "{\"systemPrompt\":[{\"type\":\"image\",\"data\":\"x\"}]}", .expected = error.UnsupportedSystemPromptBlock },
         .{ .json = "{\"systemPromptMode\":\"append\"}", .expected = error.SystemPromptModeWithoutPrompt },
         .{ .json = "{\"systemPrompt\":[{\"type\":\"text\",\"text\":\"x\"}],\"systemPromptMode\":\"override\"}", .expected = error.UnsupportedSystemPromptMode },
-        .{ .json = "{\"systemPrompt\":[{\"type\":\"text\",\"text\":\"a\"}],\"_meta\":{\"fx\":{\"systemPrompt\":[{\"type\":\"text\",\"text\":\"b\"}]}}}", .expected = error.DuplicateSystemPrompt },
+        .{ .json = "{\"systemPrompt\":[{\"type\":\"text\",\"text\":\"a\"}],\"_meta\":{\"lia\":{\"systemPrompt\":[{\"type\":\"text\",\"text\":\"b\"}]}}}", .expected = error.DuplicateSystemPrompt },
         .{ .json = "{\"systemPrompt\":[{\"type\":\"text\",\"text\":\"a\\u0000b\"}]}", .expected = error.InvalidSystemPromptText },
     };
     for (cases) |case| {

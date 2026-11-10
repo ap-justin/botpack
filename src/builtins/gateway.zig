@@ -46,10 +46,10 @@ pub const default_chat_url = "https://ai-gateway.vercel.sh/v4/ai/language-model"
 pub const models_path = "/coding-agent/v1/models";
 const credits_path = "/coding-agent/v1/credits";
 pub const retry_count: usize = 3;
-pub const chat_url_env = "FX_GATEWAY_CHAT_URL";
+pub const chat_url_env = "LIA_GATEWAY_CHAT_URL";
 pub const default_model_catalog_base_url = "https://ai-gateway.vercel.sh";
-const base_url_env = "FX_GATEWAY_BASE_URL";
-const e2e_gateway_models_url_env = "FX_TEST_GATEWAY_MODELS_URL";
+const base_url_env = "LIA_GATEWAY_BASE_URL";
+const e2e_gateway_models_url_env = "LIA_TEST_GATEWAY_MODELS_URL";
 const oauth_request_timeout_ms = oauth_transport.default_request_timeout_ms;
 const oauth_response_max_bytes: usize = 64 * 1024;
 
@@ -152,7 +152,7 @@ pub const agent_stream_provider = agent_stream_provider_contract.Provider{
 };
 
 pub const provider_bundle = provider_set.Bundle{
-    .capabilities = .{ .gateway_prompt_caching = true, .fx_search = true, .vision_fallback = true },
+    .capabilities = .{ .gateway_prompt_caching = true, .lia_search = true, .vision_fallback = true },
     .presentation = provider_catalog.find(.gateway),
     .auth_strategy = .vercel,
     .title_model = title_model,
@@ -162,7 +162,7 @@ pub const provider_bundle = provider_set.Bundle{
     .model_catalog = model_catalog_provider,
     .permission_reviewer = permission_reviewer.provider,
     .credits = credits_provider,
-    .fx_search = default_web_search_provider,
+    .lia_search = default_web_search_provider,
 };
 
 pub const provider = gateway_provider.Provider{
@@ -500,7 +500,7 @@ test "agent requests carry delivered rules in the tool result for every family, 
         // request's only system message.
         try std.testing.expect(std.mem.find(u8, body, carried) != null);
         try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, body, "\"role\":\"system\""));
-        // Only the stable instructions carry a marker, for the families fx marks.
+        // Only the stable instructions carry a marker, for the families lia marks.
         const markers: usize = @intFromBool(vercel_model_policy.cacheMarkers(model) != .none);
         try std.testing.expectEqual(markers, std.mem.count(u8, body, "\"cacheControl\"") + std.mem.count(u8, body, "\"promptCacheBreakpoint\""));
     }
@@ -860,7 +860,7 @@ fn fetchCredits(
     );
 }
 
-/// An fx login can reach several teams, so `/v1/credits` rejects it outright
+/// An lia login can reach several teams, so `/v1/credits` rejects it outright
 /// unless the request names one. The endpoint reads the team from a `teamId`
 /// query value and ignores `x-vercel-ai-gateway-team`, which is the reverse of
 /// the inference endpoint. An API key carries its own team and resolves to no
@@ -1018,8 +1018,8 @@ const OAuthHttpOperation = struct {
 };
 
 test "oauth transport user agent uses the product version" {
-    try std.testing.expect(std.mem.startsWith(u8, gateway_client.user_agent, "fx/"));
-    try std.testing.expect(gateway_client.user_agent.len > "fx/".len);
+    try std.testing.expect(std.mem.startsWith(u8, gateway_client.user_agent, "lia/"));
+    try std.testing.expect(gateway_client.user_agent.len > "lia/".len);
     try std.testing.expect(std.mem.find(u8, gateway_client.user_agent, "zig") == null);
     try std.testing.expect(std.mem.find(u8, gateway_client.user_agent, "std.http") == null);
 }
@@ -1062,14 +1062,14 @@ pub fn preferredWebSearchBackendsOverride(raw: ?[]const u8) !?[]const web_search
 }
 
 pub fn selectedWebSearchBackend() !web_search_contract.SearchBackendId {
-    if (try preferredWebSearchBackendsOverride(io_mod.getenv("FX_WEB_SEARCH_BACKEND"))) |backends| {
+    if (try preferredWebSearchBackendsOverride(io_mod.getenv("LIA_WEB_SEARCH_BACKEND"))) |backends| {
         return backends[0];
     }
     return default_web_search_backend_order[0];
 }
 
 fn resolvePreferredWebSearchBackends(_: ?*anyopaque) !?[]const web_search_contract.SearchBackendId {
-    return preferredWebSearchBackendsOverride(io_mod.getenv("FX_WEB_SEARCH_BACKEND"));
+    return preferredWebSearchBackendsOverride(io_mod.getenv("LIA_WEB_SEARCH_BACKEND"));
 }
 
 fn executeWebSearchProvider(
@@ -2090,7 +2090,7 @@ test "built-in gateway defaults preserve active provider policy" {
     try std.testing.expectEqualStrings("https://ai-gateway.vercel.sh/v4/ai/language-model", default_chat_url);
     try std.testing.expectEqualStrings("/coding-agent/v1/models", models_path);
     try std.testing.expectEqual(@as(usize, 3), retry_count);
-    try std.testing.expectEqualStrings("FX_GATEWAY_CHAT_URL", chat_url_env);
+    try std.testing.expectEqualStrings("LIA_GATEWAY_CHAT_URL", chat_url_env);
 }
 
 var test_credits_never_cancelled = std.atomic.Value(bool).init(false);
@@ -2533,7 +2533,7 @@ fn fetchModelCatalogResponse(
 }
 
 /// The catalog follows the same team contract as `/v1/credits`: it rejects an
-/// fx login unless the request names the team in a `teamId` query value, and
+/// lia login unless the request names the team in a `teamId` query value, and
 /// the `x-vercel-ai-gateway-team` header does not satisfy it. Other
 /// credentials carry their team in that header. Every catalog transport builds
 /// its request from this function and `modelCatalogHeaderTeam` so they agree.
@@ -2543,29 +2543,29 @@ pub fn modelCatalogTeamPath(
     path: []const u8,
     access: credentials.CatalogAccess,
 ) Allocator.Error!?[]u8 {
-    if (access.credentialSource() != .fx_login) return null;
+    if (access.credentialSource() != .lia_login) return null;
     const team = access.teamContext() orelse return null;
     if (!shared_types.validGatewayTeam(team)) return null;
     return try alloc.print("{s}?teamId={s}", .{ path, team });
 }
 
 /// Returns the `x-vercel-ai-gateway-team` value for a catalog request, borrowed
-/// from `access`, or null for an fx login, whose team travels in the query.
+/// from `access`, or null for an lia login, whose team travels in the query.
 pub fn modelCatalogHeaderTeam(access: credentials.CatalogAccess) ?[]const u8 {
-    if (access.credentialSource() == .fx_login) return null;
+    if (access.credentialSource() == .lia_login) return null;
     return access.teamContext();
 }
 
-test "model catalog names an fx login team in the query and other teams in the header" {
+test "model catalog names an lia login team in the query and other teams in the header" {
     const alloc = std.testing.allocator;
     const cases = [_]struct {
         access: credentials.CatalogAccess,
         path: ?[]const u8,
         header: ?[]const u8,
     }{
-        .{ .access = credentials.catalogAccessForCredential(.fx_login, "login-token", "team_123"), .path = models_path ++ "?teamId=team_123", .header = null },
-        .{ .access = credentials.catalogAccessForCredential(.fx_login, "login-token", "team a/../b"), .path = null, .header = null },
-        .{ .access = credentials.catalogAccessForCredential(.fx_login, "login-token", null), .path = null, .header = null },
+        .{ .access = credentials.catalogAccessForCredential(.lia_login, "login-token", "team_123"), .path = models_path ++ "?teamId=team_123", .header = null },
+        .{ .access = credentials.catalogAccessForCredential(.lia_login, "login-token", "team a/../b"), .path = null, .header = null },
+        .{ .access = credentials.catalogAccessForCredential(.lia_login, "login-token", null), .path = null, .header = null },
         .{ .access = credentials.catalogAccessForCredential(.ai_gateway_api_key, "api-key", "team_123"), .path = null, .header = "team_123" },
         .{ .access = credentials.catalogAccessForCredential(.ai_gateway_api_key, "api-key", null), .path = null, .header = null },
     };
@@ -2741,7 +2741,7 @@ test "model catalog GET omits team header for null and empty team" {
     try expectModelCatalogTeamHeaderOmitted("");
 }
 
-test "model catalog GET sends fx user agent without attribution headers" {
+test "model catalog GET sends lia user agent without attribution headers" {
     var fixture = try gateway_client.TestModelCatalogFixture.init();
     defer fixture.deinit();
     try fixture.start();

@@ -1,4 +1,4 @@
-//! fx-compactor: the one way fx compacts a conversation. Manual `/compact`,
+//! lia-compactor: the one way lia compacts a conversation. Manual `/compact`,
 //! automatic compaction and recovery from a provider overflow all call
 //! `compact`.
 //!
@@ -253,7 +253,7 @@ fn earlierFrom(arena: Allocator, store: ?Store, earlier: ?[]const u8) !?summariz
 }
 
 /// The first user message starts each turn; later ones are messages the user
-/// added while it ran. Notes that fx itself added stay notes, so they never
+/// added while it ran. Notes that lia itself added stay notes, so they never
 /// count as user messages.
 fn turnsFrom(arena: Allocator, history: []const types.HistoryTurn, append_messages: AppendMessages) ![]const summarize.Turn {
     var turns: std.ArrayList(summarize.Turn) = .empty;
@@ -288,7 +288,7 @@ fn appendItems(arena: Allocator, items: *std.ArrayList(summarize.Item), message:
     const content = message.content orelse "";
     switch (message.role) {
         // A saved turn's context notes come back as system messages, which
-        // are fx's context, not the conversation, and never reach the
+        // are lia's context, not the conversation, and never reach the
         // summarizer's messages (D93).
         .system => {},
         .user => if (message.context_origin == .user_turn) {
@@ -355,7 +355,7 @@ test "a question's result gives the user's answers, not the questions" {
     try std.testing.expectEqual(@as(usize, 0), items.items[1].tool_result.answers.len);
 }
 
-/// The handle of a tool's whole output that fx saved separately, when the
+/// The handle of a tool's whole output that lia saved separately, when the
 /// text the model saw was clipped and does not name it. A clipped
 /// `read_tool_result` page, for one, keeps its whole output only there.
 fn savedOutputHandle(memory: ?types.ToolResultMemory, content: []const u8) []const u8 {
@@ -388,7 +388,7 @@ test "an unreadable checkpoint numbers new turns, tool calls and ledgers after t
     try records.save(arena, store, .{ .kind = .ledger, .number = 2 }, "ledger two");
     try store.write(arena, "result-shell-1.txt", "not a record");
 
-    const broken = "fx-compactor-v1\n{\"turns\": [";
+    const broken = "lia-compactor-v1\n{\"turns\": [";
     const earlier = (try earlierFrom(arena, store, broken)).?;
     try std.testing.expectEqualStrings(broken, earlier.earlier);
     try std.testing.expectEqual(@as(usize, 3), earlier.turn_count);
@@ -399,7 +399,7 @@ test "an unreadable checkpoint numbers new turns, tool calls and ledgers after t
 
     // A count no session reaches is damage too, as is a record numbered past
     // it; numbering on from either would overflow.
-    const impossible = std.fmt.comptimePrint("fx-compactor-v1\n{{\"tool_count\":{d}}}", .{std.math.maxInt(usize)});
+    const impossible = std.fmt.comptimePrint("lia-compactor-v1\n{{\"tool_count\":{d}}}", .{std.math.maxInt(usize)});
     try store.write(arena, std.fmt.comptimePrint("compacted-T{d}.txt", .{std.math.maxInt(usize)}), "damaged");
     const recovered = (try earlierFrom(arena, store, impossible)).?;
     try std.testing.expectEqualStrings(impossible, recovered.earlier);

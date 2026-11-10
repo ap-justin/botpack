@@ -48,14 +48,14 @@ export function edgeCases(path = join(MODEL_DIR, "cases", "edge.json")): Case[] 
 const NAMES = [
   "anthropic/claude-sonnet-4.5", "anthropic/claude-opus-4.8", "openai/gpt-5.4", "openai/gpt-4o-mini",
   "google/gemini-3-pro", "zai/glm-4.7", "xai/grok-4.6", "deepseek/deepseek-v4.1-flash-1017",
-  "fx-commit", "zig-best-practices", "workflow-helper", "/model", "/mcp", "/fast-mode", "/image",
+  "lia-commit", "zig-best-practices", "workflow-helper", "/model", "/mcp", "/fast-mode", "/image",
   "Fix renderer", "Add OAuth login", "create_issue", "list_projects", "Startup scrollback",
   "acme-corp", "Acme Corp", "xhigh", "ultrafast", "修复渲染器", "café-crème", "🚀 launch plan",
 ];
 const TEXTS = [
-  "Land vercel-labs/fx work with a signed commit", "global .codex", "workspace skills/",
-  "/Users/example/.codex/skills/fx-commit/SKILL.md", "/Users/example/projects/fx",
-  "inspect footer state", "Create an issue in a project", "Show earlier conversation when fx starts",
+  "Land ap-justin/lia work with a signed commit", "global .codex", "workspace skills/",
+  "/Users/example/.codex/skills/lia-commit/SKILL.md", "/Users/example/projects/lia",
+  "inspect footer state", "Create an issue in a project", "Show earlier conversation when lia starts",
   "on", "off", "choose what model and reasoning effort to use", "Make a ticket", "",
 ];
 const ATOMS_TINY = ["a", "A", "b", "1", "-", " ", "é"];

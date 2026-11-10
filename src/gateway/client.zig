@@ -237,16 +237,16 @@ const gateway_transfer_buffer_bytes: usize = 256 * 1024;
 const provider_failure_detail_max_bytes: usize = 600;
 // Covers a 4 MiB string at worst-case JSON escaping plus SSE framing.
 const max_sse_event_line_bytes: usize = 32 * 1024 * 1024;
-const e2e_gateway_chat_url_env = "FX_TEST_GATEWAY_CHAT_URL";
-const e2e_gateway_models_url_env = "FX_TEST_GATEWAY_MODELS_URL";
-const e2e_gateway_credits_url_env = "FX_TEST_GATEWAY_CREDITS_URL";
+const e2e_gateway_chat_url_env = "LIA_TEST_GATEWAY_CHAT_URL";
+const e2e_gateway_models_url_env = "LIA_TEST_GATEWAY_MODELS_URL";
+const e2e_gateway_credits_url_env = "LIA_TEST_GATEWAY_CREDITS_URL";
 const default_gateway_base_url = "https://ai-gateway.vercel.sh";
 pub const vercel_ai_gateway_team_header = "x-vercel-ai-gateway-team";
 pub const vercel_gateway_extended_time_header = "x-vercel-gateway-extended-time";
 pub const vercel_gateway_extended_time_value = "true";
-/// Identifies fx on every AI Gateway request; the zig std.http default
+/// Identifies lia on every AI Gateway request; the zig std.http default
 /// (`zig/<version> (std.http)`) is never sent to the gateway.
-pub const user_agent = "fx/" ++ build_options.app_version;
+pub const user_agent = "lia/" ++ build_options.app_version;
 var resolved_model_trace_emitted = std.atomic.Value(bool).init(false);
 var test_cancel_watcher_spawn_error: ?anyerror = null;
 
@@ -313,7 +313,7 @@ pub fn fetchUsageGet(
 }
 
 /// The same GET as `fetchUsageGet`, through a host transport instead of
-/// fx's own HTTP client: the JS host in WebAssembly, which cannot open
+/// lia's own HTTP client: the JS host in WebAssembly, which cannot open
 /// sockets. Pulses `cooperative_pulse` while the host has nothing ready.
 /// Redirects are the host's: `fetch` follows them and drops `authorization`
 /// when one leaves the origin.
@@ -647,11 +647,11 @@ test "gateway JSON transport preserves non-success HTTP status" {
 }
 
 pub fn gatewayBaseUrl() []const u8 {
-    const override = io_mod.getenv("FX_GATEWAY_BASE_URL") orelse return default_gateway_base_url;
+    const override = io_mod.getenv("LIA_GATEWAY_BASE_URL") orelse return default_gateway_base_url;
     // The base URL carries the bearer token; only a loopback HTTP override is
     // trusted for local testing.
     if (!isLoopbackHttpUrl(override)) {
-        debug_trace.logf("stream", "ignoring FX_GATEWAY_BASE_URL: not loopback http", .{});
+        debug_trace.logf("stream", "ignoring LIA_GATEWAY_BASE_URL: not loopback http", .{});
         return default_gateway_base_url;
     }
     return override;
@@ -685,8 +685,8 @@ pub fn postGatewayCompletion(
         defer secret.zeroAndFree(alloc, auth_header);
 
         const extra_headers = [_]std.http.Header{
-            .{ .name = "HTTP-Referer", .value = "https://github.com/vercel-labs/fx" },
-            .{ .name = "X-Title", .value = "fx" },
+            .{ .name = "HTTP-Referer", .value = "https://github.com/ap-justin/lia" },
+            .{ .name = "X-Title", .value = "lia" },
             .{ .name = "Accept", .value = "application/json" },
             .{ .name = vercel_gateway_extended_time_header, .value = vercel_gateway_extended_time_value },
             .{ .name = "ai-gateway-protocol-version", .value = "0.0.1" },
@@ -869,7 +869,7 @@ const StaleConnectionEvidence = struct {
 };
 
 /// A pooled connection that the server closed while it sat idle fails as
-/// soon as fx writes the request or reads the response head, before any
+/// soon as lia writes the request or reads the response head, before any
 /// response byte arrives, and the socket says the peer closed it. Servers
 /// close idle connections without reading what arrives next, so the request
 /// goes out once more on a fresh connection and the failure is never
@@ -2276,9 +2276,9 @@ fn gatewayExtraHeaders(
 ) []const std.http.Header {
     std.debug.assert(buf.len >= 10);
     var len: usize = 0;
-    buf[len] = .{ .name = "HTTP-Referer", .value = "https://github.com/vercel-labs/fx" };
+    buf[len] = .{ .name = "HTTP-Referer", .value = "https://github.com/ap-justin/lia" };
     len += 1;
-    buf[len] = .{ .name = "X-Title", .value = "fx" };
+    buf[len] = .{ .name = "X-Title", .value = "lia" };
     len += 1;
     buf[len] = .{ .name = vercel_gateway_extended_time_header, .value = vercel_gateway_extended_time_value };
     len += 1;
@@ -3531,7 +3531,7 @@ const SseToolCallAccumulator = struct {
     provider_result: ?[]u8 = null,
     provider_result_state: ProviderResultState = .none,
     final_identity: types.FinalToolIdentity = .valid,
-    provenance: types.ToolExecutionProvenance = .fx_local,
+    provenance: types.ToolExecutionProvenance = .lia_local,
 
     fn deinit(self: *SseToolCallAccumulator, alloc: std.mem.Allocator) void {
         self.id.deinit(alloc);
@@ -3924,7 +3924,7 @@ const error_type_names = [_][]const u8{
     "AI_APICallError",
 };
 
-/// What an SSE `error` event says about the request: fx classifies what has a
+/// What an SSE `error` event says about the request: lia classifies what has a
 /// code and resends what is unclear. This differs from the Responses protocol
 /// (`responses_protocol.zig` `accept_failure`), which ends the turn for
 /// `provider_error` and for a missing code. The AI Gateway names a provider
@@ -3934,7 +3934,7 @@ const error_type_names = [_][]const u8{
 /// are resent until Esc: a coded one as a server error, an uncoded one the
 /// same way.
 const ErrorEventClass = enum {
-    /// Neither a code nor a usable HTTP status, so fx cannot tell whether a
+    /// Neither a code nor a usable HTTP status, so lia cannot tell whether a
     /// resend can succeed.
     uncoded,
     /// A server error or overload, which a resend can outlive.
@@ -3942,7 +3942,7 @@ const ErrorEventClass = enum {
     /// The gateway ended a stream that ran too long.
     stream_timeout,
     rate_limited,
-    /// A code a resend cannot fix, or a code fx does not recognize and no
+    /// A code a resend cannot fix, or a code lia does not recognize and no
     /// status to say more: a resend repeats the same request.
     non_retryable,
 
@@ -3968,7 +3968,7 @@ const ErrorEventClass = enum {
 fn errorEventClass(root: std.json.Value) ErrorEventClass {
     const status_class = if (providerErrorEventStatus(root)) |status| httpStatusClass(status) else null;
     const code = providerErrorEventCode(root) orelse return status_class orelse .uncoded;
-    // A code fx recognizes decides. One it does not, such as an upstream
+    // A code lia recognizes decides. One it does not, such as an upstream
     // provider's own `upstream_error`, says less than the status that came
     // with it.
     return recognizedCodeClass(code) orelse status_class orelse .non_retryable;
@@ -4034,7 +4034,7 @@ fn httpStatusClass(status: u16) ?ErrorEventClass {
 /// an error or missing and an error event carried a classified code, which
 /// beats it. Error events decide an error finish or a missing one; any other
 /// normal finish decides on its own. A provider error with nothing to
-/// classify it is unclear, and fx resends it.
+/// classify it is unclear, and lia resends it.
 fn streamFailureCause(
     class: ?ErrorEventClass,
     finish: ?types.ProviderFinishReason,
@@ -4237,7 +4237,7 @@ fn captureProviderFailureDetail(alloc: std.mem.Allocator, current: *?[]u8, root:
 
 /// The deepest provider value a notice detail renders as JSON. No real error
 /// body nests anywhere near this, and `std.json.Stringify` aborts past 256
-/// levels in safe builds, so a provider's value can never take fx down.
+/// levels in safe builds, so a provider's value can never take lia down.
 const max_rendered_detail_depth = 32;
 
 /// Renders a provider error value in which nothing named the failure, or the
@@ -4655,7 +4655,7 @@ fn consumeSseStreamTraced(
         data_event_count += 1;
 
         defer _ = event_arena.reset(.retain_capacity);
-        // fx serializes parts of an event, such as a tool input or provider
+        // lia serializes parts of an event, such as a tool input or provider
         // metadata, and std.json.Stringify aborts past 256 levels.
         if (json_depth.exceeds(json_text)) {
             debug_trace.logf("sse", "event type=too_deep bytes={d} max_depth={d}", .{ json_text.len, json_depth.max_depth });
@@ -4663,7 +4663,7 @@ fn consumeSseStreamTraced(
         }
         const root = std.json.parseFromSliceLeaky(std.json.Value, event_arena.allocator(), json_text, .{}) catch |err| {
             if (err == error.OutOfMemory) return err;
-            // A duplicate key is valid JSON that fx refuses, so resending
+            // A duplicate key is valid JSON that lia refuses, so resending
             // would get the same event back.
             if (err == error.DuplicateField) {
                 debug_trace.logf("sse", "event type=duplicate_key bytes={d}", .{json_text.len});
@@ -5030,7 +5030,7 @@ fn consumeSseStreamTraced(
         } else if (std.mem.eql(u8, event_type, "finish")) {
             finish_timeout = providerFailureCause(root) == .gateway_stream_timeout;
             const finish_event = parseSseFinishEvent(alloc, root, &provider_failure_detail) catch |err| switch (err) {
-                // A finish fx cannot read ends the stream as one without a
+                // A finish lia cannot read ends the stream as one without a
                 // finish, so the turn resends it like any stream that ended
                 // early.
                 error.InvalidProviderFinishReason, error.UnknownProviderFinishReason => {
@@ -5174,7 +5174,7 @@ test "provider framing rejects a Gateway event nested past the depth limit" {
     debug_trace.resetForTest();
     defer debug_trace.resetForTest();
     try debug_trace.configureForTestWithScopes(alloc, path, "sse");
-    // A tool input 300 levels deep aborted fx when it was serialized.
+    // A tool input 300 levels deep aborted lia when it was serialized.
     const deep_input = text_utils.repeat("{\"a\":", 300) ++ "0" ++ text_utils.repeat("}", 300);
     var reader = std.Io.Reader.fixed("data: {\"type\":\"tool-call\",\"toolCallId\":\"deep\",\"toolName\":\"read_file\",\"input\":" ++ deep_input ++ "}\n\n" ++
         "data: {\"type\":\"finish\",\"finishReason\":{\"unified\":\"tool-calls\"}}\n\n");
@@ -5403,7 +5403,7 @@ fn fuzzGatewayEventClass(_: void, smith: *std.testing.Smith) !void {
         // Readable JSON is never taken for a damaged event.
         if (outcome) |_| {} else |err| try std.testing.expect(err != error.MalformedGatewaySseEvent);
     } else |err| if (err == error.DuplicateField) {
-        // Valid JSON fx refuses: resending would get the same event back.
+        // Valid JSON lia refuses: resending would get the same event back.
         try std.testing.expectError(error.InvalidGatewaySseEvent, outcome);
     } else {
         // Damaged on the wire: resent as an unreadable reply.
@@ -6537,9 +6537,9 @@ test "Gateway separates provider message items in assistant text" {
         defer payload.deinit();
         try Fixture.message(&payload.writer, .{ .id = "A", .item = .{ .phase = "commentary" }, .fragments = &.{"Searching."} });
         try Fixture.event(&payload.writer, .{ .type = "tool-input-start", .id = "call", .toolName = "exa_search" });
-        try Fixture.event(&payload.writer, .{ .type = "tool-input-delta", .id = "call", .delta = "{\"query\":\"fx\"}" });
+        try Fixture.event(&payload.writer, .{ .type = "tool-input-delta", .id = "call", .delta = "{\"query\":\"lia\"}" });
         try Fixture.event(&payload.writer, .{ .type = "tool-input-end", .id = "call" });
-        try Fixture.event(&payload.writer, .{ .type = "tool-call", .toolCallId = "call", .toolName = "exa_search", .input = .{ .query = "fx" }, .providerExecuted = true });
+        try Fixture.event(&payload.writer, .{ .type = "tool-call", .toolCallId = "call", .toolName = "exa_search", .input = .{ .query = "lia" }, .providerExecuted = true });
         try Fixture.event(&payload.writer, .{ .type = "tool-result", .toolCallId = "call", .result = .{ .results = .{} } });
         try Fixture.message(&payload.writer, .{ .id = "B", .item = .{ .phase = "final_answer" }, .fragments = &.{ "Found ", "it." } });
         try Fixture.event(&payload.writer, .{ .type = "finish", .finishReason = .{ .unified = "stop" } });
@@ -6658,11 +6658,11 @@ test "consumeSseStream traces every SSE event with keyless metadata" {
     const payload =
         "data: {\"type\":\"reasoning-start\",\"id\":\"r1\"}\n" ++
         "\n" ++
-        "data: {\"type\":\"reasoning-delta\",\"id\":\"r1\",\"delta\":\"FX_REASONING_SENTINEL\",\"providerMetadata\":{\"anthropic\":{\"signature\":\"FX_PROVIDER_SIGNATURE\"}}}\n" ++
+        "data: {\"type\":\"reasoning-delta\",\"id\":\"r1\",\"delta\":\"LIA_REASONING_SENTINEL\",\"providerMetadata\":{\"anthropic\":{\"signature\":\"LIA_PROVIDER_SIGNATURE\"}}}\n" ++
         "\n" ++
         "data: {\"type\":\"reasoning-end\",\"id\":\"r1\"}\n" ++
         "\n" ++
-        "data: {\"type\":\"reasoning-future\",\"FX_DYNAMIC_KEY_SENTINEL\":\"FX_UNKNOWN_REASONING_SENTINEL\"}\n" ++
+        "data: {\"type\":\"reasoning-future\",\"LIA_DYNAMIC_KEY_SENTINEL\":\"LIA_UNKNOWN_REASONING_SENTINEL\"}\n" ++
         "\n" ++
         "data: {\"type\":\"text-start\",\"id\":\"t1\"}\n" ++
         "\n" ++
@@ -6723,10 +6723,10 @@ test "consumeSseStream traces every SSE event with keyless metadata" {
     try std.testing.expect(std.mem.find(u8, trace, "event type=text-delta bytes=") != null);
     try std.testing.expect(std.mem.find(u8, trace, "preview=<object_fields=") != null);
     try std.testing.expect(std.mem.find(u8, trace, "reasoning-future") == null);
-    try std.testing.expect(std.mem.find(u8, trace, "FX_DYNAMIC_KEY_SENTINEL") == null);
-    try std.testing.expect(std.mem.find(u8, trace, "FX_REASONING_SENTINEL") == null);
-    try std.testing.expect(std.mem.find(u8, trace, "FX_UNKNOWN_REASONING_SENTINEL") == null);
-    try std.testing.expect(std.mem.find(u8, trace, "FX_PROVIDER_SIGNATURE") == null);
+    try std.testing.expect(std.mem.find(u8, trace, "LIA_DYNAMIC_KEY_SENTINEL") == null);
+    try std.testing.expect(std.mem.find(u8, trace, "LIA_REASONING_SENTINEL") == null);
+    try std.testing.expect(std.mem.find(u8, trace, "LIA_UNKNOWN_REASONING_SENTINEL") == null);
+    try std.testing.expect(std.mem.find(u8, trace, "LIA_PROVIDER_SIGNATURE") == null);
     try std.testing.expect(std.mem.find(u8, trace, "/tmp/input") == null);
     try std.testing.expect(std.mem.find(u8, trace, "answer") == null);
 }
@@ -6746,14 +6746,14 @@ test "consumeSseStream keyless tracing handles oversized CRLF payloads" {
 
     var payload: std.ArrayList(u8) = .empty;
     defer payload.deinit(alloc);
-    try payload.appendSlice(alloc, "data: {\"type\":\"reasoning-start\",\"id\":\"r1\"}\r\n\r\ndata: {\"type\":\"reasoning-delta\",\"id\":\"r1\",\"delta\":\"FX_OVERSIZED_REASONING_HEAD_");
+    try payload.appendSlice(alloc, "data: {\"type\":\"reasoning-start\",\"id\":\"r1\"}\r\n\r\ndata: {\"type\":\"reasoning-delta\",\"id\":\"r1\",\"delta\":\"LIA_OVERSIZED_REASONING_HEAD_");
     const reasoning_bytes = try alloc.alloc(u8, 256 * 1024);
     defer alloc.free(reasoning_bytes);
     @memset(reasoning_bytes, 'r');
     try payload.appendSlice(alloc, reasoning_bytes);
     try payload.appendSlice(
         alloc,
-        "FX_OVERSIZED_REASONING_TAIL\",\"providerMetadata\":{\"anthropic\":{\"signature\":\"FX_OVERSIZED_SIGNATURE\"}}}\r\n\r\n" ++
+        "LIA_OVERSIZED_REASONING_TAIL\",\"providerMetadata\":{\"anthropic\":{\"signature\":\"LIA_OVERSIZED_SIGNATURE\"}}}\r\n\r\n" ++
             "data: {\"type\":\"reasoning-end\",\"id\":\"r1\"}\r\n\r\n" ++
             "data: {\"type\":\"text-delta\",\"id\":\"t1\",\"delta\":\"answer\"}\r\n\r\n" ++
             "data: {\"type\":\"finish\",\"finishReason\":{\"unified\":\"stop\"},\"usage\":{\"inputTokens\":{\"total\":1},\"outputTokens\":{\"total\":2}}}\r\n\r\n" ++
@@ -6779,9 +6779,9 @@ test "consumeSseStream keyless tracing handles oversized CRLF payloads" {
     defer alloc.free(trace);
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, trace, "event type=reasoning-delta"));
     try std.testing.expect(std.mem.find(u8, trace, "preview=<object_fields=") != null);
-    try std.testing.expect(std.mem.find(u8, trace, "FX_OVERSIZED_REASONING_HEAD") == null);
-    try std.testing.expect(std.mem.find(u8, trace, "FX_OVERSIZED_REASONING_TAIL") == null);
-    try std.testing.expect(std.mem.find(u8, trace, "FX_OVERSIZED_SIGNATURE") == null);
+    try std.testing.expect(std.mem.find(u8, trace, "LIA_OVERSIZED_REASONING_HEAD") == null);
+    try std.testing.expect(std.mem.find(u8, trace, "LIA_OVERSIZED_REASONING_TAIL") == null);
+    try std.testing.expect(std.mem.find(u8, trace, "LIA_OVERSIZED_SIGNATURE") == null);
     try std.testing.expect(std.mem.find(u8, trace, "answer") == null);
 }
 
@@ -7035,10 +7035,10 @@ test "consumeSseStream replaces malformed trailing or duplicate-key serialized f
         failure: types.ToolArgumentDiagnostic.Failure,
     };
     const cases = [_]Case{
-        .{ .input = "{]FX_FINAL_MALFORMED_SENTINEL", .failure = .syntax_error },
-        .{ .input = "{} FX_FINAL_TRAILING_SENTINEL", .failure = .syntax_error },
+        .{ .input = "{]LIA_FINAL_MALFORMED_SENTINEL", .failure = .syntax_error },
+        .{ .input = "{} LIA_FINAL_TRAILING_SENTINEL", .failure = .syntax_error },
         .{ .input = "{\"depth\":1,\"depth\":2}", .failure = .rejected_value },
-        .{ .input = "{\"request\":{\"task\":\"FX_FINAL_TRUNCATED_SENTINEL", .failure = .truncated },
+        .{ .input = "{\"request\":{\"task\":\"LIA_FINAL_TRUNCATED_SENTINEL", .failure = .truncated },
     };
 
     for (cases) |case| {
@@ -7211,7 +7211,7 @@ test "consumeSseStream rejects absent outer input without exact ended fallback" 
 test "consumeSseStream replaces malformed exact-id ended fallback with safe JSON" {
     const payload =
         "data: {\"type\":\"tool-input-start\",\"id\":\"c1\",\"toolName\":\"ask_user_question\"}\n\n" ++
-        "data: {\"type\":\"tool-input-delta\",\"id\":\"c1\",\"delta\":\"{]FX_FALLBACK_MALFORMED_SENTINEL\"}\n\n" ++
+        "data: {\"type\":\"tool-input-delta\",\"id\":\"c1\",\"delta\":\"{]LIA_FALLBACK_MALFORMED_SENTINEL\"}\n\n" ++
         "data: {\"type\":\"tool-input-end\",\"id\":\"c1\"}\n\n" ++
         "data: {\"type\":\"tool-call\",\"toolCallId\":\"c1\"}\n\n" ++
         "data: {\"type\":\"finish\",\"finishReason\":{\"unified\":\"tool-calls\"}}\n\n";
@@ -7233,10 +7233,10 @@ test "consumeSseStream replaces malformed exact-id ended fallback with safe JSON
 }
 
 test "consumeSseStream does not publish labels from malformed streamed arguments" {
-    const sentinel = "FX_MALFORMED_LABEL_SENTINEL";
+    const sentinel = "LIA_MALFORMED_LABEL_SENTINEL";
     const payload =
         "data: {\"type\":\"tool-input-start\",\"id\":\"c1\",\"toolName\":\"read_file\"}\n\n" ++
-        "data: {\"type\":\"tool-input-delta\",\"id\":\"c1\",\"delta\":\"{\\\"path\\\":\\\"FX_MALFORMED_LABEL_SENTINEL\\\",\"}\n\n" ++
+        "data: {\"type\":\"tool-input-delta\",\"id\":\"c1\",\"delta\":\"{\\\"path\\\":\\\"LIA_MALFORMED_LABEL_SENTINEL\\\",\"}\n\n" ++
         "data: {\"type\":\"tool-input-end\",\"id\":\"c1\"}\n\n" ++
         "data: {\"type\":\"tool-call\",\"toolCallId\":\"c1\"}\n\n" ++
         "data: {\"type\":\"finish\",\"finishReason\":{\"unified\":\"tool-calls\"}}\n\n";
@@ -7287,7 +7287,7 @@ test "consumeSseStream traces malformed argument metadata without source bytes" 
     defer debug_trace.resetForTest();
     try debug_trace.configureForTestWithScopes(alloc, trace_path, "sse");
 
-    const sentinel = "{]FX_ARGUMENT_PRIVACY_SENTINEL";
+    const sentinel = "{]LIA_ARGUMENT_PRIVACY_SENTINEL";
     var event: std.Io.Writer.Allocating = .init(alloc);
     defer event.deinit();
     try event.writer.writeAll("{\"type\":\"tool-call\",\"toolCallId\":\"c1\",\"toolName\":\"ask_user_question\",\"input\":");
@@ -7956,7 +7956,7 @@ test "consumeSseStream rejects malformed final-call provider execution flags" {
     var completion = try consumeSseStream(std.testing.allocator, &reader, undefined, Noop.chunk, null, &cancel_flag);
     defer deinitGatewayCompletion(std.testing.allocator, &completion);
 
-    try std.testing.expectEqual(.fx_local, completion.tool_calls[0].provenance);
+    try std.testing.expectEqual(.lia_local, completion.tool_calls[0].provenance);
     try std.testing.expectEqual(
         types.AuthoritativeToolAdmission{ .reject_malformed_provider_result = .malformed_provider_executed },
         types.authoritativeToolAdmission(completion),
@@ -8308,7 +8308,7 @@ test "consumeSseStream preview failure is metadata-only and non-fatal" {
     defer test_force_sse_preview_failure = false;
 
     const payload =
-        "data: {\"type\":\"text-delta\",\"id\":\"text\",\"delta\":\"FX_PREVIEW_VALUE_SENTINEL\"}\n\n" ++
+        "data: {\"type\":\"text-delta\",\"id\":\"text\",\"delta\":\"LIA_PREVIEW_VALUE_SENTINEL\"}\n\n" ++
         "data: {\"type\":\"finish\",\"finishReason\":{\"unified\":\"stop\"}}\n\n";
     const Noop = struct {
         fn chunk(_: *anyopaque, _: []const u8) void {}
@@ -8319,11 +8319,11 @@ test "consumeSseStream preview failure is metadata-only and non-fatal" {
     defer deinitGatewayCompletion(alloc, &completion);
     debug_trace.shutdown();
 
-    try std.testing.expectEqualStrings("FX_PREVIEW_VALUE_SENTINEL", completion.content.?);
+    try std.testing.expectEqualStrings("LIA_PREVIEW_VALUE_SENTINEL", completion.content.?);
     const trace = try readTraceFileForTest(alloc, trace_path);
     defer alloc.free(trace);
     try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, trace, "preview=<preview-error>"));
-    try std.testing.expect(std.mem.find(u8, trace, "FX_PREVIEW_VALUE_SENTINEL") == null);
+    try std.testing.expect(std.mem.find(u8, trace, "LIA_PREVIEW_VALUE_SENTINEL") == null);
 }
 
 test "consumeSseStream unfiltered trace excludes all payload keys and values" {
@@ -8340,15 +8340,15 @@ test "consumeSseStream unfiltered trace excludes all payload keys and values" {
     try debug_trace.configureForTest(alloc, trace_path);
 
     const payload =
-        "data: {\"type\":\"FX_UNKNOWN_TYPE_SENTINEL\",\"FX_DYNAMIC_KEY_SENTINEL\":\"FX_UNKNOWN_VALUE_SENTINEL\"}\n\n" ++
-        "data: {\"type\":\"text-delta\",\"id\":\"text\",\"delta\":\"FX_MODEL_TEXT_SENTINEL\"}\n\n" ++
+        "data: {\"type\":\"LIA_UNKNOWN_TYPE_SENTINEL\",\"LIA_DYNAMIC_KEY_SENTINEL\":\"LIA_UNKNOWN_VALUE_SENTINEL\"}\n\n" ++
+        "data: {\"type\":\"text-delta\",\"id\":\"text\",\"delta\":\"LIA_MODEL_TEXT_SENTINEL\"}\n\n" ++
         "data: {\"type\":\"tool-input-start\",\"id\":\"safe_call\",\"toolName\":\"read_file\"}\n\n" ++
         "data: {\"type\":\"tool-input-start\",\"id\":\"safe_call\",\"toolName\":\"grep_files\"}\n\n" ++
-        "data: {\"type\":\"tool-input-delta\",\"id\":\"safe_call\",\"delta\":\"{\\\"FX_ARGUMENT_KEY_SENTINEL\\\":\\\"FX_PATH_VALUE_SENTINEL\\\"}\"}\n\n" ++
+        "data: {\"type\":\"tool-input-delta\",\"id\":\"safe_call\",\"delta\":\"{\\\"LIA_ARGUMENT_KEY_SENTINEL\\\":\\\"LIA_PATH_VALUE_SENTINEL\\\"}\"}\n\n" ++
         "data: {\"type\":\"tool-input-end\",\"id\":\"safe_call\"}\n\n" ++
-        "data: {\"type\":\"tool-input-delta\",\"id\":\"safe_call\",\"delta\":\"FX_LATE_PREFIX_SENTINEL\"}\n\n" ++
-        "data: {\"type\":\"tool-call\",\"toolCallId\":\"safe_call\",\"toolName\":\"read_file\",\"input\":{\"FX_FINAL_KEY_SENTINEL\":\"FX_FINAL_VALUE_SENTINEL\"},\"providerExecuted\":true}\n\n" ++
-        "data: {\"type\":\"tool-result\",\"toolCallId\":\"safe_call\",\"result\":{\"FX_RESULT_KEY_SENTINEL\":\"FX_RESULT_VALUE_SENTINEL\"}}\n\n" ++
+        "data: {\"type\":\"tool-input-delta\",\"id\":\"safe_call\",\"delta\":\"LIA_LATE_PREFIX_SENTINEL\"}\n\n" ++
+        "data: {\"type\":\"tool-call\",\"toolCallId\":\"safe_call\",\"toolName\":\"read_file\",\"input\":{\"LIA_FINAL_KEY_SENTINEL\":\"LIA_FINAL_VALUE_SENTINEL\"},\"providerExecuted\":true}\n\n" ++
+        "data: {\"type\":\"tool-result\",\"toolCallId\":\"safe_call\",\"result\":{\"LIA_RESULT_KEY_SENTINEL\":\"LIA_RESULT_VALUE_SENTINEL\"}}\n\n" ++
         "data: {\"type\":\"finish\",\"finishReason\":{\"unified\":\"tool-calls\"}}\n\n";
 
     const Noop = struct {
@@ -8360,7 +8360,7 @@ test "consumeSseStream unfiltered trace excludes all payload keys and values" {
     defer deinitGatewayCompletion(alloc, &completion);
     debug_trace.shutdown();
 
-    try std.testing.expectEqualStrings("FX_MODEL_TEXT_SENTINEL", completion.content.?);
+    try std.testing.expectEqualStrings("LIA_MODEL_TEXT_SENTINEL", completion.content.?);
     try std.testing.expectEqual(
         types.AuthoritativeToolAdmission.admitted,
         types.authoritativeToolAdmission(completion),
@@ -8383,17 +8383,17 @@ test "consumeSseStream unfiltered trace excludes all payload keys and values" {
         try std.testing.expect(std.mem.find(u8, trace, metadata) != null);
     }
     inline for (.{
-        "FX_UNKNOWN_TYPE_SENTINEL",
-        "FX_DYNAMIC_KEY_SENTINEL",
-        "FX_UNKNOWN_VALUE_SENTINEL",
-        "FX_MODEL_TEXT_SENTINEL",
-        "FX_ARGUMENT_KEY_SENTINEL",
-        "FX_PATH_VALUE_SENTINEL",
-        "FX_LATE_PREFIX_SENTINEL",
-        "FX_FINAL_KEY_SENTINEL",
-        "FX_FINAL_VALUE_SENTINEL",
-        "FX_RESULT_KEY_SENTINEL",
-        "FX_RESULT_VALUE_SENTINEL",
+        "LIA_UNKNOWN_TYPE_SENTINEL",
+        "LIA_DYNAMIC_KEY_SENTINEL",
+        "LIA_UNKNOWN_VALUE_SENTINEL",
+        "LIA_MODEL_TEXT_SENTINEL",
+        "LIA_ARGUMENT_KEY_SENTINEL",
+        "LIA_PATH_VALUE_SENTINEL",
+        "LIA_LATE_PREFIX_SENTINEL",
+        "LIA_FINAL_KEY_SENTINEL",
+        "LIA_FINAL_VALUE_SENTINEL",
+        "LIA_RESULT_KEY_SENTINEL",
+        "LIA_RESULT_VALUE_SENTINEL",
     }) |sentinel| {
         try std.testing.expect(std.mem.find(u8, trace, sentinel) == null);
     }
@@ -11211,8 +11211,8 @@ test "gateway chat request sends extended time and attribution headers" {
 
     if (fixture.failure) |err| return err;
     try std.testing.expectEqualStrings(user_agent, fixture.capturedHeaderValue("user-agent").?);
-    try std.testing.expectEqualStrings("https://github.com/vercel-labs/fx", fixture.capturedHeaderValue("http-referer").?);
-    try std.testing.expectEqualStrings("fx", fixture.capturedHeaderValue("x-title").?);
+    try std.testing.expectEqualStrings("https://github.com/ap-justin/lia", fixture.capturedHeaderValue("http-referer").?);
+    try std.testing.expectEqualStrings("lia", fixture.capturedHeaderValue("x-title").?);
     try std.testing.expectEqualStrings(
         vercel_gateway_extended_time_value,
         fixture.capturedHeaderValue(vercel_gateway_extended_time_header).?,
@@ -11539,7 +11539,7 @@ test "a pooled open hands over a request that carries the caller's URI and heade
     const pool = &fixture.pool;
 
     const uri = try std.Uri.parse(url);
-    const extra = [_]std.http.Header{.{ .name = "x-fx-test", .value = "kept" }};
+    const extra = [_]std.http.Header{.{ .name = "x-lia-test", .value = "kept" }};
     const options: std.http.Client.RequestOptions = .{
         .headers = .{ .authorization = .{ .override = "Bearer test" } },
         .extra_headers = &extra,
@@ -11644,7 +11644,7 @@ const UnpooledOpenFixture = struct {
     }
 
     /// What became of the connection a finished open may have made: none,
-    /// or one fx already closed. Fails when fx left one open. Waits up to
+    /// or one lia already closed. Fails when lia left one open. Waits up to
     /// `appear_ms` for a connection to arrive.
     fn lateConnection(self: *UnpooledOpenFixture, appear_ms: i32) !Late {
         const zio = io_mod.getIo();
@@ -11652,8 +11652,8 @@ const UnpooledOpenFixture = struct {
         if (try std.posix.poll(&listener, appear_ms) == 0) return .none;
         var stream = try self.server.accept(zio);
         defer stream.close(zio);
-        // The close fx already made can reach this end a moment after the
-        // accept; a connection fx left open never reads end of stream.
+        // The close lia already made can reach this end a moment after the
+        // accept; a connection lia left open never reads end of stream.
         var peer = [_]std.posix.pollfd{.{ .fd = stream.socket.handle, .events = std.posix.POLL.IN, .revents = 0 }};
         if (try std.posix.poll(&peer, 2_000) == 0) return error.TestConnectionLeftOpen;
         var buffer: [64]u8 = undefined;
@@ -11752,7 +11752,7 @@ test "an unpooled open hands over a request on its job's own client with the cal
     defer fixture.deinit();
 
     const uri = try std.Uri.parse(fixture.url);
-    const extra = [_]std.http.Header{.{ .name = "x-fx-test", .value = "kept" }};
+    const extra = [_]std.http.Header{.{ .name = "x-lia-test", .value = "kept" }};
     const options: std.http.Client.RequestOptions = .{
         .headers = .{ .authorization = .{ .override = "Bearer test" } },
         .extra_headers = &extra,

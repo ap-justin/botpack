@@ -461,7 +461,7 @@ fn formatLegacyBackgroundAssistant(
         }
     }
     try out.writer.writeAll(
-        "[Historical command record: fx no longer owns or controls this process",
+        "[Historical command record: lia no longer owns or controls this process",
     );
     if (log_path.len != 0) try out.writer.print("; former log={s}", .{log_path});
     if (url) |value| try out.writer.print("; recorded url={s}", .{value});
@@ -1633,7 +1633,7 @@ test "non-object legacy function inputs are repaired without changing recorded o
             defer session.freeExecutionMemory(alloc, decoded);
             const step = decoded.tool_steps[0];
             try std.testing.expectEqualStrings(if (native_kind == 0) "{}" else "[]", step.tool_calls[0].arguments_json);
-            try std.testing.expectEqual(if (native_kind == 0) types.ToolExecutionProvenance.fx_local else .provider_executed, step.tool_calls[0].provenance);
+            try std.testing.expectEqual(if (native_kind == 0) types.ToolExecutionProvenance.lia_local else .provider_executed, step.tool_calls[0].provenance);
             try std.testing.expectEqual(types.ToolArgumentIntegrity.valid, step.tool_calls[0].argument_integrity);
             try std.testing.expectEqual(status, step.tool_results[0].status);
             try std.testing.expectEqualStrings("recorded", step.tool_results[0].output);
@@ -2079,7 +2079,7 @@ test "schema v2 legacy exact reader migrates background ownership to inert histo
     try std.testing.expect(std.mem.find(
         u8,
         loaded.history[1].assistant.assistant,
-        "fx no longer owns or controls this process",
+        "lia no longer owns or controls this process",
     ) != null);
     try std.testing.expect(std.mem.find(
         u8,

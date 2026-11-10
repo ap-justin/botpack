@@ -3,7 +3,7 @@ const std = @import("std");
 const UpdateChannel = enum { stable, dev };
 
 const PgsoArtifact = enum {
-    fx,
+    lia,
     file_index,
     unit_tests,
 };
@@ -19,19 +19,19 @@ pub fn build(b: *std.Build) void {
     const sanitize_thread = b.option(
         bool,
         "sanitize-thread",
-        "Build fx and its tests with ThreadSanitizer",
+        "Build lia and its tests with ThreadSanitizer",
     ) orelse false;
 
     const git_commit = readGitCommit(b);
     const app_version = readAppVersion(b);
-    // Only `fx status --json` reads this, as update_channel and build_channel.
+    // Only `lia status --json` reads this, as update_channel and build_channel.
     const update_channel = b.option(UpdateChannel, "update-channel", "Build update channel (stable or dev)") orelse .stable;
 
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "git_commit", git_commit);
     build_options.addOption([]const u8, "app_version", app_version);
     build_options.addOption([]const u8, "update_channel", @tagName(update_channel));
-    // Whether this is a libfx artifact, which leaves out what only the fx
+    // Whether this is a libfx artifact, which leaves out what only the lia
     // binary uses, such as its E2E test controls.
     build_options.addOption(bool, "libfx", false);
     build_options.addOption(bool, "builtin_tools", true);
@@ -46,7 +46,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const exe = b.addExecutable(.{
-        .name = "fx",
+        .name = "lia",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
@@ -75,7 +75,7 @@ pub fn build(b: *std.Build) void {
     run_cmd.step.dependOn(b.getInstallStep());
     run_cmd.addPassthruArgs();
 
-    const run_step = b.step("run", "Run fx");
+    const run_step = b.step("run", "Run lia");
     run_step.dependOn(&run_cmd.step);
 
     const exe_tests = b.addTest(.{
@@ -83,10 +83,10 @@ pub fn build(b: *std.Build) void {
     });
     const run_exe_tests = b.addRunArtifact(exe_tests);
     run_exe_tests.step.dependOn(b.getInstallStep());
-    // Tests launch the installed fx binary, and the session boundary test
+    // Tests launch the installed lia binary, and the session boundary test
     // walks the source tree.
     const test_paths = b.addOptions();
-    test_paths.addOptionPathUntracked("product_exe", b.graph.path(.install_bin, "fx"));
+    test_paths.addOptionPathUntracked("product_exe", b.graph.path(.install_bin, "lia"));
     test_paths.addOptionPathUntracked("source_root", b.path("src"));
     const test_paths_module = test_paths.createModule();
     exe.root_module.addImport("test_paths", test_paths_module);
@@ -94,18 +94,18 @@ pub fn build(b: *std.Build) void {
     // transformed code. It builds them position independent: a test there
     // defines the wasm host's `extern "fx"` functions itself, and Zig rejects
     // a library extern in a static executable that is not. `install-test`
-    // does not install fx, so the build links only the tests. Run it from the
+    // does not install lia, so the build links only the tests. Run it from the
     // repository root after `zig build` with the same prefix.
     const pgso_tests = b.addTest(.{ .root_module = exe.root_module });
     pgso_tests.pie = true;
-    const install_pgso_tests = b.addInstallArtifact(pgso_tests, .{ .dest_sub_path = "fx-test" });
+    const install_pgso_tests = b.addInstallArtifact(pgso_tests, .{ .dest_sub_path = "lia-test" });
     b.step("install-test", "Install the unit test executable without running it").dependOn(&install_pgso_tests.step);
 
-    // The session manager's own tests, as fx compiles it (no hooks).
+    // The session manager's own tests, as lia compiles it (no hooks).
     const session_manager_tests = b.addTest(.{ .root_module = session_manager });
 
     const run_session_manager_tests = b.addRunArtifact(session_manager_tests);
-    // And with its fault and trace hooks, whose tests fx's build leaves out.
+    // And with its fault and trace hooks, whose tests lia's build leaves out.
     const session_manager_hook_tests = b.addTest(.{
         .root_module = sessionManagerModule(b, target, optimize, null, true, fuzz_corpora),
     });
@@ -114,7 +114,7 @@ pub fn build(b: *std.Build) void {
         (target.result.cpu.arch == .x86_64 or target.result.cpu.arch == .aarch64))
     {
         // Lets ThreadSanitizer see pages that `mremap` releases (see the
-        // file). fx and its tests reach it through the session manager.
+        // file). lia and its tests reach it through the session manager.
         const tsan_mremap = b.addObject(.{
             .name = "tsan_mremap",
             .root_module = b.createModule(.{
@@ -160,7 +160,7 @@ pub fn build(b: *std.Build) void {
     fuzz_root.addImport("session_manager", session_manager);
     fuzz_root.addImport("test_paths", test_paths_module);
     addFuzzStep(b, fuzz_step, fuzz_corpora, fuzz_target, .{
-        .fx = fuzz_root,
+        .lia = fuzz_root,
         .session_manager = session_manager,
     });
 
@@ -197,12 +197,12 @@ pub fn build(b: *std.Build) void {
     );
     if (pgso_artifact) |artifact| {
         const selected: *std.Build.Step.Compile = switch (artifact) {
-            .fx => exe,
+            .lia => exe,
             .file_index => file_index_bench,
             .unit_tests => pgso_tests,
         };
         const output_name = switch (artifact) {
-            .fx => "pgso/fx.bc",
+            .lia => "pgso/lia.bc",
             .file_index => "pgso/file-index.bc",
             .unit_tests => "pgso/unit-tests.bc",
         };
@@ -211,7 +211,7 @@ pub fn build(b: *std.Build) void {
             output_name,
         );
         pgso_ir_step.dependOn(&install_ir.step);
-        // The tests launch the fx installed under this build's prefix.
+        // The tests launch the lia installed under this build's prefix.
         if (artifact == .unit_tests) pgso_ir_step.dependOn(b.getInstallStep());
     } else {
         const missing_artifact = b.addFail(
@@ -237,7 +237,7 @@ fn readGitCommit(b: *std.Build) []const u8 {
 
 /// The session manager as its own module, rooted at its API. It imports
 /// nothing but its own options, and a file cannot belong to two modules, so
-/// fx reaches it only through `@import("session_manager")`. Its fuzz targets'
+/// lia reaches it only through `@import("session_manager")`. Its fuzz targets'
 /// saved inputs travel in those options as `fuzz_corpus_<target>`.
 fn addSessionManager(
     b: *std.Build,
@@ -306,7 +306,7 @@ const fuzz_corpus_dir = "tests/fuzz/corpus";
 /// artifact copied into a corpus folder.
 const max_fuzz_input_bytes = 1024 * 1024;
 
-const FuzzModule = enum { fx, session_manager };
+const FuzzModule = enum { lia, session_manager };
 
 /// One entry in `tests/fuzz/targets.json`.
 const FuzzTarget = struct {
@@ -331,7 +331,7 @@ const FuzzCorpus = struct {
 };
 
 const FuzzRoots = struct {
-    fx: *std.Build.Module,
+    lia: *std.Build.Module,
     session_manager: *std.Build.Module,
 };
 
@@ -444,12 +444,12 @@ fn lessThanBytes(_: void, lhs: []const u8, rhs: []const u8) bool {
     return std.mem.lessThan(u8, lhs, rhs);
 }
 
-/// The `fuzz_corpus` module: one `[]const []const u8` of saved inputs per fx
+/// The `fuzz_corpus` module: one `[]const []const u8` of saved inputs per lia
 /// fuzz target, named after the target.
 fn addFuzzCorpusModule(b: *std.Build, corpora: []const FuzzCorpus) *std.Build.Module {
     const options = b.addOptions();
     for (corpora) |corpus| {
-        if (corpus.target.module != .fx) continue;
+        if (corpus.target.module != .lia) continue;
         options.addOption([]const []const u8, corpus.target.name, corpus.inputs);
     }
     return options.createModule();
@@ -465,20 +465,20 @@ fn addFuzzStep(
     selected: ?[]const u8,
     roots: FuzzRoots,
 ) void {
-    var fx_filters: std.ArrayList([]const u8) = .empty;
+    var lia_filters: std.ArrayList([]const u8) = .empty;
     var session_manager_filters: std.ArrayList([]const u8) = .empty;
     for (corpora) |corpus| {
         if (selected) |name| {
             if (!std.mem.eql(u8, name, corpus.target.name)) continue;
         }
         const filters = switch (corpus.target.module) {
-            .fx => &fx_filters,
+            .lia => &lia_filters,
             .session_manager => &session_manager_filters,
         };
         filters.append(b.allocator, corpus.target.@"test") catch |err|
             std.process.fatal("could not select the fuzz tests: {t}", .{err});
     }
-    if (fx_filters.items.len == 0 and session_manager_filters.items.len == 0) {
+    if (lia_filters.items.len == 0 and session_manager_filters.items.len == 0) {
         const message = if (selected) |name|
             b.fmt("unknown fuzz target '{s}'; the targets are listed in {s}", .{ name, fuzz_registry_path })
         else
@@ -492,7 +492,7 @@ fn addFuzzStep(
         root: *std.Build.Module,
         filters: []const []const u8,
     }{
-        .{ .name = "fuzz", .root = roots.fx, .filters = fx_filters.items },
+        .{ .name = "fuzz", .root = roots.lia, .filters = lia_filters.items },
         .{ .name = "fuzz-session-manager", .root = roots.session_manager, .filters = session_manager_filters.items },
     };
     for (binaries) |binary| {

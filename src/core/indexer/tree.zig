@@ -187,7 +187,7 @@ test "stamps reuse only times older than the scan start by the margin" {
     try std.testing.expect(!reusableTimes(start - 3 * std.time.ns_per_s, start, start));
     try std.testing.expect(!reusableTimes(start + 1, start - 3 * std.time.ns_per_s, start));
     // A missing source stays missing until it appears.
-    const missing = sourceStamp("/nonexistent/fx-indexer-test", false, false, start);
+    const missing = sourceStamp("/nonexistent/lia-indexer-test", false, false, start);
     try std.testing.expect(!missing.exists and missing.reusable);
 }
 

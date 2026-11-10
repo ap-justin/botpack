@@ -1,6 +1,6 @@
 ------------------------- MODULE TurnLifecycleLog -------------------------
 (***************************************************************************)
-(* Checks a log fx saved against TurnLifecycle.tla, after the fact.        *)
+(* Checks a log lia saved against TurnLifecycle.tla, after the fact.        *)
 (*                                                                         *)
 (* Only the disk is known: the log's kinds, in order (`Target`, from       *)
 (* SavedLog.tla). The process state (status, fresh), and with it every     *)

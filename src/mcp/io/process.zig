@@ -153,7 +153,7 @@ pub const Incoming = union(enum) {
     dropped: struct { err: wire.DecodeError, line: []const u8 },
     /// The connection changed state. `lost` means the process is gone and
     /// requests in flight on it are lost (`transport_lost` in `core/request.zig`).
-    /// `oversized` says fx killed it for a stdout line over `max_line`.
+    /// `oversized` says lia killed it for a stdout line over `max_line`.
     changed: struct { state: core.State, lost: bool, oversized: bool = false },
     /// `next` was given a timeout and it passed first.
     timeout,
@@ -273,7 +273,7 @@ pub const Process = struct {
     /// stderr lines dropped because the queue was full.
     stderr_dropped: std.atomic.Value(u32) = .init(0),
     /// Bytes of stdout lines posted and not yet taken: at most one longest
-    /// line, so a fast server waits instead of growing fx.
+    /// line, so a fast server waits instead of growing lia.
     budget: Budget,
     /// Why the last start failed, for logs.
     spawn_error: ?SpawnError = null,

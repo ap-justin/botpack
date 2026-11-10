@@ -61,7 +61,7 @@ async function elicit(callId: unknown) {
     send({ id: "e2", method: "elicitation/create", params: form(2) });
     log("ask", { q: 2, id: "e2" });
     await Promise.race([second, Bun.sleep(30_000)]);
-    // Long enough for fx to show what it holds next.
+    // Long enough for lia to show what it holds next.
     await Bun.sleep(Number(process.env.FIXTURE_AFTER_MS ?? "2500"));
   }
   send({ id: callId, result: { content: [{ type: "text", text: `ELICIT_DONE ${JSON.stringify(answers)}` }] } });

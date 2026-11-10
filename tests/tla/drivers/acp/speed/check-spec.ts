@@ -1,6 +1,6 @@
 // Exhaustive TLC check of the speed contract plus mutation qualification:
 // each planted mutant must violate the named invariant, which shows the
-// invariants are not vacuous. Several mutants match how an earlier fx behaved.
+// invariants are not vacuous. Several mutants match how an earlier lia behaved.
 //
 //   bun tests/tla/drivers/acp/speed/check-spec.ts
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -13,28 +13,28 @@ type Mutant = { id: string; note: string; from: string; to: string; expect: stri
 const MUTANTS: Mutant[] = [
   {
     id: "fast-ignored",
-    note: "an earlier fx: set fast succeeds but changes nothing",
+    note: "an earlier lia: set fast succeeds but changes nothing",
     from: "    ELSE /\\ fast' = b\n         /\\ ultra' = (ultra /\\ ~b)",
     to: "    ELSE /\\ fast' = fast\n         /\\ ultra' = ultra",
     expect: "RequestHonored",
   },
   {
     id: "unknown-accepted",
-    note: "an earlier fx: unknown config ids succeed",
+    note: "an earlier lia: unknown config ids succeed",
     from: 'Result("unknown", "none", FALSE, "none")',
     to: 'Result("unknown", "none", TRUE, "none")',
     expect: "UnknownRejected",
   },
   {
     id: "switch-keeps-ultra",
-    note: "an earlier fx: Ultrafast stays on, hidden, after switching to a model without it",
+    note: "an earlier lia: Ultrafast stays on, hidden, after switching to a model without it",
     from: "    /\\ ultra' = (ultra /\\ m \\in SupUltra)",
     to: "    /\\ ultra' = ultra",
     expect: "UltraValid",
   },
   {
     id: "switch-keeps-fast",
-    note: "an earlier fx: Fast stays on, hidden, after switching to a model without it",
+    note: "an earlier lia: Fast stays on, hidden, after switching to a model without it",
     from: "    /\\ fast' = (fast /\\ m \\in SupFast)",
     to: "    /\\ fast' = fast",
     expect: "SwitchClearsFast",

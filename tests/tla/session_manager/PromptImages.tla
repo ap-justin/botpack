@@ -31,7 +31,7 @@ Item == [asked : SUBSET Digests, images : [Digests -> Forms \cup {"none"}],
          listed : SUBSET Digests]
 
 VARIABLES
-    up,         \* the fx process is running
+    up,         \* the lia process is running
     forked,     \* the fork exists
     blobs,      \* [Sessions -> SUBSET Digests]: files in each blobs folder
     log,        \* [Sessions -> Seq(Item)]: each session's user items

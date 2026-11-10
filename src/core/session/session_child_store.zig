@@ -229,7 +229,7 @@ const CapabilityImpl = struct {
     /// and has no side folder (D48).
     session_dir: ?io_mod.VerifiedDir,
     blobs: ?Blobs = null,
-    /// A v2 session's terminal folder, `~/.fx/terminal/{id}` (D45), where
+    /// A v2 session's terminal folder, `~/.lia/terminal/{id}` (D45), where
     /// its terminal kinds route; opened on first use and made only by a
     /// write. `display_session_path` is its path.
     terminal_dir: ?io_mod.VerifiedDir = null,
@@ -395,8 +395,8 @@ const CapabilityImpl = struct {
         if (self.blobs == null or owner_path.len == 0) return if (create) error.SessionChildStoreFailed else null;
         if (create and self.mode != .writable) return error.SessionChildReadOnly;
         const root_path = std.Io.Dir.path.dirname(owner_path) orelse return error.SessionPathUnsafe;
-        const fx_path = std.Io.Dir.path.dirname(root_path) orelse return error.SessionPathUnsafe;
-        var fx = io_mod.VerifiedDir{ .dir = std.Io.Dir.openDirAbsolute(io_mod.getIo(), fx_path, .{
+        const lia_path = std.Io.Dir.path.dirname(root_path) orelse return error.SessionPathUnsafe;
+        var lia = io_mod.VerifiedDir{ .dir = std.Io.Dir.openDirAbsolute(io_mod.getIo(), lia_path, .{
             .iterate = true,
             .follow_symlinks = false,
         }) catch |err| switch (err) {
@@ -404,12 +404,12 @@ const CapabilityImpl = struct {
             error.NotDir, error.SymLinkLoop => return error.SessionPathUnsafe,
             else => return error.SessionChildStoreFailed,
         } };
-        defer fx.close();
+        defer lia.close();
         const root_name = std.Io.Dir.path.basename(root_path);
         var root = if (create)
-            try io_mod.openOrCreateVerifiedPrivateDir(&fx, root_name)
+            try io_mod.openOrCreateVerifiedPrivateDir(&lia, root_name)
         else
-            (try io_mod.openVerifiedPrivateDirIfPresent(&fx, root_name)) orelse return null;
+            (try io_mod.openVerifiedPrivateDirIfPresent(&lia, root_name)) orelse return null;
         defer root.close();
         const id = std.Io.Dir.path.basename(owner_path);
         self.terminal_dir = if (create)
@@ -774,7 +774,7 @@ pub const SessionChildCapability = struct {
     }
 
     /// A v2 session's capability: its bodies are that session's blobs, its
-    /// terminal kinds route to `terminal_path`, its `~/.fx/terminal/{id}`
+    /// terminal kinds route to `terminal_path`, its `~/.lia/terminal/{id}`
     /// (D45), and it has no side folder, so every other kind is absent
     /// (D44, D48). An empty `terminal_path` gives no terminal kinds.
     pub fn initBlobs(alloc: Allocator, blobs: Blobs, terminal_path: []const u8, mode: Mode) !SessionChildCapability {
@@ -1037,7 +1037,7 @@ pub const SessionChildCapability = struct {
     }
 
     /// Opens a capability restricted to holder proofs in the owning durable
-    /// fx session. It does not imply access to host-owned terminal state.
+    /// lia session. It does not imply access to host-owned terminal state.
     pub fn initTerminalProofs(
         alloc: Allocator,
         session_dir: std.Io.Dir,
@@ -1951,10 +1951,10 @@ test "a v2 capability keeps terminal kinds in the terminal folder, made only by 
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDir(io_mod.getIo(), "fx", private_dir_permissions);
-    const fx_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "fx");
-    defer alloc.free(fx_path);
-    const terminal_path = try std.Io.Dir.path.join(alloc, &.{ fx_path, "terminal", "kYIGy8ik0H3K" });
+    try tmp.dir.createDir(io_mod.getIo(), "lia", private_dir_permissions);
+    const lia_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "lia");
+    defer alloc.free(lia_path);
+    const terminal_path = try std.Io.Dir.path.join(alloc, &.{ lia_path, "terminal", "kYIGy8ik0H3K" });
     defer alloc.free(terminal_path);
 
     var memory = MemoryBlobsForTesting.init(alloc);
@@ -1964,11 +1964,11 @@ test "a v2 capability keeps terminal kinds in the terminal folder, made only by 
 
     // A read finds nothing and makes nothing.
     try std.testing.expectError(error.FileNotFound, capability.openFileReadOnly(alloc, .terminal_state, "record.json"));
-    try std.testing.expectError(error.FileNotFound, tmp.dir.statFile(io_mod.getIo(), "fx/terminal", .{ .follow_symlinks = false }));
+    try std.testing.expectError(error.FileNotFound, tmp.dir.statFile(io_mod.getIo(), "lia/terminal", .{ .follow_symlinks = false }));
 
     var entry = try capability.atomicReplace(alloc, .terminal_state, "record.json", "{}");
     entry.deinit(alloc);
-    for ([_][]const u8{ "fx/terminal", "fx/terminal/kYIGy8ik0H3K" }) |sub_path| {
+    for ([_][]const u8{ "lia/terminal", "lia/terminal/kYIGy8ik0H3K" }) |sub_path| {
         const stat = try tmp.dir.statFile(io_mod.getIo(), sub_path, .{ .follow_symlinks = false });
         try std.testing.expectEqual(std.Io.File.Kind.directory, stat.kind);
         try std.testing.expectEqual(@as(std.posix.mode_t, 0o700), stat.permissions.toMode() & 0o777);
@@ -1985,12 +1985,12 @@ test "a v2 capability keeps terminal kinds in the terminal folder, made only by 
     try std.testing.expectError(error.SessionChildStoreFailed, capability.atomicReplace(alloc, .background_records, "record.json", "{}"));
 
     // A read-only capability never makes the folder.
-    const other_path = try std.Io.Dir.path.join(alloc, &.{ fx_path, "terminal", "otherSession1" });
+    const other_path = try std.Io.Dir.path.join(alloc, &.{ lia_path, "terminal", "otherSession1" });
     defer alloc.free(other_path);
     var read_only = try SessionChildCapability.initBlobs(alloc, memory.blobs(), other_path, .read_only);
     defer read_only.deinit();
     try std.testing.expectError(error.FileNotFound, read_only.openFileReadOnly(alloc, .terminal_state, "record.json"));
-    try std.testing.expectError(error.FileNotFound, tmp.dir.statFile(io_mod.getIo(), "fx/terminal/otherSession1", .{ .follow_symlinks = false }));
+    try std.testing.expectError(error.FileNotFound, tmp.dir.statFile(io_mod.getIo(), "lia/terminal/otherSession1", .{ .follow_symlinks = false }));
 }
 
 test "post rename parent sync failure is indeterminate and next write reopens" {

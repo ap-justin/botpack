@@ -801,12 +801,12 @@ pub const Reducer = struct {
                 limits.aggregate_bytes,
             );
         }
-        // fx serializes parts of an event, such as a reasoning item or a tool
+        // lia serializes parts of an event, such as a reasoning item or a tool
         // input, and std.json.Stringify aborts past 256 levels.
         if (json_depth.exceeds(json_text)) return error.InvalidEvent;
         var parsed = std.json.parseFromSlice(std.json.Value, alloc, json_text, .{}) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
-            // Valid JSON that fx refuses ends the turn. Text that is not JSON
+            // Valid JSON that lia refuses ends the turn. Text that is not JSON
             // at all was damaged on the way, so the caller resends it.
             error.DuplicateField => return error.InvalidEvent,
             else => return error.MalformedEvent,
@@ -948,7 +948,7 @@ pub const Reducer = struct {
                 self.tools.items.len > 0,
             );
             // An incomplete response with no known reason, or a cancelled
-            // one, failed without saying why, and fx resends it.
+            // one, failed without saying why, and lia resends it.
             if (self.finish_reason == .provider_error and !self.failure_explained) {
                 self.provider_failure_cause = .unexplained_error_finish;
             }
@@ -1643,8 +1643,8 @@ test "Responses terminal failures retain provider diagnostics as outcomes" {
 test "Responses events nested past the depth limit are invalid" {
     var stream = ToolRecordTest.init(std.testing.allocator);
     defer stream.deinit();
-    // fx serializes a whole completed reasoning item, so one field 300 levels
-    // deep aborted fx.
+    // lia serializes a whole completed reasoning item, so one field 300 levels
+    // deep aborted lia.
     const deep = text_utils.repeat("{\"a\":", 300) ++ "0" ++ text_utils.repeat("}", 300);
     try std.testing.expectError(error.InvalidEvent, stream.apply("{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_deep\",\"summary\":[],\"encrypted_content\":\"opaque\",\"extra\":" ++ deep ++ "}}"));
 }
@@ -2509,7 +2509,7 @@ test "Responses usage projection retains optional cached and reasoning detail" {
     try std.testing.expectEqual(@as(?u64, 3), usage.reasoning_tokens);
 }
 
-test "a Responses event that is not JSON is malformed, and valid JSON fx refuses is invalid" {
+test "a Responses event that is not JSON is malformed, and valid JSON lia refuses is invalid" {
     var garbled = ToolRecordTest.init(std.testing.allocator);
     defer garbled.deinit();
     try std.testing.expectError(error.MalformedEvent, garbled.apply("{\"type\":\"response.output_text.delta\",\"delta\":\"\x01broken"));

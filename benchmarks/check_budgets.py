@@ -8,12 +8,12 @@ import platform
 import sys
 
 LINUX_BUDGETS = {
-    "fx (startup)": 0.002,
-    "fx help": 0.002,
-    "fx status --json": 0.002,
-    "fx background --json": 0.002,
-    "fx doctor --json": 0.002,
-    "fx sessions --json": 0.002,
+    "lia (startup)": 0.002,
+    "lia help": 0.002,
+    "lia status --json": 0.002,
+    "lia background --json": 0.002,
+    "lia doctor --json": 0.002,
+    "lia sessions --json": 0.002,
 }
 DEFAULT_LINUX_BUDGET = 0.002
 
@@ -79,7 +79,7 @@ def main():
     result_files = sorted(
         glob.glob(
             os.environ.get(
-                "FX_BENCH_RESULTS_GLOB",
+                "LIA_BENCH_RESULTS_GLOB",
                 "benchmarks/results/*.json",
             )
         )

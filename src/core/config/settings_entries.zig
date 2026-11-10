@@ -1,5 +1,5 @@
-//! The values set in fx's settings files as dotted `key=value` entries, for
-//! `fx config list` and `fx config get`.
+//! The values set in lia's settings files as dotted `key=value` entries, for
+//! `lia config list` and `lia config get`.
 
 const std = @import("std");
 const env_settings = @import("env_settings.zig");
@@ -8,15 +8,15 @@ const settings_keys = @import("settings_keys.zig");
 const Allocator = std.mem.Allocator;
 
 pub const Origin = enum {
-    /// A project `.fx.json`.
+    /// A project `.lia.json`.
     project,
     /// The top level of the profile `settings.json`.
     global,
     /// This workspace's override inside the profile `settings.json`.
     workspace,
-    /// An `FX_*` variable set for this process.
+    /// An `LIA_*` variable set for this process.
     env,
-    /// Nothing sets it, so fx uses its built-in value.
+    /// Nothing sets it, so lia uses its built-in value.
     default,
 };
 
@@ -28,14 +28,14 @@ pub const Entry = struct {
     /// Borrowed from the parsed file or the environment.
     value: std.json.Value,
     origin: Origin,
-    /// The variable an `env` entry comes from, such as `FX_MAX_AGENT_STEPS`.
+    /// The variable an `env` entry comes from, such as `LIA_MAX_AGENT_STEPS`.
     variable: ?[]const u8 = null,
 };
 
 pub const Files = struct {
     /// The parsed profile `settings.json`, or null when it is absent.
     profile: ?std.json.Value = null,
-    /// The parsed project `.fx.json`, or null when it is absent.
+    /// The parsed project `.lia.json`, or null when it is absent.
     project: ?std.json.Value = null,
     /// The workspace whose override applies, as `workspaces` stores it.
     workspace_root: []const u8,
@@ -52,7 +52,7 @@ pub const Entries = struct {
 };
 
 /// Every value set in `files` for `scope`, lowest precedence first: the
-/// project-safe keys of `.fx.json`, the profile's own settings, then this
+/// project-safe keys of `.lia.json`, the profile's own settings, then this
 /// workspace's override. A key that repeats takes its last entry. Unknown and
 /// retired keys are left out; `settings_keys.findUnknown` reports them.
 /// Caller deinits the result, whose values borrow from `files`.
@@ -81,8 +81,8 @@ pub fn collect(alloc: Allocator, files: Files, scope: Scope) !Entries {
     return .{ .items = try list.toOwnedSlice(alloc) };
 }
 
-/// Adds the `FX_*` setting overrides as the last, highest-precedence entries,
-/// as fx applies them. Their values stay borrowed from `overrides`.
+/// Adds the `LIA_*` setting overrides as the last, highest-precedence entries,
+/// as lia applies them. Their values stay borrowed from `overrides`.
 pub fn appendEnv(alloc: Allocator, entries: *Entries, overrides: []const env_settings.Override) !void {
     if (overrides.len == 0) return;
     const start = entries.items.len;
@@ -100,7 +100,7 @@ pub fn appendEnv(alloc: Allocator, entries: *Entries, overrides: []const env_set
 }
 
 /// The entries for `key` and the keys under it, such as every `sound.*` for
-/// `sound`, keeping only the entry fx uses for each. Caller frees the
+/// `sound`, keeping only the entry lia uses for each. Caller frees the
 /// returned slice; its entries borrow from `entries`.
 pub fn lookup(alloc: Allocator, entries: []const Entry, key: []const u8) ![]Entry {
     var found: std.ArrayList(Entry) = .empty;
@@ -289,7 +289,7 @@ test "scopes pick the profile's own settings or this workspace's override" {
     try std.testing.expectEqual(@as(usize, 0), none.items.len);
 }
 
-test "lookup keeps the entry fx uses for each key under the name" {
+test "lookup keeps the entry lia uses for each key under the name" {
     const alloc = std.testing.allocator;
     var profile = try parseForTest(
         \\{"fast_mode":true,"notifications":{"max":true,"turn_end":true},

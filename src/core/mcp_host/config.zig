@@ -1,6 +1,6 @@
-//! fx's MCP servers as the engine runs them. Each config from `builtins/mcp.zig`
+//! lia's MCP servers as the engine runs them. Each config from `builtins/mcp.zig`
 //! `loadNativeConfigs` (profile first, then the project's) becomes an
-//! `mcp.engine.Config`, or is held back with the reason, which fx shows.
+//! `mcp.engine.Config`, or is held back with the reason, which lia shows.
 
 const std = @import("std");
 const credentials = @import("credentials.zig");
@@ -39,11 +39,11 @@ pub const Server = struct {
     /// What a stdio server runs, to show what is trusted.
     command: ?[]const u8,
     callback_port: ?u16,
-    /// Signs in as fx's Slack app, whose redirect says `localhost`.
+    /// Signs in as lia's Slack app, whose redirect says `localhost`.
     slack_app: bool = false,
     held: ?Held = null,
     /// An editor's server whose tools go to the model every turn (ACP
-    /// `_meta.fx.alwaysLoaded`).
+    /// `_meta.lia.alwaysLoaded`).
     always_loaded: bool = false,
     /// The variable a `missing_env` or `invalid_env` server names.
     missing: ?[]const u8 = null,
@@ -125,14 +125,14 @@ pub fn resolve(
                 };
             }
         }
-        // Slack registers no clients: without an app of the user's own, fx's
+        // Slack registers no clients: without an app of the user's own, lia's
         // Slack app signs in.
         if (auth.client_id == null and slack.isSlack(s.url)) auth.client_id = slack.client_id;
-        // Only Slack's own server signs in as fx's app, with the redirect
-        // and scopes the app has: another server that names fx's app signs
+        // Only Slack's own server signs in as lia's app, with the redirect
+        // and scopes the app has: another server that names lia's app signs
         // in on its own, with a redirect Slack refuses.
-        const fx_slack_app = if (auth.client_id) |id| std.mem.eql(u8, id, slack.client_id) else false;
-        s.slack_app = fx_slack_app and slack.appServer(s.url);
+        const lia_slack_app = if (auth.client_id) |id| std.mem.eql(u8, id, slack.client_id) else false;
+        s.slack_app = lia_slack_app and slack.appServer(s.url);
         if (s.slack_app) {
             if (s.callback_port == null) s.callback_port = slack.callback_port;
             if (auth.scopes == null) auth.scopes = slack.scopes;
@@ -142,7 +142,7 @@ pub fn resolve(
                 auth.resource = try arena.print("{s}/", .{origin(url)});
             };
         }
-        // Where fx keeps logins, it decides each refresh.
+        // Where lia keeps logins, it decides each refresh.
         if (s.url != null) auth.refresh_via_host = true;
         // The server's own limits: how long its start may take, and how long a
         // request may go without an answer.
@@ -197,8 +197,8 @@ fn heldFor(c: *const McpServerConfig) ?Held {
     return null;
 }
 
-/// What a stdio server gets of fx's environment, as the MCP SDKs give it:
-/// these, then its config's `env`. Never fx's credentials or the rest.
+/// What a stdio server gets of lia's environment, as the MCP SDKs give it:
+/// these, then its config's `env`. Never lia's credentials or the rest.
 const inherited_names = [_][]const u8{ "HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER" };
 
 /// The engine's transport, or null when the server must be held back (and
@@ -337,7 +337,7 @@ test "stdio and HTTP servers become engine configs; the rest are held back with 
     try testing.expectEqualStrings("s1", linear.auth.client_secret.?);
     // The runtime's thread hands over saved credentials later.
     try testing.expect(linear.auth.saved == null);
-    // fx keeps the logins, so it decides each refresh.
+    // lia keeps the logins, so it decides each refresh.
     try testing.expect(linear.auth.refresh_via_host);
     try testing.expectEqual(@as(?u16, 33418), r.servers[2].callback_port);
 
@@ -350,7 +350,7 @@ test "stdio and HTTP servers become engine configs; the rest are held back with 
     try testing.expectEqualStrings("NOT_SET", r.servers[7].missing.?);
 }
 
-test "Slack signs in as fx's Slack app on port 3118 with the app's scopes, unless the config names its own app or port; no other server does" {
+test "Slack signs in as lia's Slack app on port 3118 with the app's scopes, unless the config names its own app or port; no other server does" {
     var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena_state.deinit();
     var inherited: std.process.Environ.Map = .init(testing.allocator);
@@ -375,7 +375,7 @@ test "Slack signs in as fx's Slack app on port 3118 with the app's scopes, unles
     try testing.expect(r.engine[1].auth.resource == null);
     try testing.expect(r.engine[2].auth.client_id == null);
     try testing.expect(!r.servers[2].slack_app);
-    // Naming fx's Slack app doesn't make a server Slack: it signs in on its own.
+    // Naming lia's Slack app doesn't make a server Slack: it signs in on its own.
     try testing.expectEqualStrings(slack.client_id, r.engine[3].auth.client_id.?);
     try testing.expect(!r.servers[3].slack_app);
     try testing.expect(r.servers[3].callback_port == null);
@@ -386,7 +386,7 @@ test "Slack signs in as fx's Slack app on port 3118 with the app's scopes, unles
     try testing.expectEqual(@as(?u16, 4242), r.servers[4].callback_port);
 }
 
-test "a stdio server gets only the MCP SDKs' few variables of fx's, then its own env" {
+test "a stdio server gets only the MCP SDKs' few variables of lia's, then its own env" {
     var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena_state.deinit();
     var inherited: std.process.Environ.Map = .init(testing.allocator);

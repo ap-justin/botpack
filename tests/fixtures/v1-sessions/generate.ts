@@ -1,12 +1,12 @@
 // Rebuilds the v1 session fixtures that the converter's unit tests read
 // (src/core/session/session_adapter.zig). Each kind is what the real v0.0.14
-// release saved under ~/.fx, made through the conversion driver's release
+// release saved under ~/.lia, made through the conversion driver's release
 // builder, fake gateway and recipes:
 //
 //   cd tests/fixtures/v1-sessions && bun generate.ts
 //
-// It replaces every <kind>/ folder, a copy of ~/.fx/sessions (v1's sessions)
-// and ~/.fx/continue (what -c resumes), and manifest.json, which names each
+// It replaces every <kind>/ folder, a copy of ~/.lia/sessions (v1's sessions)
+// and ~/.lia/continue (what -c resumes), and manifest.json, which names each
 // kind's session ids, root first, and the workspace they were saved in. Every
 // kind is made in the same fixed home, so the paths v1 records stay the same.
 // FX_FIXTURE_KINDS=a,b makes only those kinds and keeps the others as they
@@ -25,7 +25,7 @@ import {
 import { KINDS as CARRIED } from "../../tla/drivers/session_manager/conversion/recipes";
 
 const out = dirname(new URL(import.meta.url).pathname);
-const root = "/tmp/fx-v1-fixtures";
+const root = "/tmp/lia-v1-fixtures";
 
 // The v1 sessions in the fixture's home, oldest first.
 function sessionIds(f: Fixture): string[] {
@@ -181,7 +181,7 @@ for (const [kind, entry] of Object.entries(KINDS)) {
     rmSync(target, { recursive: true, force: true });
     mkdirSync(target);
     cpSync(f.v1Root, join(target, "sessions"), { recursive: true, filter: source => source !== join(f.v1Root, "v2") });
-    const remembered = join(f.home, ".fx/continue");
+    const remembered = join(f.home, ".lia/continue");
     if (existsSync(remembered)) cpSync(remembered, join(target, "continue"), { recursive: true });
     manifest.kinds[kind] = ids;
     const workspace = realpathSync(f.workspace);

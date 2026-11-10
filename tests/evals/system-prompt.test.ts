@@ -5,7 +5,7 @@ import {
   cleanupWorkDir,
   createWorkDir,
   runEval,
-  runFx,
+  runLia,
 } from "./eval-helpers";
 
 const TIMEOUT = 120_000;
@@ -21,7 +21,7 @@ afterEach(() => {
 const TABLE_DELIMITER_ROW = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/m;
 const HEADING = /^#{1,6}\s/m;
 
-// fx shows fenced content as a code block, so fenced tables and comment
+// lia shows fenced content as a code block, so fenced tables and comment
 // lines are neither rendered tables nor headings.
 function withoutFencedCode(text: string): string {
   return text.replace(/^\s*(```|~~~)[\s\S]*?^\s*\1\s*$/gm, "");
@@ -33,7 +33,7 @@ describe("eval: system prompt override", () => {
     async () => {
       workDir = createWorkDir();
 
-      const result = await runFx(
+      const result = await runLia(
         [
           "ask", "--auto", "--json", "--no-save",
           "--system", "You are a pirate. You must use pirate language like 'Arrr', 'matey', 'ye', 'ahoy', or 'shiver me timbers' in every response.",

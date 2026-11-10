@@ -738,8 +738,8 @@ test "parallel skill admission binds identities preserves denies and isolates fa
     const denied_args = try std.json.Stringify.valueAlloc(alloc, .{ .location = denied_path }, .{});
     defer alloc.free(denied_args);
     const catalog = [_]contracts.Skill{
-        .{ .name = "allowed-name", .description = "", .path = allowed_path, .source = .global_fx },
-        .{ .name = "denied-name", .description = "", .path = denied_path, .source = .global_fx },
+        .{ .name = "allowed-name", .description = "", .path = allowed_path, .source = .global_lia },
+        .{ .name = "denied-name", .description = "", .path = denied_path, .source = .global_lia },
     };
     var rules = [_]types.PermissionRule{
         .{ .permission = @constCast("skill"), .pattern = @constCast("*"), .action = .allow },
@@ -793,7 +793,7 @@ test "skill preparation failures publish discovery notices in sequential and par
                 .skills = &.{},
                 .diagnostics = &.{.{
                     .path = "/skills/malformed",
-                    .source = .global_fx,
+                    .source = .global_lia,
                     .scope = .candidate,
                     .cause = .{ .invalid_metadata = .missing_name },
                 }},
@@ -903,8 +903,8 @@ test "explicit skill preload cancellation finalizes as interrupted before model 
     deps.agent_stream_provider = gateway.provider();
     var config = fixture.config();
     config.skill_catalog = .{
-        .skills = &.{.{ .name = "workflow", .description = "", .path = "/skills/workflow", .source = .global_fx }},
-        .diagnostics = &.{.{ .path = "/skills/malformed", .source = .global_fx, .scope = .candidate, .cause = .{ .invalid_metadata = .missing_name } }},
+        .skills = &.{.{ .name = "workflow", .description = "", .path = "/skills/workflow", .source = .global_lia }},
+        .diagnostics = &.{.{ .path = "/skills/malformed", .source = .global_lia, .scope = .candidate, .cause = .{ .invalid_metadata = .missing_name } }},
     };
     var job = fixture.job();
     job.prompt = @constCast("$workflow");
@@ -2784,7 +2784,7 @@ fn expectReminderOnLastToolResult(alloc: std.mem.Allocator, body: []const u8, ru
     try std.testing.expectEqualStrings("tool", last.get("role").?.string);
     const parts = last.get("content").?.array.items;
     const output = parts[parts.len - 1].object.get("output").?.object.get("value").?.string;
-    const line = try arena.print("<scoped-rules-reminder from=\"{s}\" scope=\"{s}\">The rules fx added earlier for this folder still apply.</scoped-rules-reminder>", .{ rules, scope });
+    const line = try arena.print("<scoped-rules-reminder from=\"{s}\" scope=\"{s}\">The rules lia added earlier for this folder still apply.</scoped-rules-reminder>", .{ rules, scope });
     try std.testing.expect(std.mem.endsWith(u8, output, line));
 }
 
@@ -3011,7 +3011,7 @@ test "a resumed turn carries the stale shell handles note on its own message, no
         try std.testing.expectEqual(@as(usize, 1), users.items.len);
         try std.testing.expectEqualStrings(carried, users.items[0]);
         for ((try leadingSystemContents(arena, body)).items) |instruction| {
-            try std.testing.expect(std.mem.find(u8, instruction, "fx restarted since this session") == null);
+            try std.testing.expect(std.mem.find(u8, instruction, "lia restarted since this session") == null);
         }
     }
     try expectSameInstructions(alloc, first_gateway.request_bodies.items[0], first_gateway.request_bodies.items[1]);
@@ -3091,8 +3091,8 @@ test "a session keeps its first runtime context ahead of the history and notes a
     const second_users = try userMessageTexts(arena, second_body);
     try std.testing.expectEqual(@as(usize, 2), second_users.items.len);
     try std.testing.expectEqualStrings("First.", second_users.items[0]);
-    try std.testing.expect(std.mem.startsWith(u8, second_users.items[1], "Second.\n\n<fx-context-update>\n"));
-    try std.testing.expect(std.mem.endsWith(u8, second_users.items[1], "\n" ++ after ++ "\n</fx-context-update>"));
+    try std.testing.expect(std.mem.startsWith(u8, second_users.items[1], "Second.\n\n<lia-context-update>\n"));
+    try std.testing.expect(std.mem.endsWith(u8, second_users.items[1], "\n" ++ after ++ "\n</lia-context-update>"));
     const second_saved = second_hooks.history_turns.items[0].assistant.execution;
     try std.testing.expect(second_saved.runtime_context == null);
     try std.testing.expectEqual(@as(usize, 1), second_saved.context_notes.len);
@@ -3117,7 +3117,7 @@ test "a session keeps its first runtime context ahead of the history and notes a
     try std.testing.expectEqual(@as(usize, 3), third_users.items.len);
     try std.testing.expectEqualStrings(second_users.items[1], third_users.items[1]);
     try std.testing.expectEqualStrings("Third.", third_users.items[2]);
-    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, third_body, "<fx-context-update>"));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, third_body, "<lia-context-update>"));
     const third_saved = third_hooks.history_turns.items[0].assistant.execution;
     try std.testing.expect(third_saved.runtime_context == null);
     try std.testing.expectEqual(@as(usize, 0), third_saved.context_notes.len);
@@ -3176,7 +3176,7 @@ test "a named skill's text rides on its turn's message and the turn saves a shor
     try std.testing.expectEqual(@as(usize, 1), saved.context_notes.len);
     try std.testing.expectEqual(@as(usize, 0), saved.context_notes[0].after_tool_step_count);
     try std.testing.expectEqualStrings(
-        "<fx-skill-used>\nFor that turn the user named the skill requested-workflow, and fx sent its full text with that message. If it still applies, load it again with the skill tool, using its location from the skill catalog.\n</fx-skill-used>",
+        "<lia-skill-used>\nFor that turn the user named the skill requested-workflow, and lia sent its full text with that message. If it still applies, load it again with the skill tool, using its location from the skill catalog.\n</lia-skill-used>",
         saved.context_notes[0].text,
     );
 
@@ -3197,7 +3197,7 @@ test "a named skill's text rides on its turn's message and the turn saves a shor
     const users = try userMessageTexts(arena, body);
     try std.testing.expectEqual(@as(usize, 3), users.items.len);
     try std.testing.expect(std.mem.startsWith(u8, users.items[1], "Session file evidence from previous tool execution."));
-    try std.testing.expectEqualStrings("Use $requested-workflow.\n\n" ++ "<fx-skill-used>\nFor that turn the user named the skill requested-workflow, and fx sent its full text with that message. If it still applies, load it again with the skill tool, using its location from the skill catalog.\n</fx-skill-used>", users.items[0]);
+    try std.testing.expectEqualStrings("Use $requested-workflow.\n\n" ++ "<lia-skill-used>\nFor that turn the user named the skill requested-workflow, and lia sent its full text with that message. If it still applies, load it again with the skill tool, using its location from the skill catalog.\n</lia-skill-used>", users.items[0]);
     try std.testing.expectEqualStrings("Thanks.", users.items[2]);
     try std.testing.expectEqual(@as(usize, 0), second_hooks.history_turns.items[0].assistant.execution.context_notes.len);
 
@@ -3212,7 +3212,7 @@ test "a named skill's text rides on its turn's message and the turn saves a shor
     };
     try std.testing.expectEqualStrings("", checkpoint.assistant_source);
     try std.testing.expectEqual(@as(usize, 1), checkpoint.execution.context_notes.len);
-    try std.testing.expect(std.mem.startsWith(u8, checkpoint.execution.context_notes[0].text, "<fx-skill-used>"));
+    try std.testing.expect(std.mem.startsWith(u8, checkpoint.execution.context_notes[0].text, "<lia-skill-used>"));
     var restored = try checkpoint.dupe(alloc);
     defer restored.deinit(alloc);
     var recovered_gateway = FakeGateway.init(alloc, &.{.{ .content = "Done" }});
@@ -3229,7 +3229,7 @@ test "a named skill's text rides on its turn's message and the turn saves a shor
     try std.testing.expect(recovered_users.items.len >= 1);
     try std.testing.expect(std.mem.startsWith(u8, recovered_users.items[0], "Use $requested-workflow.\n\nExplicitly invoked skill content for this query:\n"));
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, recovered_body, "REQUESTED_SKILL_CONTENT"));
-    try std.testing.expect(std.mem.find(u8, recovered_body, "<fx-skill-used>") == null);
+    try std.testing.expect(std.mem.find(u8, recovered_body, "<lia-skill-used>") == null);
     try expectSameInstructions(alloc, first_gateway.request_bodies.items[0], recovered_body);
     try std.testing.expectEqual(@as(usize, 1), recovered_hooks.history_turns.items.len);
     const recovered_saved = recovered_hooks.history_turns.items[0].assistant.execution;
@@ -3615,7 +3615,7 @@ test "modern mixed batch materializes unsupported terminal before admission" {
     try std.testing.expectEqual(@as(usize, 1), hooks.executed_names.items.len);
     try std.testing.expectEqualStrings("read_file", hooks.executed_names.items[0]);
     // Hosts finish their own record of a refused call (ACP's final update,
-    // the `fx ask --json` tool_calls entry) through the rejection hook.
+    // the `lia ask --json` tool_calls entry) through the rejection hook.
     try std.testing.expectEqual(@as(usize, 1), hooks.rejected_names.items.len);
     try std.testing.expectEqualStrings("missing_tool", hooks.rejected_names.items[0]);
     try expectLifecycleCallIds(

@@ -1973,7 +1973,7 @@ test "processQueuedPrompt sends a text-only turn while a down catalog withholds 
     try std.testing.expectEqual(@as(usize, 1), gateway.request_bodies.items.len);
     try expectBodyNotContains(&gateway, 0, "\"type\":\"file\"");
     try expectBodyNotContains(&gateway, 0, "\"name\":\"vision\"");
-    try expectBodyContains(&gateway, 0, "[Image #1 was not sent with this request: fx could not confirm image input support");
+    try expectBodyContains(&gateway, 0, "[Image #1 was not sent with this request: lia could not confirm image input support");
     try std.testing.expectEqualStrings("Here is the preview.", hooks.finish_assistant_text.?);
     var notices: usize = 0;
     for (hooks.texts.items) |text| {
@@ -3221,7 +3221,7 @@ test "processQueuedPrompt semantically compacts history at eighty percent and co
         .name = "auto-compaction-workflow",
         .description = "Keep the selected workflow available during compaction.",
         .path = "/skills/auto-compaction-workflow",
-        .source = .global_fx,
+        .source = .global_lia,
     }} };
     var job = fixture.job();
     job.model = @constCast(model);
@@ -3336,7 +3336,7 @@ test "processQueuedPrompt delivers steering queued during in-turn compaction wit
         .name = "compact-steer-workflow",
         .description = "Keep the selected workflow available during compaction.",
         .path = "/skills/compact-steer-workflow",
-        .source = .global_fx,
+        .source = .global_lia,
     }} };
     var job = fixture.job();
     job.model = @constCast(model);
@@ -4096,7 +4096,7 @@ test "a named skill's text stays in the turn once after an in-turn compaction cu
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, gateway.request_bodies.items[0], "REQUESTED_SKILL_CONTENT"));
     try expectBodyContains(&gateway, 1, "\"toolChoice\":{\"type\":\"none\"}");
     try expectBodyContains(&gateway, 2, "compacted_conversation");
-    // The cut covered the note, so fx adds it again where the kept messages
+    // The cut covered the note, so lia adds it again where the kept messages
     // start: the turn's message carries the skill's text once more.
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, gateway.request_bodies.items[2], "REQUESTED_SKILL_CONTENT"));
     try expectBodyContains(&gateway, 2, "Use $requested-workflow.\\n\\nExplicitly invoked skill content for this query:");
@@ -4104,7 +4104,7 @@ test "a named skill's text stays in the turn once after an in-turn compaction cu
     // The turn saves the short note in its place.
     const saved = hooks.history_turns.items[hooks.history_turns.items.len - 1].assistant.execution;
     try std.testing.expectEqual(@as(usize, 1), saved.context_notes.len);
-    try std.testing.expect(std.mem.startsWith(u8, saved.context_notes[0].text, "<fx-skill-used>"));
+    try std.testing.expect(std.mem.startsWith(u8, saved.context_notes[0].text, "<lia-skill-used>"));
 }
 
 test "automatic compaction summarizes a newest exchange larger than the input window" {
@@ -4890,7 +4890,7 @@ test "processQueuedPrompt final summary counts submitted input once across Gatew
 }
 
 test "processQueuedPrompt enables Gateway automatic caching across model families and tool steps" {
-    // Anthropic models and OpenAI GPT-5.6 and later also get fx's two stable
+    // Anthropic models and OpenAI GPT-5.6 and later also get lia's two stable
     // markers, each in its provider's syntax, on the last repo-independent
     // instruction and on the last stable instruction
     // (tests/tla/prompt_context/PromptCache.tla). The turn context after
@@ -5081,7 +5081,7 @@ test "processQueuedPrompt prepares skill metadata from the supplied inventory" {
         .name = "release",
         .description = "Release the package",
         .path = "/tmp/skills/release",
-        .source = .global_fx,
+        .source = .global_lia,
     }};
     config.skill_catalog = .{ .skills = &skills };
     try runFakePrompt(&gateway, &hooks, config, fixture.job());
@@ -5232,7 +5232,7 @@ test "unchanged skill catalog keeps its request prefix across user turns" {
         .name = "release",
         .description = "Release the package",
         .path = "/tmp/skills/release",
-        .source = .global_fx,
+        .source = .global_lia,
     }};
     var gateway = FakeGateway.init(alloc, &.{ .{ .content = "First" }, .{ .content = "Second" } });
     defer gateway.deinit();
@@ -5272,8 +5272,8 @@ test "processQueuedPrompt reports a retained skill binding when discovery become
 test "processQueuedPrompt skill catalog is invariant under harmless request expansion" {
     const alloc = std.testing.allocator;
     const skills = [_]@import("../../../skills/skill_runtime.zig").Skill{
-        .{ .name = "alpha", .description = "Unrelated instructions", .path = "/tmp/skills/alpha", .source = .global_fx },
-        .{ .name = "release", .description = "Release the package", .path = "/tmp/skills/release", .source = .global_fx },
+        .{ .name = "alpha", .description = "Unrelated instructions", .path = "/tmp/skills/alpha", .source = .global_lia },
+        .{ .name = "release", .description = "Release the package", .path = "/tmp/skills/release", .source = .global_lia },
     };
     const prompts = [_][]const u8{ "Release the package", "Release the package." ++ text_utils.repeat(" Keep existing behavior unchanged.", 24) };
     var first: ?[]u8 = null;
@@ -5394,7 +5394,7 @@ test "processQueuedPrompt keeps supplied system prompt components in stable orde
         .name = "order",
         .description = "skills guidance-order section",
         .path = "/tmp/skills/order",
-        .source = .global_fx,
+        .source = .global_lia,
     }};
     config.skill_catalog = .{ .skills = &skills };
     config.context_limits.skill_catalog_bytes = .{ .value = .{ .bytes = 1024 }, .source = .command_line };
@@ -5484,17 +5484,17 @@ test "processQueuedPrompt keeps the runtime context ahead of the history and car
     try expectBodyContains(&gateway, 1, "Checking.");
     try expectBodyContains(&gateway, 1, "\"toolName\":\"read_file\"");
     // The tool result ends with the update.
-    try expectBodyContains(&gateway, 1, "\"value\":\"ok\\n\\n<fx-context-update>\\n");
+    try expectBodyContains(&gateway, 1, "\"value\":\"ok\\n\\n<lia-context-update>\\n");
     // The first step's copy stays ahead of the history, so the cached prefix
     // holds; the change rides once on the step's tool result.
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, gateway.request_bodies.items[1], "runtime overlay step one"));
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, gateway.request_bodies.items[1], "runtime overlay step two"));
-    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, gateway.request_bodies.items[1], "<fx-context-update>"));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, gateway.request_bodies.items[1], "<lia-context-update>"));
     const first_request_roles = [_]types.ChatRole{ .system, .system, .system, .user };
     const second_request_roles = [_]types.ChatRole{ .system, .system, .system, .user, .assistant, .tool };
     try expectGatewayPromptRoles(&gateway, 0, &first_request_roles);
     try expectGatewayPromptRoles(&gateway, 1, &second_request_roles);
-    const second_request_order = [_][]const u8{ "runtime overlay step one", "user prompt", "Checking.", "ok", "<fx-context-update>", "runtime overlay step two" };
+    const second_request_order = [_][]const u8{ "runtime overlay step one", "user prompt", "Checking.", "ok", "<lia-context-update>", "runtime overlay step two" };
     try expectBodyContainsInOrder(&gateway, 1, &second_request_order);
     // The turn saves the copy it captured and the update at its boundary.
     const saved = hooks.history_turns.items[0].assistant.execution;
@@ -5941,7 +5941,7 @@ test "processQueuedPrompt preserves a confirmed provider tool result across reco
     var fixture = PromptFixture{};
     const config = fixture.config();
     var initial_job = fixture.job();
-    initial_job.credential_source = .fx_login;
+    initial_job.credential_source = .lia_login;
     initial_job.account_id = @constCast("acct_1");
 
     try runFakePrompt(&gateway, &hooks, config, initial_job);
@@ -5987,7 +5987,7 @@ test "processQueuedPrompt preserves a confirmed provider tool result across reco
     var restored_hooks = FakeAgentRuntimeDeps.init(alloc);
     defer restored_hooks.deinit();
     var restored_job = fixture.job();
-    restored_job.credential_source = .fx_login;
+    restored_job.credential_source = .lia_login;
     restored_job.account_id = @constCast("acct_1");
     restored_job.recovery_checkpoint = restored_checkpoint;
 
@@ -6626,7 +6626,7 @@ test "processQueuedPrompt recovers without Fast before an unexplained error fini
 
     try runFastPrompt(&gateway, &hooks);
 
-    // Three sends with Fast fail; the module drops Fast, so fx does not stop
+    // Three sends with Fast fail; the module drops Fast, so lia does not stop
     // the request, and the fourth send succeeds without Fast.
     try std.testing.expectEqual(@as(usize, 4), gateway.request_models.items.len);
     for (0..3) |index| try expectBodyContains(&gateway, index, fast_body);
@@ -7337,9 +7337,9 @@ test "processQueuedPrompt preserves the fallback route until selection changes a
         .authority = .{
             .provider = .gateway,
             .model = @constCast("zai/glm-5.2"),
-            .credential_source = .fx_login,
+            .credential_source = .lia_login,
             .credential_identity = @import("../../../auth/credential_authority.zig").derive(
-                .fx_login,
+                .lia_login,
                 "acct_1",
             ),
         },
@@ -7360,7 +7360,7 @@ test "processQueuedPrompt preserves the fallback route until selection changes a
         config.fast_mode = true;
         var job = fixture.job();
         job.model = @constCast("zai/glm-5.2");
-        job.credential_source = .fx_login;
+        job.credential_source = .lia_login;
         job.account_id = @constCast("acct_1");
         job.recovery_checkpoint = checkpoint;
 
@@ -7388,7 +7388,7 @@ test "processQueuedPrompt preserves the fallback route until selection changes a
         config.fast_mode = false;
         var job = fixture.job();
         job.model = @constCast("zai/glm-5.2");
-        job.credential_source = .fx_login;
+        job.credential_source = .lia_login;
         job.account_id = @constCast("acct_1");
         job.recovery_checkpoint = checkpoint;
 
@@ -7459,7 +7459,7 @@ test "processQueuedPrompt counts only failed provider attempts across tool follo
     hooks.cancel_on_auto_retry_status = config.cancel_flag;
     hooks.cancel_on_auto_retry_attempt = 2;
     var initial_job = fixture.job();
-    initial_job.credential_source = .fx_login;
+    initial_job.credential_source = .lia_login;
     initial_job.account_id = @constCast("acct_1");
 
     try runFakePrompt(&gateway, &hooks, config, initial_job);
@@ -7489,7 +7489,7 @@ test "processQueuedPrompt counts only failed provider attempts across tool follo
     continued_hooks.enable_recovery_checkpoint = true;
     defer continued_hooks.deinit();
     var continued_job = fixture.job();
-    continued_job.credential_source = .fx_login;
+    continued_job.credential_source = .lia_login;
     continued_job.account_id = @constCast("acct_1");
     continued_job.recovery_checkpoint = continued_checkpoint;
     const continued_config = fixture.config();
@@ -7519,7 +7519,7 @@ test "processQueuedPrompt explicit checkpoint continuation starts a fresh attemp
     // Esc while the request waits to retry ends the turn.
     first_hooks.cancel_on_auto_retry_status = first_config.cancel_flag;
     var first_job = fixture.job();
-    first_job.credential_source = .fx_login;
+    first_job.credential_source = .lia_login;
     first_job.account_id = @constCast("acct_1");
 
     try runFakePrompt(&first_gateway, &first_hooks, first_config, first_job);
@@ -7540,7 +7540,7 @@ test "processQueuedPrompt explicit checkpoint continuation starts a fresh attemp
     second_hooks.enable_recovery_checkpoint = true;
     defer second_hooks.deinit();
     var continued_job = fixture.job();
-    continued_job.credential_source = .fx_login;
+    continued_job.credential_source = .lia_login;
     continued_job.account_id = @constCast("acct_1");
     continued_job.recovery_checkpoint = checkpoint;
     const continued_config = fixture.config();
@@ -7589,7 +7589,7 @@ test "processQueuedPrompt resumed reply retries a size rejection with fewer imag
     const first_config = fixture.config();
     first_hooks.cancel_on_auto_retry_status = first_config.cancel_flag;
     var first_job = fixture.job();
-    first_job.credential_source = .fx_login;
+    first_job.credential_source = .lia_login;
     first_job.account_id = @constCast("acct_1");
     first_job.prompt = @constCast("Describe the attached image.");
     first_job.images = &images;
@@ -7617,7 +7617,7 @@ test "processQueuedPrompt resumed reply retries a size rejection with fewer imag
     second_hooks.default_model_capabilities = native_images;
     defer second_hooks.deinit();
     var continued_job = fixture.job();
-    continued_job.credential_source = .fx_login;
+    continued_job.credential_source = .lia_login;
     continued_job.account_id = @constCast("acct_1");
     continued_job.prompt = checkpoint.user.text;
     continued_job.images = checkpoint.user.images;
@@ -7711,7 +7711,7 @@ test "processQueuedPrompt replaces scheduled retry after provider pre-admission 
         runFakePrompt(&gateway, &hooks, config, fixture.job()),
     );
 
-    // fx's terminal status replaces the module's retrying line.
+    // lia's terminal status replaces the module's retrying line.
     try std.testing.expectEqual(@as(usize, 1), gateway.admitted_requests);
     try std.testing.expectEqual(@as(usize, 2), gateway.request_models.items.len);
     try std.testing.expectEqual(@as(usize, 3), hooks.route_recovery_statuses.items.len);
@@ -8004,7 +8004,7 @@ test "processQueuedPrompt regenerates an unstarted local tool on every resend" {
     try std.testing.expectEqual(@as(usize, 4), gateway.request_models.items.len);
     try std.testing.expectEqual(@as(usize, 0), hooks.executed_names.items.len);
     for (1..4) |index| {
-        try expectBodyContains(&gateway, index, "fx did not execute that call");
+        try expectBodyContains(&gateway, index, "lia did not execute that call");
     }
     try expectRecovered(&hooks, 4);
     try std.testing.expectEqual(@as(usize, 1), hooks.history_turns.items.len);
@@ -8107,7 +8107,7 @@ test "processQueuedPrompt regenerates and executes a local tool once after ReadF
     try expectModuleStatus(&hooks, 0, .waiting, "Connection lost · next try in ");
     try expectModuleStatus(&hooks, 1, .retrying, "Connection lost · retrying · attempt 2");
     try expectRecovered(&hooks, 2);
-    try expectBodyContains(&gateway, 1, "fx did not execute that call");
+    try expectBodyContains(&gateway, 1, "lia did not execute that call");
     try expectBodyContains(&gateway, 2, "call_read_recovered");
     try expectBodyContains(&gateway, 2, "\"output\":{\"type\":\"text\",\"value\":\"ok\"}");
     try expectFailedLifecycleContains(
@@ -8364,7 +8364,7 @@ test "processQueuedPrompt recovers provider error after streamed tool start" {
     try expectModuleStatus(&hooks, 0, .waiting, "Gateway error · next try in ");
     try expectModuleStatus(&hooks, 1, .retrying, "Gateway error · retrying · attempt 2");
     try expectRecovered(&hooks, 2);
-    try expectBodyContains(&gateway, 1, "fx did not execute that call");
+    try expectBodyContains(&gateway, 1, "lia did not execute that call");
 }
 
 test "processQueuedPrompt ends a content-filtered turn without a resend when the host cannot ask" {
@@ -8401,7 +8401,7 @@ fn httpErrorCount(hooks: *const FakeAgentRuntimeDeps) usize {
     return count;
 }
 
-/// The provider's reason, shown once in the transcript while fx waited, and
+/// The provider's reason, shown once in the transcript while lia waited, and
 /// never as the HTTP error that ends a turn.
 fn expectWaitingReason(hooks: *const FakeAgentRuntimeDeps, reason: []const u8) !void {
     try std.testing.expectEqual(@as(usize, 1), hooks.system_notices.items.len);
@@ -8526,7 +8526,7 @@ test "processQueuedPrompt waits for a sign-in after an expired login and resends
     var config = fixture.config();
     config.recovery_continue_flag = &continue_flag;
     var job = fixture.job();
-    job.credential_source = .fx_login;
+    job.credential_source = .lia_login;
 
     try runFakePrompt(&gateway, &hooks, config, job);
 
@@ -8536,7 +8536,7 @@ test "processQueuedPrompt waits for a sign-in after an expired login and resends
     try std.testing.expectEqualSlices(runtime_deps.CredentialRefreshMode, &.{ .if_needed, .force, .reload }, modes);
     try std.testing.expectEqualStrings("token-before", gateway.request_api_keys.items[0]);
     try std.testing.expectEqualStrings("token-after", gateway.request_api_keys.items[1]);
-    // The status line says fx is opening the sign-in; no reason notice.
+    // The status line says lia is opening the sign-in; no reason notice.
     try std.testing.expectEqual(@as(usize, 0), hooks.system_notices.items.len);
     try std.testing.expectEqual(types.TurnPresentationOutcome.completed, hooks.finalized_outcome.?);
 }
@@ -8672,7 +8672,7 @@ test "processQueuedPrompt waits for the user when a request is still too long af
 
     try runFakePrompt(&gateway, &hooks, config, job);
 
-    // fx compacts once on its own and sends no extra request before asking.
+    // lia compacts once on its own and sends no extra request before asking.
     try std.testing.expectEqual(@as(usize, 3), gateway.request_bodies.items.len);
     try std.testing.expectEqualStrings(
         "Still too long after compacting · press Esc and shorten your message",
@@ -9092,7 +9092,7 @@ test "processQueuedPrompt non-ok gateway response records schema diagnostics" {
     try std.testing.expect(std.mem.find(u8, call.gatewayRequestShape(), "prompt.1 role=user content=array") != null);
 }
 
-test "processQueuedPrompt refreshes fx login credential before gateway request" {
+test "processQueuedPrompt refreshes lia login credential before gateway request" {
     const alloc = std.testing.allocator;
     const completions = [_]FakeCompletion{.{ .content = "Done." }};
     var gateway = FakeGateway.init(alloc, &completions);
@@ -9102,7 +9102,7 @@ test "processQueuedPrompt refreshes fx login credential before gateway request" 
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .fx_login;
+    job.credential_source = .lia_login;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -9112,7 +9112,7 @@ test "processQueuedPrompt refreshes fx login credential before gateway request" 
     try std.testing.expectEqual(runtime_deps.CredentialRefreshMode.if_needed, hooks.credential_refresh_modes.items[0]);
 }
 
-test "processQueuedPrompt refreshes and retries once after fx login 401" {
+test "processQueuedPrompt refreshes and retries once after lia login 401" {
     const alloc = std.testing.allocator;
     const completions = [_]FakeCompletion{
         .{
@@ -9128,7 +9128,7 @@ test "processQueuedPrompt refreshes and retries once after fx login 401" {
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .fx_login;
+    job.credential_source = .lia_login;
 
     const config = fixture.config();
     try runFakePrompt(&gateway, &hooks, config, job);
@@ -9162,7 +9162,7 @@ test "forced auth refresh reaches later permission and tool consumers in the sam
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .fx_login;
+    job.credential_source = .lia_login;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -9170,7 +9170,7 @@ test "forced auth refresh reaches later permission and tool consumers in the sam
     try std.testing.expectEqualStrings("fresh-after-401", hooks.last_execute_credential.?);
 }
 
-test "processQueuedPrompt does not retry a second fx login 401" {
+test "processQueuedPrompt does not retry a second lia login 401" {
     const alloc = std.testing.allocator;
     const completions = [_]FakeCompletion{
         .{
@@ -9190,7 +9190,7 @@ test "processQueuedPrompt does not retry a second fx login 401" {
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .fx_login;
+    job.credential_source = .lia_login;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -9240,7 +9240,7 @@ test "a session writer check that fails for another reason does not stop the tur
     try std.testing.expectEqual(@as(usize, 2), gateway.request_bodies.items.len);
 }
 
-test "processQueuedPrompt keeps the selected fx login credential when forced refresh is unavailable" {
+test "processQueuedPrompt keeps the selected lia login credential when forced refresh is unavailable" {
     const alloc = std.testing.allocator;
     const completions = [_]FakeCompletion{
         .{
@@ -9256,7 +9256,7 @@ test "processQueuedPrompt keeps the selected fx login credential when forced ref
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .fx_login;
+    job.credential_source = .lia_login;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -9265,7 +9265,7 @@ test "processQueuedPrompt keeps the selected fx login credential when forced ref
     try std.testing.expectEqual(@as(usize, 2), hooks.credential_refresh_modes.items.len);
     try std.testing.expectEqual(runtime_deps.CredentialRefreshMode.force, hooks.credential_refresh_modes.items[1]);
     try std.testing.expectEqual(std.http.Status.unauthorized, hooks.http_status.?);
-    try std.testing.expectEqual(types.CredentialSource.fx_login, hooks.http_credential_source.?);
+    try std.testing.expectEqual(types.CredentialSource.lia_login, hooks.http_credential_source.?);
     try std.testing.expectEqual(types.TurnPresentationOutcome.failed, hooks.finalized_outcome.?);
 }
 
@@ -9285,7 +9285,7 @@ test "processQueuedPrompt reports the selected login after refresh failure witho
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .fx_login;
+    job.credential_source = .lia_login;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -9295,7 +9295,7 @@ test "processQueuedPrompt reports the selected login after refresh failure witho
     try std.testing.expectEqual(runtime_deps.CredentialRefreshMode.if_needed, hooks.credential_refresh_modes.items[0]);
     try std.testing.expectEqual(runtime_deps.CredentialRefreshMode.force, hooks.credential_refresh_modes.items[1]);
     try std.testing.expectEqual(std.http.Status.unauthorized, hooks.http_status.?);
-    try std.testing.expectEqual(types.CredentialSource.fx_login, hooks.http_credential_source.?);
+    try std.testing.expectEqual(types.CredentialSource.lia_login, hooks.http_credential_source.?);
     try std.testing.expectEqual(types.TurnPresentationOutcome.failed, hooks.finalized_outcome.?);
 }
 
@@ -9662,7 +9662,7 @@ test "every 5xx response retries like 503" {
     }
 }
 
-test "a status fx does not retry ends naming its own code" {
+test "a status lia does not retry ends naming its own code" {
     const alloc = std.testing.allocator;
     const completions = [_]FakeCompletion{
         .{ .status = .not_found, .err_body = "{\"error\":{\"message\":\"no such route\"}}" },

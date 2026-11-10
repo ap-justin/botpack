@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runFx } from "../evals/eval-helpers";
+import { runLia } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText,
@@ -64,11 +64,11 @@ function gatewayEnv(
     HOME: fixture.home,
     AI_GATEWAY_API_KEY: "session-recovery-test-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_MODEL: FAKE_GATEWAY_MODEL,
-    FX_AUTO_UPGRADE: "0",
+    LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+    LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_MODEL: FAKE_GATEWAY_MODEL,
+    LIA_AUTO_UPGRADE: "0",
   };
 }
 
@@ -78,7 +78,7 @@ async function continueSession(
   sessionId: string,
   latest = false,
 ) {
-  return runFx(
+  return runLia(
     [
       "ask",
       "--json",
@@ -99,7 +99,7 @@ const LEGACY_TITLE = "Synthetic legacy recovery conversation";
 test("a session converts the same whatever its old replay cache holds", async () => {
   // v0.0.14 kept a replay cache beside its log. The converter reads the log,
   // so a damaged, missing or outdated cache changes nothing.
-  const versionOffset = Buffer.byteLength("fx-history-cache\x1a\n");
+  const versionOffset = Buffer.byteLength("lia-history-cache\x1a\n");
   const faults: Record<string, (cache: string) => void> = {
     intact: () => {},
     corrupt: (cache) => {
@@ -116,11 +116,11 @@ test("a session converts the same whatever its old replay cache holds", async ()
   };
   const histories = new Set<string>();
   for (const [name, fault] of Object.entries(faults)) {
-    const fixture = createFixture(`fx-history-cache-${name}-`);
+    const fixture = createFixture(`lia-history-cache-${name}-`);
     const gateway = startFakeGateway([fakeGatewayFinalText("CACHE_CONTINUED_TURN")]);
     try {
       const [id] = copyV1Fixture(fixture.home, "cancelled");
-      fault(join(fixture.home, ".fx", "sessions", id!, "history-cache.bin"));
+      fault(join(fixture.home, ".lia", "sessions", id!, "history-cache.bin"));
       const continued = await continueSession(fixture, gateway, id!);
       expect(continued.code).toBe(0);
       expect(withoutConversionNotice(continued.stderr)).toBe("");
@@ -137,11 +137,11 @@ test("a session converts the same whatever its old replay cache holds", async ()
 }, TIMEOUT);
 
 test("latest resume converts the newest session and leaves an unrelated pending authority directory", async () => {
-  const fixture = createFixture("fx-latest-pending-");
+  const fixture = createFixture("lia-latest-pending-");
   const gateway = startFakeGateway([fakeGatewayFinalText("CONTINUED_PARENT_CONTEXT")]);
   try {
     const ids = copyV1Fixture(fixture.home, "plain", 3, fixture.workspace);
-    const orphan = join(fixture.home, ".fx", "sessions", "pending-authority");
+    const orphan = join(fixture.home, ".lia", "sessions", "pending-authority");
     mkdirSync(orphan, { mode: 0o700 });
     writeFileSync(join(orphan, "authority.pending.json"), "pending", { mode: 0o600 });
     writeFileSync(join(orphan, "events.jsonl"), "unidentified saved data\n", { mode: 0o600 });
@@ -159,12 +159,12 @@ test("latest resume converts the newest session and leaves an unrelated pending 
   }
 }, TIMEOUT);
 
-test("a session converts past a damaged usage file left by an older fx", async () => {
-  const fixture = createFixture("fx-accounting-resume-");
+test("a session converts past a damaged usage file left by an older lia", async () => {
+  const fixture = createFixture("lia-accounting-resume-");
   const gateway = startFakeGateway([fakeGatewayFinalText("ACCOUNTING_RESUME_COMPLETED")]);
   try {
     const [id] = copyV1Fixture(fixture.home, "plain");
-    writeFileSync(join(fixture.home, ".fx", "sessions", id!, "usage-v2.json"), "{broken accounting", { mode: 0o600 });
+    writeFileSync(join(fixture.home, ".lia", "sessions", id!, "usage-v2.json"), "{broken accounting", { mode: 0o600 });
     const resumed = await continueSession(fixture, gateway, id!);
     expect(resumed.code).toBe(0);
     expect(withoutConversionNotice(resumed.stderr)).toBe("");
@@ -178,19 +178,19 @@ test("a session converts past a damaged usage file left by an older fx", async (
 }, TIMEOUT);
 
 test("conversation language survives an ordinary saved turn and resume", async () => {
-  const fixture = createFixture("fx-language-resume-");
+  const fixture = createFixture("lia-language-resume-");
   const gateway = startFakeGateway([
     fakeGatewayFinalText("こんにちは。"),
     fakeGatewayFinalText("完了しました。"),
   ]);
   try {
-    const seeded = await runFx(["ask", "--json", "こんにちは。日本語で返答してください。"], {
+    const seeded = await runLia(["ask", "--json", "こんにちは。日本語で返答してください。"], {
       cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
     });
     expect(seeded.code).toBe(0);
     const id = JSON.parse(seeded.stdout).session_id;
     expect((await savedSession(fixture.home, id)).conversation_language).toBe("ja");
-    const resumed = await runFx(["ask", "--json", "--resume", id, "👍"], {
+    const resumed = await runLia(["ask", "--json", "--resume", id, "👍"], {
       cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
     });
     expect(resumed.code).toBe(0);
@@ -218,7 +218,7 @@ const LEGACY_GATEWAY_OPTIONS = {
 // Entirely synthetic schema-v3 data: no copied sessions, credentials, or child markers.
 function createLegacySession(fixture: ReturnType<typeof createFixture>, version: 2 | 3 | 4) {
   const id = `synthetic-legacy-v${version}`;
-  const source = join(fixture.home, ".fx", "sessions", id);
+  const source = join(fixture.home, ".lia", "sessions", id);
   mkdirSync(source, { recursive: true, mode: 0o700 });
   const generation = "01".repeat(16);
   const authority = "03".repeat(16);
@@ -304,7 +304,7 @@ function createLegacySession(fixture: ReturnType<typeof createFixture>, version:
   writeJson("display.json", {
     schema_version: 1, title: LEGACY_TITLE, preview: null, origin_workspace_root: fixture.workspace,
   });
-  writeFileSync(join(fixture.home, ".fx", "settings.json"), JSON.stringify({
+  writeFileSync(join(fixture.home, ".lia", "settings.json"), JSON.stringify({
     model: "workspace/default", effort: "low", fast_mode: false, auto_upgrade: false,
   }), { mode: 0o600 });
   return { id, source, watermarkPath };
@@ -315,9 +315,9 @@ function legacyGatewayEnv(
   gateway: ReturnType<typeof startFakeGateway>,
 ) {
   return {
-    ...gatewayEnv(fixture, gateway), FX_MODEL: undefined, FX_EFFORT: undefined,
-    FX_FAST_MODE: undefined, FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
-    FX_TRACE_LOG: join(fixture.root, "legacy.trace.log"), FX_TRACE_SCOPES: "tool,session,agent",
+    ...gatewayEnv(fixture, gateway), LIA_MODEL: undefined, LIA_EFFORT: undefined,
+    LIA_FAST_MODE: undefined, LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+    LIA_TRACE_LOG: join(fixture.root, "legacy.trace.log"), LIA_TRACE_SCOPES: "tool,session,agent",
   };
 }
 
@@ -366,26 +366,26 @@ function expectLegacyRequest(request: { body: string; headers: Headers }) {
 describe("session recovery", () => {
 
   test("recover leaves a whole session alone and copies one whose saved rules can't be read without them", async () => {
-    const fixture = createFixture("fx-session-current-healthy-");
+    const fixture = createFixture("lia-session-current-healthy-");
     const gateway = startFakeGateway([]);
     try {
       const [id] = copyV1Fixture(fixture.home, "rules");
-      const source = join(fixture.home, ".fx", "sessions", id!);
+      const source = join(fixture.home, ".lia", "sessions", id!);
       const before = savedFileHashes(source);
-      const result = await runFx(["session", "recover", id!, "--json"], {
+      const result = await runLia(["session", "recover", id!, "--json"], {
         cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
       });
       expect(result.code).toBe(1);
       expect(result.stderr).toBe("");
       expect(JSON.parse(result.stdout).code).toBe("SessionRecoveryNotNeeded");
       expect(savedFileHashes(source)).toEqual(before);
-      expect(readdirSync(join(fixture.home, ".fx", "sessions"))).toEqual([id!]);
+      expect(readdirSync(join(fixture.home, ".lia", "sessions"))).toEqual([id!]);
       expect(gateway.requests).toHaveLength(0);
       // A conversation that only its saved rules keep from converting is
       // copied without them (D72), and v1's folder stays as it was.
       async function expectCopiedWithoutRules() {
         const damaged = savedFileHashes(source);
-        const copied = await runFx(["session", "recover", id!, "--json"], {
+        const copied = await runLia(["session", "recover", id!, "--json"], {
           cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
         });
         expect(copied.code).toBe(0);
@@ -416,13 +416,13 @@ describe("session recovery", () => {
     { checkpointedTurn: false, fullCoverage: true },
   ]) {
     test(`current conversation recovery preserves exact checkpoints and artifacts with open=${checkpointedTurn} full coverage=${fullCoverage}`, async () => {
-      const fixture = createFixture("fx-session-current-copy-");
+      const fixture = createFixture("lia-session-current-copy-");
       const responses: Response[] = [];
       const gateway = startFakeGateway(responses);
       try {
         // One saved command result, under tool-results/ and logs/commands/.
         const [id] = copyV1Fixture(fixture.home, "side");
-        const source = join(fixture.home, ".fx", "sessions", id!);
+        const source = join(fixture.home, ".lia", "sessions", id!);
         const eventPath = join(source, "events.jsonl");
         const metadataPath = join(source, "session.json");
         const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
@@ -446,7 +446,7 @@ describe("session recovery", () => {
         const prefix = records.map((record) => JSON.stringify(record)).join("\n") + "\n";
         writeFileSync(eventPath, prefix + "invalid CORRUPT_TAIL_MUST_NOT_REPLAY\n", { mode: 0o600 });
         const before = savedFileHashes(source);
-        const recovered = await runFx(["session", "recover", id!, "--json"], {
+        const recovered = await runLia(["session", "recover", id!, "--json"], {
           cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
         });
         expect(recovered.code).toBe(0);
@@ -477,9 +477,9 @@ describe("session recovery", () => {
           fakeGatewayFinalText("RECOVERED_CONTINUATION_SAVED"),
         );
         const tracePath = join(fixture.root, "continue.trace.log");
-        const continued = await runFx(["ask", "--json", "--full-access", "--resume", result.recovered_id, "Read the retained result. Do not repeat completed commands."], {
+        const continued = await runLia(["ask", "--json", "--full-access", "--resume", result.recovered_id, "Read the retained result. Do not repeat completed commands."], {
           cwd: fixture.workspace,
-          env: { ...gatewayEnv(fixture, gateway), FX_TRACE_LOG: tracePath, FX_TRACE_SCOPES: "tool,session,agent" },
+          env: { ...gatewayEnv(fixture, gateway), LIA_TRACE_LOG: tracePath, LIA_TRACE_SCOPES: "tool,session,agent" },
           timeoutMs: TIMEOUT,
         });
         expect(continued.code).toBe(0);
@@ -495,7 +495,7 @@ describe("session recovery", () => {
         expect(read?.status).toBe("success");
         expect(read?.output).toContain("12760");
         expect(savedFileHashes(source)).toEqual(before);
-        const inspected = await runFx(["session", "--id", result.recovered_id, "--json"], {
+        const inspected = await runLia(["session", "--id", result.recovered_id, "--json"], {
           cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
         });
         expect(inspected.code).toBe(0);
@@ -510,12 +510,12 @@ describe("session recovery", () => {
 
   for (const tail of ["", "invalid tail\n"]) {
     test(`current recovery excludes checkpoint splitting a call/result pair with tail=${tail.length > 0}`, async () => {
-      const fixture = createFixture("fx-session-current-cut-");
+      const fixture = createFixture("lia-session-current-cut-");
       const responses: Response[] = [];
       const gateway = startFakeGateway(responses);
       try {
         const [id] = copyV1Fixture(fixture.home, "side");
-        const source = join(fixture.home, ".fx", "sessions", id!);
+        const source = join(fixture.home, ".lia", "sessions", id!);
         const eventPath = join(source, "events.jsonl");
         const prefix = readFileSync(eventPath, "utf8");
         const records = prefix.trimEnd().split("\n").map(JSON.parse);
@@ -524,7 +524,7 @@ describe("session recovery", () => {
           context_checkpoint: { covers_through_seq: callSeq, summary: "INVALID_SPLIT_CHECKPOINT" },
         } }) + "\n" + tail);
         const before = savedFileHashes(source);
-        const recovered = await runFx(["session", "recover", id!, "--json"], {
+        const recovered = await runLia(["session", "recover", id!, "--json"], {
           cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
         });
         if (!tail) {
@@ -552,7 +552,7 @@ describe("session recovery", () => {
         expect((await savedSession(fixture.home, result.recovered_id)).history_len).toBe(1);
         expect(savedText(fixture.home, result.recovered_id)).not.toContain("INVALID_SPLIT_CHECKPOINT");
         expect(savedFileHashes(source)).toEqual(before);
-        const inspected = await runFx(["session", "--id", result.recovered_id, "--json"], {
+        const inspected = await runLia(["session", "--id", result.recovered_id, "--json"], {
           cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
         });
         expect(inspected.code).toBe(0);
@@ -573,11 +573,11 @@ describe("session recovery", () => {
 
   for (const damage of ["missing-result", "changed-result"] as const) {
     test(`current conversation recovery copies past a ${damage} and says it could not verify it`, async () => {
-      const fixture = createFixture("fx-session-current-unverified-");
+      const fixture = createFixture("lia-session-current-unverified-");
       const gateway = startFakeGateway([fakeGatewayFinalText("UNVERIFIED_CONTINUED")]);
       try {
         const [id] = copyV1Fixture(fixture.home, "side");
-        const source = join(fixture.home, ".fx", "sessions", id!);
+        const source = join(fixture.home, ".lia", "sessions", id!);
         appendFileSync(join(source, "events.jsonl"), "invalid tail\n");
         const [artifact] = readdirSync(join(source, "tool-results"));
         const artifactPath = join(source, "tool-results", artifact!);
@@ -588,7 +588,7 @@ describe("session recovery", () => {
           writeFileSync(artifactPath, bytes);
         }
         const before = savedFileHashes(source);
-        const recovered = await runFx(["session", "recover", id!, "--json"], {
+        const recovered = await runLia(["session", "recover", id!, "--json"], {
           cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
         });
         // The conversation is copied without that file, and recover says so
@@ -598,7 +598,7 @@ describe("session recovery", () => {
         const result = JSON.parse(recovered.stdout);
         expect(result).toMatchObject({ kind: "session_recovery", source_id: id, status: "recovered_with_unverified_artifacts" });
         expect(savedFileHashes(source)).toEqual(before);
-        const continued = await runFx(["ask", "--json", "--resume", result.recovered_id, "What did the command print?"], {
+        const continued = await runLia(["ask", "--json", "--resume", result.recovered_id, "What did the command print?"], {
           cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
         });
         expect(continued.code).toBe(0);
@@ -613,11 +613,11 @@ describe("session recovery", () => {
 
   for (const damage of ["metadata", "private-child", "private-marker", "first-record"] as const) {
     test(`current conversation recovery refuses ${damage} without publishing a copy`, async () => {
-      const fixture = createFixture("fx-session-current-refusal-");
+      const fixture = createFixture("lia-session-current-refusal-");
       const gateway = startFakeGateway([]);
       try {
         const [id] = copyV1Fixture(fixture.home, "side");
-        const source = join(fixture.home, ".fx", "sessions", id!);
+        const source = join(fixture.home, ".lia", "sessions", id!);
         const eventPath = join(source, "events.jsonl");
         const committed = readFileSync(eventPath, "utf8");
         if (damage === "metadata" || damage === "private-child") {
@@ -645,14 +645,14 @@ describe("session recovery", () => {
           }
         }
         const before = savedFileHashes(source);
-        const result = await runFx(["session", "recover", id!, "--json"], {
+        const result = await runLia(["session", "recover", id!, "--json"], {
           cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
         });
         expect(result.code).toBe(1);
         expect(result.stderr).toBe("");
         expect(JSON.parse(result.stdout).code).toBe(damage === "private-child" || damage === "private-marker" ? "SessionNotFound" : "SessionRecoveryBoundaryInvalid");
         expect(savedFileHashes(source)).toEqual(before);
-        const sessionRoot = join(fixture.home, ".fx", "sessions");
+        const sessionRoot = join(fixture.home, ".lia", "sessions");
         expect(readdirSync(sessionRoot).filter((name) => existsSync(join(sessionRoot, name, "session.json")))).toEqual([id!]);
         // No copy was published.
         expect(existsSync(storeRoot(fixture.home)) ? savedSessionIds(fixture.home) : []).toEqual([]);
@@ -673,7 +673,7 @@ describe("session recovery", () => {
   }
 
   test("legacy ask resume fails closed at a bad watermark then preserves archived evidence on retry", async () => {
-    const fixture = createFixture("fx-legacy-ask-recovery-");
+    const fixture = createFixture("lia-legacy-ask-recovery-");
     const legacy = createLegacySession(fixture, 4);
     const gateway = startFakeGateway([
       fakeGatewayFinalText("LEGACY_ASK_SAVED"),
@@ -685,7 +685,7 @@ describe("session recovery", () => {
         ...JSON.parse(watermark), through_event_log_bytes: Buffer.byteLength(readFileSync(join(legacy.source, "events.jsonl"))) - 1,
       }));
       const before = savedFileHashes(legacy.source);
-      const failed = await runFx(["ask", "--json", "--auto", "--resume", legacy.id, "Do not run with invalid history."], {
+      const failed = await runLia(["ask", "--json", "--auto", "--resume", legacy.id, "Do not run with invalid history."], {
         cwd: fixture.workspace, env: legacyGatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
       });
       expect(failed.timedOut).toBe(false);
@@ -693,11 +693,11 @@ describe("session recovery", () => {
       expect(gateway.requests).toHaveLength(0);
       expect(gateway.classifierRequests).toHaveLength(0);
       expect(savedFileHashes(legacy.source)).toEqual(before);
-      expect(readdirSync(join(fixture.home, ".fx", "sessions"))).toEqual([legacy.id]);
+      expect(readdirSync(join(fixture.home, ".lia", "sessions"))).toEqual([legacy.id]);
       writeFileSync(legacy.watermarkPath, watermark);
 
       for (const [index, args] of [["--resume", legacy.id], ["--resume", "last"]].entries()) {
-        const result = await runFx(["ask", "--json", "--auto", ...args, "Continue the synthetic saved conversation."], {
+        const result = await runLia(["ask", "--json", "--auto", ...args, "Continue the synthetic saved conversation."], {
           cwd: fixture.workspace, env: legacyGatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
         });
         expect(result.code).toBe(0);
@@ -721,7 +721,7 @@ describe("session recovery", () => {
 
   for (const kind of ["recovery_checkpoint_cleared", "history_turn_committed"] as const) {
     test(`legacy ask resume does not resurrect a checkpoint superseded by ${kind}`, async () => {
-      const fixture = createFixture("fx-legacy-checkpoint-superseded-");
+      const fixture = createFixture("lia-legacy-checkpoint-superseded-");
       const legacy = createLegacySession(fixture, 4);
       const gateway = startFakeGateway([fakeGatewayFinalText("SUPERSESSION_ASK_SAVED")], LEGACY_GATEWAY_OPTIONS);
       try {
@@ -752,7 +752,7 @@ describe("session recovery", () => {
 
         expect(gateway.requests).toHaveLength(0);
         const prompt = "Continue after the superseding legacy event.";
-        const result = await runFx(["ask", "--json", "--auto", "--resume", legacy.id, prompt], {
+        const result = await runLia(["ask", "--json", "--auto", "--resume", legacy.id, prompt], {
           cwd: fixture.workspace, env: legacyGatewayEnv(fixture, gateway), timeoutMs: TIMEOUT,
         });
         expect(result.code).toBe(0);
@@ -793,11 +793,11 @@ describe("session recovery", () => {
     { target: "fenced legacy snapshot", fileName: "session.legacy.json", fenced: true },
   ]) {
     test.skipIf(process.platform === "win32")(`ask resume last rejects a FIFO ${target} promptly without writes`, async () => {
-      const fixture = createFixture("fx-session-fifo-");
+      const fixture = createFixture("lia-session-fifo-");
       const gateway = startFakeGateway([]);
       try {
         const id = fenced ? "fenced-legacy-fifo" : copyV1Fixture(fixture.home, "plain", 1, fixture.workspace)[0]!;
-        const source = join(fixture.home, ".fx", "sessions", id);
+        const source = join(fixture.home, ".lia", "sessions", id);
         if (fenced) {
           mkdirSync(source, { recursive: true, mode: 0o700 });
           const snapshot = JSON.stringify({
@@ -816,7 +816,7 @@ describe("session recovery", () => {
         const fifoBefore = lstatSync(fifoPath);
         expect(fifoBefore.isFIFO()).toBe(true);
         const namesBefore = readdirSync(source, { recursive: true }).sort();
-        const result = await runFx(["ask", "--json", "--auto", "--resume", "last", "Never open the FIFO."], {
+        const result = await runLia(["ask", "--json", "--auto", "--resume", "last", "Never open the FIFO."], {
           cwd: fixture.workspace, env: gatewayEnv(fixture, gateway), timeoutMs: 5_000,
         });
         expect(result.timedOut).toBe(false);
@@ -824,7 +824,7 @@ describe("session recovery", () => {
         expect(result.code).toBe(1);
         expect(result.elapsedMs).toBeLessThan(5_000);
         // The unreadable session is skipped exactly as every listing skips it,
-        // and the error says unreadable sessions exist, as `fx session last` does.
+        // and the error says unreadable sessions exist, as `lia session last` does.
         expect(result.stdout + result.stderr).toContain("NoReadableSessions");
         expect(gateway.requests).toHaveLength(0);
         expect(gateway.classifierRequests).toHaveLength(0);
@@ -839,7 +839,7 @@ describe("session recovery", () => {
         }
         // Only the new store's folder may appear beside the untouched session,
         // and it holds no session.
-        expect(readdirSync(join(fixture.home, ".fx", "sessions")).filter((name) => name !== "v2"))
+        expect(readdirSync(join(fixture.home, ".lia", "sessions")).filter((name) => name !== "v2"))
           .toEqual([id]);
         expect(existsSync(storeRoot(fixture.home)) ? savedSessionIds(fixture.home) : []).toEqual([]);
       } finally {
@@ -850,15 +850,15 @@ describe("session recovery", () => {
   }
 
   test("latest resume discovers and repairs a partial final JSONL record", async () => {
-    const fixture = createFixture("fx-session-partial-record-");
+    const fixture = createFixture("lia-session-partial-record-");
     const gateway = startFakeGateway([fakeGatewayFinalText("PARTIAL_RECORD_RECOVERED")]);
     try {
       const [sessionId] = copyV1Fixture(fixture.home, "plain", 1, fixture.workspace) as [string];
-      const eventsPath = join(fixture.home, ".fx", "sessions", sessionId, "events.jsonl");
+      const eventsPath = join(fixture.home, ".lia", "sessions", sessionId, "events.jsonl");
       const committed = readFileSync(eventsPath, "utf8");
       appendFileSync(eventsPath, '{"schema_version":1,"partial-tail"');
 
-      const listed = await runFx(["sessions", "--json"], {
+      const listed = await runLia(["sessions", "--json"], {
         cwd: fixture.workspace,
         env: gatewayEnv(fixture, gateway),
         timeoutMs: TIMEOUT,
@@ -888,13 +888,13 @@ describe("session recovery", () => {
 
   for (const partialNextRecord of [false, true]) {
     test(`an unfinished last turn converts as interrupted with partial next record=${partialNextRecord}`, async () => {
-      const fixture = createFixture("fx-session-unfinished-turn-");
+      const fixture = createFixture("lia-session-unfinished-turn-");
       const gateway = startFakeGateway([fakeGatewayFinalText("UNFINISHED_TURN_RECOVERED")]);
       try {
         const [sessionId] = copyV1Fixture(fixture.home, "plain") as [string];
         const eventsPath = join(
           fixture.home,
-          ".fx",
+          ".lia",
           "sessions",
           sessionId,
           "events.jsonl",
@@ -936,13 +936,13 @@ describe("session recovery", () => {
   }
 
   test.each(["malformed", "oversized", "unreadable"])("committed-history corruption (%s) fails closed without rewriting JSONL and points at doctor", async (fault) => {
-    const fixture = createFixture("fx-session-middle-corruption-");
+    const fixture = createFixture("lia-session-middle-corruption-");
     const gateway = startFakeGateway([]);
     try {
       const [sessionId] = copyV1Fixture(fixture.home, "plain") as [string];
       const eventsPath = join(
         fixture.home,
-        ".fx",
+        ".lia",
         "sessions",
         sessionId,
         "events.jsonl",
@@ -954,7 +954,7 @@ describe("session recovery", () => {
       writeFileSync(eventsPath, corrupted, { mode: 0o600 });
       if (fault === "unreadable") chmodSync(eventsPath, 0);
 
-      const detail = await runFx(
+      const detail = await runLia(
         ["session", "--id", sessionId, "--json"],
         {
           cwd: fixture.workspace,
@@ -968,7 +968,7 @@ describe("session recovery", () => {
       const failure = JSON.parse(detail.stdout);
       expect(failure.code).toBe("InvalidSessionFormat");
       expect(failure.error).toContain(`session ${sessionId} can't be read: `);
-      expect(failure.error).toContain("run `fx doctor`");
+      expect(failure.error).toContain("run `lia doctor`");
       if (fault === "unreadable") chmodSync(eventsPath, 0o600);
       expect(readFileSync(eventsPath, "utf8")).toBe(corrupted);
       expect(gateway.requests).toHaveLength(0);

@@ -279,7 +279,7 @@ pub const TurnTraces = struct {
         return t.sessions.items;
     }
 
-    /// fx died with this session open.
+    /// lia died with this session open.
     pub fn crash(t: *TurnTraces, id: []const u8) void {
         const per = t.find(id) orelse return;
         if (!std.mem.eql(u8, per.status, "open")) return;

@@ -1,11 +1,11 @@
 //! Built-in color themes plus theme.json loading.
 //!
-//! `fx_dark` and `fx_light` retain their historical palette bytes. The ui
+//! `lia_dark` and `lia_light` retain their historical palette bytes. The ui
 //! keeps diff marker accents off until a theme is explicitly selected. Both
 //! core presentation and ui rendering resolve their themed values from here.
-//! User themes load from `~/.fx/themes/<name>.json` (selected with
-//! FX_THEME=<name>) in either the
-//! native fx slot schema or the VS Code theme schema (`colors` +
+//! User themes load from `~/.lia/themes/<name>.json` (selected with
+//! LIA_THEME=<name>) in either the
+//! native lia slot schema or the VS Code theme schema (`colors` +
 //! `tokenColors`), so editor themes like GitHub Dark apply
 //! directly. Hex colors resolve to truecolor escapes when the terminal
 //! supports them, otherwise they quantize to the xterm-256 palette.
@@ -73,8 +73,8 @@ pub const Theme = struct {
     syntax: SyntaxPalette,
 };
 
-pub const fx_dark: Theme = .{
-    .name = "fx-dark",
+pub const lia_dark: Theme = .{
+    .name = "lia-dark",
     .light = false,
 
     .divider_style = "\x1b[38;5;240m",
@@ -116,8 +116,8 @@ pub const fx_dark: Theme = .{
     },
 };
 
-pub const fx_light: Theme = .{
-    .name = "fx-light",
+pub const lia_light: Theme = .{
+    .name = "lia-light",
     .light = true,
 
     .divider_style = "\x1b[38;5;250m",
@@ -160,13 +160,13 @@ pub const fx_light: Theme = .{
 };
 
 pub fn builtin(light: bool) Theme {
-    return if (light) fx_light else fx_dark;
+    return if (light) lia_light else lia_dark;
 }
 
 /// The theme currently applied to the process. Core producers that cannot
 /// import ui state read their colors through `current()`; `activate` is called
 /// by the ui layer whenever a theme is applied.
-var active_theme: Theme = fx_dark;
+var active_theme: Theme = lia_dark;
 
 pub fn current() Theme {
     return active_theme;
@@ -182,9 +182,9 @@ pub const ThemeChoice = union(enum) {
     custom: []const u8,
 };
 
-/// Classifies a configured theme value (FX_THEME or the settings "theme"
+/// Classifies a configured theme value (LIA_THEME or the settings "theme"
 /// key): light/dark pin the builtin variant, anything else names a theme file
-/// under ~/.fx/themes.
+/// under ~/.lia/themes.
 pub fn classifyValue(value: []const u8) ?ThemeChoice {
     if (value.len == 0) return null;
     if (std.ascii.eqlIgnoreCase(value, "light")) return .pin_light;
@@ -408,9 +408,9 @@ pub const max_theme_bytes: usize = 1024 * 1024;
 pub const ParseError = error{ InvalidTheme, OutOfMemory };
 pub const ParseOptions = struct { truecolor: bool = true };
 
-/// Parses a theme.json document, auto-detecting the native fx slot schema and
+/// Parses a theme.json document, auto-detecting the native lia slot schema and
 /// the VS Code theme schema. Slots the file does not mention inherit from the
-/// matching builtin variant, so partial themes compose with the fx look.
+/// matching builtin variant, so partial themes compose with the lia look.
 ///
 /// The returned Theme borrows from `alloc`; themes are process-lifetime state,
 /// so the caller keeps the allocation alive rather than freeing per theme.
@@ -587,8 +587,8 @@ const VsCodeSlot = struct {
     bold: bool = false,
 };
 
-/// Maps editor workbench colors onto fx chrome slots. Unmapped slots inherit
-/// the builtin variant, which keeps fx's neutral layout under editor themes.
+/// Maps editor workbench colors onto lia chrome slots. Unmapped slots inherit
+/// the builtin variant, which keeps lia's neutral layout under editor themes.
 const vscode_slot_map = [_]VsCodeSlot{
     .{ .key = "divider", .sources = &.{ "editorLineNumber.foreground", "panel.border" } },
     .{ .key = "hint", .sources = &.{ "editor.foreground", "foreground" } },
@@ -643,7 +643,7 @@ fn vscodeColor(colors: ?std.json.ObjectMap, sources: []const []const u8, bg: Rgb
 
 const ScopeMatch = struct { rgb: Rgb, bold: bool, italic: bool };
 
-/// Finds the best TextMate scope match for one of fx's syntax slots. Exact
+/// Finds the best TextMate scope match for one of lia's syntax slots. Exact
 /// scope beats a dotted prefix match; on a tie the later entry wins, matching
 /// VS Code's override order. Compound (space-separated) selectors are skipped.
 fn tokenColorMatch(token_colors: []const std.json.Value, want: []const u8, bg: Rgb) ?ScopeMatch {
@@ -758,7 +758,7 @@ fn parseVsCode(alloc: std.mem.Allocator, root: std.json.ObjectMap, options: Pars
     return theme;
 }
 
-// --- Loading from ~/.fx/themes ---
+// --- Loading from ~/.lia/themes ---
 
 pub const LoadError = error{ InvalidName, ThemeNotFound, InvalidTheme, OutOfMemory };
 
@@ -812,10 +812,10 @@ pub fn resolveNamed(alloc: std.mem.Allocator, name: []const u8, terminal_light: 
     return null;
 }
 
-/// Loads `~/.fx/themes/<name>.json` and resolves it for the terminal's color
+/// Loads `~/.lia/themes/<name>.json` and resolves it for the terminal's color
 /// capability. The returned Theme is process-lifetime state allocated from
 /// `alloc`; the caller keeps the allocation alive.
-/// Whether `name` can name a theme file under ~/.fx/themes: 1 to 64 letters,
+/// Whether `name` can name a theme file under ~/.lia/themes: 1 to 64 letters,
 /// digits, `-`, `_`, or `.`, and not `.` or `..`.
 pub fn validThemeName(name: []const u8) bool {
     if (name.len == 0 or name.len > 64) return false;
@@ -848,8 +848,8 @@ pub fn loadNamed(alloc: std.mem.Allocator, name: []const u8, options: ParseOptio
 }
 
 test "builtin selects the variant matching the light flag" {
-    try std.testing.expectEqualStrings("fx-dark", builtin(false).name);
-    try std.testing.expectEqualStrings("fx-light", builtin(true).name);
+    try std.testing.expectEqualStrings("lia-dark", builtin(false).name);
+    try std.testing.expectEqualStrings("lia-light", builtin(true).name);
     try std.testing.expect(!builtin(false).light);
     try std.testing.expect(builtin(true).light);
 }
@@ -858,65 +858,65 @@ test "every theme slot is populated" {
     const info = @typeInfo(Theme).@"struct";
     inline for (info.field_names, info.field_types) |field_name, field_type| {
         if (field_type == []const u8) {
-            try std.testing.expect(@field(fx_dark, field_name).len > 0);
-            try std.testing.expect(@field(fx_light, field_name).len > 0);
+            try std.testing.expect(@field(lia_dark, field_name).len > 0);
+            try std.testing.expect(@field(lia_light, field_name).len > 0);
         } else if (field_type == SyntaxPalette) {
             const syntax_info = @typeInfo(SyntaxPalette).@"struct";
             inline for (syntax_info.field_names, syntax_info.field_types) |syntax_name, syntax_type| {
                 if (syntax_type != []const u8) continue;
-                try std.testing.expect(@field(fx_dark.syntax, syntax_name).len > 0);
-                try std.testing.expect(@field(fx_light.syntax, syntax_name).len > 0);
+                try std.testing.expect(@field(lia_dark.syntax, syntax_name).len > 0);
+                try std.testing.expect(@field(lia_light.syntax, syntax_name).len > 0);
             }
         }
     }
 }
 
-test "builtin themes pin the historical fx palette bytes" {
+test "builtin themes pin the historical lia palette bytes" {
     // Dark defaults.
-    try std.testing.expectEqualStrings("\x1b[38;5;240m", fx_dark.divider_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;255m", fx_dark.hint_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;245m", fx_dark.statusline_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;255m", fx_dark.user_card_marker_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;252m", fx_dark.user_card_accent_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;255m", fx_dark.inline_code_open);
-    try std.testing.expectEqualStrings("\x1b[38;5;252m", fx_dark.task_completed_open);
-    try std.testing.expectEqualStrings("\x1b[38;5;245m", fx_dark.tool_stdout_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;252m", fx_dark.tool_stderr_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;252m", fx_dark.syntax.keyword_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;245m", fx_dark.syntax.comment_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;240m", lia_dark.divider_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;255m", lia_dark.hint_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;245m", lia_dark.statusline_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;255m", lia_dark.user_card_marker_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;252m", lia_dark.user_card_accent_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;255m", lia_dark.inline_code_open);
+    try std.testing.expectEqualStrings("\x1b[38;5;252m", lia_dark.task_completed_open);
+    try std.testing.expectEqualStrings("\x1b[38;5;245m", lia_dark.tool_stdout_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;252m", lia_dark.tool_stderr_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;252m", lia_dark.syntax.keyword_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;245m", lia_dark.syntax.comment_style);
 
     // Light defaults.
-    try std.testing.expectEqualStrings("\x1b[38;5;250m", fx_light.divider_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;235m", fx_light.hint_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;241m", fx_light.statusline_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;235m", fx_light.user_card_marker_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;238m", fx_light.user_card_accent_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;235m", fx_light.inline_code_open);
-    try std.testing.expectEqualStrings("\x1b[38;5;238m", fx_light.task_completed_open);
+    try std.testing.expectEqualStrings("\x1b[38;5;250m", lia_light.divider_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;235m", lia_light.hint_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;241m", lia_light.statusline_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;235m", lia_light.user_card_marker_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;238m", lia_light.user_card_accent_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;235m", lia_light.inline_code_open);
+    try std.testing.expectEqualStrings("\x1b[38;5;238m", lia_light.task_completed_open);
     // Tool text stays the pre-theme gray in both variants (parity guard).
-    try std.testing.expectEqualStrings("\x1b[38;5;245m", fx_light.tool_stdout_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;252m", fx_light.tool_stderr_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;238m", fx_light.syntax.keyword_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;243m", fx_light.syntax.comment_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;245m", lia_light.tool_stdout_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;252m", lia_light.tool_stderr_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;238m", lia_light.syntax.keyword_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;243m", lia_light.syntax.comment_style);
 
     // Diff markers read the same on light and dark in both capability modes.
-    try std.testing.expectEqualStrings("\x1b[38;2;48;164;108m", fx_dark.diff_added_marker_truecolor);
-    try std.testing.expectEqualStrings("\x1b[38;2;229;72;77m", fx_dark.diff_removed_marker_truecolor);
-    try std.testing.expectEqualStrings("\x1b[38;5;71m", fx_dark.diff_added_marker_fallback);
-    try std.testing.expectEqualStrings("\x1b[38;5;167m", fx_dark.diff_removed_marker_fallback);
-    try std.testing.expectEqualStrings(fx_dark.diff_added_marker_truecolor, fx_light.diff_added_marker_truecolor);
-    try std.testing.expectEqualStrings(fx_dark.diff_removed_marker_truecolor, fx_light.diff_removed_marker_truecolor);
-    try std.testing.expectEqualStrings(fx_dark.diff_added_marker_fallback, fx_light.diff_added_marker_fallback);
-    try std.testing.expectEqualStrings(fx_dark.diff_removed_marker_fallback, fx_light.diff_removed_marker_fallback);
+    try std.testing.expectEqualStrings("\x1b[38;2;48;164;108m", lia_dark.diff_added_marker_truecolor);
+    try std.testing.expectEqualStrings("\x1b[38;2;229;72;77m", lia_dark.diff_removed_marker_truecolor);
+    try std.testing.expectEqualStrings("\x1b[38;5;71m", lia_dark.diff_added_marker_fallback);
+    try std.testing.expectEqualStrings("\x1b[38;5;167m", lia_dark.diff_removed_marker_fallback);
+    try std.testing.expectEqualStrings(lia_dark.diff_added_marker_truecolor, lia_light.diff_added_marker_truecolor);
+    try std.testing.expectEqualStrings(lia_dark.diff_removed_marker_truecolor, lia_light.diff_removed_marker_truecolor);
+    try std.testing.expectEqualStrings(lia_dark.diff_added_marker_fallback, lia_light.diff_added_marker_fallback);
+    try std.testing.expectEqualStrings(lia_dark.diff_removed_marker_fallback, lia_light.diff_removed_marker_fallback);
 }
 
 test "activate switches the current theme seen by core producers" {
     const previous = current();
     defer activate(previous);
-    activate(fx_light);
-    try std.testing.expectEqualStrings("fx-light", current().name);
-    activate(fx_dark);
-    try std.testing.expectEqualStrings("fx-dark", current().name);
+    activate(lia_light);
+    try std.testing.expectEqualStrings("lia-light", current().name);
+    activate(lia_dark);
+    try std.testing.expectEqualStrings("lia-dark", current().name);
 }
 
 test "parseHexColor accepts the hex forms VS Code themes use" {
@@ -982,12 +982,12 @@ test "parse resolves a native theme overlay on the matching builtin" {
     try std.testing.expectEqualStrings("\x1b[38;2;255;0;0m", theme.divider_style);
     try std.testing.expectEqualStrings("\x1b[1;38;2;25;28;34;48;2;129;161;193m", theme.approval_button_active_style);
     try std.testing.expectEqualStrings("\x1b[38;2;48;164;108m", theme.diff_added_marker_truecolor);
-    try std.testing.expectEqualStrings(fx_dark.diff_removed_marker_truecolor, theme.diff_removed_marker_truecolor);
+    try std.testing.expectEqualStrings(lia_dark.diff_removed_marker_truecolor, theme.diff_removed_marker_truecolor);
     try std.testing.expectEqualStrings("\x1b[38;2;130;210;206m", theme.syntax.keyword_style);
     try std.testing.expectEqualStrings("\x1b[3;38;2;106;153;85m", theme.syntax.comment_style);
     // Untouched slots inherit the builtin variant.
-    try std.testing.expectEqualStrings(fx_dark.hint_style, theme.hint_style);
-    try std.testing.expectEqualStrings(fx_dark.syntax.string_style, theme.syntax.string_style);
+    try std.testing.expectEqualStrings(lia_dark.hint_style, theme.hint_style);
+    try std.testing.expectEqualStrings(lia_dark.syntax.string_style, theme.syntax.string_style);
 }
 
 test "parse honors a native syntax boolean switch" {
@@ -998,7 +998,7 @@ test "parse honors a native syntax boolean switch" {
     const disabled = try parse(alloc, "{ \"name\": \"no-syntax\", \"syntax\": false }", .{ .truecolor = true });
     try std.testing.expect(!disabled.syntax.enabled);
     // Style slots keep the builtin defaults; the flag alone gates highlighting.
-    try std.testing.expectEqualStrings(fx_dark.syntax.keyword_style, disabled.syntax.keyword_style);
+    try std.testing.expectEqualStrings(lia_dark.syntax.keyword_style, disabled.syntax.keyword_style);
 
     const enabled = try parse(alloc, "{ \"name\": \"yes-syntax\", \"syntax\": true }", .{ .truecolor = true });
     try std.testing.expect(enabled.syntax.enabled);
@@ -1066,7 +1066,7 @@ test "parse resolves a VS Code theme through the adapter" {
     try std.testing.expectEqualStrings("\x1b[38;2;168;204;124m", theme.syntax.string_style);
     try std.testing.expectEqualStrings("\x1b[3;38;2;106;153;85m", theme.syntax.comment_style);
     // Unmapped scopes and slots inherit the builtin variant.
-    try std.testing.expectEqualStrings(fx_dark.syntax.number_style, theme.syntax.number_style);
+    try std.testing.expectEqualStrings(lia_dark.syntax.number_style, theme.syntax.number_style);
 }
 
 test "parse honors an explicit VS Code type field over background luminance" {
@@ -1075,7 +1075,7 @@ test "parse honors an explicit VS Code type field over background luminance" {
     const alloc = arena.allocator();
     const theme = try parse(alloc, "{ \"type\": \"light\", \"colors\": { \"editor.background\": \"#181818\" } }", .{ .truecolor = true });
     try std.testing.expect(theme.light);
-    try std.testing.expectEqualStrings(fx_light.dim_style[0..4], theme.dim_style[0..4]);
+    try std.testing.expectEqualStrings(lia_light.dim_style[0..4], theme.dim_style[0..4]);
 }
 
 test "parse rejects malformed themes" {
@@ -1097,7 +1097,7 @@ test "loadNamed validates the theme name before touching disk" {
     try std.testing.expectError(error.InvalidName, loadNamed(alloc, "../escape", .{}));
     try std.testing.expectError(error.InvalidName, loadNamed(alloc, "a/b", .{}));
     try std.testing.expectError(error.InvalidName, loadNamed(alloc, "..", .{}));
-    try std.testing.expectError(error.ThemeNotFound, loadNamed(alloc, "fx-theme-that-does-not-exist-9z9z", .{}));
+    try std.testing.expectError(error.ThemeNotFound, loadNamed(alloc, "lia-theme-that-does-not-exist-9z9z", .{}));
 }
 
 test "siblingName maps variant suffixes for terminal-mode swaps" {
@@ -1132,13 +1132,13 @@ test "sgrHasParam parses the parameter list exactly" {
 }
 
 test "closingFor resets exactly what the open set" {
-    try std.testing.expectEqualStrings("\x1b[39m", closingFor(fx_dark.hint_style));
-    try std.testing.expectEqualStrings("\x1b[39m", closingFor(fx_dark.inline_code_open));
-    try std.testing.expectEqualStrings("\x1b[39m\x1b[22m", closingFor(fx_dark.tag_style));
+    try std.testing.expectEqualStrings("\x1b[39m", closingFor(lia_dark.hint_style));
+    try std.testing.expectEqualStrings("\x1b[39m", closingFor(lia_dark.inline_code_open));
+    try std.testing.expectEqualStrings("\x1b[39m\x1b[22m", closingFor(lia_dark.tag_style));
     try std.testing.expectEqualStrings("\x1b[39m\x1b[23m", closingFor("\x1b[3;38;2;1;2;3m"));
     try std.testing.expectEqualStrings("\x1b[39m\x1b[22m\x1b[23m", closingFor("\x1b[1;3;38;2;1;2;3m"));
-    try std.testing.expectEqualStrings("\x1b[39m\x1b[49m\x1b[22m", closingFor(fx_dark.approval_button_active_style));
-    try std.testing.expectEqualStrings("\x1b[39m\x1b[49m", closingFor(fx_dark.approval_button_inactive_style));
+    try std.testing.expectEqualStrings("\x1b[39m\x1b[49m\x1b[22m", closingFor(lia_dark.approval_button_active_style));
+    try std.testing.expectEqualStrings("\x1b[39m\x1b[49m", closingFor(lia_dark.approval_button_inactive_style));
 }
 
 test "classifyValue maps configured theme values" {
@@ -1203,18 +1203,18 @@ test "parse maps the link color and split syntax scopes" {
 
     // A VS Code theme without textLink keeps the builtin link color.
     const no_link = try parse(alloc, "{ \"type\": \"dark\", \"colors\": {} }", .{ .truecolor = true });
-    try std.testing.expectEqualStrings(fx_dark.link_style, no_link.link_style);
+    try std.testing.expectEqualStrings(lia_dark.link_style, no_link.link_style);
 }
 
 test "builtin themes pin the new slot bytes" {
-    try std.testing.expectEqualStrings("\x1b[38;5;75m", fx_dark.link_style);
-    try std.testing.expectEqualStrings("\x1b[38;5;25m", fx_light.link_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;75m", lia_dark.link_style);
+    try std.testing.expectEqualStrings("\x1b[38;5;25m", lia_light.link_style);
     // The split slots default to the keyword color so default rendering is
     // byte-identical to before the split.
-    for ([_][]const u8{ fx_dark.syntax.function_style, fx_dark.syntax.variable_style, fx_dark.syntax.operator_style }) |style| {
-        try std.testing.expectEqualStrings(fx_dark.syntax.keyword_style, style);
+    for ([_][]const u8{ lia_dark.syntax.function_style, lia_dark.syntax.variable_style, lia_dark.syntax.operator_style }) |style| {
+        try std.testing.expectEqualStrings(lia_dark.syntax.keyword_style, style);
     }
-    for ([_][]const u8{ fx_light.syntax.function_style, fx_light.syntax.variable_style, fx_light.syntax.operator_style }) |style| {
-        try std.testing.expectEqualStrings(fx_light.syntax.keyword_style, style);
+    for ([_][]const u8{ lia_light.syntax.function_style, lia_light.syntax.variable_style, lia_light.syntax.operator_style }) |style| {
+        try std.testing.expectEqualStrings(lia_light.syntax.keyword_style, style);
     }
 }

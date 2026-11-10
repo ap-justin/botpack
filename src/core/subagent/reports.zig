@@ -60,13 +60,13 @@ pub const Pending = struct {
 
 /// Folds a parent's report lines, oldest first, into the reports it is
 /// still owed. A finish owes one when its
-/// line says so, or when crash repair closed a work this fx started as
-/// interrupted or lost: repair writes no fx data, and `Repair` always
-/// reports. A finish older fx wrote owes nothing, so an upgrade wakes no
+/// line says so, or when crash repair closed a work this lia started as
+/// interrupted or lost: repair writes no lia data, and `Repair` always
+/// reports. A finish older lia wrote owes nothing, so an upgrade wakes no
 /// parent. The parent's `child_report` takes a report. Reports stay in the
 /// order they became owed, the order resume posts them (`Resumed`).
 pub const PendingFold = struct {
-    /// Works this fx started that have not finished.
+    /// Works this lia started that have not finished.
     started: std.ArrayList(Key) = .empty,
     pending: std.ArrayList(Pending) = .empty,
 
@@ -92,7 +92,7 @@ pub const PendingFold = struct {
                 const repaired = finished.outcome == .interrupted or finished.outcome == .lost;
                 const owed = child_state.finishOwesFlag(finished.data) orelse (started != null and repaired);
                 var end = child_state.finishEndFacts(finished.data);
-                // Repair writes no fx data, so who started the work is read
+                // Repair writes no lia data, so who started the work is read
                 // from its spawn, and the report still names the user's turn.
                 if (finished.data == null) if (started) |by| {
                     end.started_by = by;
@@ -100,7 +100,7 @@ pub const PendingFold = struct {
                 if (owed and self.findPending(finished.child, finished.work_id) == null) try self.pending.append(alloc, .{
                     .child_id = finished.child,
                     .work_id = finished.work_id,
-                    .outcome = child_state.fxOutcome(finished.outcome),
+                    .outcome = child_state.liaOutcome(finished.outcome),
                     .end = end,
                 });
             },
@@ -110,7 +110,7 @@ pub const PendingFold = struct {
         }
     }
 
-    /// Who started the work this fx opened, forgotten once taken; null for
+    /// Who started the work this lia opened, forgotten once taken; null for
     /// one it didn't open.
     fn takeStarted(self: *PendingFold, child_id: []const u8, work_id: []const u8) ?StartedBy {
         for (self.started.items, 0..) |key, index| {
@@ -351,21 +351,21 @@ test "a pending report keeps who started its work and why it was cancelled" {
     const L = session_adapter.ReportLine;
     var lines = [_]L{
         .{ .spawned = .{ .child = "c1", .work_id = "w1", .data = marked_spawn } },
-        .{ .finished = .{ .child = "c1", .work_id = "w1", .outcome = .cancelled, .data = "{\"report\":true,\"by\":\"user\",\"cause\":\"fx_quit\"}" } },
+        .{ .finished = .{ .child = "c1", .work_id = "w1", .outcome = .cancelled, .data = "{\"report\":true,\"by\":\"user\",\"cause\":\"lia_quit\"}" } },
         .{ .spawned = .{ .child = "c1", .work_id = "w2", .data = marked_spawn } },
         .{ .finished = .{ .child = "c1", .work_id = "w2", .outcome = .ok, .data = "{\"report\":true}" } },
     };
     const pending = try pendingReports(alloc, &lines);
     defer alloc.free(pending);
     try std.testing.expectEqual(@as(usize, 2), pending.len);
-    try std.testing.expectEqual(child_state.EndFacts{ .started_by = .user, .cause = .fx_quit }, pending[0].end);
+    try std.testing.expectEqual(child_state.EndFacts{ .started_by = .user, .cause = .lia_quit }, pending[0].end);
     try std.testing.expectEqual(child_state.EndFacts{}, pending[1].end);
 }
 
 test "a work crash repair closes still says who started it" {
     const alloc = std.testing.allocator;
     const L = session_adapter.ReportLine;
-    // Repair's finish carries no fx data; the spawn says the user started w1.
+    // Repair's finish carries no lia data; the spawn says the user started w1.
     var lines = [_]L{
         .{ .spawned = .{ .child = "c1", .work_id = "w1", .data = "{\"fingerprint\":\"ab\",\"report\":\"final\",\"by\":\"user\"}" } },
         .{ .finished = .{ .child = "c1", .work_id = "w1", .outcome = .interrupted, .data = null } },
@@ -531,14 +531,14 @@ test "pending reports are the owed ones not yet taken, in the order they became 
     var lines = [_]L{
         .{ .spawned = .{ .child = "c1", .work_id = "w1", .data = marked_spawn } },
         .{ .finished = .{ .child = "c1", .work_id = "w1", .outcome = .ok, .data = "{\"report\":true}" } },
-        // Older fx started it, so its repaired end owes nothing.
+        // Older lia started it, so its repaired end owes nothing.
         .{ .spawned = .{ .child = "c2", .work_id = "w2", .data = older_spawn } },
         .{ .finished = .{ .child = "c2", .work_id = "w2", .outcome = .interrupted, .data = null } },
-        // This fx started it and repair closed it: owed, once.
+        // This lia started it and repair closed it: owed, once.
         .{ .spawned = .{ .child = "c1", .work_id = "w3", .data = marked_spawn } },
         .{ .finished = .{ .child = "c1", .work_id = "w3", .outcome = .interrupted, .data = null } },
         .{ .finished = .{ .child = "c1", .work_id = "w3", .outcome = .interrupted, .data = null } },
-        // This fx wrote a finish that owes nothing.
+        // This lia wrote a finish that owes nothing.
         .{ .spawned = .{ .child = "c3", .work_id = "w4", .data = marked_spawn } },
         .{ .finished = .{ .child = "c3", .work_id = "w4", .outcome = .ok, .data = null } },
         .{ .taken = .{ .child = "c9", .work_id = "w9" } },
@@ -585,7 +585,7 @@ fn pendingOracle(alloc: Allocator, lines: []const session_adapter.ReportLine) ![
                 const owed = child_state.finishOwesFlag(finished.data) orelse (started and repaired);
                 if (owed and state.since == null) {
                     state.since = index;
-                    state.outcome = child_state.fxOutcome(finished.outcome);
+                    state.outcome = child_state.liaOutcome(finished.outcome);
                 }
             },
             .taken => state.since = null,

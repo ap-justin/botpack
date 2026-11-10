@@ -1,10 +1,10 @@
-//! The loopback redirect for an MCP sign-in (RFC 8252 §7.3): fx listens on
+//! The loopback redirect for an MCP sign-in (RFC 8252 §7.3): lia listens on
 //! 127.0.0.1, the browser comes back to `GET /callback`, and the address it
 //! came to goes to the engine's `finishSignIn`. Slack's app allows only a
 //! `localhost` redirect, so for it the redirect and that address say
 //! `localhost`, which browsers reach on 127.0.0.1.
 //!
-//! fx's browser callback reader reads the requests, so a connection that
+//! lia's browser callback reader reads the requests, so a connection that
 //! stays silent, as a browser's spare one does, is dropped and the next one
 //! served. Only a return carrying this sign-in's state ends the wait
 //!: anything else, such as a request for an icon or a return with

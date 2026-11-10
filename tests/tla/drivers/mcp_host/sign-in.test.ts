@@ -36,9 +36,9 @@ async function signInScenario(name: string, tamper: boolean) {
     expect(state).toBe(authorize.searchParams.get("state"));
     let stray: { status: number; open: string } | undefined;
     if (tamper) {
-      // A return with a state fx never made gets a 404 and the wait goes on.
+      // A return with a state lia never made gets a 404 and the wait goes on.
       const wrong = new URL(location.toString());
-      wrong.searchParams.set("state", "not-the-state-fx-made");
+      wrong.searchParams.set("state", "not-the-state-lia-made");
       records.push({ event: "callback", data: { login: 1, state: 0, kind: "get" }, at: at() });
       const reply = await fetch(wrong.toString(), { signal: AbortSignal.timeout(10_000) });
       await reply.text();
@@ -47,7 +47,7 @@ async function signInScenario(name: string, tamper: boolean) {
       stray = { status: reply.status, open: still.result };
       save(join(f.base, "stray.json"), { location: wrong.toString(), ...stray });
     }
-    // Recorded when sent: fx answers the page and redeems before this fetch returns.
+    // Recorded when sent: lia answers the page and redeems before this fetch returns.
     records.push({ event: "callback", data: { login: 1, state: 1, kind: "get" }, at: at() });
     const back = await fetch(location.toString());
     save(join(f.base, "callback.json"), { location: location.toString(), status: back.status, body: (await back.text()).slice(0, 400) });
@@ -73,11 +73,11 @@ test("control: a sign-in redeems the code of the callback whose state matches, t
   expect(r.out).toContain("Signed in to web.");
   expect(r.tokens.length).toBe(1);
   expect(r.after.result).toBe("closed");
-  expect(readFileSync(join(r.f.home, ".fx", "mcp-credentials", "credentials-v3.json"), "utf8")).toContain("\"name\":\"web\"");
+  expect(readFileSync(join(r.f.home, ".lia", "mcp-credentials", "credentials-v3.json"), "utf8")).toContain("\"name\":\"web\"");
   expect(r.verdict.verdict).toBe("ACCEPTED");
 }, 120_000);
 
-// Fixed. Before the fix a return with a state fx never made ended the
+// Fixed. Before the fix a return with a state lia never made ended the
 // sign-in ("Couldn't sign in to web"), so anything that could reach the port
 // could cancel it. It fails that way on the code before.
 test("contract: a return whose state isn't the live sign-in's gets a 404 and the sign-in goes on; its own return still signs in (trace ACCEPTED)", async () => {
@@ -92,9 +92,9 @@ test("contract: a return whose state isn't the live sign-in's gets a 404 and the
 }, 120_000);
 
 // Fixed. A return whose iss names another authorization server is
-// never redeemed; before the fix fx called it "the sign-in page returned an
+// never redeemed; before the fix lia called it "the sign-in page returned an
 // error". It fails that way on the code before.
-test("contract: a return naming another issuer redeems nothing, and fx says the answer wasn't for this sign-in", async () => {
+test("contract: a return naming another issuer redeems nothing, and lia says the answer wasn't for this sign-in", async () => {
   const f = fixture(artifacts, "signin-wrong-iss");
   const fake = await startFake(f, { iss: "wrong" });
   writeProfile(f, { web: { type: "http", url: fake.url } });
@@ -118,9 +118,9 @@ test("contract: a return naming another issuer redeems nothing, and fx says the 
 }, 120_000);
 
 // A pasted address goes to the sign-in without
-// the listener's state check. One with a state fx never made is never
-// redeemed; before the fix fx called it "the sign-in page returned an error".
-test("contract: a pasted return with a state fx never made redeems nothing, and fx says the answer wasn't for this sign-in", async () => {
+// the listener's state check. One with a state lia never made is never
+// redeemed; before the fix lia called it "the sign-in page returned an error".
+test("contract: a pasted return with a state lia never made redeems nothing, and lia says the answer wasn't for this sign-in", async () => {
   const f = fixture(artifacts, "signin-pasted-wrong-state");
   const fake = await startFake(f);
   writeProfile(f, { web: { type: "http", url: fake.url } });
@@ -129,7 +129,7 @@ test("contract: a pasted return with a state fx never made redeems nothing, and 
     const url = await waitFor("the authorization URL", () => /\n\s+(http\S+)\n/.exec(login.out())?.[1], 30_000);
     const redirect = await fetch(url, { redirect: "manual" });
     const wrong = new URL(redirect.headers.get("location")!);
-    wrong.searchParams.set("state", "not-the-state-fx-made");
+    wrong.searchParams.set("state", "not-the-state-lia-made");
     login.child.stdin.write(`${wrong.toString()}\n`);
     login.child.stdin.flush();
     const code = await login.done();

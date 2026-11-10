@@ -13,7 +13,7 @@ from scripts.pgso.model import PgsoError, sha256_file
 from scripts.pgso.pipeline import PipelinePaths
 from scripts.pgso.runner import CommandResult
 
-# `llvm-readelf --file-header --program-headers --wide` of a static musl fx
+# `llvm-readelf --file-header --program-headers --wide` of a static musl lia
 # control, trimmed to the lines the layout reads.
 CONTROL_HEADERS = """ELF Header:
   Class:                             ELF64
@@ -37,7 +37,7 @@ CONTROL_SECTIONS = "  [ 1] .rodata PROGBITS\n  [ 2] .text PROGBITS\n"
 
 class LinuxPlatformTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary_directory = tempfile.TemporaryDirectory(prefix="fx-pgso-linux-")
+        self.temporary_directory = tempfile.TemporaryDirectory(prefix="lia-pgso-linux-")
         self.root = pathlib.Path(self.temporary_directory.name)
         self.paths = PipelinePaths.create(self.root / "run")
 
@@ -59,7 +59,7 @@ class LinuxPlatformTests(unittest.TestCase):
             item.write_bytes(item.name.encode())
         argv = [
             "ld.lld", "--entry", "_start", "-z", "stack-size=16777216", "--gc-sections", "-s", "-static",
-            str(inputs[0]), "/cache/fx_zcu.o", *map(str, inputs[1:]), "-o", "/cache/fx",
+            str(inputs[0]), "/cache/lia_zcu.o", *map(str, inputs[1:]), "-o", "/cache/lia",
         ]
         result = CommandResult(
             argv=("zig", "build"),
@@ -149,13 +149,13 @@ class LinuxPlatformTests(unittest.TestCase):
 
         record = json.loads((self.paths.logs / "control-link.json").read_text())
         self.assertEqual(argv, record["argv"])
-        self.assertEqual("/cache/fx_zcu.o", record["zig_object"])
+        self.assertEqual("/cache/lia_zcu.o", record["zig_object"])
         self.assertEqual({str(crt1): sha256_file(crt1), str(libc): sha256_file(libc)}, record["inputs"])
 
         for stderr, message in (
             ("ld.lld -r /cache/partial.o -o /cache/partial\n", "one final ld.lld link, found 0"),
-            ("ld.lld /cache/fx_zcu.o -o a\nld.lld /cache/fx_zcu.o -o b\n", "found 2"),
-            ("ld.lld /cache/x.o -o /cache/fx\n", "one Zig object"),
+            ("ld.lld /cache/lia_zcu.o -o a\nld.lld /cache/lia_zcu.o -o b\n", "found 2"),
+            ("ld.lld /cache/x.o -o /cache/lia\n", "one Zig object"),
         ):
             with self.subTest(message=message), self.assertRaisesRegex(PgsoError, message):
                 linux.record_control_build(
@@ -252,7 +252,7 @@ class LinuxPlatformTests(unittest.TestCase):
         self.assertEqual({"outlined_helpers": 3, "ranked_helpers": 2}, counts)
 
     def test_the_link_must_apply_the_order_or_explain_each_missing_symbol(self) -> None:
-        obj = self.root / "fx.o"
+        obj = self.root / "lia.o"
         removed = linux.removed_sections(
             f"removing unused section {obj}:(.text.dead)\nremoving unused section /other.a:(.text.main)\n",
             obj,
@@ -264,16 +264,16 @@ class LinuxPlatformTests(unittest.TestCase):
         link_map = (
             "             VMA              LMA     Size Align Out     In      Symbol\n"
             "         10fe670          10fe670       10     4                 main\n"
-            "         10fe680          10fe680       20     4                 fx.foo bar\n"
+            "         10fe680          10fe680       20     4                 lia.foo bar\n"
         )
-        found = linux.map_addresses(link_map, ["main", "fx.foo bar", "dead"])
-        self.assertEqual({"main": 0x10FE670, "fx.foo bar": 0x10FE680}, found)
+        found = linux.map_addresses(link_map, ["main", "lia.foo bar", "dead"])
+        self.assertEqual({"main": 0x10FE670, "lia.foo bar": 0x10FE680}, found)
 
-        self.assertEqual(["dead"], linux.check_applied_order(["main", "dead", "fx.foo bar"], found, removed))
+        self.assertEqual(["dead"], linux.check_applied_order(["main", "dead", "lia.foo bar"], found, removed))
         with self.assertRaisesRegex(PgsoError, "not removed"):
             linux.check_applied_order(["main", "gone"], found, removed)
         with self.assertRaisesRegex(PgsoError, "did not apply the profile function order"):
-            linux.check_applied_order(["fx.foo bar", "main"], found, removed)
+            linux.check_applied_order(["lia.foo bar", "main"], found, removed)
 
     def test_public_api_keeps_every_symbol_the_seed_defines(self) -> None:
         with mock.patch.object(
@@ -287,7 +287,7 @@ class LinuxPlatformTests(unittest.TestCase):
         self.assertEqual((f"-internalize-public-api-file={api}",), flags)
         self.assertEqual("main\nmemcpy\nstrlen\n", api.read_text())
 
-    def test_only_fx_bitcode_names_its_private_functions(self) -> None:
+    def test_only_lia_bitcode_names_its_private_functions(self) -> None:
         toolchain = self.toolchain()
         toolchain.ir_size = self.root / "ir_size.py"
         toolchain.libllvm = self.root / "libLLVM.so"
@@ -332,9 +332,9 @@ class LinuxPlatformTests(unittest.TestCase):
     def test_the_ordered_link_fails_when_a_candidate_function_has_no_symbol(self) -> None:
         self.write_control_link(inputs=(self.root / "start.o",))
         obj = self.paths.profile_use_object
-        self.paths.startup_order.write_text("fx.main\n")
-        self.paths.profile_use_ir.write_text("define internal void @fx.main() {\n  ret void\n}\n")
-        named = f"    1000  1000  10  16         {obj}:(.text.fx.main)\n    1000  1000  10   1                 fx.main\n"
+        self.paths.startup_order.write_text("lia.main\n")
+        self.paths.profile_use_ir.write_text("define internal void @lia.main() {\n  ret void\n}\n")
+        named = f"    1000  1000  10  16         {obj}:(.text.lia.main)\n    1000  1000  10   1                 lia.main\n"
         unnamed = named + f"    1010  1010  10  16         {obj}:(.text.hot..Lfx.helper)\n"
 
         def link(link_map: str) -> None:
@@ -342,9 +342,9 @@ class LinuxPlatformTests(unittest.TestCase):
                 argv = list(argv)
                 stdout = ""
                 if "order" in argv:
-                    pathlib.Path(argv[argv.index("-o") + 1]).write_text("fx.main\n")
+                    pathlib.Path(argv[argv.index("-o") + 1]).write_text("lia.main\n")
                 elif "--symbols" in argv:
-                    stdout = "     1: 0000000000000000    16 FUNC    LOCAL  DEFAULT    3 fx.main\n"
+                    stdout = "     1: 0000000000000000    16 FUNC    LOCAL  DEFAULT    3 lia.main\n"
                 else:
                     map_path = next(item for item in argv if item.startswith("-Map="))
                     pathlib.Path(map_path.removeprefix("-Map=")).write_text(link_map)
@@ -360,7 +360,7 @@ class LinuxPlatformTests(unittest.TestCase):
         with self.assertRaisesRegex(PgsoError, r"1 candidate function sections have no symbol.*\.text\.hot\.\.Lfx\.helper"):
             link(unnamed)
 
-    def test_only_fx_objects_get_function_sections(self) -> None:
+    def test_only_lia_objects_get_function_sections(self) -> None:
         self.assertEqual(("-function-sections",), linux.candidate_object_flags(self.paths))
         benchmark = PipelinePaths.create(self.root / "bench", selector="file_index")
         self.assertEqual((), linux.candidate_object_flags(benchmark))

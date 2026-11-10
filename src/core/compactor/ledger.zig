@@ -1,4 +1,4 @@
-//! The notes of fx-compactor, kept beside the user's messages and the
+//! The notes of lia-compactor, kept beside the user's messages and the
 //! assistant's final replies, which stay word for word: what the assistant
 //! did in between, a line for every tool call, and the session's rules,
 //! facts, decisions and status. The conversation's model writes them for the
@@ -61,13 +61,13 @@ pub const Asked = struct {
 
 /// A request that follows the conversation reads like the user's next
 /// message, so the model is told not to note it.
-const from_fx = " This request comes from fx, not from the user, so leave it and the writing of these notes out of every note and entry.";
+const from_lia = " This request comes from lia, not from the user, so leave it and the writing of these notes out of every note and entry.";
 
 /// Appends the request for the notes. It lists the exact headings to write,
 /// since a model given an example heading may copy it instead.
 pub fn writeRequest(alloc: Allocator, text: *std.ArrayList(u8), asked: Asked) Allocator.Error!void {
     try text.appendSlice(alloc, if (asked.after_conversation)
-        "Write the compaction notes for the turns of the conversation above that are listed below; the turns after them stay in the conversation as they are. Answer with text only and call no tools." ++ from_fx
+        "Write the compaction notes for the turns of the conversation above that are listed below; the turns after them stay in the conversation as they are. Answer with text only and call no tools." ++ from_lia
     else
         "Write the compaction notes for the new turns above.");
     try text.appendSlice(alloc, " The user's messages and the assistant's final replies stay in the conversation word for word, so do not repeat them.");
@@ -124,12 +124,12 @@ pub fn writeFollowUp(alloc: Allocator, text: *std.ArrayList(u8), missing: []cons
     if (missing.len == 0) {
         try text.appendSlice(alloc, "Your notes left out the summary of the earlier compacted conversation. Write only that now, under this heading:\n\n");
         try writeEarlierSection(alloc, text, fold, after_conversation);
-        if (after_conversation) try text.appendSlice(alloc, "Answer with text only and call no tools." ++ from_fx);
+        if (after_conversation) try text.appendSlice(alloc, "Answer with text only and call no tools." ++ from_lia);
         return;
     }
     try text.appendSlice(alloc, "Your notes on the turns above left some out. Write the notes for only these turns now, each heading followed by its notes:\n\n");
     try writeHeadings(alloc, text, missing, null);
-    if (after_conversation) try text.appendSlice(alloc, "\nUnder each heading above are the turn's tool calls, so you can find them; do not copy those lines. Answer with text only and call no tools." ++ from_fx ++ "\n");
+    if (after_conversation) try text.appendSlice(alloc, "\nUnder each heading above are the turn's tool calls, so you can find them; do not copy those lines. Answer with text only and call no tools." ++ from_lia ++ "\n");
     try text.appendSlice(alloc, "\nUnder each heading, " ++ in_between_label ++ " with what the assistant did before its final reply, then a line for every tool call, starting with its ID, on why it was used and what it showed.\n\n" ++
         "Then any new entries from those turns under the same sections, each starting with its ID and the turn or tool call it comes from.");
     try writeHighestIds(alloc, text, highest);
@@ -1018,13 +1018,13 @@ test "skills and MCP tools are listed from their calls, counted in the order fir
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    const earlier = [_]checkpoint.Used{.{ .kind = .skill, .name = "skill:ab:4/fx-conventions", .first_tool = 2, .last_tool = 2 }};
+    const earlier = [_]checkpoint.Used{.{ .kind = .skill, .name = "skill:ab:4/lia-conventions", .first_tool = 2, .last_tool = 2 }};
     const calls = [_]Call{
         .{ .number = 7, .name = "read_file", .arguments = "{\"path\":\"a.zig\"}" },
         .{ .number = 8, .name = "mcp_linear_list_issues", .arguments = "{}" },
-        .{ .number = 9, .name = "skill", .arguments = "{\"location\":\"skill:ab:4/fx-conventions\"}" },
+        .{ .number = 9, .name = "skill", .arguments = "{\"location\":\"skill:ab:4/lia-conventions\"}" },
         .{ .number = 10, .name = "mcp_select_tool", .arguments = "{\"name\":\"mcp_linear_get_issue\"}" },
-        .{ .number = 11, .name = "mcp_linear_list_issues", .arguments = "{\"team\":\"fx\"}" },
+        .{ .number = 11, .name = "mcp_linear_list_issues", .arguments = "{\"team\":\"lia\"}" },
         .{ .number = 12, .name = "mcp_features", .arguments = "{\"action\":\"resource_read\",\"server\":\"linear\"}" },
         .{ .number = 13, .name = "skill", .arguments = "{\"location\":\"skill:ab:4/zig\",\"resource\":\"references/io.md\"}" },
         .{ .number = 14, .name = "skill", .arguments = "not json" },

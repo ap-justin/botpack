@@ -11,12 +11,12 @@ import {
 
 export type Made = { id: string; read(home: string, v2: boolean): Promise<string | null> };
 
-// Continues `id` in the profile at `home` with one prompt: the requests fx
+// Continues `id` in the profile at `home` with one prompt: the requests lia
 // sent the model, or null when it could not continue. Without --auto, the
 // fixture's full access runs every tool call unreviewed.
 async function continued(f: Fixture, id: string, home: string, v2: boolean, prompt: string) {
   const mark = f.gateway.requests.length;
-  const run = await f.fx(v2, ["ask", "--json", v2 ? "--resume" : "--resume-id", id, prompt], home);
+  const run = await f.lia(v2, ["ask", "--json", v2 ? "--resume" : "--resume-id", id, prompt], home);
   return run.code === 0 ? f.gateway.requests.slice(mark).map((r: any) => r.body as string) : null;
 }
 
@@ -111,7 +111,7 @@ async function terminal(f: Fixture): Promise<Made> {
 // An open v1 turn with its unfinished reply in recovery.json. v1 logs a turn
 // only when it ends, except that compacting inside a turn logs the turn so
 // far, so the turn runs a tool after a reply long enough to compact, then its
-// next reply stalls on a stream timeout and fx is killed while it probes the
+// next reply stalls on a stream timeout and lia is killed while it probes the
 // connection. (A checkpoint whose turn is not in the log is dropped by the
 // next prompt.) Read back by what the next turn shows the model.
 async function unfinished(f: Fixture): Promise<Made> {
@@ -211,7 +211,7 @@ async function sideFile(f: Fixture): Promise<Made> {
 // v1 reading must show for the comparison to mean something.
 export const KINDS: Record<string, { name: string; make(f: Fixture): Promise<Made>; via: Via; shows: RegExp }> = {
   acp: { name: "ACP client prompt and tool identities", make: acpClient, via: "acp", shows: /CONV_CLIENT_PROMPT.*Read page/ },
-  terminal: { name: "hosted terminal state", make: terminal, via: "ask", shows: /ended when the fx process that started it exited/ },
+  terminal: { name: "hosted terminal state", make: terminal, via: "ask", shows: /ended when the lia process that started it exited/ },
   unfinished: { name: "unfinished reply in recovery.json", make: unfinished, via: "ask", shows: /CONV_PARTIAL_REPLY.*turn_aborted/ },
   side: { name: "tool-result side files and their handles", make: sideFile, via: "ask", shows: /total_bytes.*output_delta.*150001/ },
   midturn: { name: "cut of a compaction inside a turn", make: midTurn, via: "ask", shows: /CONV_LONG.*CONV_STEP_TWO.*CONV_TURN_DONE/ },

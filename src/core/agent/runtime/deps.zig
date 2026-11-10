@@ -43,7 +43,7 @@ pub const TurnProgress = struct {
     /// form, so a crash while they run leaves them in the session (D28).
     running_calls: []const types.ToolCall = &.{},
     /// The text of the message that issued `running_calls`, so a crash also
-    /// leaves what fx already showed (D51).
+    /// leaves what lia already showed (D51).
     running_assistant: ?[]const u8 = null,
     /// The recovery module's record for the send this write goes before,
     /// saved in the same write.
@@ -248,7 +248,7 @@ pub const AgentRuntimeDeps = struct {
     record_usage: ?*const fn (ctx: *anyopaque, usage: types.Usage) anyerror!void = null,
     /// Keeps the conversation's Claude prompt cache warm between requests.
     /// Owned by the conversation's `SessionRuntime`; null where no one waits
-    /// on the conversation, as in `fx ask` and subagents.
+    /// on the conversation, as in `lia ask` and subagents.
     cache_warmer: ?*cache_warmer.Warmer = null,
     /// Saves the turn's prompt images in the session before its first
     /// request is built, so the note naming each saved file is true when
@@ -275,7 +275,7 @@ pub const AgentRuntimeDeps = struct {
     push_context_notice: ?*const fn (ctx: *anyopaque, text: []const u8) anyerror!void = null,
     push_route_recovery_status: *const fn (ctx: *anyopaque, status: types.RouteRecoveryStatus) anyerror!void = discardRouteRecoveryStatus,
     /// A new model request starts. A host that reports the last request's
-    /// recovery, as `fx ask --json` does, forgets the previous request's
+    /// recovery, as `lia ask --json` does, forgets the previous request's
     /// here. Null: the host keeps no per-request report.
     begin_route_recovery_request: ?*const fn (ctx: *anyopaque) void = null,
     /// A turn that can never recover hands the user's prompt back to the

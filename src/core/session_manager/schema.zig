@@ -12,7 +12,7 @@ const std = @import("std");
 /// with a newer `v` makes the session read-only.
 pub const version: u32 = 1;
 
-/// Every kind the manager knows. The manager owns this set; fx content
+/// Every kind the manager knows. The manager owns this set; lia content
 /// lives inside `data` and `value` fields and is never interpreted here.
 pub const Kind = enum {
     session_created,
@@ -99,14 +99,14 @@ pub const Host = enum { app, ask, acp, sdk, child };
 pub const Reason = enum { cancel, failed, closed, crash };
 /// How a child's work item ended (D22). Hosts never write `lost`.
 pub const Outcome = enum { ok, failed, cancelled, interrupted, lost };
-/// `language` is the conversation language fx keeps per session, a JSON
+/// `language` is the conversation language lia keeps per session, a JSON
 /// string such as `"es"` or `"und-Latn"` (D18); the index lists it.
 /// `client_prompt` (a JSON string) and `tool_identities` are an ACP
-/// client's settings (D46). `moved_files` records a session moved off fx's
+/// client's settings (D46). `moved_files` records a session moved off lia's
 /// side folder: its value names the blob that maps old handles to blobs,
 /// and its line lists every moved blob (D47). `compaction_records` names
-/// the blob that maps fx's compactor record names to blobs, and its line
-/// lists the map and the records it adds (D50). `v1_source` is fx's record
+/// the blob that maps lia's compactor record names to blobs, and its line
+/// lists the map and the records it adds (D50). `v1_source` is lia's record
 /// of the v1 session a converted one was copied from (D60).
 pub const SetKey = enum { prefs, title, permissions, usage, workspace, language, client_prompt, tool_identities, moved_files, compaction_records, v1_source };
 
@@ -138,7 +138,7 @@ pub const Body = union(Kind) {
     pub const Turn = struct { turn: u64 };
     pub const Piece = struct {
         turn: u64,
-        /// fx's name for the piece (`steering`, `tool_call`, ...); checked
+        /// lia's name for the piece (`steering`, `tool_call`, ...); checked
         /// by `validItemType`, never interpreted (D17).
         type: []const u8,
         data: []const u8,
@@ -163,7 +163,7 @@ pub const Body = union(Kind) {
             else => &.{},
         };
     }
-    /// `data` is fx's raw JSON about the child or the work (D22).
+    /// `data` is lia's raw JSON about the child or the work (D22).
     pub const WorkItem = struct { child: []const u8, work_id: []const u8, data: ?[]const u8 = null };
     pub const Finished = struct { child: []const u8, work_id: []const u8, outcome: Outcome, data: ?[]const u8 = null };
     pub const Snapshot = struct { covers_seq: u64, state: []const u8, compaction_offset: ?u64 };
@@ -584,7 +584,7 @@ pub const new_id_len = 12;
 pub const blob_hash_len = 64;
 
 /// Pure: an item type is 1 to 32 of `a-z`, `0-9` and `_` (D17). The name is
-/// fx's; the manager checks only its form.
+/// lia's; the manager checks only its form.
 pub fn validItemType(name: []const u8) bool {
     if (name.len == 0 or name.len > max_item_type_len) return false;
     for (name) |c| switch (c) {

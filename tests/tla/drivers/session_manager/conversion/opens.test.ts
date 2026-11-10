@@ -182,7 +182,7 @@ scenario("a crash mid-conversion leaves only leftovers, swept by the next open",
   await requireAccepted(o, "crash");
 });
 
-scenario("fx sessions convert converts what was never opened", async f => {
+scenario("lia sessions convert converts what was never opened", async f => {
   plainReplies(f);
   const id = (await f.v1Ask(["CONV_FIRST"])).session_id;
   const o = observer(f, id);

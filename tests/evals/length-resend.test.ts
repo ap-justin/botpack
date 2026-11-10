@@ -5,7 +5,7 @@
  * A proxy in front of AI Gateway answers the turn's first model request itself
  * with a reply that spent its whole limit on reasoning before a tool call it
  * cut off, the way a model stuck in its reasoning stops. Every other request
- * goes to the real model, so the resend fx sends next, without the cut-off call
+ * goes to the real model, so the resend lia sends next, without the cut-off call
  * and at low effort, has to be accepted and answered by the provider. Run one
  * model with `EVAL_MODEL=<id> bun test length-resend.test.ts`, or every model
  * in `EVAL_MODELS` with `bun run eval:matrix`. It makes billed calls.
@@ -14,7 +14,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EVAL_MODEL, HAS_API_KEY, runFx } from "./eval-helpers";
+import { EVAL_MODEL, HAS_API_KEY, runLia } from "./eval-helpers";
 import { DEFAULT_UPSTREAM } from "./prompt-cache-ab";
 
 const SENTINEL = "cut-call-ran.txt";
@@ -79,30 +79,30 @@ function startCuttingProxy(upstream = DEFAULT_UPSTREAM) {
 
 describe.skipIf(!HAS_API_KEY)(`eval: length-cut resend (${EVAL_MODEL})`, () => {
   test("a reply cut off by its output limit is resent at low effort and answered", async () => {
-    const root = mkdtempSync(join(tmpdir(), "fx-length-resend-"));
+    const root = mkdtempSync(join(tmpdir(), "lia-length-resend-"));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     mkdirSync(home, { recursive: true });
     mkdirSync(workspace, { recursive: true });
     const proxy = startCuttingProxy();
     try {
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--json", "--auto", "--no-save", "--", `Reply with exactly ${ANSWER} and nothing else.`],
         {
           cwd: workspace,
           env: {
             HOME: home,
-            FX_SOUND: "0",
-            FX_MODEL: EVAL_MODEL,
-            FX_AUTO_UPGRADE: "0",
-            FX_SKIP_ONBOARDING: "1",
-            FX_GATEWAY_CHAT_URL: `${proxy.url}/v4/ai/language-model`,
-            FX_GATEWAY_BASE_URL: proxy.url,
+            LIA_SOUND: "0",
+            LIA_MODEL: EVAL_MODEL,
+            LIA_AUTO_UPGRADE: "0",
+            LIA_SKIP_ONBOARDING: "1",
+            LIA_GATEWAY_CHAT_URL: `${proxy.url}/v4/ai/language-model`,
+            LIA_GATEWAY_BASE_URL: proxy.url,
           },
           timeoutMs: 180_000,
         },
       );
-      if (result.code !== 0) throw new Error(`fx exited ${result.code}\n${result.stdout}\n${result.stderr}`);
+      if (result.code !== 0) throw new Error(`lia exited ${result.code}\n${result.stdout}\n${result.stderr}`);
       expect(JSON.parse(result.stdout).final_output).toContain(ANSWER);
       expect(existsSync(join(workspace, SENTINEL))).toBe(false);
 

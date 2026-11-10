@@ -104,7 +104,7 @@ fn fields(alloc: std.mem.Allocator, json: []const FieldJson) ![]fuzzy_match.Fiel
 
 /// `containsIgnoreCase` from `src/core/shared/text_utils.zig`, the scan most
 /// menus run today. Copied rather than imported because that file pulls in
-/// fx's I/O layer; it is the benchmark's baseline, not a reference answer.
+/// lia's I/O layer; it is the benchmark's baseline, not a reference answer.
 fn legacyContains(haystack: []const u8, needle: []const u8) bool {
     if (needle.len == 0) return true;
     if (needle.len > haystack.len) return false;

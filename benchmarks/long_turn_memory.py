@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Bounded Linux RSS measurement of a saved fx turn against a local Gateway fixture.
+"""Bounded Linux RSS measurement of a saved lia turn against a local Gateway fixture.
 
-Only fx is measured. The fixture never retains requests; changing file contents
+Only lia is measured. The fixture never retains requests; changing file contents
 make each read useful.
 Artifacts include RSS samples, stdout/stderr and the private session directory.
 """
@@ -21,7 +21,7 @@ import time
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", default="./zig-out/bin/fx")
+    parser.add_argument("--binary", default="./zig-out/bin/lia")
     parser.add_argument("--output", required=True)
     parser.add_argument("--steps", type=int, default=1000)
     parser.add_argument("--bytes", type=int, default=1024)
@@ -35,11 +35,11 @@ def main():
     root = Path(args.output).resolve()
     root.mkdir(mode=0o700, parents=True, exist_ok=False)
     home, workspace = root / "home", root / "workspace"
-    (home / ".fx").mkdir(parents=True, mode=0o700)
+    (home / ".lia").mkdir(parents=True, mode=0o700)
     workspace.mkdir()
     # Background title generation would consume one fixture response and shift
     # the step accounting, so the fixture profile keeps titles off.
-    (home / ".fx/settings.json").write_text(json.dumps({"provider": "gateway", "model": "openai/gpt-5.5", "max_agent_steps": 0, "session_titles": False}))
+    (home / ".lia/settings.json").write_text(json.dumps({"provider": "gateway", "model": "openai/gpt-5.5", "max_agent_steps": 0, "session_titles": False}))
     count = 0
     request_bytes = 0
 
@@ -78,9 +78,9 @@ def main():
             self.reply(("".join("data: " + json.dumps(e) + "\n\n" for e in events) + "data: [DONE]\n\n").encode(), "text/event-stream")
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("FX_", "OPENAI_", "AI_GATEWAY_", "VERCEL_"))}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("LIA_", "OPENAI_", "AI_GATEWAY_", "VERCEL_"))}
     base_url = f"http://127.0.0.1:{server.server_port}"
-    env.update(HOME=str(home), AI_GATEWAY_API_KEY="fixture-key", FX_GATEWAY_BASE_URL=base_url, FX_TEST_GATEWAY_CHAT_URL=base_url + "/chat", FX_TEST_GATEWAY_MODELS_URL=base_url + "/coding-agent/v1/models", FX_MODEL="openai/gpt-5.5", FX_MAX_AGENT_STEPS="0")
+    env.update(HOME=str(home), AI_GATEWAY_API_KEY="fixture-key", LIA_GATEWAY_BASE_URL=base_url, LIA_TEST_GATEWAY_CHAT_URL=base_url + "/chat", LIA_TEST_GATEWAY_MODELS_URL=base_url + "/coding-agent/v1/models", LIA_MODEL="openai/gpt-5.5", LIA_MAX_AGENT_STEPS="0")
 
     def limits():
         resource.setrlimit(resource.RLIMIT_AS, (args.limit_mib * 1024**2,) * 2)
@@ -106,7 +106,7 @@ def main():
     server.shutdown()
     # What the session kept: its log and blobs, and each step's tool result.
     retained = {"session_bytes": 0, "tool_output_bytes": 0, "tool_steps": 0}
-    for log in (home / ".fx/sessions/v2").glob("*/log.jsonl"):
+    for log in (home / ".lia/sessions/v2").glob("*/log.jsonl"):
         retained["session_bytes"] += sum(path.stat().st_size for path in log.parent.rglob("*") if path.is_file())
         result_count = 0
         output_bytes = 0

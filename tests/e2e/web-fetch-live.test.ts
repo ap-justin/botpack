@@ -11,7 +11,7 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runFx } from "../evals/eval-helpers";
+import { runLia } from "../evals/eval-helpers";
 import { sessionDir } from "./saved-sessions";
 
 const TIMEOUT = 60_000;
@@ -113,13 +113,13 @@ async function startFakeGateway(responses: Response[]) {
 }
 
 function createIsolatedRoot(domains = ["example.com"]) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-web-fetch-live-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-web-fetch-live-")));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".lia"), { recursive: true });
   mkdirSync(workspace, { recursive: true });
   writeFileSync(
-    join(home, ".fx", "settings.json"),
+    join(home, ".lia", "settings.json"),
     JSON.stringify({
       model: OUTER_MODEL,
       permission: {
@@ -138,14 +138,14 @@ function fakeGatewayEnv(
     HOME: root.home,
     AI_GATEWAY_API_KEY: "fake-live-web-fetch-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_AUTO_UPGRADE: "0",
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_MODEL: OUTER_MODEL,
+    LIA_AUTO_UPGRADE: "0",
+    LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+    LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_MODEL: OUTER_MODEL,
   };
 }
 
-describe.skipIf(process.env.FX_WEB_FETCH_LIVE !== "1")("live web_fetch public URL", () => {
+describe.skipIf(process.env.LIA_WEB_FETCH_LIVE !== "1")("live web_fetch public URL", () => {
   // These mutable endpoints are operational probes, not deterministic HTTP
   // framing proof. The transport/framing contract is covered by Zig fixtures.
   for (const probe of [
@@ -162,14 +162,14 @@ describe.skipIf(process.env.FX_WEB_FETCH_LIVE !== "1")("live web_fetch public UR
           outerText(`Final: ${probe.label} endpoint fetched successfully.`),
         ]);
         try {
-          const result = await runFx(
+          const result = await runLia(
             ["ask", "--auto", "--json", "--no-save", `Fetch ${probe.url} exactly once.`],
             {
               cwd: root.workspace,
               env: {
                 ...fakeGatewayEnv(root, gateway),
-                FX_TRACE_LOG: traceLog,
-                FX_TRACE_SCOPES: "tool",
+                LIA_TRACE_LOG: traceLog,
+                LIA_TRACE_SCOPES: "tool",
               },
               timeoutMs: TIMEOUT,
             },
@@ -177,7 +177,7 @@ describe.skipIf(process.env.FX_WEB_FETCH_LIVE !== "1")("live web_fetch public UR
 
           if (result.code !== 0) {
             throw new Error(
-              `fx exited ${result.code}\nstdout: ${result.stdout.slice(-4000)}\nstderr: ${result.stderr.slice(-4000)}`,
+              `lia exited ${result.code}\nstdout: ${result.stdout.slice(-4000)}\nstderr: ${result.stderr.slice(-4000)}`,
             );
           }
           const json = JSON.parse(result.stdout.trim()) as {
@@ -237,7 +237,7 @@ describe.skipIf(process.env.FX_WEB_FETCH_LIVE !== "1")("live web_fetch public UR
         outerText("Final: Example Domain was fetched and cached."),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "--json", "--no-save", "Fetch and then refetch https://example.com/."],
           {
             cwd: root.workspace,
@@ -248,7 +248,7 @@ describe.skipIf(process.env.FX_WEB_FETCH_LIVE !== "1")("live web_fetch public UR
 
         if (result.code !== 0) {
           throw new Error(
-            `fx exited ${result.code}\nstdout: ${result.stdout.slice(-4000)}\nstderr: ${result.stderr.slice(-4000)}`,
+            `lia exited ${result.code}\nstdout: ${result.stdout.slice(-4000)}\nstderr: ${result.stderr.slice(-4000)}`,
           );
         }
         const json = JSON.parse(result.stdout.trim()) as {
@@ -303,7 +303,7 @@ describe.skipIf(process.env.FX_WEB_FETCH_LIVE !== "1")("live web_fetch public UR
         outerText("Final: PDF artifact metadata was recorded."),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "--json", "Fetch the public PDF artifact."],
           {
             cwd: root.workspace,
@@ -314,7 +314,7 @@ describe.skipIf(process.env.FX_WEB_FETCH_LIVE !== "1")("live web_fetch public UR
 
         if (result.code !== 0) {
           throw new Error(
-            `fx exited ${result.code}\nstdout: ${result.stdout.slice(-4000)}\nstderr: ${result.stderr.slice(-4000)}`,
+            `lia exited ${result.code}\nstdout: ${result.stdout.slice(-4000)}\nstderr: ${result.stderr.slice(-4000)}`,
           );
         }
         const json = JSON.parse(result.stdout.trim()) as {
@@ -354,7 +354,7 @@ describe.skipIf(process.env.FX_WEB_FETCH_LIVE !== "1")("live web_fetch public UR
         expect(sessionLog).not.toContain("%PDF-");
         expect(sessionLog).not.toContain(artifactBase64Prefix);
         expect(sessionLog).not.toContain("Store the file and summarize safe metadata only.");
-        const detail = await runFx(["session", "--id", json.session_id, "--json"], {
+        const detail = await runLia(["session", "--id", json.session_id, "--json"], {
           cwd: root.workspace,
           env: fakeGatewayEnv(root, gateway),
           timeoutMs: TIMEOUT,

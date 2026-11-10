@@ -2,7 +2,7 @@ pub const ModelPromptOverlayFn = *const fn (model: []const u8) ?[]const u8;
 
 pub const Policy = struct {
     system_prompt: []const u8,
-    /// Variant for hosts that present fx inside another application instead
+    /// Variant for hosts that present lia inside another application instead
     /// of a terminal. Falls back to `system_prompt` when absent.
     embedded_system_prompt: ?[]const u8 = null,
     model_prompt_overlay_fn: ?ModelPromptOverlayFn = null,

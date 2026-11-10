@@ -1,9 +1,9 @@
-//! How fx-compactor asks a model for the summary: the conversation's own
+//! How lia-compactor asks a model for the summary: the conversation's own
 //! model, with the least reasoning it accepts. If that call fails, refuses,
 //! or returns nothing, the gateway tries once more with another model family.
 //! A request right after the conversation instead keeps the agent's own
 //! settings, reasoning too: the provider reuses its cache only for the same
-//! settings. The caller of fx-compactor hands in the `ModelCaller` that
+//! settings. The caller of lia-compactor hands in the `ModelCaller` that
 //! reaches them.
 
 const std = @import("std");

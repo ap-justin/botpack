@@ -4,8 +4,8 @@
 //! `smith.slice` as a little-endian u32 length and then that many bytes. A
 //! seed written as a plain string loses its first four bytes to the length,
 //! so `"one"` replays as an empty slice. `build.zig` makes this file the
-//! `fuzz_seed` module for fx's tests. The session manager imports nothing
-//! from fx, so its targets keep their seeds in `tests/fuzz/corpus/`.
+//! `fuzz_seed` module for lia's tests. The session manager imports nothing
+//! from lia, so its targets keep their seeds in `tests/fuzz/corpus/`.
 const std = @import("std");
 
 /// Encodes each of `seeds`, a tuple of byte strings, as the input that makes

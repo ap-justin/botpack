@@ -32,33 +32,33 @@
     { "id": "E29", "rules": ["R6", "R2"], "query": " - / ", "fields": [{ "text": "openai", "kind": "name" }], "expect": { "tier": "none", "field": null } },
     { "id": "E30", "rules": ["R4"], "query": "gpt - 5", "fields": [{ "text": "openai/gpt-5", "kind": "name" }], "expect": { "tier": "words", "field": 0 } },
     { "id": "E31", "rules": ["R8"], "query": "GPT", "fields": [{ "text": "openai/gpt-5", "kind": "name" }], "expect": { "tier": "substring", "field": 0 } },
-    { "id": "E32", "rules": ["R4", "R7"], "query": "fx commit", "fields": [
-      { "text": "fx-commit", "kind": "name" }, { "text": "Land vercel-labs/fx work with a signed commit", "kind": "text" },
-      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/fx-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "words", "field": 0 } },
+    { "id": "E32", "rules": ["R4", "R7"], "query": "lia commit", "fields": [
+      { "text": "lia-commit", "kind": "name" }, { "text": "Land ap-justin/lia work with a signed commit", "kind": "text" },
+      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/lia-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "words", "field": 0 } },
     { "id": "E33", "rules": ["R4"], "query": "fxcommit", "fields": [
-      { "text": "fx-commit", "kind": "name" }, { "text": "Land vercel-labs/fx work with a signed commit", "kind": "text" },
-      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/fx-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "words", "field": 0 } },
+      { "text": "lia-commit", "kind": "name" }, { "text": "Land ap-justin/lia work with a signed commit", "kind": "text" },
+      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/lia-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "words", "field": 0 } },
     { "id": "E34", "rules": ["R4"], "query": "fxc", "fields": [
-      { "text": "fx-commit", "kind": "name" }, { "text": "Land vercel-labs/fx work with a signed commit", "kind": "text" },
-      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/fx-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "words", "field": 0 } },
+      { "text": "lia-commit", "kind": "name" }, { "text": "Land ap-justin/lia work with a signed commit", "kind": "text" },
+      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/lia-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "words", "field": 0 } },
     { "id": "E35", "rules": ["R3"], "query": "signed", "fields": [
-      { "text": "fx-commit", "kind": "name" }, { "text": "Land vercel-labs/fx work with a signed commit", "kind": "text" },
-      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/fx-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "substring", "field": 1 } },
+      { "text": "lia-commit", "kind": "name" }, { "text": "Land ap-justin/lia work with a signed commit", "kind": "text" },
+      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/lia-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "substring", "field": 1 } },
     { "id": "E36", "rules": ["R4", "R7"], "query": "commit signed", "fields": [
-      { "text": "fx-commit", "kind": "name" }, { "text": "Land vercel-labs/fx work with a signed commit", "kind": "text" },
-      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/fx-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "words", "field": 0 } },
+      { "text": "lia-commit", "kind": "name" }, { "text": "Land ap-justin/lia work with a signed commit", "kind": "text" },
+      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/lia-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "words", "field": 0 } },
     { "id": "E37", "rules": ["R3", "R7"], "query": "codex", "fields": [
-      { "text": "fx-commit", "kind": "name" }, { "text": "Land vercel-labs/fx work with a signed commit", "kind": "text" },
-      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/fx-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "substring", "field": 2 } },
+      { "text": "lia-commit", "kind": "name" }, { "text": "Land ap-justin/lia work with a signed commit", "kind": "text" },
+      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/lia-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "substring", "field": 2 } },
     { "id": "E38", "rules": ["R5"], "query": "sgnd", "fields": [
-      { "text": "fx-commit", "kind": "name" }, { "text": "Land vercel-labs/fx work with a signed commit", "kind": "text" },
-      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/fx-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "none", "field": null }, "note": "text fields never match fuzzily" },
-    { "id": "E39", "rules": ["R3"], "query": "fx-commit", "fields": [
-      { "text": "fx-commit", "kind": "name" }, { "text": "Land vercel-labs/fx work with a signed commit", "kind": "text" },
-      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/fx-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "exact", "field": 0 } },
-    { "id": "E40", "rules": ["R3"], "query": "fx-c", "fields": [
-      { "text": "fx-commit", "kind": "name" }, { "text": "Land vercel-labs/fx work with a signed commit", "kind": "text" },
-      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/fx-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "prefix", "field": 0 } },
+      { "text": "lia-commit", "kind": "name" }, { "text": "Land ap-justin/lia work with a signed commit", "kind": "text" },
+      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/lia-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "none", "field": null }, "note": "text fields never match fuzzily" },
+    { "id": "E39", "rules": ["R3"], "query": "lia-commit", "fields": [
+      { "text": "lia-commit", "kind": "name" }, { "text": "Land ap-justin/lia work with a signed commit", "kind": "text" },
+      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/lia-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "exact", "field": 0 } },
+    { "id": "E40", "rules": ["R3"], "query": "lia-c", "fields": [
+      { "text": "lia-commit", "kind": "name" }, { "text": "Land ap-justin/lia work with a signed commit", "kind": "text" },
+      { "text": "global .codex", "kind": "text" }, { "text": "/Users/example/.codex/skills/lia-commit/SKILL.md", "kind": "text" }], "expect": { "tier": "prefix", "field": 0 } },
     { "id": "E41", "rules": ["R5"], "query": "mdl", "fields": [{ "text": "/model", "kind": "name" }], "expect": { "tier": "fuzzy", "field": 0 } },
     { "id": "E42", "rules": ["R3", "D8"], "query": "/Model", "fields": [{ "text": "/model", "kind": "name" }], "expect": { "tier": "exact", "field": 0 } },
     { "id": "E43", "rules": ["R3"], "query": "/m", "fields": [{ "text": "/model", "kind": "name" }], "expect": { "tier": "prefix", "field": 0 } },
@@ -66,27 +66,27 @@
     { "id": "E45", "rules": ["R3", "R7"], "query": "/im", "fields": [{ "text": "/image", "kind": "name" }, { "text": "/img", "kind": "name" }], "expect": { "tier": "prefix", "field": 0 } },
     { "id": "E46", "rules": ["R3"], "query": "/img", "fields": [{ "text": "/image", "kind": "name" }, { "text": "/img", "kind": "name" }], "expect": { "tier": "exact", "field": 1 } },
     { "id": "E47", "rules": ["R4"], "query": "renderer fix", "fields": [
-      { "text": "Fix renderer", "kind": "name" }, { "text": "/Users/example/projects/fx", "kind": "text" }, { "text": "inspect footer state", "kind": "text" }], "expect": { "tier": "words", "field": 0 } },
-    { "id": "E48", "rules": ["R3", "R7"], "query": "fx", "fields": [
-      { "text": "Fix renderer", "kind": "name" }, { "text": "/Users/example/projects/fx", "kind": "text" }, { "text": "inspect footer state", "kind": "text" }], "expect": { "tier": "substring", "field": 1 } },
+      { "text": "Fix renderer", "kind": "name" }, { "text": "/Users/example/projects/lia", "kind": "text" }, { "text": "inspect footer state", "kind": "text" }], "expect": { "tier": "words", "field": 0 } },
+    { "id": "E48", "rules": ["R3", "R7"], "query": "lia", "fields": [
+      { "text": "Fix renderer", "kind": "name" }, { "text": "/Users/example/projects/lia", "kind": "text" }, { "text": "inspect footer state", "kind": "text" }], "expect": { "tier": "substring", "field": 1 } },
     { "id": "E49", "rules": ["R3"], "query": "footer", "fields": [
-      { "text": "Fix renderer", "kind": "name" }, { "text": "/Users/example/projects/fx", "kind": "text" }, { "text": "inspect footer state", "kind": "text" }], "expect": { "tier": "substring", "field": 2 } },
+      { "text": "Fix renderer", "kind": "name" }, { "text": "/Users/example/projects/lia", "kind": "text" }, { "text": "inspect footer state", "kind": "text" }], "expect": { "tier": "substring", "field": 2 } },
     { "id": "E50", "rules": ["R5"], "query": "fr", "fields": [
-      { "text": "Fix renderer", "kind": "name" }, { "text": "/Users/example/projects/fx", "kind": "text" }, { "text": "inspect footer state", "kind": "text" }], "expect": { "tier": "fuzzy", "field": 0 } },
+      { "text": "Fix renderer", "kind": "name" }, { "text": "/Users/example/projects/lia", "kind": "text" }, { "text": "inspect footer state", "kind": "text" }], "expect": { "tier": "fuzzy", "field": 0 } },
     { "id": "E51", "rules": ["R4", "R7"], "query": "insp state", "fields": [
-      { "text": "Fix renderer", "kind": "name" }, { "text": "/Users/example/projects/fx", "kind": "text" }, { "text": "inspect footer state", "kind": "text" }], "expect": { "tier": "words", "field": 2 } },
+      { "text": "Fix renderer", "kind": "name" }, { "text": "/Users/example/projects/lia", "kind": "text" }, { "text": "inspect footer state", "kind": "text" }], "expect": { "tier": "words", "field": 2 } },
     { "id": "E52", "rules": ["R4"], "query": "createissue", "fields": [{ "text": "create_issue", "kind": "name" }, { "text": "Create an issue in a project", "kind": "text" }], "expect": { "tier": "words", "field": 0 } },
     { "id": "E53", "rules": ["R4"], "query": "create issue", "fields": [{ "text": "create_issue", "kind": "name" }, { "text": "Create an issue in a project", "kind": "text" }], "expect": { "tier": "words", "field": 0 } },
     { "id": "E54", "rules": ["R5"], "query": "ci", "fields": [{ "text": "create_issue", "kind": "name" }, { "text": "Create an issue in a project", "kind": "text" }], "expect": { "tier": "fuzzy", "field": 0 } },
     { "id": "E55", "rules": ["R5"], "query": "scrollbck", "fields": [
       { "text": "Startup scrollback", "kind": "name" }, { "text": "startup_scrollback", "kind": "name" },
-      { "text": "Show earlier conversation when fx starts", "kind": "text" }, { "text": "on", "kind": "text" }], "expect": { "tier": "fuzzy", "field": 0 } },
+      { "text": "Show earlier conversation when lia starts", "kind": "text" }, { "text": "on", "kind": "text" }], "expect": { "tier": "fuzzy", "field": 0 } },
     { "id": "E56", "rules": ["R3", "R7"], "query": "on", "fields": [
       { "text": "Startup scrollback", "kind": "name" }, { "text": "startup_scrollback", "kind": "name" },
-      { "text": "Show earlier conversation when fx starts", "kind": "text" }, { "text": "on", "kind": "text" }], "expect": { "tier": "substring", "field": 2 }, "note": "a text field never gives exact" },
+      { "text": "Show earlier conversation when lia starts", "kind": "text" }, { "text": "on", "kind": "text" }], "expect": { "tier": "substring", "field": 2 }, "note": "a text field never gives exact" },
     { "id": "E57", "rules": ["R3"], "query": "startup_scroll", "fields": [
       { "text": "Startup scrollback", "kind": "name" }, { "text": "startup_scrollback", "kind": "name" },
-      { "text": "Show earlier conversation when fx starts", "kind": "text" }, { "text": "on", "kind": "text" }], "expect": { "tier": "prefix", "field": 1 } },
+      { "text": "Show earlier conversation when lia starts", "kind": "text" }, { "text": "on", "kind": "text" }], "expect": { "tier": "prefix", "field": 1 } },
     { "id": "E58", "rules": ["R3", "R8"], "query": "acme corp", "fields": [{ "text": "Acme Corp", "kind": "name" }, { "text": "acme-corp", "kind": "name" }], "expect": { "tier": "exact", "field": 0 } },
     { "id": "E59", "rules": ["R4"], "query": "acme corp", "fields": [{ "text": "acme-corp", "kind": "name" }], "expect": { "tier": "words", "field": 0 } },
     { "id": "E60", "rules": ["R3"], "query": "hi", "fields": [{ "text": "xhigh", "kind": "name" }], "expect": { "tier": "substring", "field": 0 } },
@@ -115,8 +115,8 @@
     { "id": "E83", "rules": ["R6", "R3"], "query": "- /", "fields": [{ "text": "a - / b", "kind": "name" }], "expect": { "tier": "substring", "field": 0 } },
     { "id": "E84", "rules": ["R6", "R4"], "query": "a -", "fields": [{ "text": "a", "kind": "name" }], "expect": { "tier": "words", "field": 0 }, "note": "a word of only punctuation is ignored when another word has letters" },
     { "id": "E85", "rules": ["R6", "R3"], "query": "--", "fields": [{ "text": "x", "kind": "name" }, { "text": "use -- to stop", "kind": "text" }], "expect": { "tier": "substring", "field": 1 } },
-    { "id": "E86", "rules": ["R12", "R4"], "query": "commit                                                        fx", "fields": [{ "text": "fx-commit", "kind": "name" } ], "expect": { "tier": "words", "field": 0}, "note": "64 characters, the limit, still match by words" },
-    { "id": "E87", "rules": ["R12"], "query": "commit                                                         fx", "fields": [{ "text": "fx-commit", "kind": "name" } ], "expect": { "tier": "none", "field": null}, "note": "65 characters match only as typed, and no field holds the query" },
+    { "id": "E86", "rules": ["R12", "R4"], "query": "commit                                                        lia", "fields": [{ "text": "lia-commit", "kind": "name" } ], "expect": { "tier": "words", "field": 0}, "note": "64 characters, the limit, still match by words" },
+    { "id": "E87", "rules": ["R12"], "query": "commit                                                         lia", "fields": [{ "text": "lia-commit", "kind": "name" } ], "expect": { "tier": "none", "field": null}, "note": "65 characters match only as typed, and no field holds the query" },
     { "id": "E88", "rules": ["R12", "R3"], "query": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "fields": [{ "text": "short", "kind": "name" }, { "text": "yxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxz", "kind": "text" } ], "expect": { "tier": "substring", "field": 1}, "note": "a long query still matches where a field holds it as typed" },
     { "id": "E89", "rules": ["R12", "R3"], "query": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fields": [{ "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "kind": "name" } ], "expect": { "tier": "exact", "field": 0}, "note": "a long query still matches a name that equals it" },
     { "id": "E90", "rules": ["R12", "R4"], "query": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "fields": [{ "text": "a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-a-", "kind": "name" } ], "expect": { "tier": "none", "field": null}, "note": "over the limit, the run across separators no longer counts" },

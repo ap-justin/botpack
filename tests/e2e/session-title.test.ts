@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FX_BIN, runFx } from "../evals/eval-helpers";
+import { LIA_BIN, runLia } from "../evals/eval-helpers";
 import { logLines, rootSessionIds, storeRoot } from "./saved-sessions";
 import {
   fakeGatewayFinalText,
@@ -20,12 +20,12 @@ type FixtureRoot = {
 };
 
 function createFixtureRoot(label: string, settings: string = "{}"): FixtureRoot {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), `fx-session-title-${label}-`)));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), `lia-session-title-${label}-`)));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".lia"), { recursive: true });
   mkdirSync(workspace, { recursive: true });
-  writeFileSync(join(home, ".fx", "settings.json"), settings);
+  writeFileSync(join(home, ".lia", "settings.json"), settings);
   return { root, home, workspace: realpathSync(workspace) };
 }
 
@@ -41,18 +41,18 @@ function baseEnv(root: FixtureRoot, gateway: { baseUrl: string; chatUrl: string 
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     HOME: root.home,
     AI_GATEWAY_API_KEY: "synthetic-title",
-    FX_DISABLE_KEYCHAIN: "1",
-    FX_E2E_DISABLE_DOTENV: "1",
-    FX_AUTO_UPGRADE: "0",
-    FX_SOUND: "0",
-    FX_TEST_SKIP_ONBOARDING: "1",
-    FX_MODEL: MAIN_MODEL,
-    FX_PERMISSION_MODE: "full-access",
-    FX_MAX_AGENT_STEPS: "2",
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+    LIA_DISABLE_KEYCHAIN: "1",
+    LIA_E2E_DISABLE_DOTENV: "1",
+    LIA_AUTO_UPGRADE: "0",
+    LIA_SOUND: "0",
+    LIA_TEST_SKIP_ONBOARDING: "1",
+    LIA_MODEL: MAIN_MODEL,
+    LIA_PERMISSION_MODE: "full-access",
+    LIA_MAX_AGENT_STEPS: "2",
+    LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+    LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
   };
 }
 
@@ -69,11 +69,11 @@ function titleRequests(gateway: ReturnType<typeof startTitleAwareGateway>) {
   return gateway.titleRequests;
 }
 
-test("fx ask generates a model title for a fresh session", async () => {
+test("lia ask generates a model title for a fresh session", async () => {
   const root = createFixtureRoot("ask");
   const gateway = startTitleAwareGateway();
   try {
-    const result = await runFx(["ask", "refactor the renderer loop to fix the crash"], {
+    const result = await runLia(["ask", "refactor the renderer loop to fix the crash"], {
       cwd: root.workspace,
       env: baseEnv(root, gateway),
       timeoutMs: 30_000,
@@ -88,7 +88,7 @@ test("fx ask generates a model title for a fresh session", async () => {
 
     expect(sessionTitles(root)).toContain(GENERATED_TITLE);
 
-    const list = await runFx(["sessions", "--json"], {
+    const list = await runLia(["sessions", "--json"], {
       cwd: root.workspace,
       env: baseEnv(root, gateway),
       timeoutMs: 15_000,
@@ -100,11 +100,11 @@ test("fx ask generates a model title for a fresh session", async () => {
   }
 });
 
-test("fx ask keeps the derived title when session_titles is off", async () => {
+test("lia ask keeps the derived title when session_titles is off", async () => {
   const root = createFixtureRoot("disabled", JSON.stringify({ session_titles: false }));
   const gateway = startTitleAwareGateway();
   try {
-    const result = await runFx(["ask", "refactor the renderer loop to fix the crash"], {
+    const result = await runLia(["ask", "refactor the renderer loop to fix the crash"], {
       cwd: root.workspace,
       env: baseEnv(root, gateway),
       timeoutMs: 30_000,
@@ -118,14 +118,14 @@ test("fx ask keeps the derived title when session_titles is off", async () => {
   }
 });
 
-test("fx ask keeps the derived title when the title model output is unusable", async () => {
+test("lia ask keeps the derived title when the title model output is unusable", async () => {
   const root = createFixtureRoot("unusable");
   const gateway = startDynamicFakeGateway(_raw => fakeGatewayFinalText("MAIN_ANSWER_OK"), {
     models: [{ id: MAIN_MODEL, type: "language", tags: ["tool-use"] }],
     titleResponses: [fakeGatewayFinalText("\n  \n")],
   });
   try {
-    const result = await runFx(["ask", "refactor the renderer loop to fix the crash"], {
+    const result = await runLia(["ask", "refactor the renderer loop to fix the crash"], {
       cwd: root.workspace,
       env: baseEnv(root, gateway),
       timeoutMs: 30_000,
@@ -141,7 +141,7 @@ test("fx ask keeps the derived title when the title model output is unusable", a
   }
 });
 
-test("fx ask exits soon after its answer while the title request never answers", async () => {
+test("lia ask exits soon after its answer while the title request never answers", async () => {
   const root = createFixtureRoot("title-hang");
   let titleArrived = false;
   const gateway = startDynamicFakeGateway(_raw => fakeGatewayFinalText("MAIN_ANSWER_OK"), {
@@ -153,7 +153,7 @@ test("fx ask exits soon after its answer while the title request never answers",
   });
   try {
     const started = Date.now();
-    const result = await runFx(["ask", "refactor the renderer loop to fix the crash"], {
+    const result = await runLia(["ask", "refactor the renderer loop to fix the crash"], {
       cwd: root.workspace,
       env: baseEnv(root, gateway),
       timeoutMs: 30_000,
@@ -162,7 +162,7 @@ test("fx ask exits soon after its answer while the title request never answers",
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("MAIN_ANSWER_OK");
     expect(titleArrived).toBe(true);
-    // The title call's own deadline is 15 s; fx gives it a short grace after
+    // The title call's own deadline is 15 s; lia gives it a short grace after
     // the answer and then leaves.
     expect(elapsedMs).toBeLessThan(8_000);
 
@@ -170,7 +170,7 @@ test("fx ask exits soon after its answer while the title request never answers",
     const titles = sessionTitles(root);
     expect(titles).toHaveLength(1);
     expect(titles[0]).toContain("refactor the renderer loop");
-    const list = await runFx(["sessions", "--json"], {
+    const list = await runLia(["sessions", "--json"], {
       cwd: root.workspace,
       env: baseEnv(root, gateway),
       timeoutMs: 15_000,
@@ -183,14 +183,14 @@ test("fx ask exits soon after its answer while the title request never answers",
   }
 }, 45_000);
 
-test("fx ask keeps a generated title that arrives soon after its answer", async () => {
+test("lia ask keeps a generated title that arrives soon after its answer", async () => {
   const root = createFixtureRoot("title-late");
   const gateway = startDynamicFakeGateway(_raw => fakeGatewayFinalText("MAIN_ANSWER_OK"), {
     models: [{ id: MAIN_MODEL, type: "language", tags: ["tool-use"] }],
     titleResponses: [() => Bun.sleep(1_000).then(() => fakeGatewayFinalText(GENERATED_TITLE))],
   });
   try {
-    const result = await runFx(["ask", "refactor the renderer loop to fix the crash"], {
+    const result = await runLia(["ask", "refactor the renderer loop to fix the crash"], {
       cwd: root.workspace,
       env: baseEnv(root, gateway),
       timeoutMs: 30_000,
@@ -204,7 +204,7 @@ test("fx ask keeps a generated title that arrives soon after its answer", async 
   }
 }, 45_000);
 
-test("fx ask exits promptly on SIGINT while its title request never answers", async () => {
+test("lia ask exits promptly on SIGINT while its title request never answers", async () => {
   const root = createFixtureRoot("interrupt");
   let chatArrived!: () => void;
   let titleArrived!: () => void;
@@ -221,7 +221,7 @@ test("fx ask exits promptly on SIGINT while its title request never answers", as
       return new Promise<Response>(() => {});
     }],
   });
-  const child = Bun.spawn([FX_BIN, "ask", "refactor the renderer loop to fix the crash"], {
+  const child = Bun.spawn([LIA_BIN, "ask", "refactor the renderer loop to fix the crash"], {
     cwd: root.workspace,
     env: baseEnv(root, gateway),
     stdout: "pipe",

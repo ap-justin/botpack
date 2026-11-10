@@ -2,8 +2,8 @@
 \* Trace wrapper for SignIn.tla. trace.ts generates TraceObs from a real
 \* sign-in against the harness's OAuth fake (tests/tla/drivers/mcp_host/). Logins
 \* are numbered in the order started; a state is the number of the login
-\* whose authorization URL carried it, or 0 for one fx never made.
-\*   login {}                  `fx mcp login --no-browser NAME` or `/mcp login NAME`
+\* whose authorization URL carried it, or 0 for one lia never made.
+\*   login {}                  `lia mcp login --no-browser NAME` or `/mcp login NAME`
 \*   authorize {login}         the authorization URL was printed
 \*   probe {login, result}     the harness asked the login's port for an icon:
 \*                             "open" (a 404 came back), "closed" (refused)

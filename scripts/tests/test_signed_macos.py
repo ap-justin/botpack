@@ -27,7 +27,7 @@ class SignedMacosComparisonTests(unittest.TestCase):
             control, candidate, output = root / "control", root / "candidate", root / "output"
             control.write_bytes(fixture(32))
             candidate.write_bytes(fixture(16))
-            details = "Identifier=com.vercel.fx TeamIdentifier=JW6Y669B67 flags=0x10000(runtime) Timestamp=fixture Page size=4096 Page size=16384"
+            details = "Identifier=com.vercel.lia TeamIdentifier=JW6Y669B67 flags=0x10000(runtime) Timestamp=fixture Page size=4096 Page size=16384"
             with mock.patch("sys.argv", ["compare_signed_macos", "--control", str(control), "--candidate", str(candidate), "--output", str(output), "--source-sha", "0" * 40]), \
                  mock.patch("scripts.compare_signed_macos.subprocess.run", return_value=mock.Mock(stderr=details)), \
                  mock.patch("scripts.compare_signed_macos.subprocess.check_output", return_value="fixture\n"), \

@@ -10,9 +10,9 @@ const max_prompt_bytes: usize = 4 * 1024;
 const guidance =
     "Configured MCP servers visible to this model turn are listed below.\n" ++
     "A listed server is not a reason to use MCP. Use capability_search only when the task clearly needs a capability not already available locally. Pass the task and an optional exact server name. Call tools advertised after search directly. Use mcp_select_tool when a relevant result is not yet callable. Use returned identities and refine the query when needed.\n";
-/// `fx mcp call` (`src/core/mcp_host/mcp_call_client.zig`), where it works.
+/// `lia mcp call` (`src/core/mcp_host/mcp_call_client.zig`), where it works.
 const file_guidance = if (mcp_call_capability.supported)
-    "When a tool's result would be large or needs filtering, run it from a shell command instead: fx mcp call TOOL_NAME '<JSON arguments>' > FILE. Only what the command prints returns to you.\n"
+    "When a tool's result would be large or needs filtering, run it from a shell command instead: lia mcp call TOOL_NAME '<JSON arguments>' > FILE. Only what the command prints returns to you.\n"
 else
     "";
 const header = guidance ++ file_guidance ++ "<mcp_servers>\n";

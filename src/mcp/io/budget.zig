@@ -18,7 +18,7 @@
 //!
 //! A large message's buffer is kept for the next one: macOS keeps a freed
 //! 16 MiB block resident instead of reusing it, so copying each message into
-//! a new one grew fx by every message a server sent.
+//! a new one grew lia by every message a server sent.
 
 const std = @import("std");
 const Io = std.Io;

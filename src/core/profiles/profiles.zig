@@ -1,10 +1,10 @@
 //! Agent profiles: named, saved settings for what an agent may do. Main runs
-//! in one profile, `main` unless `fx --profile` names another, and each
+//! in one profile, `main` unless `lia --profile` names another, and each
 //! subagent starts in the profile main names for it, `main` by default.
 //!
 //! A profile is a folder, `<name>/profile.json` with an optional
-//! `<name>/prompt.md`. A name resolves from the user's `~/.fx/agents/` first,
-//! then the repository's `.fx/agents/`, then fx's own `main` and `agent`.
+//! `<name>/prompt.md`. A name resolves from the user's `~/.lia/agents/` first,
+//! then the repository's `.lia/agents/`, then lia's own `main` and `agent`.
 //! A repository's profile never sets the permission mode, so a cloned
 //! repository cannot grant itself access, and its files never resolve
 //! outside the repository, so it cannot read the user's other files.
@@ -41,7 +41,7 @@ pub const IgnoredReason = enum {
     project_cannot_set_permissions,
 };
 
-/// A key a profile set that fx did not apply.
+/// A key a profile set that lia did not apply.
 pub const Ignored = struct {
     key: []const u8,
     reason: IgnoredReason,
@@ -56,7 +56,7 @@ pub const Profile = struct {
     effort: ?types.ReasoningEffort = null,
     /// Null means the agent runs under its parent's mode.
     permission_mode: ?types.PermissionMode = null,
-    /// Tool names. `*` means every tool fx has and `!name` removes one.
+    /// Tool names. `*` means every tool lia has and `!name` removes one.
     /// Set, it decides the agent's tools, even ones its parent lacks;
     /// null, the agent has its parent's.
     tools: ?[]const []const u8 = null,
@@ -80,15 +80,15 @@ pub const LoadError = error{ OutOfMemory, InvalidProfile, ProfileNotFound, ReadF
 
 /// Where profiles are saved. Either may be absent.
 pub const Roots = struct {
-    /// `~/.fx/agents`.
+    /// `~/.lia/agents`.
     home: ?[]const u8 = null,
-    /// `<workspace>/.fx/agents`.
+    /// `<workspace>/.lia/agents`.
     project: ?[]const u8 = null,
     /// The workspace itself, which a repository's profile files must stay
     /// inside. Without it they must stay inside `project`.
     repository: ?[]const u8 = null,
 
-    /// Builds both roots from the fx home and the workspace. Caller owns the
+    /// Builds both roots from the lia home and the workspace. Caller owns the
     /// result through `arena`.
     pub fn init(arena: Allocator, home: ?[]const u8, workspace_root: ?[]const u8) !Roots {
         return .{
@@ -113,12 +113,12 @@ pub const Roots = struct {
 };
 
 /// The profile an agent runs in, with the memory it was loaded into. Starts as
-/// fx's `main`.
+/// lia's `main`.
 pub const Held = struct {
     arena: ?std.heap.ArenaAllocator = null,
     profile: Profile = builtin(main_name).?,
     /// The system prompt with the profile's prompt applied, or null to use
-    /// fx's own.
+    /// lia's own.
     system_prompt: ?[]const u8 = null,
 
     /// Replaces the current profile with `name` from `roots`, applying its
@@ -168,13 +168,13 @@ pub fn validName(name: []const u8) bool {
     return true;
 }
 
-/// fx's own profiles: `main` and `agent`. Neither sets tools, MCP servers,
+/// lia's own profiles: `main` and `agent`. Neither sets tools, MCP servers,
 /// or a mode, so an agent in either is a copy of the one that started it,
-/// and an instance in `main` has every tool fx has.
+/// and an instance in `main` has every tool lia has.
 pub fn builtin(name: []const u8) ?Profile {
     if (std.mem.eql(u8, name, main_name)) return .{
         .name = main_name,
-        .description = "fx itself, with every tool",
+        .description = "lia itself, with every tool",
         .source = .builtin,
     };
     if (std.mem.eql(u8, name, agent_name)) return .{
@@ -285,7 +285,7 @@ pub fn systemPrompt(arena: Allocator, profile: *const Profile, base: []const u8)
 }
 
 /// Loads the profile named `name`: the user's own, then the repository's,
-/// then fx's. `main` is always fx's own. On failure, `failure` holds a message
+/// then lia's. `main` is always lia's own. On failure, `failure` holds a message
 /// for the user. The result belongs to `arena`.
 pub fn load(arena: Allocator, roots: Roots, name: []const u8, failure: *?[]const u8) LoadError!Profile {
     if (!validName(name)) return fail(arena, failure, "profile name '{s}' must use lowercase letters, digits, '-', or '_'", .{name});
@@ -302,7 +302,7 @@ pub fn load(arena: Allocator, roots: Roots, name: []const u8, failure: *?[]const
 }
 
 /// Every profile main can pick, by name, with the user's own over the
-/// repository's over fx's. A profile that fails to load is left out. The
+/// repository's over lia's. A profile that fails to load is left out. The
 /// result belongs to `arena` and is sorted by name.
 pub fn list(arena: Allocator, roots: Roots) ![]Entry {
     var entries: std.ArrayList(Entry) = .empty;
@@ -393,7 +393,7 @@ fn readFailure(arena: Allocator, err: anyerror, max_bytes: usize) Allocator.Erro
             "it is larger than the 256 KiB a profile file may hold"
         else
             "it is larger than the 64 KiB a profile file may hold",
-        error.AccessDenied, error.PermissionDenied => "fx isn't allowed to read it",
+        error.AccessDenied, error.PermissionDenied => "lia isn't allowed to read it",
         error.IsDir => "it is a folder, not a file",
         error.NotRegularFile => "it isn't a regular file",
         error.OutsideRepository => "it links outside the repository, and a repository's profile may read only its own files",
@@ -441,7 +441,7 @@ fn fuzzProfileParse(_: void, smith: *std.testing.Smith) anyerror!void {
 
 /// Reads the profile file at `path`, up to `max_bytes`, into `arena`. It
 /// reads only a regular file, so a link to a terminal, a pipe, or a device
-/// can neither hang fx nor feed it. With `within`, the file's real path must
+/// can neither hang lia nor feed it. With `within`, the file's real path must
 /// lie inside that folder, so a link can't hand a repository's profile a
 /// file from elsewhere on the machine.
 fn readFile(arena: Allocator, path: []const u8, max_bytes: usize, within: ?[]const u8) ![]u8 {
@@ -488,12 +488,12 @@ test "a repository's profile reads only files inside the repository" {
     try writeTestFile(tmp.dir, "repo/prompts/review.md", "Review only.");
     const outside_secret = try io_mod.dirRealpathAlloc(arena, tmp.dir, "outside/secret.txt");
     const inside_prompt = try io_mod.dirRealpathAlloc(arena, tmp.dir, "repo/prompts/review.md");
-    try writeTestProfile(tmp.dir, "repo/.fx/agents/evil", "{\"description\": \"Evil\"}");
-    try linkTestFile(tmp.dir, outside_secret, "repo/.fx/agents/evil/prompt.md");
-    try writeTestProfile(tmp.dir, "repo/.fx/agents/shared", "{\"description\": \"Shared prompt\"}");
-    try linkTestFile(tmp.dir, inside_prompt, "repo/.fx/agents/shared/prompt.md");
+    try writeTestProfile(tmp.dir, "repo/.lia/agents/evil", "{\"description\": \"Evil\"}");
+    try linkTestFile(tmp.dir, outside_secret, "repo/.lia/agents/evil/prompt.md");
+    try writeTestProfile(tmp.dir, "repo/.lia/agents/shared", "{\"description\": \"Shared prompt\"}");
+    try linkTestFile(tmp.dir, inside_prompt, "repo/.lia/agents/shared/prompt.md");
     try writeTestFile(tmp.dir, "outside/settings/profile.json", "{\"description\": \"Elsewhere\"}");
-    try linkTestFile(tmp.dir, try io_mod.dirRealpathAlloc(arena, tmp.dir, "outside/settings/profile.json"), "repo/.fx/agents/far/profile.json");
+    try linkTestFile(tmp.dir, try io_mod.dirRealpathAlloc(arena, tmp.dir, "outside/settings/profile.json"), "repo/.lia/agents/far/profile.json");
     const roots = try Roots.init(arena, null, try io_mod.dirRealpathAlloc(arena, tmp.dir, "repo"));
 
     var failure: ?[]const u8 = null;
@@ -644,7 +644,7 @@ test "a profile without a description, with bad JSON, or with a bad value is ref
     try testing.expectError(error.InvalidProfile, parse(arena, "Bad Name", .home, "{\"description\": \"x\"}", "", &failure));
 }
 
-test "fx's main and agent profiles decide nothing, so an agent in either copies its parent" {
+test "lia's main and agent profiles decide nothing, so an agent in either copies its parent" {
     const main = builtin(main_name).?;
     const agent = builtin(agent_name).?;
     try testing.expect(allowsTool(&main, "subagent"));
@@ -683,7 +683,7 @@ test "a profile's * covers every tool, subagent included, and only !subagent lea
     try testing.expect(allowsTool(&unset, "shell"));
 }
 
-test "a profile's prompt adds to fx's prompt, or replaces it when the profile says so" {
+test "a profile's prompt adds to lia's prompt, or replaces it when the profile says so" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -704,7 +704,7 @@ fn writeTestProfile(dir: std.Io.Dir, sub_path: []const u8, json: []const u8) !vo
     try file.writeStreamingAll(io_mod.getIo(), json);
 }
 
-test "a name resolves from the user's profiles, then the repository's, then fx's" {
+test "a name resolves from the user's profiles, then the repository's, then lia's" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -714,7 +714,7 @@ test "a name resolves from the user's profiles, then the repository's, then fx's
     try writeTestProfile(tmp.dir, "project/reviewer", "{\"description\": \"Repo reviewer\"}");
     try writeTestProfile(tmp.dir, "project/tester", "{\"description\": \"Repo tester\", \"permission_mode\": \"full-access\"}");
     try writeTestProfile(tmp.dir, "project/broken", "{not json");
-    try writeTestProfile(tmp.dir, "home/main", "{\"description\": \"Not fx\", \"tools\": []}");
+    try writeTestProfile(tmp.dir, "home/main", "{\"description\": \"Not lia\", \"tools\": []}");
     const roots: Roots = .{
         .home = try io_mod.dirRealpathAlloc(arena, tmp.dir, "home"),
         .project = try io_mod.dirRealpathAlloc(arena, tmp.dir, "project"),
@@ -747,14 +747,14 @@ test "a name resolves from the user's profiles, then the repository's, then fx's
 test "a held profile replaces the last only when the next one loads, and keeps its prompt" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    try writeTestProfile(tmp.dir, "fxhome/.fx/agents/reviewer", "{\"description\": \"Reviewer\", \"permission_mode\": \"ask\"}");
+    try writeTestProfile(tmp.dir, "fxhome/.lia/agents/reviewer", "{\"description\": \"Reviewer\", \"permission_mode\": \"ask\"}");
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "fxhome/.fx/agents/reviewer/prompt.md", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "fxhome/.lia/agents/reviewer/prompt.md", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(io_mod.getIo(), "Review only.");
     }
-    const fx_home = try io_mod.dirRealpathAlloc(testing.allocator, tmp.dir, "fxhome");
-    defer testing.allocator.free(fx_home);
+    const lia_home = try io_mod.dirRealpathAlloc(testing.allocator, tmp.dir, "fxhome");
+    defer testing.allocator.free(lia_home);
 
     var held: Held = .{};
     defer held.deinit();
@@ -768,7 +768,7 @@ test "a held profile replaces the last only when the next one loads, and keeps i
 
     // It keeps its own copy of the name it was asked for.
     var name_buf = "reviewer".*;
-    try held.replace(testing.allocator, fx_home, null, &name_buf, "BASE", &failure);
+    try held.replace(testing.allocator, lia_home, null, &name_buf, "BASE", &failure);
     @memset(&name_buf, 'x');
     try testing.expectEqualStrings("reviewer", held.profile.name);
     try testing.expectEqual(types.PermissionMode.ask, held.profile.permission_mode.?);

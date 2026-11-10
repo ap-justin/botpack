@@ -2133,7 +2133,7 @@ fn defaultRunCommandPermissionOutcome(
             .execution_authority = .{ .run_command = .{ .direct_only = fingerprint } },
         },
         // Review cannot see a repository's git config, and the routine-command
-        // rule would run plain git, so an automatic git command that fx could
+        // rule would run plain git, so an automatic git command that lia could
         // not make safe does not run at all.
         .approval_required => |reason| if (reason == .unsafe_git and permission_mode == .auto)
             .{ .tool_failure = unsafe_git_hold_output }
@@ -2143,7 +2143,7 @@ fn defaultRunCommandPermissionOutcome(
 }
 
 const unsafe_git_hold_output =
-    "fx did not run this git command. It could not run git here with every program this repository's config " ++
+    "lia did not run this git command. It could not run git here with every program this repository's config " ++
     "names turned off, and plain git could start them. Inspect files with read_file, glob_files or grep_files, " ++
     "or ask the user to run git themselves.";
 
@@ -2254,7 +2254,7 @@ pub fn permissionStateKeyForCall(
 
     var canonical: std.Io.Writer.Allocating = .init(arena);
     defer canonical.deinit();
-    try writeIdentityField(&canonical.writer, "fx-permission-state-v1");
+    try writeIdentityField(&canonical.writer, "lia-permission-state-v1");
     var targets = try permissionTargetsForCall(input, arena, call);
     defer targets.deinit(arena);
     try writeIdentityField(&canonical.writer, call.name);
@@ -2343,7 +2343,7 @@ fn permissionStateKeyForPreparedFileMutation(
 ) !session_permission_state.RuleKey {
     var canonical: std.Io.Writer.Allocating = .init(arena);
     defer canonical.deinit();
-    try writeIdentityField(&canonical.writer, "fx-permission-state-file-v1");
+    try writeIdentityField(&canonical.writer, "lia-permission-state-file-v1");
     try writeIdentityField(&canonical.writer, prepared.tool_name);
     try writeIdentityField(&canonical.writer, &prepared.arguments_hash);
     try writeIdentityField(&canonical.writer, prepared.target_path);
@@ -3888,7 +3888,7 @@ test "resolved skill calls retain name policy and ordinary execution authority" 
         .name = "restricted-name",
         .description = "",
         .path = "/installed/different-directory-name",
-        .source = .global_fx,
+        .source = .global_lia,
     } };
     const calls = [_]ToolCall{
         .{ .id = "alias", .name = "skill", .arguments_json = "{\"location\":\"skill:0000000000000001:0/different-directory-name\"}", .resolved_skill = &skill },
@@ -5821,7 +5821,7 @@ test "automatic git that safe git refuses is held instead of running plain git" 
     const arena = arena_state.allocator();
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    // The repository config includes a file through a symlink, which fx's
+    // The repository config includes a file through a symlink, which lia's
     // config reader refuses, so safe git cannot prepare and no git starts.
     try tmp.dir.createDirPath(std.testing.io, "workspace/.git/objects");
     try tmp.dir.createDirPath(std.testing.io, "workspace/.git/refs");
@@ -5886,7 +5886,7 @@ test "session deny narrows configured command allow" {
         .arguments_json = "{\"action\":\"run\",\"command\":\"touch configured.txt\"}",
     };
     const key = try permissionStateKeyForCall(input, arena, call);
-    try std.testing.expect(std.mem.find(u8, key.canonical, "fx-permission-state-v2") != null);
+    try std.testing.expect(std.mem.find(u8, key.canonical, "lia-permission-state-v2") != null);
     try std.testing.expect(std.mem.find(u8, key.canonical, "restricted") == null);
     try std.testing.expect(std.mem.find(u8, key.canonical, "none") == null);
     var empty: session_permission_state.State = .{};
@@ -6402,7 +6402,7 @@ test "automatic trusted-root write keeps persistence targets on reviewer path" {
         ".git/hooks/pre-commit",
         ".git/config",
         ".ssh/authorized_keys",
-        "Library/LaunchAgents/com.fx.smoke.plist",
+        "Library/LaunchAgents/com.lia.smoke.plist",
     };
     for (relative_targets, 0..) |relative_target, index| {
         const target_path = try std.Io.Dir.path.join(arena, &.{ workspace, relative_target });

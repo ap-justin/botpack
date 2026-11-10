@@ -1,4 +1,4 @@
-// The trace bridge: turns what a scenario saw of real fx into TraceObs.tla
+// The trace bridge: turns what a scenario saw of real lia into TraceObs.tla
 // and checks it against a model's trace wrapper, as drivers/mcp/bridge.ts does (sentinel
 // invariant: violated exactly when a complete match exists).
 //

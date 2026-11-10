@@ -1,8 +1,8 @@
 -------------------------- MODULE BinaryImageRoute --------------------------
 (***************************************************************************)
-(* Checks what the built fx binary did against ImageRoute.                 *)
+(* Checks what the built lia binary did against ImageRoute.                 *)
 (*                                                                         *)
-(* tests/tla/drivers/image_route/binary-to-spec.ts runs `fx ask` turns     *)
+(* tests/tla/drivers/image_route/binary-to-spec.ts runs `lia ask` turns     *)
 (* against a fake gateway and records each one in BinaryData.tla, which   *)
 (* is generated for each run: the catalog view the turn saw, the request   *)
 (* flags the shell must compute from the turn itself (an image attached    *)

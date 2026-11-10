@@ -191,10 +191,10 @@ fn renderRawSearch(
 test "skill search ranks metadata and returns final-projection-stable JSON" {
     const alloc = std.testing.allocator;
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "general", .description = "Review ordinary text", .path = "/skills/general/SKILL.md", .source = .workspace_fx },
-        .{ .name = "fx-review", .description = "Review fx runtime changes", .path = "/skills/fx-review/SKILL.md", .source = .workspace_fx },
+        .{ .name = "general", .description = "Review ordinary text", .path = "/skills/general/SKILL.md", .source = .workspace_lia },
+        .{ .name = "lia-review", .description = "Review lia runtime changes", .path = "/skills/lia-review/SKILL.md", .source = .workspace_lia },
     };
-    const query = try lexical_relevance.prepare("review fx runtime public");
+    const query = try lexical_relevance.prepare("review lia runtime public");
     var result = try renderProjectedSearch(
         alloc,
         .{ .query = &query, .kind = .skill, .limit = capability_retrieval.default_limit },
@@ -204,7 +204,7 @@ test "skill search ranks metadata and returns final-projection-stable JSON" {
     );
     defer result.deinit(alloc);
     const output = result.model_output;
-    try std.testing.expect(std.mem.find(u8, output, "\"name\":\"fx-review\"") != null);
+    try std.testing.expect(std.mem.find(u8, output, "\"name\":\"lia-review\"") != null);
     try std.testing.expect(std.mem.find(u8, output, "\"count\":1") != null);
 
     const projected_again = try tool_result_limits.prepareModelOutput(alloc, "capability_search", output, 4096);
@@ -215,8 +215,8 @@ test "skill search ranks metadata and returns final-projection-stable JSON" {
 test "skill search preserves projected identities and verbatim descriptions" {
     const alloc = std.testing.allocator;
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "unsafe-location", .description = "Review files", .path = "/skills/TOKEN=path-secret-value", .source = .workspace_fx },
-        .{ .name = "safe", .description = "API_KEY=description-secret-value", .path = "/skills/safe/SKILL.md", .source = .workspace_fx },
+        .{ .name = "unsafe-location", .description = "Review files", .path = "/skills/TOKEN=path-secret-value", .source = .workspace_lia },
+        .{ .name = "safe", .description = "API_KEY=description-secret-value", .path = "/skills/safe/SKILL.md", .source = .workspace_lia },
     };
     const query = try lexical_relevance.prepare("");
     var result = try renderProjectedSearch(
@@ -238,15 +238,15 @@ test "skill search preserves projected identities and verbatim descriptions" {
 test "skill search caps ranked entries and atomically omits byte overflow" {
     const alloc = std.testing.allocator;
     const skills = [_]skill_runtime.Skill{
-        .{ .name = "one", .description = text_utils.repeat("x", 700), .path = "/skills/one/SKILL.md", .source = .workspace_fx },
-        .{ .name = "two", .description = "two", .path = "/skills/two/SKILL.md", .source = .workspace_fx },
-        .{ .name = "three", .description = "three", .path = "/skills/three/SKILL.md", .source = .workspace_fx },
-        .{ .name = "four", .description = "four", .path = "/skills/four/SKILL.md", .source = .workspace_fx },
-        .{ .name = "five", .description = "five", .path = "/skills/five/SKILL.md", .source = .workspace_fx },
-        .{ .name = "six", .description = "six", .path = "/skills/six/SKILL.md", .source = .workspace_fx },
-        .{ .name = "seven", .description = "seven", .path = "/skills/seven/SKILL.md", .source = .workspace_fx },
-        .{ .name = "eight", .description = "eight", .path = "/skills/eight/SKILL.md", .source = .workspace_fx },
-        .{ .name = "nine", .description = "nine", .path = "/skills/nine/SKILL.md", .source = .workspace_fx },
+        .{ .name = "one", .description = text_utils.repeat("x", 700), .path = "/skills/one/SKILL.md", .source = .workspace_lia },
+        .{ .name = "two", .description = "two", .path = "/skills/two/SKILL.md", .source = .workspace_lia },
+        .{ .name = "three", .description = "three", .path = "/skills/three/SKILL.md", .source = .workspace_lia },
+        .{ .name = "four", .description = "four", .path = "/skills/four/SKILL.md", .source = .workspace_lia },
+        .{ .name = "five", .description = "five", .path = "/skills/five/SKILL.md", .source = .workspace_lia },
+        .{ .name = "six", .description = "six", .path = "/skills/six/SKILL.md", .source = .workspace_lia },
+        .{ .name = "seven", .description = "seven", .path = "/skills/seven/SKILL.md", .source = .workspace_lia },
+        .{ .name = "eight", .description = "eight", .path = "/skills/eight/SKILL.md", .source = .workspace_lia },
+        .{ .name = "nine", .description = "nine", .path = "/skills/nine/SKILL.md", .source = .workspace_lia },
     };
     const query = try lexical_relevance.prepare("");
     var result = try renderProjectedSearch(
@@ -272,15 +272,15 @@ test "skill search projection releases every allocation failure" {
     const Case = struct {
         fn run(alloc: Allocator) !void {
             const skills = [_]skill_runtime.Skill{
-                .{ .name = "unsafe", .description = "unsafe", .path = "/skills/TOKEN=runtime-location-secret/SKILL.md", .source = .workspace_fx },
-                .{ .name = "oversized", .description = text_utils.repeat("x", 700), .path = "/skills/oversized/SKILL.md", .source = .workspace_fx },
-                .{ .name = "three", .description = "three", .path = "/skills/three/SKILL.md", .source = .workspace_fx },
-                .{ .name = "four", .description = "four", .path = "/skills/four/SKILL.md", .source = .workspace_fx },
-                .{ .name = "five", .description = "five", .path = "/skills/five/SKILL.md", .source = .workspace_fx },
-                .{ .name = "six", .description = "six", .path = "/skills/six/SKILL.md", .source = .workspace_fx },
-                .{ .name = "seven", .description = "seven", .path = "/skills/seven/SKILL.md", .source = .workspace_fx },
-                .{ .name = "eight", .description = "eight", .path = "/skills/eight/SKILL.md", .source = .workspace_fx },
-                .{ .name = "nine", .description = "nine", .path = "/skills/nine/SKILL.md", .source = .workspace_fx },
+                .{ .name = "unsafe", .description = "unsafe", .path = "/skills/TOKEN=runtime-location-secret/SKILL.md", .source = .workspace_lia },
+                .{ .name = "oversized", .description = text_utils.repeat("x", 700), .path = "/skills/oversized/SKILL.md", .source = .workspace_lia },
+                .{ .name = "three", .description = "three", .path = "/skills/three/SKILL.md", .source = .workspace_lia },
+                .{ .name = "four", .description = "four", .path = "/skills/four/SKILL.md", .source = .workspace_lia },
+                .{ .name = "five", .description = "five", .path = "/skills/five/SKILL.md", .source = .workspace_lia },
+                .{ .name = "six", .description = "six", .path = "/skills/six/SKILL.md", .source = .workspace_lia },
+                .{ .name = "seven", .description = "seven", .path = "/skills/seven/SKILL.md", .source = .workspace_lia },
+                .{ .name = "eight", .description = "eight", .path = "/skills/eight/SKILL.md", .source = .workspace_lia },
+                .{ .name = "nine", .description = "nine", .path = "/skills/nine/SKILL.md", .source = .workspace_lia },
             };
             const query = try lexical_relevance.prepare("");
             var result = try renderProjectedSearch(

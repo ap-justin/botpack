@@ -38,7 +38,7 @@
 (* its copy was made is never converted again or deleted, so v1ver may   *)
 (* run ahead of base.                                                      *)
 (*                                                                         *)
-(* Salvage (D64): `fx session recover` on a damaged v1 root copies the   *)
+(* Salvage (D64): `lia session recover` on a damaged v1 root copies the   *)
 (* start v1's own recover would keep into a fresh v2 session. It holds   *)
 (* the root's v1 lock for the read, as v1 does, and never writes,        *)
 (* converts or deletes the v1 session. A healthy root needs no salvage,  *)
@@ -150,7 +150,7 @@ Leftover(p, i) ==
     /\ v1lock[i] = "free" /\ i \notin refused[p]
     /\ i \notin keeps
 
-\* What the picker and `fx sessions` list: v2 roots, and v1 roots v2 does not
+\* What the picker and `lia sessions` list: v2 roots, and v1 roots v2 does not
 \* hold; children are internal.
 Listed ==
     {r \in Roots : Live(r) \/ (pub[r] = "none" /\ v1ver[r] > 0)}
@@ -228,7 +228,7 @@ WCrash(i) ==
     /\ UNCHANGED <<v1ver, locks, bad, pub, base, staged, stagedBase, extra,
                    conv, req, out, refused, reqs, famOf, keeps>>
 
-\* A member's v1 files become unreadable: damage from outside fx, which may
+\* A member's v1 files become unreadable: damage from outside lia, which may
 \* leave a start v1's recover validates.
 Damage(i) ==
     /\ v1ver[i] > 0

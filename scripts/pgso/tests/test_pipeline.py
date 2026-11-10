@@ -28,7 +28,7 @@ from scripts.pgso.macos import (
 )
 from scripts.pgso.pipeline import (
     BENCHMARK_USE_FLAGS,
-    FX_CODEGEN_FLAGS,
+    LIA_CODEGEN_FLAGS,
     GENERATION_FLAGS,
     IR_OUTLINER_FLAGS,
     IR_OUTLINER_ROUNDS,
@@ -68,7 +68,7 @@ from scripts.pgso.toolchain import Toolchain
 class PgsoPipelineTests(unittest.TestCase):
     def test_temporal_order_binds_real_text_symbols_and_accounts_for_unmapped_names(self) -> None:
         ordered, evidence = map_temporal_symbols(
-            "# Ordered 4 functions\n# fx\nalpha\nbeta\nalias\nmissing\n",
+            "# Ordered 4 functions\n# lia\nalpha\nbeta\nalias\nmissing\n",
             "_alpha T 0 0\nl_beta t 8 0\nl_alias t 8 0\n_missing d 20 0\n",
         )
         self.assertEqual(("_alpha", "l_beta"), ordered)
@@ -228,7 +228,7 @@ class PgsoPipelineTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory(
-            prefix="fx-pgso-pipeline-"
+            prefix="lia-pgso-pipeline-"
         )
         self.root = pathlib.Path(self.temporary_directory.name)
         self.paths = PipelinePaths.create(self.root / "run")
@@ -322,7 +322,7 @@ with pathlib.Path({str(actions)!r}).open('a') as stream:
     stream.write('zig ' + ' '.join(sys.argv[1:]) + '\\n')
 prefix = pathlib.Path(sys.argv[sys.argv.index('--prefix') + 1])
 (prefix / 'pgso').mkdir(parents=True, exist_ok=True)
-(prefix / 'pgso' / 'fx.bc').write_bytes(b'BC\\xc0\\xdezig')""",
+(prefix / 'pgso' / 'lia.bc').write_bytes(b'BC\\xc0\\xdezig')""",
         )
 
     def test_emitted_bitcode_outlines_helpers_before_identity_is_recorded(self) -> None:
@@ -346,7 +346,7 @@ prefix = pathlib.Path(sys.argv[sys.argv.index('--prefix') + 1])
             f"{self.paths.bitcode} {self.paths.bitcode}.staged",
             lines[1],
         )
-        self.assertFalse(self.paths.bitcode.with_name("fx.bc.staged").exists())
+        self.assertFalse(self.paths.bitcode.with_name("lia.bc.staged").exists())
         emit_bitcode(toolchain, self.spec, self.paths, expected_sha256=digest)
 
     def test_emitted_bitcode_accepts_the_darwin_bitcode_wrapper(self) -> None:
@@ -615,7 +615,7 @@ print('{{}}')""",
                 "-machine-outliner-reruns=1",
                 "-homogeneous-prolog-epilog",
             ),
-            FX_CODEGEN_FLAGS,
+            LIA_CODEGEN_FLAGS,
         )
         self.assertEqual(
             (
@@ -729,7 +729,7 @@ print('{{}}')""",
         self.assertIn("-Doptimize=ReleaseSafe", control)
         self.assertIn("-Dupdate-channel=stable", control)
         self.assertIn("pgso-ir", ir)
-        self.assertIn("-Dpgso-artifact=fx", ir)
+        self.assertIn("-Dpgso-artifact=lia", ir)
         self.assertNotEqual(
             control[control.index("--cache-dir") + 1],
             ir[ir.index("--cache-dir") + 1],
@@ -743,7 +743,7 @@ print('{{}}')""",
     def test_benchmark_artifacts_use_their_existing_build_owners_and_names(self) -> None:
         cases = (
             ("file_index", "bench-file-index", "file-index-bench", "file-index.bc"),
-            ("unit_tests", "install-test", "fx-test", "unit-tests.bc"),
+            ("unit_tests", "install-test", "lia-test", "unit-tests.bc"),
         )
         for selector, build_step, binary_name, bitcode_name in cases:
             with self.subTest(selector=selector):
@@ -813,7 +813,7 @@ print('{{}}')""",
             ),
             candidate,
         )
-        for flag in FX_CODEGEN_FLAGS:
+        for flag in LIA_CODEGEN_FLAGS:
             self.assertIn(flag, candidate_object)
             self.assertNotIn(flag, benchmark_object)
             self.assertIn(flag, measured_benchmark_object)
@@ -872,7 +872,7 @@ else: sys.exit(2)""",
             f"""import pathlib,sys
 with pathlib.Path({str(actions)!r}).open('a') as stream:
     stream.write('order ' + ' '.join(sys.argv[1:]) + '\\n')
-pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text('# Ordered 1 functions\\n# fx\\nalpha\\n')""",
+pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_text('# Ordered 1 functions\\n# lia\\nalpha\\n')""",
         )
         nm = self.write_executable(
             "nm-tool",
@@ -1005,7 +1005,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_bytes(b'artifact')""",
     def test_measured_benchmark_candidate_builds_with_the_production_flags(self) -> None:
         for production_flags, use_flags, codegen_flags in (
             (False, BENCHMARK_USE_FLAGS, ()),
-            (True, USE_FLAGS, FX_CODEGEN_FLAGS),
+            (True, USE_FLAGS, LIA_CODEGEN_FLAGS),
         ):
             with self.subTest(production_flags=production_flags):
                 actions = self.root / f"measured-actions-{production_flags}"
@@ -1066,7 +1066,7 @@ pathlib.Path(sys.argv[sys.argv.index('-o') + 1]).write_bytes(b'artifact')""",
                 )
 
     def test_bitcode_hash_must_match_the_original(self) -> None:
-        bitcode = self.root / "fx.bc"
+        bitcode = self.root / "lia.bc"
         bitcode.write_bytes(b"release-safe bitcode")
 
         validate_bitcode_hash(bitcode, sha256_file(bitcode))
@@ -1154,11 +1154,11 @@ output.write_bytes(b'startup profile')""",
     def test_executed_functions_are_those_with_a_nonzero_count(self) -> None:
         shown = (
             "Counters:\n"
-            "  fx;core.app.help:\n"
+            "  lia;core.app.help:\n"
             "    Hash: 0x01\n"
             "    Counters: 2\n"
             "    Block counts: [0, 3]\n"
-            "  fx;core.app.never:\n"
+            "  lia;core.app.never:\n"
             "    Hash: 0x02\n"
             "    Counters: 1\n"
             "    Block counts: [0]\n"
@@ -1183,9 +1183,9 @@ output.write_bytes(b'startup profile')""",
             "2\n"
             "# Weight:\n"
             "1\n"
-            "fx;core.cold,fx;core.hot\n"
+            "lia;core.cold,lia;core.hot\n"
             "\n"
-            "fx;core.cold\n"
+            "lia;core.cold\n"
             "# Func Hash:\n"
             "10\n"
             "# Num Counters:\n"
@@ -1193,7 +1193,7 @@ output.write_bytes(b'startup profile')""",
             "# Counter Values:\n"
             "1\n"
             "\n"
-            "fx;core.hot\n"
+            "lia;core.hot\n"
             "# Func Hash:\n"
             "11\n"
             "# Num Counters:\n"
@@ -1206,19 +1206,19 @@ output.write_bytes(b'startup profile')""",
         filtered, removed = remove_profile_records(text, {"core.cold", "core.absent"})
 
         self.assertEqual({"core.cold"}, removed)
-        self.assertNotIn("fx;core.cold\n# Func Hash", filtered)
-        self.assertIn("fx;core.hot\n# Func Hash:\n11\n", filtered)
+        self.assertNotIn("lia;core.cold\n# Func Hash", filtered)
+        self.assertIn("lia;core.hot\n# Func Hash:\n11\n", filtered)
         self.assertIn(":temporal_prof_traces\n", filtered)
-        self.assertIn("fx;core.cold,fx;core.hot\n", filtered)
+        self.assertIn("lia;core.cold,lia;core.hot\n", filtered)
 
     def test_startup_exemption_removes_only_the_cold_startup_functions(self) -> None:
         actions = self.root / "actions.log"
         text_profile = (
             ":ir\n\n"
-            "fx;startup.cold\n# Func Hash:\n1\n# Num Counters:\n1\n# Counter Values:\n1\n\n"
-            "fx;startup.hot\n# Func Hash:\n2\n# Num Counters:\n1\n# Counter Values:\n900\n\n"
-            "fx;startup.shared\n# Func Hash:\n4\n# Num Counters:\n1\n# Counter Values:\n3\n\n"
-            "fx;other.cold\n# Func Hash:\n3\n# Num Counters:\n1\n# Counter Values:\n0\n\n"
+            "lia;startup.cold\n# Func Hash:\n1\n# Num Counters:\n1\n# Counter Values:\n1\n\n"
+            "lia;startup.hot\n# Func Hash:\n2\n# Num Counters:\n1\n# Counter Values:\n900\n\n"
+            "lia;startup.shared\n# Func Hash:\n4\n# Num Counters:\n1\n# Counter Values:\n3\n\n"
+            "lia;other.cold\n# Func Hash:\n3\n# Num Counters:\n1\n# Counter Values:\n0\n\n"
         )
 
         def show(module: str, counts: tuple[tuple[str, int], ...]) -> str:
@@ -1227,7 +1227,7 @@ output.write_bytes(b'startup profile')""",
                 for name, count in counts
             )
 
-        shown = show("fx", (("startup.cold", 1), ("startup.hot", 5), ("startup.inlined", 2), ("startup.shared", 3), ("other.cold", 0)))
+        shown = show("lia", (("startup.cold", 1), ("startup.hot", 5), ("startup.inlined", 2), ("startup.shared", 3), ("other.cold", 0)))
         # A heavy benchmark runs startup.shared, so it keeps its record.
         benchmark_shown = show("bench", (("startup.shared", 7000), ("startup.cold", 0)))
         profdata = self.write_executable(
@@ -1290,10 +1290,10 @@ print('{{}}')""",
         self.assertEqual(1, evidence["not_defined_functions"])
         self.assertEqual(1, evidence["records_removed"])
         exempt_text = (self.paths.logs / "production-startup-exempt.proftext").read_text()
-        self.assertNotIn("fx;startup.cold\n", exempt_text)
-        self.assertIn("fx;startup.hot\n", exempt_text)
-        self.assertIn("fx;startup.shared\n", exempt_text)
-        self.assertIn("fx;other.cold\n", exempt_text)
+        self.assertNotIn("lia;startup.cold\n", exempt_text)
+        self.assertIn("lia;startup.hot\n", exempt_text)
+        self.assertIn("lia;startup.shared\n", exempt_text)
+        self.assertIn("lia;other.cold\n", exempt_text)
         self.assertEqual(b"merged:" + exempt_text.encode(), self.paths.merged_profile.read_bytes())
         self.assertEqual(
             b"production profile",
@@ -1383,7 +1383,7 @@ print('_main T ---------------- 0')""",
         self.assertFalse(marked.exists())
         self.assertTrue(self.paths.profile_use_base_bitcode.read_bytes().startswith(b"BC\xc0\xde"))
 
-    def test_fx_profile_use_outlines_the_whole_program_once(self) -> None:
+    def test_lia_profile_use_outlines_the_whole_program_once(self) -> None:
         actions = self.root / "profile-actions"
         toolchain = self.profile_use_toolchain(actions)
         self.paths.bitcode.write_bytes(b"same bitcode")
@@ -1544,7 +1544,7 @@ sys.stderr.write('optimizer warning')""",
                 "Load command 2\ncmd LC_LOAD_DYLIB\nname /usr/lib/libSystem.B.dylib (offset 24)\n"
                 "current version 1356.0.0\ncompatibility version 1.0.0\n"
             ),
-            dependencies="fx:\n/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)",
+            dependencies="lia:\n/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)",
         )
 
     def good_link_contract(self) -> MacosLinkContract:

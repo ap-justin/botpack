@@ -20,7 +20,7 @@ const tool_set = @import("../tooling/tool_set.zig");
 /// How many history turns an agent's session keeps in memory.
 pub const max_history_turns: usize = 8;
 
-/// What an agent is to its host: a top-level fx instance, or a subagent an
+/// What an agent is to its host: a top-level lia instance, or a subagent an
 /// instance or another subagent started.
 pub const Role = enum { instance, subagent };
 
@@ -87,6 +87,6 @@ pub const Agent = struct {
     child_run: ?child_run_mod.ChildRun = null,
     /// The profile this agent runs in, `main` until one is loaded.
     profile: profiles.Held = .{},
-    /// fx's tools narrowed to `profile`, in its arena, or null for all of them.
+    /// lia's tools narrowed to `profile`, in its arena, or null for all of them.
     profile_tools: ?tool_set.ToolSet = null,
 };

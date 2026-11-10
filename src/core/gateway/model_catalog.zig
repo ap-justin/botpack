@@ -72,7 +72,7 @@ pub const Failure = struct {
     }
 };
 
-/// Who serves `provider`'s model catalog, as a message about a connection fx
+/// Who serves `provider`'s model catalog, as a message about a connection lia
 /// could not make names it.
 pub fn serviceName(provider: model_provider.ProviderId) []const u8 {
     return if (provider == .gateway) "AI Gateway" else "the model provider";
@@ -802,7 +802,7 @@ test "catalog authentication fallback is anonymous and bounded" {
 
 test "strict authenticated catalog requests never retry anonymously" {
     const access = credentials.catalogAccessForCredential(
-        .fx_login,
+        .lia_login,
         "test-token",
         "team_123",
     ).withExplicitAuthority();

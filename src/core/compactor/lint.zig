@@ -724,8 +724,8 @@ test "values are the words whose exact form matters" {
     var arena_state = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    const found = try values(arena, "Ran `zig build test` on main.zig (T12) and M3: 141 passed in 12.3s, e.g. see ~/src/fx/build.zig, and/or \"the ledger\"; 2 of 12 failed.");
-    const expected = [_][]const u8{ "zig build test", "the ledger", "main.zig", "141", "12.3s", "~/src/fx/build.zig" };
+    const found = try values(arena, "Ran `zig build test` on main.zig (T12) and M3: 141 passed in 12.3s, e.g. see ~/src/lia/build.zig, and/or \"the ledger\"; 2 of 12 failed.");
+    const expected = [_][]const u8{ "zig build test", "the ledger", "main.zig", "141", "12.3s", "~/src/lia/build.zig" };
     try testing.expectEqual(expected.len, found.len);
     for (expected, found) |want, got| try testing.expectEqualStrings(want, got);
     try testing.expectEqual(@as(usize, 0), (try values(arena, "F12 T3\u{2013}T9 M40 R2 search/edit/read (T47,T60,T109) (M9/T254):")).len);

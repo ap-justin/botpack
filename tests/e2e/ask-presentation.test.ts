@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
-import { runFx } from "../evals/eval-helpers";
+import { runLia } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText,
@@ -12,7 +12,7 @@ import {
   startFakeGateway,
 } from "./fake-gateway";
 
-// `fx ask` as a script sees it: stdout and stderr redirected, no terminal.
+// `lia ask` as a script sees it: stdout and stderr redirected, no terminal.
 
 const TIMEOUT = 30_000;
 const MARKDOWN =
@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 function createRoot() {
-  const root = mkdtempSync(join(tmpdir(), "fx-e2e-ask-presentation-"));
+  const root = mkdtempSync(join(tmpdir(), "lia-e2e-ask-presentation-"));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
   mkdirSync(home);
@@ -52,17 +52,17 @@ function gatewayEnv(
     HOME: home,
     AI_GATEWAY_API_KEY: "fake-ask-presentation-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_DISABLE_KEYCHAIN: "1",
-    FX_TEST_SKIP_ONBOARDING: "1",
-    FX_MODEL: FAKE_GATEWAY_MODEL,
-    FX_PERMISSION_MODE: "auto",
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+    LIA_DISABLE_KEYCHAIN: "1",
+    LIA_TEST_SKIP_ONBOARDING: "1",
+    LIA_MODEL: FAKE_GATEWAY_MODEL,
+    LIA_PERMISSION_MODE: "auto",
+    LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+    LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
   };
 }
 
-describe("fx ask presentation", () => {
+describe("lia ask presentation", () => {
   test("redirected command output separates the next tool header", async () => {
     const root = createRoot();
     const gateway = startFakeGateway([
@@ -88,7 +88,7 @@ describe("fx ask presentation", () => {
     ]);
     gateways.push(gateway);
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--yolo", "--no-save", "--no-color", "Run both commands."],
       {
         cwd: root.workspace,
@@ -111,31 +111,31 @@ describe("fx ask presentation", () => {
     if (configuredShell.endsWith("/zsh")) {
       writeFileSync(
         join(root.home, ".zprofile"),
-        "export FX_PROFILE_LOGIN=login\nexport PATH=\"$HOME/profile-bin:$PATH\"\n",
+        "export LIA_PROFILE_LOGIN=login\nexport PATH=\"$HOME/profile-bin:$PATH\"\n",
       );
       writeFileSync(
         join(root.home, ".zshrc"),
-        "export FX_PROFILE_RC=rc\nalias fx_profile_alias='printf alias-user'\n" +
-          "fx_profile_function() { printf function-user; }\n",
+        "export LIA_PROFILE_RC=rc\nalias lia_profile_alias='printf alias-user'\n" +
+          "lia_profile_function() { printf function-user; }\n",
       );
     } else {
       writeFileSync(
         join(root.home, ".bash_profile"),
-        "export FX_PROFILE_LOGIN=login\nexport PATH=\"$HOME/profile-bin:$PATH\"\n" +
+        "export LIA_PROFILE_LOGIN=login\nexport PATH=\"$HOME/profile-bin:$PATH\"\n" +
           "source \"$HOME/.bashrc\"\n",
       );
       writeFileSync(
         join(root.home, ".bashrc"),
-        "export FX_PROFILE_RC=rc\nalias fx_profile_alias='printf alias-user'\n" +
-          "fx_profile_function() { printf function-user; }\n",
+        "export LIA_PROFILE_RC=rc\nalias lia_profile_alias='printf alias-user'\n" +
+          "lia_profile_function() { printf function-user; }\n",
       );
     }
 
     const profileCommand =
-      "printf 'mode=%s:%s:' \"${FX_PROFILE_LOGIN-unset}\" \"${FX_PROFILE_RC-unset}\"; " +
+      "printf 'mode=%s:%s:' \"${LIA_PROFILE_LOGIN-unset}\" \"${LIA_PROFILE_RC-unset}\"; " +
       "case :\"$PATH\": in *:\"$HOME/profile-bin\":*) printf 'path-user:';; *) printf 'path-clean:';; esac; " +
-      "if alias fx_profile_alias >/dev/null 2>&1; then fx_profile_alias; else printf no-alias; fi; printf ':'; " +
-      "if command -v fx_profile_function >/dev/null; then fx_profile_function; else printf no-function; fi";
+      "if alias lia_profile_alias >/dev/null 2>&1; then lia_profile_alias; else printf no-alias; fi; printf ':'; " +
+      "if command -v lia_profile_function >/dev/null; then lia_profile_function; else printf no-function; fi";
     const nestedExecMarker = join(root.workspace, "nested-no-save-ran");
     const gateway = startFakeGateway([
       fakeGatewayToolCall("shell-omitted", "shell", {
@@ -169,7 +169,7 @@ describe("fx ask presentation", () => {
     ]);
     gateways.push(gateway);
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--yolo", "--no-save", "Verify shell run profiles."],
       {
         cwd: root.workspace,
@@ -233,9 +233,9 @@ describe("fx ask presentation", () => {
     expect(gateway.requests[6]!.body).toContain("neighbor-exec");
     // The refused tty run never reached the terminal store.
     expect(
-      existsSync(join(root.home, ".fx"))
+      existsSync(join(root.home, ".lia"))
         ? Array.from(new Bun.Glob("**/terminal/state/record-*.json").scanSync({
-          cwd: join(root.home, ".fx"),
+          cwd: join(root.home, ".lia"),
           dot: true,
         }))
         : [],
@@ -246,7 +246,7 @@ describe("fx ask presentation", () => {
     const root = createRoot();
     const rawGateway = startFakeGateway([fakeGatewayFinalText(MARKDOWN)]);
     gateways.push(rawGateway);
-    const raw = await runFx(["ask", "--no-save", "Render the fixture."], {
+    const raw = await runLia(["ask", "--no-save", "Render the fixture."], {
       cwd: root.workspace,
       env: gatewayEnv(root.home, rawGateway),
       timeoutMs: TIMEOUT,
@@ -259,7 +259,7 @@ describe("fx ask presentation", () => {
 
     const jsonGateway = startFakeGateway([fakeGatewayFinalText(MARKDOWN)]);
     gateways.push(jsonGateway);
-    const json = await runFx(
+    const json = await runLia(
       ["ask", "--json", "--no-save", "Render the fixture."],
       {
         cwd: root.workspace,
@@ -290,7 +290,7 @@ describe("fx ask presentation", () => {
     ]);
     gateways.push(gateway);
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Inspect fixture.txt."],
       {
         cwd: root.workspace,
@@ -342,7 +342,7 @@ describe("fx ask presentation", () => {
     ]);
     gateways.push(gateway);
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Inspect missing.txt and recover with fallback.txt."],
       {
         cwd: root.workspace,
@@ -414,16 +414,16 @@ function startupLoads(home: string): number {
   return existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).length : 0;
 }
 
-describe("fx ask shell startup files", () => {
+describe("lia ask shell startup files", () => {
   test("user-profile commands load startup files once and reload after an edit", async () => {
     const root = createRoot();
     writeStartupFiles(
       root.home,
       "printf 'loaded\\n' >> \"$HOME/rc.log\"\n" +
-        "export PATH=\"$HOME/fx-startup-marker:$PATH\"\n",
+        "export PATH=\"$HOME/lia-startup-marker:$PATH\"\n",
     );
     const edit = "for f in ~/.zshrc ~/.bash_profile; do " +
-      "printf '%s\\n' \"alias fxlate='printf FX_RELOADED_ALIAS'\" >> \"$f\"; done";
+      "printf '%s\\n' \"alias fxlate='printf LIA_RELOADED_ALIAS'\" >> \"$f\"; done";
     const gateway = startFakeGateway([
       userShellRun("path-0", "echo \"PATH=$PATH\""),
       userShellRun("path-1", "echo \"PATH=$PATH\""),
@@ -434,17 +434,17 @@ describe("fx ask shell startup files", () => {
     ]);
     gateways.push(gateway);
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--yolo", "--no-save", "Check the startup files."],
       { cwd: root.workspace, env: gatewayEnv(root.home, gateway), timeoutMs: TIMEOUT },
     );
 
     expect(result.code).toBe(0);
-    const marker = `${root.home}/fx-startup-marker:`;
+    const marker = `${root.home}/lia-startup-marker:`;
     for (const index of [1, 2, 3]) {
       expect(gateway.requests[index]!.body).toContain(`PATH=${marker}`);
     }
-    expect(gateway.requests[5]!.body).toContain("FX_RELOADED_ALIAS");
+    expect(gateway.requests[5]!.body).toContain("LIA_RELOADED_ALIAS");
     // One capture, and one more after the edit: never once per command.
     expect(startupLoads(root.home)).toBe(2);
     expect(result.stderr).not.toContain("shell snapshot unavailable");
@@ -458,9 +458,9 @@ describe("fx ask shell startup files", () => {
     ]);
     gateways.push(gateway);
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--yolo", "--no-save", "Check the guidance."],
-      { cwd: root.workspace, env: { ...gatewayEnv(root.home, gateway), FX_SOUND: "0" }, timeoutMs: TIMEOUT },
+      { cwd: root.workspace, env: { ...gatewayEnv(root.home, gateway), LIA_SOUND: "0" }, timeoutMs: TIMEOUT },
     );
 
     expect(result.code).toBe(0);
@@ -479,7 +479,7 @@ describe("fx ask shell startup files", () => {
       root.home,
       "printf 'loaded\\n' >> \"$HOME/rc.log\"\n" +
         "alias fxbig=\"$(head -c 9000000 /dev/zero | tr '\\0' x)\"\n" +
-        "alias fxsmall='printf FX_FULL_STARTUP_ALIAS'\n",
+        "alias fxsmall='printf LIA_FULL_STARTUP_ALIAS'\n",
     );
     const gateway = startFakeGateway([
       userShellRun("first", "fxsmall"),
@@ -488,18 +488,18 @@ describe("fx ask shell startup files", () => {
     ]);
     gateways.push(gateway);
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--yolo", "--no-save", "Check the fallback."],
       { cwd: root.workspace, env: gatewayEnv(root.home, gateway), timeoutMs: TIMEOUT },
     );
 
     expect(result.code).toBe(0);
     const notice = "shell snapshot unavailable (the captured state exceeded 8 MiB)";
-    expect(occurrences(result.stderr, `fx ask: warning: ${notice}`)).toBe(1);
+    expect(occurrences(result.stderr, `lia ask: warning: ${notice}`)).toBe(1);
     expect(occurrences(gateway.requests[1]!.body, notice)).toBe(1);
     // The later request repeats the history, so one notice in total.
     expect(occurrences(gateway.requests[2]!.body, notice)).toBe(1);
-    expect(occurrences(gateway.requests[2]!.body, "FX_FULL_STARTUP_ALIAS")).toBe(2);
+    expect(occurrences(gateway.requests[2]!.body, "LIA_FULL_STARTUP_ALIAS")).toBe(2);
     // The failed capture plus one full startup per command.
     expect(startupLoads(root.home)).toBe(3);
   }, TIMEOUT);
@@ -510,7 +510,7 @@ describe("fx ask shell startup files", () => {
     writeStartupFiles(
       root.home,
       "if [ ! -e \"$HOME/fault-fired\" ]; then : > \"$HOME/fault-fired\"; kill -9 $$; fi\n" +
-        "alias fxa='printf FX_RECOVERY_ALIAS'\n",
+        "alias fxa='printf LIA_RECOVERY_ALIAS'\n",
     );
     const gateway = startFakeGateway([
       userShellRun("fallback", "fxa"),
@@ -520,15 +520,15 @@ describe("fx ask shell startup files", () => {
     ]);
     gateways.push(gateway);
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--yolo", "--no-save", "Check recovery."],
       { cwd: root.workspace, env: gatewayEnv(root.home, gateway), timeoutMs: TIMEOUT },
     );
 
     expect(result.code).toBe(0);
     expect(existsSync(join(root.home, "fault-fired"))).toBe(true);
-    const notice = "fx ask: warning: shell snapshot unavailable (the login shell exited before reporting its state)";
+    const notice = "lia ask: warning: shell snapshot unavailable (the login shell exited before reporting its state)";
     expect(occurrences(result.stderr, notice)).toBe(1);
-    expect(gateway.requests[3]!.body).toContain("FX_RECOVERY_ALIAS");
+    expect(gateway.requests[3]!.body).toContain("LIA_RECOVERY_ALIAS");
   }, TIMEOUT);
 });

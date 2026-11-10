@@ -114,7 +114,7 @@ pub fn executeFromSource(alloc: Allocator, skills_dir: []const u8, source: []con
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
 
-    try out.writer.print("Installed {d} skill(s) into fx.\n", .{result.installed.items.len});
+    try out.writer.print("Installed {d} skill(s) into lia.\n", .{result.installed.items.len});
     for (result.installed.items) |name| {
         try out.writer.writeAll("- ");
         try model_context_encoding.writeScalar(&out.writer, name);
@@ -128,7 +128,7 @@ fn formatNoMatchOutput(alloc: Allocator, source: []const u8) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
 
-    out.writer.writeAll("No matching skills were installed into fx from ") catch return error.OutOfMemory;
+    out.writer.writeAll("No matching skills were installed into lia from ") catch return error.OutOfMemory;
     model_context_encoding.writeScalar(&out.writer, source) catch return error.OutOfMemory;
     out.writer.writeByte('.') catch return error.OutOfMemory;
     return try out.toOwnedSlice();
@@ -207,7 +207,7 @@ test "install_skill owner installs local skill source" {
     defer arena_state.deinit();
     const output = try executeFromSource(arena_state.allocator(), skills_dir, repo_root, "workflow");
 
-    try expectContains(output, "Installed 1 skill(s) into fx.");
+    try expectContains(output, "Installed 1 skill(s) into lia.");
     try expectContains(output, "- workflow\n");
     try std.testing.expect(std.mem.find(u8, output, "<skill") == null);
     try std.testing.expect(std.mem.find(u8, output, "use the workflow skill") == null);
@@ -274,7 +274,7 @@ test "install_skill owner reports no matching skills" {
     defer arena_state.deinit();
     const output = try executeFromSource(arena_state.allocator(), skills_dir, repo_root, "missing");
 
-    const expected = try alloc.print("No matching skills were installed into fx from {s}.", .{repo_root});
+    const expected = try alloc.print("No matching skills were installed into lia from {s}.", .{repo_root});
     defer alloc.free(expected);
     try std.testing.expectEqualStrings(expected, output);
 
@@ -360,5 +360,5 @@ test "install_skill owner reports status when an unsafe root cannot be installed
 
     const output = try executeFromSource(alloc, skills_dir, source_dir, null);
     defer alloc.free(output);
-    try expectContains(output, "No matching skills were installed into fx from");
+    try expectContains(output, "No matching skills were installed into lia from");
 }

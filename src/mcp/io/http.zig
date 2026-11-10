@@ -1,5 +1,5 @@
 //! Streamable HTTP I/O: each request runs as its own task on
-//! `std.http.Client`, the client fx already uses, reads a JSON body or an SSE
+//! `std.http.Client`, the client lia already uses, reads a JSON body or an SSE
 //! stream, and posts what it finds to one queue the host reads with `next`.
 //! Cancelling a request cancels its task, which closes the stream.
 //! Redirects aren't followed: a 3xx is an HTTP failure the host reports.
@@ -140,7 +140,7 @@ pub const Client = struct {
     /// What the last `next` returned, freed on the next one.
     held: ?Posted = null,
     /// Bytes of messages posted and not yet taken: at most one largest
-    /// message, so a fast server waits instead of growing fx.
+    /// message, so a fast server waits instead of growing lia.
     budget: Budget,
     /// When a request last started or ended, in the awake clock's
     /// milliseconds; under `used_lock`.

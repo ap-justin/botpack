@@ -11,15 +11,15 @@ validation checks that the real code stays inside the design on every run
 we execute: unit tests, the standalone driver, and the `kill -9` and
 machine-crash matrix.
 
-In fx, the manager's trace hook is compiled out: `build.zig` sets the
+In lia, the manager's trace hook is compiled out: `build.zig` sets the
 `hooks` option to false for every artifact it ships. `zig build test` also
 runs the manager's own tests with `hooks` on, and they write their traces to
 `zig-out/session-manager-traces/`, but nothing checks those traces against
 the specs yet. The standalone driver and crash matrix are not part of this
 repository. What runs here is `selftest.sh`, each checker's
-`--selftest` mode, `check_saved_logs.py` on logs fx saved, and
+`--selftest` mode, `check_saved_logs.py` on logs lia saved, and
 `check_wiring_traces.py` on traces from a run with
-`FX_TRACE_SCOPES=wiring`.
+`LIA_TRACE_SCOPES=wiring`.
 
 ## How it works
 
@@ -52,12 +52,12 @@ emits one line              "log_len": 2, ...}      (Trace == <<...>>)  EXTENDS 
 | `to_tla.py` | Converts JSON lines into `TraceData.tla`. Lists become sequences, objects records, `{"$set": [...]}` sets |
 | `SessionLogTrace.tla`, `.cfg` | Wrapper for `SessionLog.tla`. The event contract is in its header |
 | `stand_in_log.py` | A small Python stand-in for L1, used only to self-test this tooling |
-| `check_saved_logs.py ROOT...` | Checks logs fx saved (`{id}/log.jsonl` under each ROOT) after the fact: every log against `TurnLifecycle`, every parent with child lines against `Subagents`, and every fork against its source with `ForkLog`. `--selftest` requires 7 good and 9 planted logs to get their verdicts |
+| `check_saved_logs.py ROOT...` | Checks logs lia saved (`{id}/log.jsonl` under each ROOT) after the fact: every log against `TurnLifecycle`, every parent with child lines against `Subagents`, and every fork against its source with `ForkLog`. `--selftest` requires 7 good and 9 planted logs to get their verdicts |
 | `ForkLog.tla` | A fork's copied lines against its source's: accepted only when they are the source's first lines byte for byte (snapshots aside, which a fork encodes again) and end at a turn boundary |
 | `TurnLifecycleLog.tla`, `SubagentsLog.tla` | Its wrappers. Only the disk is known, so TLC searches the process state between lines; accepted when some behavior writes exactly the saved lines |
-| `check_wiring_traces.py LOG...` | Checks the adapter's `wiring` trace lines (a run with `FX_TRACE_SCOPES=wiring`) against `Wiring.tla`: each process's lines become Start, the host steps and Exit, or Crash when it stops without Exit. A log where two processes overlap is skipped. `--selftest` requires 6 good and 8 planted traces to get their verdicts, the fork cases included |
+| `check_wiring_traces.py LOG...` | Checks the adapter's `wiring` trace lines (a run with `LIA_TRACE_SCOPES=wiring`) against `Wiring.tla`: each process's lines become Start, the host steps and Exit, or Crash when it stops without Exit. A log where two processes overlap is skipped. `--selftest` requires 6 good and 8 planted traces to get their verdicts, the fork cases included |
 | `WiringTrace.tla` | Its wrapper. Accepted when every step is allowed in turn; the usage steps change nothing a traced step reads, so they are left out |
-| `check_conversion.py --request R --report D` | Checks a recorded v1-to-v2 conversion run against `V1Conversion.tla` (D59): each step's result on disk and through fx's own readers and listing. Exit 0 ACCEPTED only when TLC matched every observation, 1 REJECTED, 2 INCONCLUSIVE, 3 TOOL_ERROR. `--selftest` requires its good and planted runs to get their verdicts |
+| `check_conversion.py --request R --report D` | Checks a recorded v1-to-v2 conversion run against `V1Conversion.tla` (D59): each step's result on disk and through lia's own readers and listing. Exit 0 ACCEPTED only when TLC matched every observation, 1 REJECTED, 2 INCONCLUSIVE, 3 TOOL_ERROR. `--selftest` requires its good and planted runs to get their verdicts |
 | `V1ConversionTrace.tla` | Its wrapper. Each observation's step kind limits the model actions that may run before it; a request step makes exactly one request, and only a writer an earlier hold step left running may write during it |
 | `PromptImagesTrace.tla`, `.cfg` | Checks a run of `drivers/session_manager/prompt-images.test.ts` against `PromptImages.tla` (D89): each turn's first request, its user item, and the session's blobs folder, with every save, failed save and process exit between them left to TLC. A note counts only when it names the image's own blob |
 | `selftest.sh` | Proves the tooling both accepts and rejects (below) |
@@ -79,7 +79,7 @@ Last run: 2026-09-27, TLC2 2.19. All three verdicts matched.
 These rules apply to the test-only trace hook, `src/core/session_manager/trace.zig`:
 
 1. **Test builds only.** The hook is behind a build option and compiles to
-   nothing in release builds, so it adds no cost and no I/O to fx.
+   nothing in release builds, so it adds no cost and no I/O to lia.
 2. **One line per spec action,** named exactly like the action in the spec
    (`BeginWrite`, `Fsync`, `Recover`, ...), with one field per spec variable
    under the names in the wrapper header.

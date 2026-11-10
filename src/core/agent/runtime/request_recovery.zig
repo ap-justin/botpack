@@ -22,10 +22,10 @@
 //! a completed response clears it in the write that saves the response
 //! (`responseRecord`); any other save is written at once. A launch reads the
 //! newest one to resume the request. Every request that keeps a record
-//! registers for `closeActive`. One fx process runs main and its subagents,
+//! registers for `closeActive`. One lia process runs main and its subagents,
 //! and each can have a request in flight.
 //!
-//! The module retries every transient failure for as long as it lasts, and fx
+//! The module retries every transient failure for as long as it lasts, and lia
 //! adds no limit of its own: only a cancel ends a request whose failures keep
 //! coming.
 
@@ -55,7 +55,7 @@ const ticker_interval_ns: i96 = if (builtin.is_test) 5 * std.time.ns_per_ms else
 /// The virtual boot clock tests start at.
 const test_epoch_ms: u64 = 1_000_000;
 
-/// The module's failure kind for each of fx's transient causes, and null for
+/// The module's failure kind for each of lia's transient causes, and null for
 /// a cause that never reaches it. Every failure site in the turn loop reports
 /// through this.
 pub fn failureKind(cause: types.ModelRecoveryCause) ?Failure.Kind {
@@ -117,7 +117,7 @@ pub const RequestRecovery = struct {
     /// A record on disk says a send is or was in flight; a completed
     /// response or the request's end clears it.
     record_live: bool = false,
-    /// `closeActive` saved the record marked clean: fx is exiting, and
+    /// `closeActive` saved the record marked clean: lia is exiting, and
     /// nothing after that may replace it.
     closed: bool = false,
     next_beat_ms: u64 = 0,
@@ -242,7 +242,7 @@ pub const RequestRecovery = struct {
     }
 
     /// Whether the host can answer a request that needs the user. Hosts that
-    /// cannot keep fx's own handling and end the turn.
+    /// cannot keep lia's own handling and end the turn.
     pub fn canAskUser(self: *const RequestRecovery) bool {
         return self.continue_flag != null;
     }
@@ -312,8 +312,8 @@ pub const RequestRecovery = struct {
         _ = try self.event(.user_cancel);
     }
 
-    /// fx's own terminal status replaces the module's on the host. Terminal
-    /// failures keep fx's handling and wording in this change. The terminal
+    /// lia's own terminal status replaces the module's on the host. Terminal
+    /// failures keep lia's handling and wording in this change. The terminal
     /// status is the request's result, so nothing reports over it.
     pub fn replaceStatus(self: *RequestRecovery, status: types.RouteRecoveryStatus) !void {
         const io = io_mod.getIo();
@@ -325,7 +325,7 @@ pub const RequestRecovery = struct {
     }
 
     /// The request ended on an error with no success, cancel, or terminal
-    /// status of fx's own, for example an HTTP error after a retry or a
+    /// status of lia's own, for example an HTTP error after a retry or a
     /// resend that never reached the transport. After the host showed a
     /// status, hosts that report a result get `failed`, which also clears the
     /// TUI's status line; otherwise a module status still shown is cleared.
@@ -376,7 +376,7 @@ pub const RequestRecovery = struct {
     /// refresh the `retrying` status the turn loop already published for it
     /// (`recovery.zig` `onTick`, phase `sending`): no clear, no send. Until
     /// `endSend`, every other route status for the request also comes from
-    /// this file under `mutex` (`responding`'s clear), and fx's terminal
+    /// this file under `mutex` (`responding`'s clear), and lia's terminal
     /// statuses go through `replaceStatus` only after the stream returns.
     /// The turn loop keeps calling the host's other callbacks meanwhile, and
     /// each host takes a status from another thread safely:
@@ -386,10 +386,10 @@ pub const RequestRecovery = struct {
     /// - ACP (`AcpContext.sendModelRecoveryStatus`): formats into a local
     ///   writer and writes one frame under `jsonrpc.Writer.mutex`; libfx's
     ///   writer callback queues under its own mutex. The allocator is the
-    ///   server loop's (`processAllocator()` for `fx acp`, `c_allocator` for
+    ///   server loop's (`processAllocator()` for `lia acp`, `c_allocator` for
     ///   libfx, and `state.alloc` for subagent children), never an arena, and
     ///   the loop thread already shares it with the prompt thread.
-    /// - `fx ask` (`pushRouteRecoveryStatus`): writes only its two recovery
+    /// - `lia ask` (`pushRouteRecoveryStatus`): writes only its two recovery
     ///   fields. During a send their only other writer is the clear from
     ///   `responding`, under `mutex`, and the result reads them after the
     ///   ticker is joined. It prints only when the kind changes, which a
@@ -476,7 +476,7 @@ pub const RequestRecovery = struct {
     /// Steps the module and carries out its plan in field order. Returns
     /// the plan's send, which the caller carries out.
     fn stepLocked(self: *RequestRecovery, value: recovery.Event) !?Send {
-        // fx is exiting with the clean record saved; nothing replaces it.
+        // lia is exiting with the clean record saved; nothing replaces it.
         if (self.closed) return null;
         const now_ms = self.nowMs();
         const plan = recovery.step(&self.state, value, now_ms);
@@ -885,7 +885,7 @@ test "an error after a status reports failed and every exit clears the status" {
         defer request.deinit();
         _ = try request.start(false, null);
         _ = try request.failed(.{ .kind = .dropped });
-        // fx's terminal status reports the result itself.
+        // lia's terminal status reports the result itself.
         try request.replaceStatus(.{ .kind = .terminal_provider_error, .attempt = 1 });
         request.endWithError();
     }

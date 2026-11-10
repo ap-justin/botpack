@@ -918,7 +918,7 @@ fn answerUrl(
         .non_ascii => "\nWarning: This host contains non-ASCII characters and may be visually ambiguous.",
     };
     const question = try alloc.print(
-        "MCP server {s} requests an external browser action. Target host: {s}\nComplete URL: {s}{s}\nOpen it? fx will not fetch this URL or see browser contents.",
+        "MCP server {s} requests an external browser action. Target host: {s}\nComplete URL: {s}{s}\nOpen it? lia will not fetch this URL or see browser contents.",
         .{ display_server_name, display_host, display_url, warning },
     );
     defer alloc.free(question);
@@ -949,7 +949,7 @@ fn answerUrl(
     }
 
     const failure_question = try alloc.print(
-        "fx could not open the browser for {s}. The URL was not fetched. Continue manually, retry the browser, or cancel?",
+        "lia could not open the browser for {s}. The URL was not fetched. Continue manually, retry the browser, or cancel?",
         .{display_host},
     );
     defer alloc.free(failure_question);
@@ -1012,7 +1012,7 @@ fn answerLegacyUrlCompletion(
     const display_server_name = try terminalSafeAlloc(alloc, server_name);
     defer alloc.free(display_server_name);
     const question = try alloc.print(
-        "Complete the browser flow requested by MCP server {s}. fx will continue automatically if the server confirms every URL request. Otherwise choose I completed it / Retry, or Cancel.",
+        "Complete the browser flow requested by MCP server {s}. lia will continue automatically if the server confirms every URL request. Otherwise choose I completed it / Retry, or Cancel.",
         .{display_server_name},
     );
     defer alloc.free(question);

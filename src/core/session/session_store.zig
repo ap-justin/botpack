@@ -476,7 +476,7 @@ pub const Store = struct {
         title: ?[]u8,
     };
 
-    /// What `fx session recover` keeps of a damaged session, read from its
+    /// What `lia session recover` keeps of a damaged session, read from its
     /// folder `dir`, which the caller holds locked: its state up to the last
     /// frame v1 validates, or a schema-3 session's manifest boundary (D64).
     /// `error.SessionRecoveryNotNeeded` when nothing is damaged. Caller owns
@@ -702,16 +702,16 @@ test "session snapshot locators resolve through their owning store" {
         alloc,
         history,
         null,
-        "/new/fx-home/sessions",
+        "/new/lia-home/sessions",
         "id",
     );
 
     try std.testing.expectEqualStrings(
-        "/new/fx-home/sessions/id/images/image-1-aaaaaaaaaaaaaaaa.bin",
+        "/new/lia-home/sessions/id/images/image-1-aaaaaaaaaaaaaaaa.bin",
         history[0].assistant.user.images[0].snapshot_path.?,
     );
     try std.testing.expectEqualStrings(
-        "/new/fx-home/sessions/id/images/image-2-bbbbbbbbbbbbbbbb.bin",
+        "/new/lia-home/sessions/id/images/image-2-bbbbbbbbbbbbbbbb.bin",
         history[0].assistant.user.images[1].snapshot_path.?,
     );
     try std.testing.expect(history[0].assistant.user.images[2].snapshot_path == null);
@@ -736,7 +736,7 @@ test "current session snapshot locators reject absolute paths" {
             alloc,
             history,
             null,
-            "/new/fx-home/sessions",
+            "/new/lia-home/sessions",
             "id",
         ),
     );
@@ -776,7 +776,7 @@ test "session snapshot locator resolver rejects noncanonical tampering" {
                 alloc,
                 history,
                 null,
-                "/new/fx-home/sessions",
+                "/new/lia-home/sessions",
                 "id",
             ),
         );
@@ -972,7 +972,7 @@ const TempStore = struct {
 
 fn initTempStore(alloc: Allocator, tmp: *std.testing.TmpDir) !TempStore {
     // The read-only store only sees a sessions folder that already exists.
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx/sessions");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia/sessions");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
     errdefer alloc.free(home);
@@ -1081,7 +1081,7 @@ test "reads of an empty or missing home find nothing and create nothing" {
         try std.testing.expect((try candidates.nextId(alloc, null)) == null);
         try std.testing.expectError(error.SessionNotFound, store.loadReadOnly(alloc, "missing"));
     }
-    try std.testing.expectError(error.FileNotFound, tmp.dir.access(io_mod.getIo(), "home/.fx", .{}));
+    try std.testing.expectError(error.FileNotFound, tmp.dir.access(io_mod.getIo(), "home/.lia", .{}));
     try std.testing.expectError(error.FileNotFound, tmp.dir.access(io_mod.getIo(), "missing-home", .{}));
 }
 

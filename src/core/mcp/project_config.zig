@@ -72,11 +72,11 @@ pub const WorkspaceDiagnosticCause = enum {
     approved_rejected_overlap,
     /// Under "mcpServers" in a profile that also has "mcp".
     ignored_alias,
-    /// A key the server sets that fx doesn't act on.
+    /// A key the server sets that lia doesn't act on.
     ignored_key,
 };
 
-/// The keys fx reads but doesn't act on.
+/// The keys lia reads but doesn't act on.
 pub const IgnoredKey = enum { required, restart_limit };
 
 pub const WorkspaceEnvironmentField = enum {
@@ -86,7 +86,7 @@ pub const WorkspaceEnvironmentField = enum {
     http_header,
 };
 
-/// Why an entry fx can't read was skipped, for its note. The
+/// Why an entry lia can't read was skipped, for its note. The
 /// field ones are named by their JSON key.
 pub const EntryProblem = enum {
     not_object,
@@ -95,7 +95,7 @@ pub const EntryProblem = enum {
     type,
     url,
     headers,
-    /// A token written into an `Authorization` header, which fx won't send.
+    /// A token written into an `Authorization` header, which lia won't send.
     authorization,
     oauth,
     env,
@@ -112,7 +112,7 @@ pub const EntryProblem = enum {
     other,
 };
 
-/// Notes `name` as skipped because fx can't read it.
+/// Notes `name` as skipped because lia can't read it.
 fn noteInvalidEntry(alloc: Allocator, notes: *std.ArrayList(WorkspaceDiagnostic), profile: bool, name: []const u8, err: anyerror) Allocator.Error!void {
     const owned = try alloc.dupe(u8, name);
     errdefer alloc.free(owned);
@@ -141,7 +141,7 @@ fn entryProblem(err: anyerror) EntryProblem {
 }
 
 pub const WorkspaceDiagnostic = struct {
-    /// About `~/.fx/mcp.json` rather than `.mcp.json`.
+    /// About `~/.lia/mcp.json` rather than `.mcp.json`.
     profile: bool = false,
     server_name: ?[]u8 = null,
     environment_variable: ?[]u8 = null,
@@ -192,7 +192,7 @@ pub fn renderWorkspaceDiagnostic(
         );
     }
     if (diagnostic.cause == .ignored_key) return alloc.print(
-        "{s} server '{s}' sets \"{s}\", which fx ignores; remove it.",
+        "{s} server '{s}' sets \"{s}\", which lia ignores; remove it.",
         .{ diagnosticFile(diagnostic), encoded_server.bytes, @tagName(diagnostic.ignored_key orelse .required) },
     );
     // Every reason is a constant, so this is the one `print` there is.
@@ -201,12 +201,12 @@ pub fn renderWorkspaceDiagnostic(
         .url_without_type => "it has a \"url\" but no \"type\"; add \"type\": \"http\"",
         .command => "it needs a \"command\", with any \"args\" as strings",
         .variable => "a ${...} in it isn't valid",
-        .name => "its name has a character fx won't print",
-        .authorization => "fx won't send its Authorization header; put the token in \"bearer_token_env\", or sign in with login",
-        .other => "fx can't read it",
+        .name => "its name has a character lia won't print",
+        .authorization => "lia won't send its Authorization header; put the token in \"bearer_token_env\", or sign in with login",
+        .other => "lia can't read it",
         inline else => |field| "its \"" ++ @tagName(field) ++ "\" isn't valid",
     } else if (diagnostic.cause == .ignored_alias)
-        "the file has both \"mcp\" and \"mcpServers\", and fx reads only \"mcp\"; merge them into one"
+        "the file has both \"mcp\" and \"mcpServers\", and lia reads only \"mcp\"; merge them into one"
     else
         @tagName(diagnostic.cause);
     return alloc.print(
@@ -215,7 +215,7 @@ pub fn renderWorkspaceDiagnostic(
     );
 }
 
-/// A note for each key a server sets that fx doesn't act on: `required`, and
+/// A note for each key a server sets that lia doesn't act on: `required`, and
 /// a `restart_limit` other than the default.
 pub fn noteIgnoredKeys(
     alloc: Allocator,
@@ -236,7 +236,7 @@ pub fn noteIgnoredKeys(
 }
 
 fn diagnosticFile(diagnostic: WorkspaceDiagnostic) []const u8 {
-    return if (diagnostic.profile) profile_paths.displayText("~/.fx/mcp.json") else ".mcp.json";
+    return if (diagnostic.profile) profile_paths.displayText("~/.lia/mcp.json") else ".mcp.json";
 }
 
 pub const WorkspaceParseResult = struct {
@@ -283,7 +283,7 @@ pub fn parseProfileJson(alloc: Allocator, json_text: []const u8) !std.ArrayList(
     return parseProfileServers(alloc, json_text, null);
 }
 
-/// The profile's servers. With `skipped`, an entry fx can't read is left out
+/// The profile's servers. With `skipped`, an entry lia can't read is left out
 /// and noted there instead of failing the file.
 pub fn parseProfileServers(alloc: Allocator, json_text: []const u8, skipped: ?*std.ArrayList(WorkspaceDiagnostic)) !std.ArrayList(McpServerConfig) {
     var result = try parseProfileDocumentInto(alloc, json_text, skipped);
@@ -401,7 +401,7 @@ fn parseProfileServerMap(
     return configs;
 }
 
-/// One note per server under "mcpServers" when "mcp" is also set, since fx
+/// One note per server under "mcpServers" when "mcp" is also set, since lia
 /// reads only "mcp"; a name under both loads from "mcp", so it gets none.
 fn noteIgnoredAlias(
     alloc: Allocator,
@@ -1475,10 +1475,10 @@ test "a server that sets required or a non-default restart_limit gets a note nam
     try std.testing.expectEqual(@as(usize, 2), notes.items.len);
     const first = try renderWorkspaceDiagnostic(alloc, notes.items[0]);
     defer alloc.free(first);
-    try std.testing.expectEqualStrings("~/.fx/mcp.json server 'gated' sets \"required\", which fx ignores; remove it.", first);
+    try std.testing.expectEqualStrings("~/.lia/mcp.json server 'gated' sets \"required\", which lia ignores; remove it.", first);
     const second = try renderWorkspaceDiagnostic(alloc, notes.items[1]);
     defer alloc.free(second);
-    try std.testing.expectEqualStrings(".mcp.json server 'retry' sets \"restart_limit\", which fx ignores; remove it.", second);
+    try std.testing.expectEqualStrings(".mcp.json server 'retry' sets \"restart_limit\", which lia ignores; remove it.", second);
 }
 
 test "profile document accepts mcpServers alias and preserves strict entry parsing" {
@@ -1532,7 +1532,7 @@ test "profile servers note each one ignored under mcpServers beside mcp" {
     const text = try renderWorkspaceDiagnostic(alloc, notes.items[0]);
     defer alloc.free(text);
     try std.testing.expectEqualStrings(
-        "~/.fx/mcp.json server 'beta' was skipped: the file has both \"mcp\" and \"mcpServers\", and fx reads only \"mcp\"; merge them into one.",
+        "~/.lia/mcp.json server 'beta' was skipped: the file has both \"mcp\" and \"mcpServers\", and lia reads only \"mcp\"; merge them into one.",
         text,
     );
 }
@@ -2048,7 +2048,7 @@ test "choice parsing and mutation release every partial allocation failure" {
     try std.testing.expect(fail_index < 128);
 }
 
-test "a profile entry fx can't read is skipped with a note naming it, and the rest load" {
+test "a profile entry lia can't read is skipped with a note naming it, and the rest load" {
     const alloc = std.testing.allocator;
     const json =
         \\{"mcpServers":{"webonly":{"url":"http://127.0.0.1:9/mcp"},"ok":{"command":"true"},"bad":{"type":"http","url":"https://x.example/mcp","enabled":"yes"}}}
@@ -2064,8 +2064,8 @@ test "a profile entry fx can't read is skipped with a note naming it, and the re
     try std.testing.expectEqualStrings("ok", configs.items[0].name);
     try std.testing.expectEqual(@as(usize, 2), skipped.items.len);
     const expected = [_][]const u8{
-        "~/.fx/mcp.json server 'webonly' was skipped: it has a \"url\" but no \"type\"; add \"type\": \"http\".",
-        "~/.fx/mcp.json server 'bad' was skipped: its \"enabled\" isn't valid.",
+        "~/.lia/mcp.json server 'webonly' was skipped: it has a \"url\" but no \"type\"; add \"type\": \"http\".",
+        "~/.lia/mcp.json server 'bad' was skipped: its \"enabled\" isn't valid.",
     };
     for (skipped.items, expected) |note, words| {
         const said = try renderWorkspaceDiagnostic(alloc, note);
@@ -2076,7 +2076,7 @@ test "a profile entry fx can't read is skipped with a note naming it, and the re
     try std.testing.expectError(error.McpConfigUrlWithoutType, parseProfileJson(alloc, json));
 }
 
-test "a project entry fx can't read says why in words" {
+test "a project entry lia can't read says why in words" {
     const alloc = std.testing.allocator;
     const json =
         \\{"mcpServers":{"odd":{"type":"pigeon","url":"https://x.example/mcp"},"plain":7}}

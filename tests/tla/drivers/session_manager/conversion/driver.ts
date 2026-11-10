@@ -3,14 +3,14 @@
 // runs the real binary and its observations are judged by TLC against
 // tests/tla/session_manager/V1Conversion.tla.
 //
-// Each scenario runs real fx processes one step at a time: "older build"
+// Each scenario runs real lia processes one step at a time: "older build"
 // steps run a v1 writer (v1Writer, or an older release), requests run the
 // target, through every way a session can be opened. After every
 // step the driver observes what the step left: each v1 member's contents,
 // each id in v2, the version a v2 copy equals (by the real readers on both
 // sides), leftovers in the manager's .tmp, and the listing. The content
 // oracle continues two copies of the pre-conversion profile, one with each
-// store, and compares the requests fx sends the model for the root and its
+// store, and compares the requests lia sends the model for the root and its
 // child; a difference marks that copy as matching no v1 version. Read-backs
 // do the same for each kind of state D56 says the converter carries.
 // check_conversion.py then asks TLC whether some behavior of V1Conversion
@@ -31,7 +31,7 @@ const savedLogsChecker = join(worktree, "tests/tla/session_manager/trace/check_s
 
 export type Answer = "none" | "opened" | "converted" | "busy" | "unreadable" | "notfound"
   | "recovered" | "healthy" | "unsalvageable" | "inv2";
-// A member's damage, as the v1 writer's own `fx session recover` judges it.
+// A member's damage, as the v1 writer's own `lia session recover` judges it.
 type Damage = "ok" | "salvage" | "lost";
 // open2: two processes opened the root at once; `ans2` is the second's answer.
 type Kind = "create" | "write" | "hold" | "release" | "open" | "open2" | "all" | "crash" | "damage" | "fresh" | "list" | "recover";
@@ -84,7 +84,7 @@ export function fixture(label: string, at?: string, models?: object[]) {
   const root = at ?? mkdtempSync(join(artifacts, label + "-"));
   const home = join(root, "home"), workspace = join(root, "workspace");
   mkdirSync(home, { mode: 0o700 }); mkdirSync(workspace, { mode: 0o700 });
-  const v1Root = join(home, ".fx/sessions"), v2Root = join(v1Root, "v2");
+  const v1Root = join(home, ".lia/sessions"), v2Root = join(v1Root, "v2");
   const runs: Run[] = [];
   const active = new Set<ReturnType<typeof Bun.spawn>>();
   const acps = new Set<ChildProcess>();
@@ -99,15 +99,15 @@ export function fixture(label: string, at?: string, models?: object[]) {
   const env = (v2: boolean, homeDir = home) => {
     const e: Record<string, string> = {
       PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: homeDir, TMPDIR: root,
-      AI_GATEWAY_API_KEY: "synthetic-conversion-fixture", FX_DISABLE_KEYCHAIN: "1", FX_E2E_DISABLE_DOTENV: "1",
-      FX_GATEWAY_BASE_URL: gateway.baseUrl, FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-      FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+      AI_GATEWAY_API_KEY: "synthetic-conversion-fixture", LIA_DISABLE_KEYCHAIN: "1", LIA_E2E_DISABLE_DOTENV: "1",
+      LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+      LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
       // The older releases that write v1 read these names for the same hooks.
-      FX_E2E_GATEWAY_CHAT_URL: gateway.chatUrl, FX_E2E_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
-      FX_MODEL: FAKE_GATEWAY_MODEL, FX_PERMISSION_MODE: "full-access", FX_AUTO_UPGRADE: "0", FX_SOUND: "0", NO_COLOR: "1",
+      LIA_E2E_GATEWAY_CHAT_URL: gateway.chatUrl, LIA_E2E_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+      LIA_MODEL: FAKE_GATEWAY_MODEL, LIA_PERMISSION_MODE: "full-access", LIA_AUTO_UPGRADE: "0", LIA_SOUND: "0", NO_COLOR: "1",
       // A v1 writer build that still has the store switch writes v1 even when
       // the driver's own environment sets it; tmux passes that environment on.
-      ...(v2 ? {} : { FX_SESSIONS_V2: "0" }),
+      ...(v2 ? {} : { LIA_SESSIONS_V2: "0" }),
     };
     return { ...e, ...injected };
   };
@@ -127,18 +127,18 @@ export function fixture(label: string, at?: string, models?: object[]) {
     })();
     return { child, finished };
   }
-  const fx = (v2: boolean, args: string[], homeDir = home, extraEnv: Record<string, string> = {}, bin = v2 ? binary : v1Writer()) =>
+  const lia = (v2: boolean, args: string[], homeDir = home, extraEnv: Record<string, string> = {}, bin = v2 ? binary : v1Writer()) =>
     start(v2, args, 30_000, homeDir, extraEnv, bin).finished;
 
   // Older build (v1) asks; each must succeed.
   async function v1Ask(args: string[], homeDir = home) {
-    const run = await fx(false, ["ask", "--json", "--auto", ...args], homeDir);
+    const run = await lia(false, ["ask", "--json", "--auto", ...args], homeDir);
     assert.equal(run.code, 0, `v1 ask failed: ${run.stderr}${run.stdout}`);
     return JSON.parse(run.stdout);
   }
 
   function fingerprint(id: string, homeDir = home): string | null {
-    const dir = join(homeDir, ".fx/sessions", id);
+    const dir = join(homeDir, ".lia/sessions", id);
     if (!existsSync(join(dir, "session.json"))) return null;
     const hash = createHash("sha256");
     const walk = (d: string) => {
@@ -152,19 +152,19 @@ export function fixture(label: string, at?: string, models?: object[]) {
     return hash.digest("hex");
   }
 
-  // Until `stop`, every fx this fixture starts runs with the path fault
+  // Until `stop`, every lia this fixture starts runs with the path fault
   // on these absolute paths: "refuse" fails every move or removal of them,
   // "pause" blocks a rename of exactly one, for `pauseMs` when given. The
   // tmux app gets it too: it is started through /usr/bin/env, whose
-  // arguments keep DYLD_* for the fx it starts.
+  // arguments keep DYLD_* for the lia it starts.
   function faultPaths(mode: "refuse" | "pause", paths: string[], pauseMs?: number) {
     const dir = mkdtempSync(join(root, `${mode}-fault-`));
     const arm = join(dir, "armed"), record = join(dir, "hits.txt");
     writeFileSync(arm, "armed");
     injected = {
-      DYLD_INSERT_LIBRARIES: pathFaultLibrary(), FX_PATH_FAULT_MODE: mode, FX_PATH_FAULT_ARM: arm,
-      FX_PATH_FAULT_RECORD: record, FX_PATH_FAULT_TARGETS: paths.join(":"),
-      ...(pauseMs === undefined ? {} : { FX_PATH_FAULT_PAUSE_MS: String(pauseMs) }),
+      DYLD_INSERT_LIBRARIES: pathFaultLibrary(), LIA_PATH_FAULT_MODE: mode, LIA_PATH_FAULT_ARM: arm,
+      LIA_PATH_FAULT_RECORD: record, LIA_PATH_FAULT_TARGETS: paths.join(":"),
+      ...(pauseMs === undefined ? {} : { LIA_PATH_FAULT_PAUSE_MS: String(pauseMs) }),
     };
     const hits = () => (existsSync(record) ? readFileSync(record, "utf8").split("\n").filter(Boolean) : []);
     return {
@@ -174,11 +174,11 @@ export function fixture(label: string, at?: string, models?: object[]) {
   }
   // Real paths, as the fault compares them; the folders below home may not
   // exist yet.
-  const v1Path = (id: string) => join(realpathSync(home), ".fx/sessions", id);
-  const stagingPath = (id: string) => join(realpathSync(home), ".fx/sessions/v2/.tmp", id);
+  const v1Path = (id: string) => join(realpathSync(home), ".lia/sessions", id);
+  const stagingPath = (id: string) => join(realpathSync(home), ".lia/sessions/v2/.tmp", id);
 
-  return { root, home, workspace, v1Root, v2Root, runs, gateway, env, start, fx, v1Ask, fingerprint, acps, faultPaths, v1Path, stagingPath,
-    // What the host said in the last openVia: fx ask's output, ACP's load
+  return { root, home, workspace, v1Root, v2Root, runs, gateway, env, start, lia, v1Ask, fingerprint, acps, faultPaths, v1Path, stagingPath,
+    // What the host said in the last openVia: lia ask's output, ACP's load
     // error and session updates.
     said: "",
     setRespond: (f: (body: string) => Response) => { respond = f; },
@@ -203,7 +203,7 @@ export async function waitUntil(check: () => boolean | Promise<boolean>, timeout
   return false;
 }
 
-// What fx said when it refused, from any host's output; `otherwise` when it
+// What lia said when it refused, from any host's output; `otherwise` when it
 // said none of these.
 function refusal(text: string, where: string, otherwise?: Answer): Answer {
   if (/SessionBusy|session is busy|is open in another/i.test(text)) return "busy";
@@ -213,15 +213,15 @@ function refusal(text: string, where: string, otherwise?: Answer): Answer {
   throw new Error(`Unclassified answer from ${where}: ${text.slice(0, 600)}`);
 }
 
-// The answer a v2 `fx ask` gave, from fx's own JSON.
+// The answer a v2 `lia ask` gave, from lia's own JSON.
 export function askAnswer(run: Run, id: string): Answer {
   let json: any = null;
   try { json = JSON.parse(run.stdout); } catch { /* not JSON */ }
   if (run.code === 0 && json?.session_id === id) return "opened";
-  return refusal(String(json?.error ?? json?.code ?? "") + " " + run.stdout + run.stderr, `fx ${run.args.join(" ")}`);
+  return refusal(String(json?.error ?? json?.code ?? "") + " " + run.stdout + run.stderr, `lia ${run.args.join(" ")}`);
 }
 
-// A minimal ACP client over the real `fx acp`.
+// A minimal ACP client over the real `lia acp`.
 export class Acp {
   private buffer = "";
   private nextId = 1;
@@ -272,7 +272,7 @@ export class Acp {
 export async function openVia(f: Fixture, id: string, via: Via, prompt = "CONV_NEXT", firstPrompt = "CONV_FIRST"): Promise<Answer> {
   f.said = "";
   if (via === "ask") {
-    const run = await f.fx(true, ["ask", "--json", "--auto", "--resume", id, prompt]);
+    const run = await f.lia(true, ["ask", "--json", "--auto", "--resume", id, prompt]);
     f.said = run.stdout + run.stderr;
     return askAnswer(run, id);
   }
@@ -290,28 +290,28 @@ export async function openVia(f: Fixture, id: string, via: Via, prompt = "CONV_N
   throw new Error(`unknown host ${via}`);
 }
 
-// `fx sessions convert`, as JSON or text: the run, and the answer it gave
+// `lia sessions convert`, as JSON or text: the run, and the answer it gave
 // each root from its own report, where a root it did not skip converted.
 export async function convertAll(f: Fixture, json = true) {
-  const run = await f.fx(true, ["sessions", "convert", ...(json ? ["--json"] : [])]);
+  const run = await f.lia(true, ["sessions", "convert", ...(json ? ["--json"] : [])]);
   const skipped = new Map<string, Answer>();
   if (json) {
     let report: any = null;
     try { report = JSON.parse(run.stdout); } catch { /* not JSON */ }
-    assert.equal(report?.kind, "sessions_convert", `fx sessions convert gave no report: ${run.stdout}${run.stderr}`);
+    assert.equal(report?.kind, "sessions_convert", `lia sessions convert gave no report: ${run.stdout}${run.stderr}`);
     for (const skip of report.skipped) skipped.set(skip.id, skip.error === "SessionBusy" ? "busy" : "unreadable");
   } else {
-    assert.match(run.stdout, /^converted \d+, busy \d+, unreadable \d+\n/, `fx sessions convert gave no report: ${run.stdout}${run.stderr}`);
+    assert.match(run.stdout, /^converted \d+, busy \d+, unreadable \d+\n/, `lia sessions convert gave no report: ${run.stdout}${run.stderr}`);
     for (const [, id, why] of run.stdout.matchAll(/^(\S+): (busy|unreadable)/gm)) skipped.set(id, why as Answer);
   }
   return { run, answer: (id: string): Answer => skipped.get(id) ?? "converted" };
 }
 
-// Makes a profile private (0700: ~/.fx, sessions/ and each session folder),
+// Makes a profile private (0700: ~/.lia, sessions/ and each session folder),
 // the only kind the current build reads in v1; older releases left them 0755.
 export function makePrivate(home: string) {
-  const sessions = join(home, ".fx/sessions");
-  for (const dir of [join(home, ".fx"), sessions, ...readdirSync(sessions).map(n => join(sessions, n)).filter(d => existsSync(join(d, "session.json")))]) {
+  const sessions = join(home, ".lia/sessions");
+  for (const dir of [join(home, ".lia"), sessions, ...readdirSync(sessions).map(n => join(sessions, n)).filter(d => existsSync(join(d, "session.json")))]) {
     chmodSync(dir, 0o700);
   }
 }
@@ -320,7 +320,7 @@ export function makePrivate(home: string) {
 // `older`: the root is in an older v1 format, which v1 migrates before it
 // writes; its reference history is then what v1 shows after that migration.
 export function observer(f: Fixture, rootId: string, homeDir = f.home, older = false) {
-  const v1Root = join(homeDir, ".fx/sessions"), v2Root = join(v1Root, "v2");
+  const v1Root = join(homeDir, ".lia/sessions"), v2Root = join(v1Root, "v2");
   const versions = new Map<string, string[]>();        // id -> fingerprints in order of appearance
   const histories = new Map<string, unknown[][]>();    // root -> history per version, from the v1 reader
   const observations: Observation[] = [];
@@ -368,7 +368,7 @@ export function observer(f: Fixture, rootId: string, homeDir = f.home, older = f
     }) ?? null;
   }
   async function history(v2: boolean, id: string, home = homeDir): Promise<unknown[] | null> {
-    const run = await f.fx(v2, ["session", id, "--json"], home);
+    const run = await f.lia(v2, ["session", id, "--json"], home);
     if (run.code !== 0) return null;
     return JSON.parse(run.stdout).history ?? null;
   }
@@ -393,11 +393,11 @@ export function observer(f: Fixture, rootId: string, homeDir = f.home, older = f
     });
   }
   function keepBodies(home: string, id: string) {
-    const results = join(home, ".fx/sessions", id, "tool-results");
+    const results = join(home, ".lia/sessions", id, "tool-results");
     if (existsSync(results)) for (const name of readdirSync(results)) bodies.set(name, readFileSync(join(results, name)));
   }
   // v1's history of the root. An older format is read on a private copy
-  // after v1's own `fx session migrate`, the step v1 takes before it writes,
+  // after v1's own `lia session migrate`, the step v1 takes before it writes,
   // keeping the result bodies that migration wrote; the observed profile
   // stays as it is.
   async function reference(id: string): Promise<unknown[] | null> {
@@ -406,14 +406,14 @@ export function observer(f: Fixture, rootId: string, homeDir = f.home, older = f
     try {
       cpSync(homeDir, copy, { recursive: true });
       makePrivate(copy);
-      const migrated = await f.fx(false, ["session", "migrate", id, "--json"], copy);
+      const migrated = await f.lia(false, ["session", "migrate", id, "--json"], copy);
       assert.equal(migrated.code, 0, `v1 could not migrate ${id}: ${migrated.stderr}${migrated.stdout}`);
       keepBodies(copy, id);
       return await history(false, id, copy);
     } finally { rmSync(copy, { recursive: true, force: true }); }
   }
   async function listed(): Promise<string[]> {
-    const run = await f.fx(true, ["sessions", "--all", "--json"], homeDir);
+    const run = await f.lia(true, ["sessions", "--all", "--json"], homeDir);
     assert.equal(run.code, 0, `v2 listing failed: ${run.stderr}`);
     return JSON.parse(run.stdout).sessions.map((s: any) => s.id).filter((id: string) => !others.includes(id));
   }
@@ -501,7 +501,7 @@ export function observer(f: Fixture, rootId: string, homeDir = f.home, older = f
       try {
         cpSync(homeDir, copy, { recursive: true });
         makePrivate(copy);
-        const run = await f.fx(false, ["session", "recover", id, "--json"], copy);
+        const run = await f.lia(false, ["session", "recover", id, "--json"], copy);
         bad[id] = run.code === 0 ? "salvage" : "lost";
       } finally { rmSync(copy, { recursive: true, force: true }); }
       return bad[id];
@@ -572,7 +572,7 @@ export async function compareContinuations(f: Fixture, snapshot: string, rootId:
     // that quotes its title or review instruction lands in those lists.
     const lists = [f.gateway.requests, f.gateway.classifierRequests, f.gateway.titleRequests];
     const marks = lists.map(list => list.length);
-    const run = await f.fx(v2, ["ask", "--json", "--auto", v2 ? "--resume" : "--resume-id", rootId, "CONV_ORACLE"], home);
+    const run = await f.lia(v2, ["ask", "--json", "--auto", v2 ? "--resume" : "--resume-id", rootId, "CONV_ORACLE"], home);
     const bodies: string[] = lists.flatMap((list, i) => list.slice(marks[i])).map((r: any) => r.body);
     const root = bodies.find(b => b.includes("CONV_ORACLE") && !b.includes("CONV_ORACLE_CHILD"));
     const child = bodies.find(b => b.includes("CONV_ORACLE_CHILD") && !b.includes("CONV_ORACLE_CHILD_ANSWER"));
@@ -637,37 +637,37 @@ export async function crashAtRename(f: Fixture, o: ReturnType<typeof observer>, 
   await o.observe("crash");
 }
 
-// The last commit of main whose fx writes v1 sessions: the v1 writer for
+// The last commit of main whose lia writes v1 sessions: the v1 writer for
 // every "older build" step that names no other release, unless
-// FX_TLA_V1_WRITER names another release of the same format, such as v0.0.14.
+// LIA_TLA_V1_WRITER names another release of the same format, such as v0.0.14.
 export const lastV1Commit = "9656a2c2cdb487f6acb12883cee43ca167df0829";
-export const v1Writer = () => olderRelease(process.env.FX_TLA_V1_WRITER || lastV1Commit);
+export const v1Writer = () => olderRelease(process.env.LIA_TLA_V1_WRITER || lastV1Commit);
 
 const releases = new Map<string, string>();
-const releaseCache = process.env.FX_TLA_RELEASE_CACHE ?? join(tmpdir(), "fx-tla-releases");
-// An fx release or commit, built from the target's own history once per
+const releaseCache = process.env.LIA_TLA_RELEASE_CACHE ?? join(tmpdir(), "lia-tla-releases");
+// An lia release or commit, built from the target's own history once per
 // machine in a cache outside every repository, to write the v1 formats it
 // wrote; release-<ref>.json records its commit and binary hash. A ref builds
 // only with the Zig it was written for: the default `zig` when its version
-// matches, otherwise the one FX_RELEASE_ZIG names. Returns its binary.
+// matches, otherwise the one LIA_RELEASE_ZIG names. Returns its binary.
 export function olderRelease(ref: string): string {
   const cached = releases.get(ref);
   if (cached) return cached;
   const git = (...args: string[]) => Bun.spawnSync(["git", "-C", worktree, ...args]);
   const commit = git("rev-parse", `${ref}^{commit}`).stdout.toString().trim();
-  assert.match(commit, /^[0-9a-f]{40}$/, `fx ${ref} is not in this checkout's history`);
-  const dir = join(releaseCache, commit), bin = join(dir, "zig-out/bin/fx");
+  assert.match(commit, /^[0-9a-f]{40}$/, `lia ${ref} is not in this checkout's history`);
+  const dir = join(releaseCache, commit), bin = join(dir, "zig-out/bin/lia");
   const wanted = /minimum_zig_version = "([^"]+)"/.exec(git("show", `${commit}:build.zig.zon`).stdout.toString())?.[1];
   const local = Bun.spawnSync(["zig", "version"]).stdout.toString().trim();
-  const zig = wanted === local ? "zig" : process.env.FX_RELEASE_ZIG;
-  assert(zig, `fx ${ref} needs Zig ${wanted}; set FX_RELEASE_ZIG to it`);
+  const zig = wanted === local ? "zig" : process.env.LIA_RELEASE_ZIG;
+  assert(zig, `lia ${ref} needs Zig ${wanted}; set LIA_RELEASE_ZIG to it`);
   if (!existsSync(bin)) {
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     const extracted = Bun.spawnSync(["sh", "-c", `git -C ${shellQuote(worktree)} archive ${commit} | tar -x -C ${shellQuote(dir)}`]);
-    assert.equal(extracted.exitCode, 0, `extracting fx ${ref} failed: ${extracted.stderr.toString()}`);
+    assert.equal(extracted.exitCode, 0, `extracting lia ${ref} failed: ${extracted.stderr.toString()}`);
     const built = Bun.spawnSync([zig, "build"], { cwd: dir });
-    assert.equal(built.exitCode, 0, `building fx ${ref} with ${zig} failed: ${built.stderr.toString().slice(-2000)}`);
+    assert.equal(built.exitCode, 0, `building lia ${ref} with ${zig} failed: ${built.stderr.toString().slice(-2000)}`);
   }
   const sha256 = createHash("sha256").update(readFileSync(bin)).digest("hex");
   writeFileSync(join(artifacts, `release-${ref.replace(/[^\w.-]/g, "_")}.json`), JSON.stringify({ ref, commit, bin, sha256, zig }, null, 2));
@@ -678,7 +678,7 @@ export function olderRelease(ref: string): string {
 // Every v2 log a run left, converted ones included, through the saved-log
 // check (TurnLifecycle and Subagents under TLC); none may be unreadable.
 async function checkSavedLogs(root: string, label: string) {
-  const found = Bun.spawnSync(["find", root, "-type", "d", "-path", "*/.fx/sessions/v2"]).stdout.toString().split("\n")
+  const found = Bun.spawnSync(["find", root, "-type", "d", "-path", "*/.lia/sessions/v2"]).stdout.toString().split("\n")
     .filter(dir => dir && readdirSync(dir).some(name => existsSync(join(dir, name, "log.jsonl"))));
   if (!found.length) return;
   const child = Bun.spawn(["python3", savedLogsChecker, ...found], { stdout: "pipe", stderr: "pipe" });

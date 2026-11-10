@@ -70,7 +70,7 @@ pub const Phase = enum { reply, tools };
 
 /// Owns bounded steering text shared by the ACP reader and prompt worker.
 ///
-/// For libfx it also decides when a steer interrupts the turn, as the fx
+/// For libfx it also decides when a steer interrupts the turn, as the lia
 /// CLI does: a steer that arrives while the model streams a reply, with no
 /// tool call in flight, cuts the reply short and the turn continues with it.
 /// The steer sets the turn's cancel flag; the cancel boundary that follows
@@ -197,7 +197,7 @@ pub const Runtime = struct {
     }
 
     /// A steer that cannot join the turn, such as one with images, asks the
-    /// turn to end at its next safe point so it can run next, as the fx CLI
+    /// turn to end at its next safe point so it can run next, as the lia CLI
     /// hands off: at once while the model streams a reply, else at the next
     /// boundary. Returns true when it interrupts the reply now. A turn that
     /// takes no more steering is ending anyway, and the request does nothing.

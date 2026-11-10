@@ -5,7 +5,7 @@
 //! folder search never reuses a snapshot cut at the candidate cap. Any other
 //! search scans its root.
 //! Nothing here saves a snapshot, so searches outside the workspace leave no
-//! trace under `~/.fx/file-index/`.
+//! trace under `~/.lia/file-index/`.
 
 const std = @import("std");
 const debug_trace = @import("../shared/debug_trace.zig");
@@ -158,7 +158,7 @@ pub const Completeness = struct {
     }
 
     /// Names the reason files may be missing: the cap, or folders and git
-    /// files fx could not read.
+    /// files lia could not read.
     pub fn writeNotes(self: Completeness, writer: *std.Io.Writer) error{OutOfMemory}!void {
         if (self.cap_reached) {
             writer.print("... candidate list may be incomplete; candidate cap {d} reached before all files were discovered\n", .{self.candidate_cap}) catch return error.OutOfMemory;

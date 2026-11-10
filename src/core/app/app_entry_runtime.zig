@@ -80,7 +80,7 @@ pub const BeforeInteractiveResult = union(enum) {
     exit: u8,
 };
 
-const interactive_unavailable_message = "fx: this build has no interactive terminal UI; use fx ask or fx acp\n";
+const interactive_unavailable_message = "lia: this build has no interactive terminal UI; use lia ask or lia acp\n";
 
 const RunIfRequestedFn = *const fn (?*anyopaque, Allocator, []const [:0]const u8, cli_surface.Config) anyerror!cli_surface.RunResult;
 const GetenvFn = *const fn (?*anyopaque, []const u8) ?[]const u8;
@@ -114,7 +114,7 @@ fn runBeforeInteractiveWithDeps(alloc: Allocator, args: []const [:0]const u8, cf
         else => return commandFailure(deps, err),
     };
 
-    return beforeInteractiveResultFromRunResult(deps, alloc, run_result, deps.getenv(deps.env_ctx, "FX_BENCH") != null);
+    return beforeInteractiveResultFromRunResult(deps, alloc, run_result, deps.getenv(deps.env_ctx, "LIA_BENCH") != null);
 }
 
 fn beforeInteractiveResultFromRunResult(deps: RunDeps, alloc: Allocator, run_result: cli_surface.RunResult, bench: bool) BeforeInteractiveResult {
@@ -198,7 +198,7 @@ const output_reader_gone_exit_code: u8 = 141;
 
 /// How a command that ended on `err` exits. One whose output reader went
 /// away, as `head` does, ends quietly with SIGPIPE's status, as the commands
-/// that finish before fx's I/O starts do when SIGPIPE ends them.
+/// that finish before lia's I/O starts do when SIGPIPE ends them.
 fn commandFailure(deps: RunDeps, err: anyerror) BeforeInteractiveResult {
     if (err == error.OutputReaderGone) {
         debug_trace.logf("core", "command ended after its output reader went away", .{});
@@ -208,12 +208,12 @@ fn commandFailure(deps: RunDeps, err: anyerror) BeforeInteractiveResult {
     return .{ .exit = 1 };
 }
 
-/// Reports an error that ended a command, such as `fx ask`, in plain words
+/// Reports an error that ended a command, such as `lia ask`, in plain words
 /// (`types.plainErrorText`). The raw name goes only to the trace.
 fn tryWriteErrorMessage(deps: RunDeps, err: anyerror) void {
     debug_trace.logf("core", "command error err={s}", .{@errorName(err)});
     var words: [128]u8 = undefined;
-    writeStderr(deps, "fx: ");
+    writeStderr(deps, "lia: ");
     writeStderr(deps, config_runtime.modelNotSelectedMessage(err) orelse types.plainErrorText(@errorName(err), &words));
     writeStderr(deps, "\n");
 }
@@ -258,7 +258,7 @@ fn testConfig() Config {
         .url_opener = host.unavailable_url_opener,
         .secret_store = host.unavailable_secret_store,
         .prompt_policy = .{ .system_prompt = "system" },
-        .skill_root_policy = .{ .managed_root_source = .global_fx },
+        .skill_root_policy = .{ .managed_root_source = .global_lia },
         .ignored_list_entries = &.{ ".git", "zig-out" },
         .max_list_entries = 100,
         .max_read_file_bytes = 1024,
@@ -321,7 +321,7 @@ fn runIfRequestedForTest(ctx: ?*anyopaque, _: Allocator, _: []const [:0]const u8
 
 fn getenvForTest(ctx: ?*anyopaque, key: []const u8) ?[]const u8 {
     const capture: *TestCapture = @ptrCast(@alignCast(ctx.?));
-    if (std.mem.eql(u8, key, "FX_BENCH")) return capture.bench_value;
+    if (std.mem.eql(u8, key, "LIA_BENCH")) return capture.bench_value;
     return null;
 }
 
@@ -387,7 +387,7 @@ test "app entry returns after handled zero exit" {
     try std.testing.expectEqual(RunOutcome.returned, outcome);
 }
 
-test "app entry honors FX_BENCH for an interactive launch" {
+test "app entry honors LIA_BENCH for an interactive launch" {
     const alloc = std.testing.allocator;
     var capture = TestCapture.init(.{ .interactive = .{} });
     defer capture.deinit();
@@ -411,10 +411,10 @@ test "an interactive launch says the build has no terminal UI" {
 test "a command that ends on an error reports it in plain words" {
     const alloc = std.testing.allocator;
     const cases = [_]struct { err: anyerror, stderr: []const u8 }{
-        .{ .err = error.InvalidGatewaySseEvent, .stderr = "fx: unreadable reply\n" },
-        .{ .err = error.NoSpaceLeft, .stderr = "fx: the disk is full\n" },
-        .{ .err = error.ProviderRequestLimitReached, .stderr = "fx: provider request limit reached\n" },
-        .{ .err = error.OutputWriteFailed, .stderr = "fx: couldn't write the output\n" },
+        .{ .err = error.InvalidGatewaySseEvent, .stderr = "lia: unreadable reply\n" },
+        .{ .err = error.NoSpaceLeft, .stderr = "lia: the disk is full\n" },
+        .{ .err = error.ProviderRequestLimitReached, .stderr = "lia: provider request limit reached\n" },
+        .{ .err = error.OutputWriteFailed, .stderr = "lia: couldn't write the output\n" },
     };
     for (cases) |case| {
         var capture = TestCapture.init(.{ .interactive = .{} });

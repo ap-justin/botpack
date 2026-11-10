@@ -24,9 +24,9 @@ pub const Options = struct {
     client_id: ?[]const u8 = null,
     client_secret: ?[]const u8 = null,
     /// The client ID metadata document's URL, used when the
-    /// authorization server supports them. None until fx hosts one.
+    /// authorization server supports them. None until lia hosts one.
     client_metadata_url: ?[]const u8 = null,
-    client_name: []const u8 = "fx",
+    client_name: []const u8 = "lia",
     flow: core.FlowConfig = .{},
     /// A credential `save` wrote before, which the host kept
     /// securely; its tokens are used again.
@@ -47,7 +47,7 @@ pub const Options = struct {
 
 /// Why a sign-in ended without a token. `insecure_endpoint` and
 /// `internal_endpoint` are a discovery that found only an authorization
-/// server fx won't contact: plain HTTP, or an internal address.
+/// server lia won't contact: plain HTTP, or an internal address.
 pub const Failure = enum {
     discovery,
     registration,

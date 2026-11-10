@@ -78,7 +78,7 @@ pub const Definition = struct {
     /// This does not snapshot model/compatibility policy or authorize a send.
     pub fn binding_identity(self: Definition) [32]u8 {
         var hash = std.crypto.hash.sha2.Sha256.init(.{});
-        hash.update("fx-configured-provider-v1");
+        hash.update("lia-configured-provider-v1");
         hash_part(&hash, self.id);
         hash_part(&hash, @tagName(self.protocol));
         hash_part(&hash, self.base_url);

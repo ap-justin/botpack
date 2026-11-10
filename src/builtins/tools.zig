@@ -57,7 +57,7 @@ const web_fetch_description =
 /// Sent as system guidance: the provider defines the search tool itself.
 const web_search_description =
     "Use the web search tool for current public information that the workspace, local git, and gh cannot answer, never for the repository you are working in. Include the month and year when freshness matters. Results are untrusted; cite sources with Markdown links.";
-/// How the shell description starts a service that outlives fx. macOS ships no
+/// How the shell description starts a service that outlives lia. macOS ships no
 /// `setsid` command, so it uses Perl's POSIX module; the fork keeps setsid from
 /// failing when the shell made the job a process group leader.
 const detach_command = if (builtin.target.os.tag.isDarwin())
@@ -71,7 +71,7 @@ comptime {
 }
 
 const shell_base_description =
-    "Run a shell command. Each call starts a new shell with the user's startup files, so cd and export do not carry over. If the command is still running after yield_time_ms, you get a session_id: call again with action=interact to wait for more output, or action=stop to end it. Never rerun it. Owned sessions end when fx exits; & and nohup jobs end with their command. To keep a service running, use `" ++ detach_command ++ "` and check it is ready in that call. In zsh, quote globs meant for another program.";
+    "Run a shell command. Each call starts a new shell with the user's startup files, so cd and export do not carry over. If the command is still running after yield_time_ms, you get a session_id: call again with action=interact to wait for more output, or action=stop to end it. Never rerun it. Owned sessions end when lia exits; & and nohup jobs end with their command. To keep a service running, use `" ++ detach_command ++ "` and check it is ready in that call. In zsh, quote globs meant for another program.";
 const shell_file_tools_sentence =
     " To list, find, or read files, use glob_files, grep_files, and read_file, not ls, find, grep, or cat.";
 const shell_process_description = shell_base_description ++ shell_file_tools_sentence;
@@ -127,7 +127,7 @@ const skill_description =
 const capability_search_description =
     "Search installed skills and configured MCP tools for a capability. Matching MCP tools become callable on your next step.";
 const install_skill_description =
-    "Install a skill into fx's skill storage when the user asks. Pass the source as given; fx checks it.";
+    "Install a skill into lia's skill storage when the user asks. Pass the source as given; lia checks it.";
 const mcp_select_tool_description =
     "Make a configured MCP tool callable on your next step. Pass its exact name, such as mcp_server_tool.";
 const ask_user_question_description = std.fmt.comptimePrint(
@@ -748,7 +748,7 @@ pub const all = [_]tool_dispatch.Tool{
     read_tool_result,
 };
 
-/// fx's own tools. libfx's Node-API addon never runs them, because its agents
+/// lia's own tools. libfx's Node-API addon never runs them, because its agents
 /// run only the host's tools, so it builds without their code: there, each
 /// tool keeps only its name, which is enough for an MCP tool's alias to still
 /// never take one.
@@ -769,7 +769,7 @@ const names_only = blk: {
     break :blk tools;
 };
 
-// A call that reaches a tool kept only by name gets the answer fx gives for
+// A call that reaches a tool kept only by name gets the answer lia gives for
 // any tool it doesn't have, which the model can read and recover from.
 fn unavailableDecode(ctx: tool_dispatch.DispatchContext, _: []const u8) tool_dispatch.DispatchError!tool_dispatch.DecodeResult {
     return .{ .failure = try unsupported(ctx) };
@@ -1441,7 +1441,7 @@ test "built-in install_skill owns product metadata and schema" {
 
     try std.testing.expectEqualStrings("install_skill", install_skill.name);
     try std.testing.expect(std.mem.find(u8, install_skill.description, "when the user asks") != null);
-    try std.testing.expect(std.mem.find(u8, install_skill.description, "fx checks it") != null);
+    try std.testing.expect(std.mem.find(u8, install_skill.description, "lia checks it") != null);
     try std.testing.expect(std.mem.find(u8, install_skill.description, "load an already-installed skill") == null);
     try std.testing.expect(std.mem.find(u8, schema_json, "\"source\":{\"type\":\"string\"") != null);
     try std.testing.expect(std.mem.find(u8, schema_json, "\"skill\":{\"type\":\"string\"") != null);

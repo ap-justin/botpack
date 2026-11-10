@@ -100,7 +100,7 @@ pub fn writeStatusLine(writer: *std.Io.Writer, status: CommandStatus) !void {
         .finished => try writer.writeAll("process finished\n"),
         .indeterminate => try writer.writeAll(
             "termination_indeterminate=true\n" ++
-                "message=the command was started, but fx could not confirm its final process status; do not retry unchanged because side effects may already exist\n",
+                "message=the command was started, but lia could not confirm its final process status; do not retry unchanged because side effects may already exist\n",
         ),
     }
 }

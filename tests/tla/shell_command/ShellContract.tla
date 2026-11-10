@@ -1,6 +1,6 @@
 --------------------------- MODULE ShellContract ---------------------------
 (***************************************************************************)
-(* One model turn of fx's shell tool pipeline (src/tools/shell/shell.zig    *)
+(* One model turn of lia's shell tool pipeline (src/tools/shell/shell.zig    *)
 (* decode, src/core/agent/runtime/orchestrator.zig processQueuedPromptLoop):*)
 (*                                                                         *)
 (*   model emits a call -> gateway passes the bytes unchanged              *)
@@ -11,7 +11,7 @@
 (*     -> history replay for the next model request                        *)
 (*     -> loop guard ends the turn on a repeated invalid call.             *)
 (*                                                                         *)
-(* Design = "current" models the shell tool as fx implements it;          *)
+(* Design = "current" models the shell tool as lia implements it;          *)
 (* Design = "proposed" models a redesign. AdmissionReads and              *)
 (* GuessAmbiguous are mutation                                             *)
 (* knobs that prove two of the invariants can fail.                        *)
@@ -83,7 +83,7 @@ Inferred(e) ==
 CurrentReadable(e) == e.shape \in {"flat_action", "wrapped"} \/ Inferred(e)
 
 (* Shell decode.                                                             *)
-(* current: fx accepts the exact wrapper, flat-with-action, and an inferred *)
+(* current: lia accepts the exact wrapper, flat-with-action, and an inferred *)
 (*   call, and rejects an explicit shell without tty. Checked against the    *)
 (*   fresh build.                                                            *)
 (* proposed: forgiving decoder.                                             *)
@@ -118,7 +118,7 @@ AdmissionView(e) ==
 (* proposed: accepted calls appear in canonical form; rejected calls appear   *)
 (*   exactly as sent.                                                         *)
 (* Argument text that is not JSON cannot be replayed: providers require JSON  *)
-(* in history, so fx shows a {} placeholder in both designs.                 *)
+(* in history, so lia shows a {} placeholder in both designs.                 *)
 HistoryEntry(e, acc) ==
   IF acc THEN "canonical"
   ELSE IF e.shape = "invalid_json" THEN "placeholder"
@@ -199,7 +199,7 @@ Exactness == \A k \in Calls : calls[k].accepted => calls[k].decoded = calls[k].e
 (* Permission checks exactly what will run.                                 *)
 AdmissionConsistency == \A k \in Calls : calls[k].accepted => calls[k].checked = calls[k].decoded
 
-(* Every call fx can read exactly is run.                                   *)
+(* Every call lia can read exactly is run.                                   *)
 Completeness == \A k \in Calls : ExactlyReadable(calls[k].e) => calls[k].accepted
 
 (* History shows rejected calls exactly as sent, except text that         *)

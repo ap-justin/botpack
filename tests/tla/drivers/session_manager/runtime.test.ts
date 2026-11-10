@@ -14,21 +14,21 @@ function fixture(label: string) {
   const root = mkdtempSync(join(artifacts, label + "-"));
   const home = join(root, "home"), workspace = join(root, "workspace"), trace = join(root, "wiring.log");
   mkdirSync(home, { mode: 0o700 }); mkdirSync(workspace, { mode: 0o700 });
-  const sessionsRoot = join(home, ".fx/sessions/v2");
+  const sessionsRoot = join(home, ".lia/sessions/v2");
   const outcomes: Outcome[] = [];
   const active = new Set<ChildProcess>();
   const environment = (gateway: any) => ({
     PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: home, TMPDIR: root,
-    AI_GATEWAY_API_KEY: "synthetic-tlc-runtime-fixture", FX_DISABLE_KEYCHAIN: "1", FX_E2E_DISABLE_DOTENV: "1",
-    FX_GATEWAY_BASE_URL: gateway.baseUrl, FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
-    FX_MODEL: FAKE_GATEWAY_MODEL, FX_PERMISSION_MODE: "full-access",
-    FX_AUTO_UPGRADE: "0", FX_SOUND: "0", NO_COLOR: "1", FX_TRACE_LOG: trace, FX_TRACE_SCOPES: "wiring",
+    AI_GATEWAY_API_KEY: "synthetic-tlc-runtime-fixture", LIA_DISABLE_KEYCHAIN: "1", LIA_E2E_DISABLE_DOTENV: "1",
+    LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+    LIA_MODEL: FAKE_GATEWAY_MODEL, LIA_PERMISSION_MODE: "full-access",
+    LIA_AUTO_UPGRADE: "0", LIA_SOUND: "0", NO_COLOR: "1", LIA_TRACE_LOG: trace, LIA_TRACE_SCOPES: "wiring",
   });
   function start(gateway: any, args: string[]) {
     const argv = ["ask", "--json", "--auto", ...args];
     const child = spawn(binary, argv, { cwd: workspace, env: environment(gateway), stdio: ["ignore", "pipe", "pipe"] });
-    assert(child.pid, "fx did not start"); active.add(child);
+    assert(child.pid, "lia did not start"); active.add(child);
     const stdout: Buffer[] = [], stderr: Buffer[] = [];
     child.stdout!.on("data", data => stdout.push(Buffer.from(data)));
     child.stderr!.on("data", data => stderr.push(Buffer.from(data)));

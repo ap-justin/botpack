@@ -8,7 +8,7 @@ const max_tool_display_title_bytes: usize = 200;
 /// Who a tool call went to, as an editor shows it.
 pub const ToolIdentity = struct {
     server: []u8,
-    /// The tool's name on its server, before fx exposes it to the model.
+    /// The tool's name on its server, before lia exposes it to the model.
     tool: []u8,
     /// The server's display title, when it declares one.
     title: ?[]u8 = null,

@@ -36,7 +36,7 @@
     "property": "ApprovedServersSettle"
   },
   {
-    "description": "A server whose host let go of it never exits until fx quits",
+    "description": "A server whose host let go of it never exits until lia quits",
     "old": "    /\\ <<h, s>> \\in stopping\n    /\\ stopping' = stopping \\ {<<h, s>>}\n    /\\ refreshed' = FALSE\n    /\\ UNCHANGED <<decision, cur, alive, retired, leases, st, procs, termed",
     "new": "    /\\ <<h, s>> \\in stopping /\\ quit\n    /\\ stopping' = stopping \\ {<<h, s>>}\n    /\\ refreshed' = FALSE\n    /\\ UNCHANGED <<decision, cur, alive, retired, leases, st, procs, termed",
     "property": "EveryStopEnds"

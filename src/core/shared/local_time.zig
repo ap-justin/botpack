@@ -1,4 +1,4 @@
-//! Local wall-clock readings of timestamps, for text a person reads. fx
+//! Local wall-clock readings of timestamps, for text a person reads. lia
 //! stores and serializes times in UTC; display reads them in the user's time
 //! zone, from the C library's rules for `TZ` or the system default.
 

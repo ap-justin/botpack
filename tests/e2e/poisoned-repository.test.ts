@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runFx } from "../evals/eval-helpers";
+import { runLia } from "../evals/eval-helpers";
 import {
   fakeGatewayFinalText,
   fakeGatewayToolCall,
@@ -20,9 +20,9 @@ import {
 } from "./fake-gateway";
 
 // A repository's own git config can name programs: fsmonitor, hooks, clean
-// and smudge filters, diff drivers and the pager. Opening a repository in fx
+// and smudge filters, diff drivers and the pager. Opening a repository in lia
 // must never run them. A control first proves the fixture's programs run
-// under plain git; every fx path below must then leave the sentinel log
+// under plain git; every lia path below must then leave the sentinel log
 // empty while still answering from the repository's real contents.
 
 const TIMEOUT = 60_000;
@@ -69,7 +69,7 @@ function sentinelRuns(fixture: Fixture): string[] {
 }
 
 function poisonedRepository(): Fixture {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), "fx-poisoned-repo-")));
+  const base = realpathSync(mkdtempSync(join(tmpdir(), "lia-poisoned-repo-")));
   const fixture: Fixture = {
     base,
     home: join(base, "home"),
@@ -77,10 +77,10 @@ function poisonedRepository(): Fixture {
     log: join(base, "sentinel.log"),
   };
   fixtures.push(fixture);
-  mkdirSync(join(fixture.home, ".fx"), { recursive: true });
+  mkdirSync(join(fixture.home, ".lia"), { recursive: true });
   mkdirSync(join(fixture.workspace, "notes"), { recursive: true });
   writeFileSync(
-    join(fixture.home, ".fx", "settings.json"),
+    join(fixture.home, ".lia", "settings.json"),
     JSON.stringify({ auto_upgrade: false }),
   );
   const sentinel = join(base, "sentinel.sh");
@@ -113,15 +113,15 @@ function poisonedRepository(): Fixture {
   return fixture;
 }
 
-function fxEnv(fixture: Fixture, gateway: Gateway): Record<string, string> {
+function liaEnv(fixture: Fixture, gateway: Gateway): Record<string, string> {
   return {
     HOME: fixture.home,
     AI_GATEWAY_API_KEY: "fake-poisoned-repo-key",
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_MODEL: MODEL,
-    FX_PERMISSION_MODE: "auto",
-    FX_SOUND: "0",
+    LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+    LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_MODEL: MODEL,
+    LIA_PERMISSION_MODE: "auto",
+    LIA_SOUND: "0",
     NO_COLOR: "1",
   };
 }
@@ -159,12 +159,12 @@ describe("poisoned repository", () => {
       ], { classifierResponses: [] });
       gateways.push(gateway);
 
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--quiet", "--json", "--no-save", "Inspect the repository."],
-        { cwd: fixture.workspace, env: fxEnv(fixture, gateway), timeoutMs: TIMEOUT },
+        { cwd: fixture.workspace, env: liaEnv(fixture, gateway), timeoutMs: TIMEOUT },
       );
       expect(result.code, result.stderr).toBe(0);
-      // `fx ask` reports each tool's activity on stderr.
+      // `lia ask` reports each tool's activity on stderr.
       expect(result.stderr).toContain("Running git status --short");
       expect(result.stderr).not.toMatch(/panic|error/i);
       expect(sentinelRuns(fixture)).toEqual([]);
@@ -185,10 +185,10 @@ describe("poisoned repository", () => {
   );
 
   test(
-    "auto mode holds a git command whose repository config fx cannot read",
+    "auto mode holds a git command whose repository config lia cannot read",
     async () => {
       const fixture = poisonedRepository();
-      // fx reads repository config only through regular files, so an include
+      // lia reads repository config only through regular files, so an include
       // that is a symlink leaves the config unread and safe git refuses.
       writeFileSync(join(fixture.base, "real.inc"), `[core]\n\tfsmonitor = ${join(fixture.base, "sentinel.sh")}\n`);
       symlinkSync(join(fixture.base, "real.inc"), join(fixture.workspace, ".git", "linked.inc"));
@@ -201,16 +201,16 @@ describe("poisoned repository", () => {
       ], { classifierResponses: [] });
       gateways.push(gateway);
 
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--quiet", "--json", "--no-save", "Inspect the repository."],
-        { cwd: fixture.workspace, env: fxEnv(fixture, gateway), timeoutMs: TIMEOUT },
+        { cwd: fixture.workspace, env: liaEnv(fixture, gateway), timeoutMs: TIMEOUT },
       );
       expect(result.code, result.stderr).toBe(0);
       expect(result.stderr).not.toMatch(/panic/i);
       expect(sentinelRuns(fixture)).toEqual([]);
       expect(gateway.classifierRequests).toHaveLength(0);
       const bodies = gateway.requests.map((request: { body: string }) => request.body);
-      expect(toolResult(bodies[1]!, "status")).toContain("fx did not run this git command");
+      expect(toolResult(bodies[1]!, "status")).toContain("lia did not run this git command");
     },
     TIMEOUT,
   );
@@ -221,7 +221,7 @@ describe("poisoned repository", () => {
       const fixture = poisonedRepository();
       // Each include of the config reads it again with its includes, so four
       // of them ask for about 4^10 reads before the include depth stops one
-      // chain. git refuses the file; fx must answer from it quickly.
+      // chain. git refuses the file; lia must answer from it quickly.
       const config = join(fixture.workspace, ".git", "config");
       writeFileSync(config, readFileSync(config, "utf8") + "[include]\n\tpath = config\n".repeat(4));
       const gateway = startFakeGateway([
@@ -231,9 +231,9 @@ describe("poisoned repository", () => {
       gateways.push(gateway);
 
       const started = Date.now();
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--quiet", "--json", "--no-save", "Inspect the repository."],
-        { cwd: fixture.workspace, env: fxEnv(fixture, gateway), timeoutMs: 15_000 },
+        { cwd: fixture.workspace, env: liaEnv(fixture, gateway), timeoutMs: 15_000 },
       );
       expect(result.code, result.stderr).toBe(0);
       expect(Date.now() - started).toBeLessThan(10_000);
@@ -251,7 +251,7 @@ describe("poisoned repository", () => {
   );
 
   test(
-    "fx pr snapshots the repository without running its programs",
+    "lia pr snapshots the repository without running its programs",
     async () => {
       const fixture = poisonedRepository();
       const gateway = startFakeGateway(
@@ -260,9 +260,9 @@ describe("poisoned repository", () => {
       );
       gateways.push(gateway);
 
-      const result = await runFx(["pr"], {
+      const result = await runLia(["pr"], {
         cwd: fixture.workspace,
-        env: fxEnv(fixture, gateway),
+        env: liaEnv(fixture, gateway),
         timeoutMs: TIMEOUT,
       });
       expect(result.code, result.stderr).toBe(0);
@@ -282,13 +282,13 @@ describe("user git config through a symlink", () => {
   test(
     "glob and grep honor an excludes file named by a symlinked ~/.gitconfig",
     async () => {
-      const base = realpathSync(mkdtempSync(join(tmpdir(), "fx-linked-gitconfig-")));
+      const base = realpathSync(mkdtempSync(join(tmpdir(), "lia-linked-gitconfig-")));
       const fixture: Fixture = { base, home: join(base, "home"), workspace: join(base, "workspace"), log: join(base, "unused.log") };
       fixtures.push(fixture);
-      mkdirSync(join(fixture.home, ".fx"), { recursive: true });
+      mkdirSync(join(fixture.home, ".lia"), { recursive: true });
       mkdirSync(join(fixture.home, "dotfiles"));
       mkdirSync(fixture.workspace);
-      writeFileSync(join(fixture.home, ".fx", "settings.json"), JSON.stringify({ auto_upgrade: false }));
+      writeFileSync(join(fixture.home, ".lia", "settings.json"), JSON.stringify({ auto_upgrade: false }));
       writeFileSync(join(fixture.home, "dotfiles", "ignore"), "*.secret\n");
       writeFileSync(join(fixture.home, "dotfiles", "gitconfig"), "[core]\n\texcludesFile = ~/dotfiles/ignore\n");
       symlinkSync(join(fixture.home, "dotfiles", "gitconfig"), join(fixture.home, ".gitconfig"));
@@ -303,9 +303,9 @@ describe("user git config through a symlink", () => {
         fakeGatewayFinalText("inspection complete"),
       ], { classifierResponses: [] });
       gateways.push(gateway);
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--quiet", "--json", "--no-save", "Inspect the repository."],
-        { cwd: fixture.workspace, env: { ...fxEnv(fixture, gateway), GIT_CONFIG_NOSYSTEM: "1" }, timeoutMs: TIMEOUT },
+        { cwd: fixture.workspace, env: { ...liaEnv(fixture, gateway), GIT_CONFIG_NOSYSTEM: "1" }, timeoutMs: TIMEOUT },
       );
       expect(result.code, result.stderr).toBe(0);
       const bodies = gateway.requests.map((request: { body: string }) => request.body);

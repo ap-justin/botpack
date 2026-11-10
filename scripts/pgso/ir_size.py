@@ -19,7 +19,7 @@ writeByte, and allocating writer setup and teardown, the byte list's append,
 every list's teardown, slice equality and prefix checks, case-insensitive
 ASCII equality, and the Io mutex's lock and unlock.
 Zig inlines them at thousands of call sites (free alone at about
-11,000 in fx); one out-of-line copy per instantiation keeps the same checks,
+11,000 in lia); one out-of-line copy per instantiation keeps the same checks,
 poisoning, and calls. Run it on the emitted bitcode, before instrumentation,
 so training and profile use see the same inlining.
 

@@ -54,15 +54,15 @@ for (const call of toolCalls) {
   permission[`mcp_conformance_${call.name}`] = "allow";
 }
 
-const fxBin = resolve(import.meta.dirname, "../../../zig-out/bin/fx");
-const root = mkdtempSync(join(tmpdir(), "fx-mcp-conformance-client-"));
+const liaBin = resolve(import.meta.dirname, "../../../zig-out/bin/lia");
+const root = mkdtempSync(join(tmpdir(), "lia-mcp-conformance-client-"));
 const home = join(root, "home");
 const workspace = join(root, "workspace");
-mkdirSync(join(home, ".fx", "skills"), { recursive: true, mode: 0o700 });
+mkdirSync(join(home, ".lia", "skills"), { recursive: true, mode: 0o700 });
 mkdirSync(workspace, { recursive: true });
 
 writeFileSync(
-  join(home, ".fx", "mcp.json"),
+  join(home, ".lia", "mcp.json"),
   JSON.stringify({
     mcp: {
       conformance: {
@@ -76,7 +76,7 @@ writeFileSync(
             ? { client_id: scenarioContext.client_id }
             : {}),
           ...(scenarioContext.client_secret
-            ? { client_secret_env: "FX_MCP_CONFORMANCE_CLIENT_SECRET" }
+            ? { client_secret_env: "LIA_MCP_CONFORMANCE_CLIENT_SECRET" }
             : {}),
         },
       },
@@ -84,7 +84,7 @@ writeFileSync(
   }),
 );
 writeFileSync(
-  join(home, ".fx", "settings.json"),
+  join(home, ".lia", "settings.json"),
   JSON.stringify({
     permission_mode: "auto",
     permission,
@@ -113,9 +113,9 @@ function gatewaySteps() {
   return steps;
 }
 
-// fx signs in through the browser with fx mcp login. For the auth scenarios
-// this browser follows the authorization URL's redirects back to fx's
-// loopback callback, as a user approving it would. On Linux fx opens a
+// lia signs in through the browser with lia mcp login. For the auth scenarios
+// this browser follows the authorization URL's redirects back to lia's
+// loopback callback, as a user approving it would. On Linux lia opens a
 // browser only when a display is set, so these scenarios also set DISPLAY.
 const authScenario = scenario.startsWith("auth/");
 const fakeBin = join(root, "bin");
@@ -127,31 +127,31 @@ if (authScenario) {
     writeFileSync(join(fakeBin, name), opener, { mode: 0o755 });
   }
 }
-const fxEnv = {
+const liaEnv = {
   ...process.env,
   HOME: home,
   PATH: authScenario ? `${fakeBin}:${process.env.PATH ?? ""}` : process.env.PATH,
   ...(authScenario ? { DISPLAY: process.env.DISPLAY || ":0" } : {}),
   AI_GATEWAY_API_KEY: "mcp-conformance-placeholder",
   VERCEL_OIDC_TOKEN: "",
-  FX_AUTO_UPGRADE: "0",
-  FX_DISABLE_KEYCHAIN: "1",
+  LIA_AUTO_UPGRADE: "0",
+  LIA_DISABLE_KEYCHAIN: "1",
   ...(scenarioContext.client_secret
     ? {
-        FX_MCP_CONFORMANCE_CLIENT_SECRET:
+        LIA_MCP_CONFORMANCE_CLIENT_SECRET:
           scenarioContext.client_secret,
       }
     : {}),
-  FX_MODEL: FAKE_GATEWAY_MODEL,
-  FX_TEST_SKIP_ONBOARDING: "1",
-  FX_SOUND: "0",
+  LIA_MODEL: FAKE_GATEWAY_MODEL,
+  LIA_TEST_SKIP_ONBOARDING: "1",
+  LIA_SOUND: "0",
   NO_COLOR: "1",
 };
 
-async function runFx(args: string[], extraEnv: Record<string, string> = {}) {
-  const child = Bun.spawn([fxBin, ...args], {
+async function runLia(args: string[], extraEnv: Record<string, string> = {}) {
+  const child = Bun.spawn([liaBin, ...args], {
     cwd: workspace,
-    env: { ...fxEnv, ...extraEnv },
+    env: { ...liaEnv, ...extraEnv },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -169,7 +169,7 @@ async function runFx(args: string[], extraEnv: Record<string, string> = {}) {
 async function ask() {
   const gateway = startFakeGateway(gatewaySteps());
   try {
-    const result = await runFx(
+    const result = await runLia(
       [
         "ask",
         "--json",
@@ -177,9 +177,9 @@ async function ask() {
         "--no-save",
         "Call the conformance add_numbers MCP tool with a=2 and b=3.",
       ],
-      { FX_GATEWAY_BASE_URL: gateway.baseUrl, FX_GATEWAY_CHAT_URL: gateway.chatUrl },
+      { LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl },
     );
-    // What fx told the model: a call ended because the server needs a
+    // What lia told the model: a call ended because the server needs a
     // login. The --json result carries only each call's status.
     const needsLogin = gateway.requests.some((r) => r.body.includes("needs a login"));
     return { ...result, needsLogin };
@@ -189,15 +189,15 @@ async function ask() {
 }
 
 // A server that asks questions needs a client that can take them, and a
-// headless fx ask declares none: such scenarios run through fx acp, as an ACP
+// headless lia ask declares none: such scenarios run through lia acp, as an ACP
 // client that takes form questions and answers each with its defaults.
 const asksQuestions = scenario === "sep-2322-client-request-state";
 
 async function askOverAcp() {
   const gateway = startFakeGateway(gatewaySteps());
-  const child = Bun.spawn([fxBin, "acp"], {
+  const child = Bun.spawn([liaBin, "acp"], {
     cwd: workspace,
-    env: { ...fxEnv, FX_GATEWAY_BASE_URL: gateway.baseUrl, FX_GATEWAY_CHAT_URL: gateway.chatUrl },
+    env: { ...liaEnv, LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl },
     stdin: "pipe",
     stdout: "pipe",
     stderr: "inherit",
@@ -272,12 +272,12 @@ function formDefaults(schema: any): Record<string, unknown> {
 }
 
 try {
-  if (authScenario) await runFx(["mcp", "login", "conformance"]);
+  if (authScenario) await runLia(["mcp", "login", "conformance"]);
   let result = asksQuestions ? await askOverAcp() : await ask();
   // A server that asks for more scope at call time: sign in again once,
   // then ask once more.
   if (authScenario && result.needsLogin) {
-    await runFx(["mcp", "login", "conformance"]);
+    await runLia(["mcp", "login", "conformance"]);
     result = await ask();
   }
   process.exitCode = result.exitCode;

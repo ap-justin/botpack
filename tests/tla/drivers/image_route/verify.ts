@@ -7,17 +7,17 @@
 //   3. the harness, built from the real src/core/images/image_route.zig;
 //   4. spec to code: every graph edge replayed against the real core;
 //   5. code to spec: scripted and random traces with faults, checked by TLC;
-//   6. binary to spec: `fx ask` turns of the built binary, a matrix and
+//   6. binary to spec: `lia ask` turns of the built binary, a matrix and
 //      random sessions, each checked by TLC against the model, and doctored
 //      observations the check must reject;
 //   7. every planted bug in the spec caught by its property;
 //   8. every planted bug in the code caught in both directions;
 //   9. traceability: DESIGN.md accounts for every question, rule, and law.
 //
-// Settings: FX_IMAGE_ROUTE_SEED (default 20261019), FX_IMAGE_ROUTE_TRACES
-// (random traces, default 300), FX_IMAGE_ROUTE_BINARY_SESSIONS (random
-// binary sessions, default 8), FX_BIN (the binary, default zig-out/bin/fx,
-// which `zig build` must have built from this checkout), FX_TLA_OUT (where
+// Settings: LIA_IMAGE_ROUTE_SEED (default 20261019), LIA_IMAGE_ROUTE_TRACES
+// (random traces, default 300), LIA_IMAGE_ROUTE_BINARY_SESSIONS (random
+// binary sessions, default 8), LIA_BIN (the binary, default zig-out/bin/lia,
+// which `zig build` must have built from this checkout), LIA_TLA_OUT (where
 // the report goes).
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -30,9 +30,9 @@ import { codeMutations, specMutations } from "./mutations.ts";
 import { specToCode } from "./spec-to-code.ts";
 import { checkTraceability } from "./traceability.ts";
 
-const seed = Number(process.env.FX_IMAGE_ROUTE_SEED ?? "20261019");
-const randomTraces = Number(process.env.FX_IMAGE_ROUTE_TRACES ?? "300");
-const binarySessions = Number(process.env.FX_IMAGE_ROUTE_BINARY_SESSIONS ?? "8");
+const seed = Number(process.env.LIA_IMAGE_ROUTE_SEED ?? "20261019");
+const randomTraces = Number(process.env.LIA_IMAGE_ROUTE_TRACES ?? "300");
+const binarySessions = Number(process.env.LIA_IMAGE_ROUTE_BINARY_SESSIONS ?? "8");
 const out = outDir("image-route");
 const report: Record<string, unknown> = { started: new Date().toISOString(), seed, randomTraces, binarySessions, binary, out };
 const failures: string[] = [];

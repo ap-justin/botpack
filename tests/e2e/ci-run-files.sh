@@ -12,7 +12,7 @@ fi
 
 cd "$(dirname "$0")" || exit 1
 
-tmux_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/fx-e2e-tmux"
+tmux_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/lia-e2e-tmux"
 status=0
 index=0
 

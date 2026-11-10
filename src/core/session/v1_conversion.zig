@@ -108,7 +108,7 @@ pub fn kindProblem(store: *session_store.Store, alloc: Allocator, id: []const u8
             if (isConversationMetadata(alloc, bytes)) return problem.set("its subagent marker can't be read ({s})", .{@errorName(err)});
         },
     }
-    return problem.set("session.json can't be read in any format this fx knows ({s})", .{@errorName(err)});
+    return problem.set("session.json can't be read in any format this lia knows ({s})", .{@errorName(err)});
 }
 
 /// A v1 root, or a folder whose kind could not be told, with why.
@@ -233,7 +233,7 @@ fn parentOf(store: *session_store.Store, alloc: Allocator, id: []const u8) !?[]u
 }
 
 /// The session v1 remembered for `workspace` (`-c`), or null when it
-/// remembers none. A bookmark fx cannot read is `RememberedSessionUnavailable`,
+/// remembers none. A bookmark lia cannot read is `RememberedSessionUnavailable`,
 /// so `-c` says so, as v1 did (D86). Reads only. Caller owns it.
 pub fn rememberedId(alloc: Allocator, home: []const u8, workspace: []const u8) !?[]u8 {
     var store = try session_store.Store.initReadOnlyFromHome(alloc, home, workspace);
@@ -247,7 +247,7 @@ pub fn rememberedId(alloc: Allocator, home: []const u8, workspace: []const u8) !
     };
 }
 
-/// v1's read-only detail of the root `id`, for `fx session {id}` (D61), or
+/// v1's read-only detail of the root `id`, for `lia session {id}` (D61), or
 /// null when v1 holds no such root. It converts and writes nothing. Caller
 /// owns the result.
 pub fn readDetail(alloc: Allocator, home: []const u8, id: []const u8) !?session_store.ReadOnlyDetail {
@@ -626,7 +626,7 @@ fn countTurns(steps: []const Step) usize {
     return turns;
 }
 
-/// The start of a damaged root that v1's `fx session recover` keeps (D64),
+/// The start of a damaged root that v1's `lia session recover` keeps (D64),
 /// read by v1's own recovery from the locked folder, as a member to import
 /// under a new id. Errors as `session_store.Store.recoverableState`, and
 /// `error.InvalidSessionFormat` with `problem` set when a kept turn is one
@@ -983,7 +983,7 @@ fn coveredSteps(events: []const Event, seqs: []const u64, coverage: u64) !types.
 fn readOlderFormat(a: Allocator, store: *session_store.Store, locked: *Locked, member: *Member, problem: *Problem) !void {
     var detail = store.loadReadOnlyDetail(a, locked.id, .{ .allow_large_legacy = true }) catch |err| switch (err) {
         error.OutOfMemory => return err,
-        else => return problem.set("session.json can't be read in any format this fx knows ({s})", .{@errorName(err)}),
+        else => return problem.set("session.json can't be read in any format this lia knows ({s})", .{@errorName(err)}),
     };
     member.listed_ms = @intCast(@max(detail.summary.updated_at_ms, 0));
     member.title = detail.summary.title;
@@ -1329,14 +1329,14 @@ test "a member folder another process removes after it is opened and before it i
     const io = io_mod.getIo();
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io, ".fx/sessions/v1memberid01");
+    try tmp.dir.createDirPath(io, ".lia/sessions/v1memberid01");
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
     defer alloc.free(home);
     var store = try session_store.Store.initReadOnlyFromHome(alloc, home, "/");
     defer store.deinit(alloc);
     const opened = (try openMemberDir(&store, "v1memberid01")).?;
     // The other process's conversion removes the folder.
-    try tmp.dir.deleteTree(io, ".fx/sessions/v1memberid01");
+    try tmp.dir.deleteTree(io, ".lia/sessions/v1memberid01");
     try std.testing.expectEqual(@as(?Locked, null), try lockOpened(alloc, &store, "v1memberid01", opened, io_mod.milliTimestamp(), 0));
 }
 

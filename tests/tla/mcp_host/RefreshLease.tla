@@ -3,18 +3,18 @@
 \* Store.tryRefreshLock, src/core/mcp_host/runtime.zig tryRefresh), on a
 \* whole-second awake clock.
 \*
-\* The refresher, one fx, holds the refresh lock across three steps: it looks
+\* The refresher, one lia, holds the refresh lock across three steps: it looks
 \* the saved login up in the store (one Keychain call under the store's
 \* lock), sends the refresh and waits up to RefreshMax for the answer
 \* (src/mcp/core/request.zig refresh_ms), and saves the answer in the store
-\* (a read and a write under the store's lock). Other fx processes use the
+\* (a read and a write under the store's lock). Other lia processes use the
 \* store meanwhile; the store's lock is leased as in StoreLockBudget.tla: a
 \* stamp before each Keychain call, each call within CallMax <= Budget of it,
 \* and its waiters give up Budget + Slack after the later of the stamp and
 \* their own start. A refresher that gives up on the store, or whose call is
 \* cut, goes on without that step's result, as the code does.
 \*
-\* Another fx waits for the refresh lock, so as to take the login the
+\* Another lia waits for the refresh lock, so as to take the login the
 \* refresher saves rather than refresh it again with a token already sent.
 \* The design: the refresher stamps the refresh lock when it takes it, before
 \* it sends the refresh, and before it saves; the waiter goes ahead without
@@ -22,7 +22,7 @@
 \* store's lease (Budget + Slack) ran out, each counted from its own start
 \* if that is later. The store's lease runs out for the refresher too, when
 \* it waits behind a frozen holder: the extra Slack lets it give up on the
-\* store and stamp the refresh lock first. Any fx may freeze (ctrl+z) and
+\* store and stamp the refresh lock first. Any lia may freeze (ctrl+z) and
 \* never act again.
 \*
 \* NoGoAheadPastLiveRefresher: the waiter goes ahead only behind a frozen
@@ -30,9 +30,9 @@
 EXTENDS Naturals
 
 CONSTANTS
-    Others,     \* the other fx processes that use the store, once each
+    Others,     \* the other lia processes that use the store, once each
     CallMax,    \* one Keychain call's own timeout (s)
-    MaxCalls,   \* Keychain calls another fx's hold makes, at most
+    MaxCalls,   \* Keychain calls another lia's hold makes, at most
     Budget,     \* how old a live store holder's stamp gets (s)
     Slack,      \* what a waiter allows past a stamp (s)
     RefreshMax  \* how long a sent refresh waits for its answer (s)
@@ -101,7 +101,7 @@ Init ==
 OVars == <<oState, oNeeds, oCalls, oIn, oCallAt, oStamped>>
 RVars == <<phase, rHold, rCalls, rIn, rCallAt, rStamped, rWaitAt, netAt, rStamp>>
 
-\* Another fx takes the free store lock whenever it likes.
+\* Another lia takes the free store lock whenever it likes.
 OAcquire(o) ==
     /\ sOwner = "none" /\ oState[o] = "ready" /\ ~(o \in frozen)
     /\ sOwner' = o

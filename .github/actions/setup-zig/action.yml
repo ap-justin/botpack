@@ -3,7 +3,7 @@ description: >-
   Install Zig and restore the job's Zig cache. Only runs on main save the cache,
   through save-zig-cache, so pull requests reuse main's cache without adding
   entries of their own. The key changes only with the Zig version and the build
-  files: fx itself recompiles on every change, so the cache pays off through the
+  files: lia itself recompiles on every change, so the cache pays off through the
   dependencies, compiler_rt, and libc it keeps.
 
 inputs:

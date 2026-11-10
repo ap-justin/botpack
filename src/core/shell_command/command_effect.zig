@@ -124,7 +124,7 @@ fn reversibleAutoStage(raw_tokens: []const command_lex.ArgvToken) bool {
     return false;
 }
 
-// `^` and `#` are globs in zsh with `extendedglob`, which fx replays from the
+// `^` and `#` are globs in zsh with `extendedglob`, which lia replays from the
 // user's startup files: `^x` matches every file not named `x`, and `x#`
 // matches any run of `x`, so a workspace file could supply the word. A word
 // that starts with an unquoted `#` also starts a comment in every shell.
@@ -300,10 +300,10 @@ test "known reversible auto commands exclude destructive and hidden effects" {
         "git fetch --depth=1 origin main",
         "git fetch --no-tags origin +main:main",
         "git fetch origin -- --not-an-option",
-        "git fetch https://github.com/vercel-labs/fx main",
-        "git fetch HTTPS://github.com/vercel-labs/fx",
-        "git fetch ssh://git@github.com/vercel-labs/fx.git",
-        "git fetch git@github.com:vercel-labs/fx.git",
+        "git fetch https://github.com/ap-justin/lia main",
+        "git fetch HTTPS://github.com/ap-justin/lia",
+        "git fetch ssh://git@github.com/ap-justin/lia.git",
+        "git fetch git@github.com:ap-justin/lia.git",
         "git fetch file:///tmp/repository",
         "git fetch ../other main",
         "npm install 2>&1",
@@ -405,7 +405,7 @@ pub const ApprovalReason = enum {
     command_owned_input,
     unknown_command,
     planning_failure,
-    /// fx could not apply its git safety settings in this directory.
+    /// lia could not apply its git safety settings in this directory.
     unsafe_git,
 };
 
@@ -2004,18 +2004,18 @@ const ParityShell = struct {
     paths: []const []const u8,
     flags: []const []const u8,
     guards_special_builtins: bool,
-    /// Runs before anything else in the script. fx turns off zsh's `equals`
+    /// Runs before anything else in the script. lia turns off zsh's `equals`
     /// option before every command (`zsh_command_prelude` in
     /// `src/core/terminal/shell_resolver.zig`), so zsh here does too.
     prelude: []const u8 = "",
     /// Whether this shell stands in for options a user's startup files can
-    /// turn on. fx runs direct read-only commands without a shell, so only
+    /// turn on. lia runs direct read-only commands without a shell, so only
     /// the commands it hands to a shell are compared with this one.
     user_options: bool = false,
 };
 
 /// `/bin/sh` is dash on Debian and Ubuntu and bash in POSIX mode on macOS,
-/// so dash is listed on its own as well. fx replays a user's zsh glob
+/// so dash is listed on its own as well. lia replays a user's zsh glob
 /// options, and `extendedglob` makes `^` and `#` glob operators, so zsh also
 /// runs with it on.
 const parity_shells = [_]ParityShell{
@@ -2044,7 +2044,7 @@ const parity_shells = [_]ParityShell{
     },
 };
 
-const parity_recorder = "#!/bin/sh\nprintf '%s\\0' \"$#\" \"$@\" >> \"$FX_PARITY_LOG\"\n";
+const parity_recorder = "#!/bin/sh\nprintf '%s\\0' \"$#\" \"$@\" >> \"$LIA_PARITY_LOG\"\n";
 
 const ParityOrder = enum {
     /// `&&` stages run one after another.
@@ -2057,7 +2057,7 @@ const ParityExpectation = struct {
     /// Each stage's words, program first.
     stages: []const []const []const u8,
     order: ParityOrder,
-    /// Whether fx hands the command to a shell, rather than running it
+    /// Whether lia hands the command to a shell, rather than running it
     /// itself.
     runs_in_shell: bool,
 };
@@ -2073,7 +2073,7 @@ const ParityRun = struct {
 
 const ParityMode = enum { must_run_without_review, if_run_without_review };
 
-/// What fx parsed for each review-free path that accepts `command`. Empty
+/// What lia parsed for each review-free path that accepts `command`. Empty
 /// when both send it to review. Allocates from `arena`.
 fn parityExpectations(arena: std.mem.Allocator, command: []const u8) ![]const ParityExpectation {
     var expectations: std.ArrayList(ParityExpectation) = .empty;
@@ -2117,10 +2117,10 @@ fn checkShellParity(command: []const u8, mode: ParityMode) !void {
     const expectations = try parityExpectations(arena, command);
     if (expectations.len == 0) {
         if (mode == .if_run_without_review) return;
-        // The failure output names the command fx reviews.
+        // The failure output names the command lia reviews.
         std.testing.expectEqualStrings(
-            try arena.print("fx runs without review: {s}", .{command}),
-            try arena.print("fx reviews: {s}", .{command}),
+            try arena.print("lia runs without review: {s}", .{command}),
+            try arena.print("lia reviews: {s}", .{command}),
         ) catch {};
         return error.TestExpectedReviewFreeCommand;
     }
@@ -2136,15 +2136,15 @@ fn checkShellParity(command: []const u8, mode: ParityMode) !void {
 
 /// Finds the shell, or returns null to skip it. The Linux unit test job and
 /// the nightly Fuzz workflow install every shell and set
-/// `FX_TEST_SHELL_PARITY_ALL_SHELLS`, so a missing shell there fails instead of
+/// `LIA_TEST_SHELL_PARITY_ALL_SHELLS`, so a missing shell there fails instead of
 /// quietly narrowing the check. Tests read the process environment from
-/// `std.testing.environ`, since fx's own environment is never set up in them.
+/// `std.testing.environ`, since lia's own environment is never set up in them.
 fn parityShellPath(shell: ParityShell) !?[]const u8 {
     for (shell.paths) |path| {
         std.Io.Dir.accessAbsolute(std.testing.io, path, .{}) catch continue;
         return path;
     }
-    if (try std.testing.environ.contains(std.testing.allocator, "FX_TEST_SHELL_PARITY_ALL_SHELLS")) {
+    if (try std.testing.environ.contains(std.testing.allocator, "LIA_TEST_SHELL_PARITY_ALL_SHELLS")) {
         // The failure output names the path where the shell was expected.
         std.testing.expectEqualStrings(shell.paths[0], "") catch {};
         return error.TestShellParityShellMissing;
@@ -2185,7 +2185,7 @@ fn runParityShell(
     var environ: std.process.Environ.Map = .init(arena);
     try environ.put("PATH", try std.Io.Dir.path.join(arena, &.{ root, "empty" }));
     try environ.put("HOME", try std.Io.Dir.path.join(arena, &.{ root, "home" }));
-    try environ.put("FX_PARITY_LOG", try std.Io.Dir.path.join(arena, &.{ root, "log" }));
+    try environ.put("LIA_PARITY_LOG", try std.Io.Dir.path.join(arena, &.{ root, "log" }));
 
     var argv: std.ArrayList([]const u8) = .empty;
     try argv.append(arena, shell_path);
@@ -2266,7 +2266,7 @@ fn expectParity(
     };
     if (exited_cleanly and run.created.len == 0 and sameParityRecords(expected, actual)) return;
 
-    // The failure output shows what fx parsed against what the shell ran.
+    // The failure output shows what lia parsed against what the shell ran.
     const term = switch (run.term) {
         .exited => |code| try arena.print("exited {d}", .{code}),
         else => try arena.print("{any}", .{run.term}),
@@ -2335,8 +2335,8 @@ fn sameParityRecords(expected: []const []const []const u8, actual: []const []con
     return true;
 }
 
-/// Every form of command that fx runs without review. Each must still be
-/// review-free and must run in every shell exactly as fx parsed it.
+/// Every form of command that lia runs without review. Each must still be
+/// review-free and must run in every shell exactly as lia parsed it.
 const parity_review_free_commands = [_][]const u8{
     "node -v",
     "node --version",
@@ -2403,8 +2403,8 @@ const parity_review_free_commands = [_][]const u8{
     "git log -n 5 | head -n 3",
 };
 
-/// Near misses that fx may or may not run without review. When it does,
-/// they must still run as fx parsed them.
+/// Near misses that lia may or may not run without review. When it does,
+/// they must still run as lia parsed them.
 const parity_probe_commands = [_][]const u8{
     "git fetch '&&' git status",
     "git fetch \\&\\& git status --prune",
@@ -2444,7 +2444,7 @@ const parity_probe_commands = [_][]const u8{
     "printf '%s\\n' a b",
 };
 
-test "shell parity: fx runs every review-free command form as sh, dash, bash, and zsh parse it" {
+test "shell parity: lia runs every review-free command form as sh, dash, bash, and zsh parse it" {
     const os = @import("builtin").target.os.tag;
     if (os != .macos and os != .linux) return error.SkipZigTest;
     var failures: usize = 0;
@@ -2463,7 +2463,7 @@ test "shell parity: fx runs every review-free command form as sh, dash, bash, an
     try std.testing.expectEqual(@as(usize, 0), failures);
 }
 
-/// Program words that start a generated stage, weighted toward commands fx
+/// Program words that start a generated stage, weighted toward commands lia
 /// runs without review.
 const parity_stage_starts = [_][]const u8{
     "node -v",  "which",   "git status",   "git remote -v", "git worktree list", "git fetch",

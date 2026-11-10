@@ -5,7 +5,7 @@
 //! subscriptions, so one run traces up to five machines ("stdio",
 //! "request", "era", "catalog", "subscription") for TLC.
 //! Everything the host sees is printed as JSON lines. Dev only; never moves
-//! into fx.
+//! into lia.
 //!
 //! Usage: stdio_lab <trace-path> <script> [options] -- <server argv...>
 //! Options: --max-attempts N, --grace-ms N, --term-ms N, --backoff-ms N,

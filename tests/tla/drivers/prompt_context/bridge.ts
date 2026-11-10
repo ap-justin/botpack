@@ -1,4 +1,4 @@
-// Connects the requests the real fx binary sent to TLC.
+// Connects the requests the real lia binary sent to TLC.
 //
 // 1. Each captured agent request becomes PromptCache blocks: the tools, then
 //    the stable instruction groups (base, skills, project, mcp), the turn
@@ -80,11 +80,11 @@ const ORDER = ["base", "skills", "project", "mcp", "ctx", "rt"] as const;
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 const short = (text: string) => sha(text).slice(0, 16);
 
-/** Blocks today's fx inserts ahead of the history mid-session. */
+/** Blocks today's lia inserts ahead of the history mid-session. */
 const INSERTED = ["scoped", "skill"] as const;
 const SKILL_TEXT = "Explicitly invoked skill content for this query:";
 /** Opens the short note a turn saves in place of a named skill's text (src/core/skills/skill_invocation.zig skill_used_open_tag). */
-const SKILL_USED = "<fx-skill-used>";
+const SKILL_USED = "<lia-skill-used>";
 
 type SystemKind = (typeof ORDER)[number] | (typeof INSERTED)[number] | "other";
 
@@ -95,7 +95,7 @@ function systemKind(content: string): SystemKind {
   if (content.startsWith("Skills provide task instructions") || content.includes("<available_skills>")) return "skills";
   if (content.startsWith("<project-instructions-guidance>") || content.includes("<project-rules")) return "project";
   if (content.startsWith("Configured MCP servers")) return "mcp";
-  if (content.startsWith("<fx-turn-context>")) return "ctx";
+  if (content.startsWith("<lia-turn-context>")) return "ctx";
   if (content.startsWith("Runtime context:") || content.startsWith("<response_language_control>")) return "rt";
   return "other";
 }
@@ -116,17 +116,17 @@ function hasMarker(message: any, family: Family): boolean {
 
 /** A system message inside the conversation, as a note carrier sends it, or null. */
 function noteKind(content: string): "note" | "skilltext" | "skillnote" | null {
-  if (content.startsWith("<fx-context-update>") || content.includes("<scoped-rules")) return "note";
+  if (content.startsWith("<lia-context-update>") || content.includes("<scoped-rules")) return "note";
   if (content.startsWith(SKILL_TEXT)) return "skilltext";
-  if (content.startsWith("<fx-skill-used")) return "skillnote";
+  if (content.startsWith("<lia-skill-used")) return "skillnote";
   return null;
 }
 
 /** The note a resumed turn's user message carries when earlier shell handles are gone (src/core/session/session.zig stale_shell_handles_note). */
-export const STALE_SHELL_NOTE = "Runtime context: fx restarted since this session was last active";
+export const STALE_SHELL_NOTE = "Runtime context: lia restarted since this session was last active";
 
 /** Opens the note a changed runtime context rides in (src/core/agent/runtime/runtime_context.zig update_open_tag). */
-export const RUNTIME_UPDATE = "<fx-context-update>";
+export const RUNTIME_UPDATE = "<lia-context-update>";
 
 function text(message: any): string {
   return typeof message.content === "string" ? message.content : JSON.stringify(message.content);
@@ -168,7 +168,7 @@ export function abstractRequest(body: string, family: Family): Abstraction {
       continue;
     }
     if (kind === "scoped" || kind === "skill") {
-      // Today's fx: rules delivered this turn follow the MCP group and move
+      // Today's lia: rules delivered this turn follow the MCP group and move
       // after the project rules on later turns; a named skill's text comes
       // right before the turn context.
       const after = groups.at(-1)!.kind;
@@ -235,7 +235,7 @@ export function abstractRequest(body: string, family: Family): Abstraction {
       continue;
     }
     // One model response is one block: an assistant message and the tool
-    // results that follow it. Rules fx delivered ride on a tool result; an
+    // results that follow it. Rules lia delivered ride on a tool result; an
     // escaped tag (&lt;scoped-rules) in tool output is not a block.
     const last = blocks.at(-1)!;
     if ((last.k === "asst" || last.k === "asstc") && role !== "assistant") {
@@ -319,7 +319,7 @@ export function derive(observed: ObservedRequest[]): Derived[] {
 export function coverage(observed: ObservedRequest[]): Record<Property, number> {
   const d = derive(observed);
   // The runtime block changed since the previous request of the session, as
-  // when fx put a notice in the instructions mid-session.
+  // when lia put a notice in the instructions mid-session.
   const rt = (r: ObservedRequest) => r.req.find((b) => b.k === "rt")?.v;
   const rtChanged = (x: Derived, n: number) => x.prev !== null && rt(x.prev) !== rt(observed[n]!);
   return {

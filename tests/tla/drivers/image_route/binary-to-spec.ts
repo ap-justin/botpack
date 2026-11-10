@@ -1,4 +1,4 @@
-// Binary to spec: drives the built fx binary through `fx ask` turns against a
+// Binary to spec: drives the built lia binary through `lia ask` turns against a
 // fake gateway, records what each turn did, and has TLC check every turn
 // against ImageRoute (BinaryImageRoute.tla).
 //
@@ -9,8 +9,8 @@
 // the wrong source, such as counting an earlier turn's image as one attached
 // now, passes every core check and fails here.
 //
-// Each session is one saved fx session with its own HOME, and each turn is
-// one `fx ask` process that sees one catalog view: listed with vision,
+// Each session is one saved lia session with its own HOME, and each turn is
+// one `lia ask` process that sees one catalog view: listed with vision,
 // listed without it, missing the model, or down (its host refuses
 // connections, as an unreachable gateway does). The matrix runs every view
 // with and without an image attached now, after a turn that left an image
@@ -31,10 +31,10 @@ const VISION_MODEL = "google/gemini-2.5-flash";
 const IMAGE = join(REPO_ROOT, "tests", "e2e", "fixtures", "placeholder-logo.png");
 
 // What the binary prints, matched by stable prefixes of its own text.
-const UNKNOWN_NOTE = "was not sent with this request: fx could not confirm image input support";
+const UNKNOWN_NOTE = "was not sent with this request: lia could not confirm image input support";
 const DEAD_END_NOTE = "was not sent with this request: this model does not accept inline images";
 // Both catalog-down notices say it: the one for a catalog that answered with a
-// failure, and the one for a catalog fx could not connect to, which the "down"
+// failure, and the one for a catalog lia could not connect to, which the "down"
 // view below is (`catalogDownNotice` in src/core/agent/runtime/orchestrator.zig).
 const CATALOG_DOWN_NOTICE = "aren't reaching the model";
 
@@ -111,7 +111,7 @@ class FakeGateway {
     if (req.method !== "POST") return new Response("not found", { status: 404 });
     const body = await req.text();
     if (body.includes("Generate a short title")) return sseText("Image route session");
-    if (body.includes("fx_vision_evidence")) {
+    if (body.includes("lia_vision_evidence")) {
       const images = this.visionIds.map((image_id) => ({ image_id, status: "ok", summary: `image ${image_id}`, visible_text: [], details: [] }));
       return sseText(JSON.stringify({ images }));
     }
@@ -141,9 +141,9 @@ async function runSession(bin: string, dir: string, name: string, turns: Turn[],
   const root = mkdtempSync(join(dir, "session-"));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".lia"), { recursive: true });
   mkdirSync(workspace, { recursive: true });
-  writeFileSync(join(home, ".fx", "settings.json"), "{}");
+  writeFileSync(join(home, ".lia", "settings.json"), "{}");
   const gateway = new FakeGateway();
   const observations: Observation[] = [];
   let sessionId = "";
@@ -173,9 +173,9 @@ async function runSession(bin: string, dir: string, name: string, turns: Turn[],
           HOME: home,
           TMPDIR: root,
           AI_GATEWAY_API_KEY: "fake-image-route-key",
-          FX_MODEL: MODEL,
-          FX_GATEWAY_BASE_URL: turn.view === "down" ? refused : gateway.base,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
+          LIA_MODEL: MODEL,
+          LIA_GATEWAY_BASE_URL: turn.view === "down" ? refused : gateway.base,
+          LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
         }),
       });
       const timer = setTimeout(() => proc.kill("SIGKILL"), 30_000);
@@ -284,7 +284,7 @@ function mismatchesFrom(output: string, observations: Observation[]): Mismatch[]
 }
 
 export async function binaryToSpec(options: { bin: string; dir: string; seed: number; randomSessions: number; maxTurns: number; all?: boolean }): Promise<BinaryToSpecResult> {
-  if (!existsSync(options.bin)) throw new Error(`no fx binary at ${options.bin}; run zig build, or point FX_BIN at one`);
+  if (!existsSync(options.bin)) throw new Error(`no lia binary at ${options.bin}; run zig build, or point LIA_BIN at one`);
   const sessions = [...matrixSessions(), ...randomSessions(options.seed, options.randomSessions, options.maxTurns)];
   mkdirSync(options.dir, { recursive: true });
   const refused = await refusedBase();
@@ -358,8 +358,8 @@ if (import.meta.main) {
   const result = await binaryToSpec({
     bin: flag("--bin") ?? binary,
     dir: outDir("image-route-binary"),
-    seed: Number(flag("--seed") ?? process.env.FX_IMAGE_ROUTE_SEED ?? "20261022"),
-    randomSessions: Number(flag("--sessions") ?? process.env.FX_IMAGE_ROUTE_BINARY_SESSIONS ?? "8"),
+    seed: Number(flag("--seed") ?? process.env.LIA_IMAGE_ROUTE_SEED ?? "20261022"),
+    randomSessions: Number(flag("--sessions") ?? process.env.LIA_IMAGE_ROUTE_BINARY_SESSIONS ?? "8"),
     maxTurns: 5,
     // Standalone runs list every turn that disagrees, not just the first.
     all: true,

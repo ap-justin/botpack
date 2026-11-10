@@ -5,7 +5,7 @@
 # commits, and how each tool result keeps the time it was made.
 # stream-holds.cfg must pass with every edge case on: results that lost their
 # stamp, compaction, recovery from a checkpoint, and faults. stream-before-
-# safe.cfg must pass for fx before results kept their stamps, and
+# safe.cfg must pass for lia before results kept their stamps, and
 # stream-before-reparses.cfg shows that design reparsed streamed pieces. Each
 # stream-mutant-*.cfg plants one bug that its property must catch, and each
 # stream-witness-*.cfg must be violated. stream-simulate*.cfg run random

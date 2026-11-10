@@ -11,7 +11,7 @@ import unittest
 from scripts.pgso.pipeline import _require_bitcode_header
 from scripts.pgso.toolchain import IR_SIZE_SCRIPT
 
-LLVM_BIN = pathlib.Path(os.environ.get("FX_PGSO_LLVM_BIN", "/opt/homebrew/opt/llvm@22/bin"))
+LLVM_BIN = pathlib.Path(os.environ.get("LIA_PGSO_LLVM_BIN", "/opt/homebrew/opt/llvm@22/bin"))
 LIBLLVM = (LLVM_BIN.parent / "lib" / ("libLLVM.dylib" if sys.platform == "darwin" else "libLLVM.so")).resolve()
 AVAILABLE = (LLVM_BIN / "llvm-as").is_file() and LIBLLVM.is_file()
 
@@ -30,7 +30,7 @@ ERROR_UNION = (
 
 class LlvmCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary_directory = tempfile.TemporaryDirectory(prefix="fx-pgso-ir-size-")
+        self.temporary_directory = tempfile.TemporaryDirectory(prefix="lia-pgso-ir-size-")
         self.root = pathlib.Path(self.temporary_directory.name)
 
     def tearDown(self) -> None:
@@ -458,7 +458,7 @@ class OverlayConstantTests(LlvmCase):
             "@target = global i64 0\n"
             "@relocated = internal unnamed_addr constant { ptr, [120 x i8] } { ptr @target, [120 x i8] undef }, align 8\n"
             "@compared = internal unnamed_addr constant { [120 x i8], i16, [6 x i8] } { [120 x i8] undef, i16 3, [6 x i8] undef }, align 8\n"
-            "@named = internal unnamed_addr constant { [120 x i8], i16, [6 x i8] } { [120 x i8] undef, i16 4, [6 x i8] undef }, section \"__TEXT,__fx\", align 8\n"
+            "@named = internal unnamed_addr constant { [120 x i8], i16, [6 x i8] } { [120 x i8] undef, i16 4, [6 x i8] undef }, section \"__TEXT,__lia\", align 8\n"
             "@significant = internal constant { [120 x i8], i16, [6 x i8] } { [120 x i8] undef, i16 5, [6 x i8] undef }, align 8\n"
             "declare void @use(ptr)\n"
             "define i1 @f(ptr %p) minsize {\n"
@@ -606,7 +606,7 @@ bad:
     ),
 }
 
-# llvm-reduce's reduction of six fx footer functions. The outliner gives the
+# llvm-reduce's reduction of six lia footer functions. The outliner gives the
 # two regions one outlined function with two copies of the exit PHI and two
 # output blocks, and nothing branches to either block, so neither call site's
 # result is ever stored.
@@ -1075,7 +1075,7 @@ class ZeroFillGlobalTests(LlvmCase):
             "@constant = internal unnamed_addr constant { [8192 x i8], i32 } { [8192 x i8] undef, i32 1 }, align 4\n"
             "@external = global { [8192 x i8], i32 } { [8192 x i8] undef, i32 1 }, align 4\n"
             "@local = internal thread_local global { [8192 x i8], i32 } { [8192 x i8] undef, i32 1 }, align 4\n"
-            '@placed = internal global { [8192 x i8], i32 } { [8192 x i8] undef, i32 1 }, section "__DATA,__fx", align 4\n'
+            '@placed = internal global { [8192 x i8], i32 } { [8192 x i8] undef, i32 1 }, section "__DATA,__lia", align 4\n'
         )
         uses = "".join(
             f"  %{name} = load i32, ptr @{name}, align 4\n"

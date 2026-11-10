@@ -50,10 +50,10 @@ export function fakeShellRun(
   });
 }
 
-// Marks a fake review decision that fx will hold, without reading its stream.
+// Marks a fake review decision that lia will hold, without reading its stream.
 const HELD_REVIEW_HEADER = "x-fake-review-held";
 
-// A caution without `evidence` reaches fx as an unproven caution, which fx
+// A caution without `evidence` reaches lia as an unproven caution, which lia
 // clears. Use fakeGatewayHeldDecision for a review that must hold the action.
 export function fakeGatewayPermissionDecision(
   decision: "clear" | "caution" = "clear",
@@ -72,7 +72,7 @@ export function fakeGatewayPermissionDecision(
   return response;
 }
 
-// fx holds an action only when the review names a harm and quotes evidence
+// lia holds an action only when the review names a harm and quotes evidence
 // found in the pending action, so this answers with a system-harm caution
 // that quotes the action line of the review request it receives.
 export function fakeGatewayHeldDecision(
@@ -83,7 +83,7 @@ export function fakeGatewayHeldDecision(
     fakeGatewayPermissionDecision("caution", toolCallId, rationale, reviewedActionEvidence(body));
 }
 
-// fx confirms a held decision with a second, identical review request. A fake
+// lia confirms a held decision with a second, identical review request. A fake
 // reviewer answers that confirmation the way it answered the first request,
 // and only that one request, so format and transport retries still take the
 // next queued answer.
@@ -300,7 +300,7 @@ function serveFakeGateway(
 ) {
   const requests: Array<{ body: string; headers: Headers }> = [];
   const classifierRequests: Array<{ body: string; headers: Headers }> = [];
-  // fx's second, identical review of a held action, kept apart so
+  // lia's second, identical review of a held action, kept apart so
   // classifierRequests counts one entry per review.
   const confirmationRequests: Array<{ body: string; headers: Headers }> = [];
   const evaluationRequests: Array<{ body: string; headers: Headers }> = [];

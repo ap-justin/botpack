@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# fx's recovery module in src/core/recovery decides what to do about one model
-# request and never acts: fx reports events to step() and carries out the
+# lia's recovery module in src/core/recovery decides what to do about one model
+# request and never acts: lia reports events to step() and carries out the
 # plan it returns. Code outside imports only the front door, recovery.zig. The
 # module imports only the standard library and its own files, and its
 # production code, everything above each file's first test, performs no I/O,

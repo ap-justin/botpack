@@ -186,8 +186,8 @@ pub fn profileShell(
 const captured_zsh_user_prelude = "\\builtin trap - TERM; ";
 
 /// A startup file can define a function named `builtin`, and zsh and bash run
-/// a function before a builtin of the same name, so every `\builtin` line fx
-/// adds would run the user's function instead. fx removes such a function
+/// a function before a builtin of the same name, so every `\builtin` line lia
+/// adds would run the user's function instead. lia removes such a function
 /// before its own lines. The zsh test runs no command when there is no such
 /// function, so it can't fail under `errexit`; bash's `unset -f` succeeds
 /// either way.
@@ -240,7 +240,7 @@ pub fn capturedInvocation(
 
 /// Stderr marker, followed by a nonce, that a snapshot bootstrap writes with
 /// exit status 125 when the replay stopped before the command could start.
-pub const snapshot_replay_failure_prefix = "fx-shell-snapshot-replay-failed:";
+pub const snapshot_replay_failure_prefix = "lia-shell-snapshot-replay-failed:";
 
 /// Builds the clean-shell argv for a snapshot run. The shell sources the
 /// replay and the command from stdin, so no snapshot text or command appears
@@ -279,11 +279,11 @@ pub fn snapshotInvocation(
     var bootstrap: std.ArrayList(u8) = .empty;
     errdefer bootstrap.deinit(alloc);
     try bootstrap.appendSlice(alloc, park_stderr);
-    try bootstrap.appendSlice(alloc, "\\builtin source /dev/fd/0; __fx_snapshot_status=$?; ");
+    try bootstrap.appendSlice(alloc, "\\builtin source /dev/fd/0; __lia_snapshot_status=$?; ");
     try bootstrap.appendSlice(alloc, restore_stderr);
     try bootstrap.appendSlice(
         alloc,
-        "if [[ -z ${__fx_snapshot_restored-} ]]; then \\builtin printf '%s' ",
+        "if [[ -z ${__lia_snapshot_restored-} ]]; then \\builtin printf '%s' ",
     );
     try appendShellWord(&bootstrap, alloc, failure_marker);
     // Re-raise the common termination signals so the supervisor reports a
@@ -291,9 +291,9 @@ pub fn snapshotInvocation(
     try bootstrap.appendSlice(
         alloc,
         " >&2; \\builtin exit 125; fi; " ++
-            "case $__fx_snapshot_status in 129|130|137|143) " ++
-            "\\builtin kill -$((__fx_snapshot_status - 128)) $$;; esac; " ++
-            "\\builtin exit $__fx_snapshot_status",
+            "case $__lia_snapshot_status in 129|130|137|143) " ++
+            "\\builtin kill -$((__lia_snapshot_status - 128)) $$;; esac; " ++
+            "\\builtin exit $__lia_snapshot_status",
     );
     invocation.setCommand(try bootstrap.toOwnedSlice(alloc));
     return invocation;
@@ -316,7 +316,7 @@ pub fn snapshotScript(
     errdefer output.deinit(alloc);
     try output.appendSlice(alloc, replay);
     if (replay.len != 0 and replay[replay.len - 1] != '\n') try output.append(alloc, '\n');
-    try output.appendSlice(alloc, "__fx_snapshot_restored=1\n");
+    try output.appendSlice(alloc, "__lia_snapshot_restored=1\n");
     if (kind == .zsh) try output.appendSlice(alloc, zsh_command_prelude);
     try output.appendSlice(alloc, "\\builtin eval -- ");
     try appendShellWord(&output, alloc, command);
@@ -343,17 +343,17 @@ const zsh_capture_script =
     \\\builtin printf 'FXSNAP:@NONCE@:REPLAY\0'
     \\\builtin print -r -- '\builtin unalias -a; \builtin unalias -as'
     \\\builtin typeset -p fpath
-    \\for __fx_snapshot_name in ${(ko)functions}; do
-    \\  case $__fx_snapshot_name in (_*|prompt_*|__fx_snapshot_*) continue;; esac
-    \\  \builtin functions -- $__fx_snapshot_name
+    \\for __lia_snapshot_name in ${(ko)functions}; do
+    \\  case $__lia_snapshot_name in (_*|prompt_*|__lia_snapshot_*) continue;; esac
+    \\  \builtin functions -- $__lia_snapshot_name
     \\done
     \\\builtin alias -L
     \\\builtin alias -sL
-    \\for __fx_snapshot_name in extendedglob globdots nullglob nomatch kshglob shglob globstarshort bareglobqual caseglob numericglobsort rcexpandparam shwordsplit ksharrays magicequalsubst braceccl rcquotes shortloops cshnullglob globsubst; do
-    \\  if [[ -o $__fx_snapshot_name ]]; then
-    \\    \builtin print -r -- "\\builtin setopt $__fx_snapshot_name"
+    \\for __lia_snapshot_name in extendedglob globdots nullglob nomatch kshglob shglob globstarshort bareglobqual caseglob numericglobsort rcexpandparam shwordsplit ksharrays magicequalsubst braceccl rcquotes shortloops cshnullglob globsubst; do
+    \\  if [[ -o $__lia_snapshot_name ]]; then
+    \\    \builtin print -r -- "\\builtin setopt $__lia_snapshot_name"
     \\  else
-    \\    \builtin print -r -- "\\builtin unsetopt $__fx_snapshot_name"
+    \\    \builtin print -r -- "\\builtin unsetopt $__lia_snapshot_name"
     \\  fi
     \\done
     \\\builtin printf '\0FXSNAP:@NONCE@:END\0'
@@ -368,13 +368,13 @@ const bash_capture_script =
     \\\builtin printf 'FXSNAP:@NONCE@:NAMES\0'
     \\\builtin printf '%s\0' $(\builtin compgen -a) $(\builtin compgen -A function)
     \\\builtin printf 'FXSNAP:@NONCE@:REPLAY\0'
-    \\for __fx_snapshot_name in $(\builtin compgen -A function); do
-    \\  case $__fx_snapshot_name in _*|__fx_snapshot_*) continue;; esac
-    \\  \builtin declare -f -- "$__fx_snapshot_name"
+    \\for __lia_snapshot_name in $(\builtin compgen -A function); do
+    \\  case $__lia_snapshot_name in _*|__lia_snapshot_*) continue;; esac
+    \\  \builtin declare -f -- "$__lia_snapshot_name"
     \\done
     \\\builtin alias -p
-    \\for __fx_snapshot_name in extglob nullglob dotglob globstar nocaseglob failglob nocasematch globasciiranges; do
-    \\  \builtin shopt -p "$__fx_snapshot_name" 2>/dev/null
+    \\for __lia_snapshot_name in extglob nullglob dotglob globstar nocaseglob failglob nocasematch globasciiranges; do
+    \\  \builtin shopt -p "$__lia_snapshot_name" 2>/dev/null
     \\done
     \\\builtin printf '\0FXSNAP:@NONCE@:END\0'
     \\} 2>/dev/null
@@ -428,9 +428,9 @@ pub fn buildBootstrap(
     var output: std.ArrayList(u8) = .empty;
     errdefer output.deinit(alloc);
 
-    try output.appendSlice(alloc, "set +x; export AI_AGENT=fx; ");
+    try output.appendSlice(alloc, "set +x; export AI_AGENT=lia; ");
     if (command_path) |path| {
-        try output.appendSlice(alloc, "fx_terminal_command=$(< ");
+        try output.appendSlice(alloc, "lia_terminal_command=$(< ");
         try appendShellWord(&output, alloc, path);
         try output.appendSlice(alloc, ") || exit 125; ");
     }
@@ -452,8 +452,8 @@ pub fn buildBootstrap(
         });
         try output.appendSlice(
             alloc,
-            "builtin eval -- \"$fx_terminal_command\"; " ++
-                "fx_terminal_status=$?; exit \"$fx_terminal_status\"\n",
+            "builtin eval -- \"$lia_terminal_command\"; " ++
+                "lia_terminal_status=$?; exit \"$lia_terminal_status\"\n",
         );
     } else {
         try output.appendSlice(alloc, " || exit 125\n");
@@ -483,7 +483,7 @@ fn appendMarker(
 ) Allocator.Error!void {
     try appendShellWord(output, alloc, executable);
     inline for (.{
-        "--fx-internal-terminal-control",
+        "--lia-internal-terminal-control",
         control_path,
         nonce,
         event,
@@ -672,7 +672,7 @@ test "snapshot script turns off zsh equals expansion after the replay" {
     const zsh = try snapshotScript(std.testing.allocator, .zsh, "builtin setopt equals", "echo ======");
     defer std.testing.allocator.free(zsh);
     try std.testing.expectEqualStrings(
-        "builtin setopt equals\n__fx_snapshot_restored=1\n" ++
+        "builtin setopt equals\n__lia_snapshot_restored=1\n" ++
             "(( ${+functions[builtin]} )) && \\unfunction builtin; \\builtin unsetopt equals; \\builtin eval -- 'echo ======' </dev/null 2>&9 9>&-\n",
         zsh,
     );
@@ -680,7 +680,7 @@ test "snapshot script turns off zsh equals expansion after the replay" {
     const bash = try snapshotScript(std.testing.allocator, .bash, "", "echo ======");
     defer std.testing.allocator.free(bash);
     try std.testing.expectEqualStrings(
-        "__fx_snapshot_restored=1\n\\builtin eval -- 'echo ======' </dev/null 2>&9 9>&-\n",
+        "__lia_snapshot_restored=1\n\\builtin eval -- 'echo ======' </dev/null 2>&9 9>&-\n",
         bash,
     );
 }
@@ -689,20 +689,20 @@ test "snapshot bootstrap hides replay errors and restores stderr afterwards" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    const tail = "if [[ -z ${__fx_snapshot_restored-} ]]; then \\builtin printf '%s' 'marker' >&2; " ++
-        "\\builtin exit 125; fi; case $__fx_snapshot_status in 129|130|137|143) " ++
-        "\\builtin kill -$((__fx_snapshot_status - 128)) $$;; esac; \\builtin exit $__fx_snapshot_status";
+    const tail = "if [[ -z ${__lia_snapshot_restored-} ]]; then \\builtin printf '%s' 'marker' >&2; " ++
+        "\\builtin exit 125; fi; case $__lia_snapshot_status in 129|130|137|143) " ++
+        "\\builtin kill -$((__lia_snapshot_status - 128)) $$;; esac; \\builtin exit $__lia_snapshot_status";
 
     const zsh = try snapshotInvocation(arena, "/bin/zsh", "marker");
     try std.testing.expectEqualStrings(
-        "\\builtin exec 9>&2 2>/dev/null; \\builtin source /dev/fd/0; __fx_snapshot_status=$?; " ++
+        "\\builtin exec 9>&2 2>/dev/null; \\builtin source /dev/fd/0; __lia_snapshot_status=$?; " ++
             "\\builtin exec 2>&9 9>&-; " ++ tail,
         zsh.argv()[zsh.argv().len - 1],
     );
 
     const bash = try snapshotInvocation(arena, "/bin/bash", "marker");
     try std.testing.expectEqualStrings(
-        "exec 9>&2 2>/dev/null; \\builtin source /dev/fd/0; __fx_snapshot_status=$?; " ++
+        "exec 9>&2 2>/dev/null; \\builtin source /dev/fd/0; __lia_snapshot_status=$?; " ++
             "\\builtin unset -f exec; exec 2>&9 9>&-; " ++ tail,
         bash.argv()[bash.argv().len - 1],
     );
@@ -753,14 +753,14 @@ test "bootstrap quotes private paths and separates command completion" {
     const commandless = try buildBootstrap(
         std.testing.allocator,
         .zsh,
-        "/tmp/fx'bin",
+        "/tmp/lia'bin",
         "/tmp/control",
         "nonce",
         null,
     );
     defer std.testing.allocator.free(commandless);
     try std.testing.expectEqualStrings(
-        "set +x; export AI_AGENT=fx; '/tmp/fx'\"'\"'bin' '--fx-internal-terminal-control' " ++
+        "set +x; export AI_AGENT=lia; '/tmp/lia'\"'\"'bin' '--lia-internal-terminal-control' " ++
             "'/tmp/control' 'nonce' 'shell-ready' || exit 125\n",
         commandless,
     );
@@ -768,7 +768,7 @@ test "bootstrap quotes private paths and separates command completion" {
     const command = try buildBootstrap(
         std.testing.allocator,
         .zsh,
-        "/tmp/fx",
+        "/tmp/lia",
         "/tmp/control",
         "nonce",
         "/tmp/command",
@@ -781,13 +781,13 @@ test "bootstrap quotes private paths and separates command completion" {
         std.mem.find(u8, command, "|| exit 125; (( ${+functions[builtin]} )) && \\unfunction builtin; \\builtin unsetopt equals; builtin eval --") != null,
     );
     try std.testing.expect(
-        std.mem.find(u8, command, "exit \"$fx_terminal_status\"") != null,
+        std.mem.find(u8, command, "exit \"$lia_terminal_status\"") != null,
     );
 
     const bash_command = try buildBootstrap(
         std.testing.allocator,
         .bash,
-        "/tmp/fx",
+        "/tmp/lia",
         "/tmp/control",
         "nonce",
         "/tmp/command",
@@ -813,7 +813,7 @@ fn checkBootstrapAllocationFailures(alloc: Allocator) !void {
     const bootstrap = try buildBootstrap(
         alloc,
         .zsh,
-        "/tmp/fx",
+        "/tmp/lia",
         "/tmp/control",
         "nonce",
         "/tmp/command",

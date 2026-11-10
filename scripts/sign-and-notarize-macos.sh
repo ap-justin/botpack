@@ -5,15 +5,15 @@ set -euo pipefail
 umask 077
 
 signing_identity="Developer ID Application: Vercel, Inc (JW6Y669B67)"
-signing_identifier="com.vercel.fx"
+signing_identifier="com.vercel.lia"
 signing_team_id="JW6Y669B67"
 
-openssl_bin="${FX_SIGNING_OPENSSL_BIN:-/usr/bin/openssl}"
-security_bin="${FX_SIGNING_SECURITY_BIN:-/usr/bin/security}"
-codesign_bin="${FX_SIGNING_CODESIGN_BIN:-/usr/bin/codesign}"
-ditto_bin="${FX_SIGNING_DITTO_BIN:-/usr/bin/ditto}"
-xcrun_bin="${FX_SIGNING_XCRUN_BIN:-/usr/bin/xcrun}"
-jq_bin="${FX_SIGNING_JQ_BIN:-/usr/bin/jq}"
+openssl_bin="${LIA_SIGNING_OPENSSL_BIN:-/usr/bin/openssl}"
+security_bin="${LIA_SIGNING_SECURITY_BIN:-/usr/bin/security}"
+codesign_bin="${LIA_SIGNING_CODESIGN_BIN:-/usr/bin/codesign}"
+ditto_bin="${LIA_SIGNING_DITTO_BIN:-/usr/bin/ditto}"
+xcrun_bin="${LIA_SIGNING_XCRUN_BIN:-/usr/bin/xcrun}"
+jq_bin="${LIA_SIGNING_JQ_BIN:-/usr/bin/jq}"
 
 binary_path="${1:?usage: sign-and-notarize-macos.sh <binary-path> [4096|16384]}"
 signing_page_size="${2-4096}"
@@ -45,11 +45,11 @@ for required_name in \
 done
 
 runner_temp="${RUNNER_TEMP:-/private/tmp}"
-signing_temp_dir="$(mktemp -d "${runner_temp}/fx-signing.XXXXXX")"
+signing_temp_dir="$(mktemp -d "${runner_temp}/lia-signing.XXXXXX")"
 signing_keychain="${signing_temp_dir}/signing.keychain-db"
 certificate_path="${signing_temp_dir}/developer-id.p12"
 notary_key_path="${signing_temp_dir}/notary-key.p8"
-notary_archive_path="${signing_temp_dir}/fx-notary.zip"
+notary_archive_path="${signing_temp_dir}/lia-notary.zip"
 notary_result_path="${signing_temp_dir}/notary-result.json"
 notary_log_path="${signing_temp_dir}/notary-log.json"
 keychain_password="$(${openssl_bin} rand -hex 32)"

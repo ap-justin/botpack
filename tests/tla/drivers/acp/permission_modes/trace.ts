@@ -17,7 +17,7 @@ export function obsModule(observations: Observation[], profile: string, values: 
   };
   return [
     "--------------------- MODULE AcpPermissionModesObs ---------------------",
-    "(* Generated from one observed fx acp run. *)",
+    "(* Generated from one observed lia acp run. *)",
     `TProfiles == {${tla(profile)}}`,
     `TValues == {${[...new Set(values)].map(tla).join(", ")}}`,
     "TraceLog == <<",

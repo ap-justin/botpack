@@ -5,12 +5,12 @@
 \* "for-<n>" naming the question it saw, so the fixture's log says whose
 \* answer reached which question.
 \*   ask {q}                 the fixture sent elicitation/create q
-\*   shown {q}               fx's terminal shows question q
+\*   shown {q}               lia's terminal shows question q
 \*   answer {q}              the harness typed the answer to what it saw
 \*   delivered {target, from}  the fixture got, for q = target, the answer "for-<from>"
 \*   withdraw {q}            the fixture sent notifications/cancelled for q
 \*   call_end {}             the tool call's result went out
-\* fx's own cancels are part of `ask`; `delivered` with from = target and
+\* lia's own cancels are part of `ask`; `delivered` with from = target and
 \* no answer typed for it is one.
 EXTENDS ElicitationRouting, TraceObs, Sequences
 
@@ -26,7 +26,7 @@ Step(rec) ==
       [] rec.event = "shown" -> Take /\ offered = rec.data.q
       [] rec.event = "answer" -> UserAnswers /\ asking = rec.data.q
       [] rec.event = "delivered" -> Deliver /\ answeredBy'[rec.data.target] = rec.data.from /\ answeredBy[rec.data.target] = None
-      [] rec.event = "fx_dismissed" -> answeredBy[rec.data.q] = rec.data.q /\ dismissed[rec.data.q] /\ UNCHANGED vars
+      [] rec.event = "lia_dismissed" -> answeredBy[rec.data.q] = rec.data.q /\ dismissed[rec.data.q] /\ UNCHANGED vars
       [] rec.event = "withdraw" -> Withdraw(rec.data.q)
       [] rec.event = "call_end" -> CallEnds
       [] OTHER -> FALSE

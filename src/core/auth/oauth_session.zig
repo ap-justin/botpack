@@ -16,9 +16,9 @@ const session_presence = @import("session_presence.zig");
 const Allocator = std.mem.Allocator;
 
 pub const issuer = "https://vercel.com";
-pub const client_id_env = "FX_OAUTH_CLIENT_ID";
+pub const client_id_env = "LIA_OAUTH_CLIENT_ID";
 pub const default_client_id = "cl_zzh5hiOZbwJ9bfqEcYqPIJv3TaPaEYL0";
-const e2e_issuer_url_env = "FX_TEST_OAUTH_ISSUER_URL";
+const e2e_issuer_url_env = "LIA_TEST_OAUTH_ISSUER_URL";
 pub const auth_file_name = profile_paths.auth_file_name;
 const schema_version: i64 = 1;
 const max_auth_file_bytes: usize = 64 * 1024;
@@ -26,7 +26,7 @@ const expiry_skew_ms: i64 = 60 * 1000;
 const mutation_lock_file_name = "auth.lock";
 /// The lock is leased (`leased_lock`): its holder stamps it before each
 /// Keychain call and each request to the issuer, and each ends within
-/// `mutation_step_ms`, the longer of their timeouts. A waiting fx gives up
+/// `mutation_step_ms`, the longer of their timeouts. A waiting lia gives up
 /// `leased_lock.slack_ms` after that, so it waits for another refreshing the
 /// login however slowly, and one frozen holding the lock (ctrl+z) costs it 17 s.
 const mutation_step_ms: i64 = @max(native_keychain.keychain_call_ms, oauth_transport.default_request_timeout_ms);
@@ -160,24 +160,24 @@ pub fn refresh_deadline_ms(expires_at_ms: i64) i64 {
 }
 
 const MutationLockProbe = struct {
-    fx_dir: std.Io.Dir,
+    lia_dir: std.Io.Dir,
     signaled: bool = false,
 
     fn tryLock(raw_ctx: ?*anyopaque, file: std.Io.File) anyerror!bool {
         const locked = try file.tryLock(io_mod.getIo(), .exclusive);
         const self: *MutationLockProbe = @ptrCast(@alignCast(raw_ctx.?));
         if (!locked and !self.signaled) {
-            signalE2ELockContention(self.fx_dir);
+            signalE2ELockContention(self.lia_dir);
             self.signaled = true;
         }
         return locked;
     }
 };
 
-fn signalE2ELockContention(fx_dir: std.Io.Dir) void {
-    const enabled = io_mod.getenv("FX_TEST_AUTH_LOCK_CONTENTION") orelse return;
+fn signalE2ELockContention(lia_dir: std.Io.Dir) void {
+    const enabled = io_mod.getenv("LIA_TEST_AUTH_LOCK_CONTENTION") orelse return;
     if (!std.mem.eql(u8, enabled, "1")) return;
-    var file = fx_dir.createFile(io_mod.getIo(), e2e_lock_contention_file_name, .{
+    var file = lia_dir.createFile(io_mod.getIo(), e2e_lock_contention_file_name, .{
         .truncate = true,
         .permissions = std.Io.File.Permissions.fromMode(0o600),
     }) catch return;
@@ -301,8 +301,8 @@ const KeychainObservation = union(enum) {
     }
 };
 
-fn observeAuthFile(alloc: Allocator, fx_dir: *std.Io.Dir) !FileObservation {
-    var current = (session_presence.openCurrent(fx_dir.*, auth_file_name) catch |err| {
+fn observeAuthFile(alloc: Allocator, lia_dir: *std.Io.Dir) !FileObservation {
+    var current = (session_presence.openCurrent(lia_dir.*, auth_file_name) catch |err| {
         debug_trace.logf("auth", "session load failed source=file step=open err={s}", .{@errorName(err)});
         return .unusable;
     }) orelse return .absent;
@@ -361,8 +361,8 @@ fn publishAndVerifyKeychain(alloc: Allocator, keychain: KeychainBackend, session
     if (!std.mem.eql(u8, bytes, persisted)) return error.OAuthSessionKeychainWriteMismatch;
 }
 
-fn authFileExists(fx_dir: *std.Io.Dir) !bool {
-    _ = fx_dir.statFile(io_mod.getIo(), auth_file_name, .{}) catch |err| switch (err) {
+fn authFileExists(lia_dir: *std.Io.Dir) !bool {
+    _ = lia_dir.statFile(io_mod.getIo(), auth_file_name, .{}) catch |err| switch (err) {
         error.FileNotFound => return false,
         else => return err,
     };
@@ -372,7 +372,7 @@ fn authFileExists(fx_dir: *std.Io.Dir) !bool {
 pub const Mutation = if (host_target.is_wasm) HostMutation else NativeMutation;
 
 const NativeMutation = struct {
-    fx_dir: io_mod.VerifiedDir,
+    lia_dir: io_mod.VerifiedDir,
     lock: io_mod.TimedAdvisoryLock,
     /// The lease's last stamp, on the awake clock (`mutation_lock_wait_ms`).
     stamp_ms: i64,
@@ -382,7 +382,7 @@ const NativeMutation = struct {
 
     pub fn requireWritable(self: *Mutation) error{CredentialStorageUnavailable}!void {
         if (self.backend == .profile_file or self.authority == .profile_file) {
-            _ = try session_presence.requireWritableInDir(self.fx_dir.dir, auth_file_name);
+            _ = try session_presence.requireWritableInDir(self.lia_dir.dir, auth_file_name);
         }
     }
 
@@ -390,7 +390,7 @@ const NativeMutation = struct {
     /// has its whole budget from a fresh stamp. Keychain calls stamp it
     /// themselves (`stamped`).
     pub fn restamp(self: *NativeMutation) void {
-        self.stamp_ms = leased_lock.restamp(self.lock.file, "auth", "fx login");
+        self.stamp_ms = leased_lock.restamp(self.lock.file, "auth", "lia login");
     }
 
     /// `keychain`, stamping the lease before each call.
@@ -429,16 +429,16 @@ const NativeMutation = struct {
     }
 
     pub fn deinit(self: *Mutation) void {
-        debug_trace.logf("auth", "fx login lock released stamp={d} at={d}", .{ self.stamp_ms, io_mod.awakeMilliTimestamp() });
+        debug_trace.logf("auth", "lia login lock released stamp={d} at={d}", .{ self.stamp_ms, io_mod.awakeMilliTimestamp() });
         self.lock.release();
-        self.fx_dir.close();
+        self.lia_dir.close();
         self.* = undefined;
     }
 
     pub fn load(self: *Mutation, alloc: Allocator) !?Session {
         if (self.backend == .profile_file) {
             self.authority = .profile_file;
-            return loadFromDir(alloc, &self.fx_dir.dir);
+            return loadFromDir(alloc, &self.lia_dir.dir);
         }
         return self.loadKeychainResolved(alloc);
     }
@@ -454,7 +454,7 @@ const NativeMutation = struct {
     fn saveFile(self: *Mutation, alloc: Allocator, session: Session) !void {
         const text = try stringify(alloc, session);
         defer secret.zeroAndFree(alloc, text);
-        try io_mod.durableReplaceVerified(alloc, &self.fx_dir, auth_file_name, text);
+        try io_mod.durableReplaceVerified(alloc, &self.lia_dir, auth_file_name, text);
     }
 
     pub fn delete(self: *Mutation, alloc: Allocator) !DeleteResult {
@@ -467,7 +467,7 @@ const NativeMutation = struct {
             result.session_deleted = result.session_deleted or deleted;
         }
 
-        const file_outcome = deleteAuthFile(&self.fx_dir.dir, .{}) catch {
+        const file_outcome = deleteAuthFile(&self.lia_dir.dir, .{}) catch {
             result.local_cleanup_failed = true;
             return result;
         };
@@ -484,7 +484,7 @@ const NativeMutation = struct {
     }
 
     fn loadKeychainResolved(self: *Mutation, alloc: Allocator) !?Session {
-        var file = try observeAuthFile(alloc, &self.fx_dir.dir);
+        var file = try observeAuthFile(alloc, &self.lia_dir.dir);
         defer file.deinit(alloc);
         var keychain = try observeKeychain(alloc, self.stamped());
         defer keychain.deinit(alloc);
@@ -515,7 +515,7 @@ const NativeMutation = struct {
 
     fn saveKeychainResolved(self: *Mutation, alloc: Allocator, session: Session) !void {
         if (self.authority == .unresolved) {
-            self.authority = if (try authFileExists(&self.fx_dir.dir)) .profile_file else .keychain;
+            self.authority = if (try authFileExists(&self.lia_dir.dir)) .profile_file else .keychain;
         }
 
         switch (self.authority) {
@@ -538,8 +538,8 @@ const NativeMutation = struct {
             return false;
         };
 
-        const outcome = deleteAuthFile(&self.fx_dir.dir, .{}) catch |err| {
-            const stat = self.fx_dir.dir.statFile(io_mod.getIo(), auth_file_name, .{}) catch |stat_err| switch (stat_err) {
+        const outcome = deleteAuthFile(&self.lia_dir.dir, .{}) catch |err| {
+            const stat = self.lia_dir.dir.statFile(io_mod.getIo(), auth_file_name, .{}) catch |stat_err| switch (stat_err) {
                 error.FileNotFound => return error.OAuthSessionCleanupUncertain,
                 else => return stat_err,
             };
@@ -550,7 +550,7 @@ const NativeMutation = struct {
         return switch (outcome) {
             .deleted => true,
             .missing => blk: {
-                try io_mod.syncVerifiedDir(self.fx_dir.dir);
+                try io_mod.syncVerifiedDir(self.lia_dir.dir);
                 break :blk true;
             },
             .deleted_not_durable => error.OAuthSessionCleanupUncertain,
@@ -693,7 +693,7 @@ pub fn load(alloc: Allocator) !?Session {
     };
     defer home_dir.close(io_mod.getIo());
 
-    var fx_dir = home_dir.openDir(io_mod.getIo(), profile_paths.rootName(), .{
+    var lia_dir = home_dir.openDir(io_mod.getIo(), profile_paths.rootName(), .{
         .iterate = true,
         .follow_symlinks = false,
     }) catch |err| {
@@ -701,9 +701,9 @@ pub fn load(alloc: Allocator) !?Session {
         if (err == error.FileNotFound) return null;
         return session_presence.storageError(auth_file_name, err);
     };
-    defer fx_dir.close(io_mod.getIo());
+    defer lia_dir.close(io_mod.getIo());
 
-    return loadFromDir(alloc, &fx_dir);
+    return loadFromDir(alloc, &lia_dir);
 }
 
 fn loadFromHost(alloc: Allocator, store: js_host_auth.SessionStore) !?Session {
@@ -712,8 +712,8 @@ fn loadFromHost(alloc: Allocator, store: js_host_auth.SessionStore) !?Session {
     return try parseStoredSession(alloc, stored.bytes);
 }
 
-fn loadFromDir(alloc: Allocator, fx_dir: *std.Io.Dir) !?Session {
-    var current = (session_presence.openCurrent(fx_dir.*, auth_file_name) catch |err| {
+fn loadFromDir(alloc: Allocator, lia_dir: *std.Io.Dir) !?Session {
+    var current = (session_presence.openCurrent(lia_dir.*, auth_file_name) catch |err| {
         debug_trace.logf("auth", "session load failed step=open_file err={s}", .{@errorName(err)});
         return session_presence.storageError(auth_file_name, err);
     }) orelse return null;
@@ -769,11 +769,11 @@ fn beginExistingNativeMutation() !?Mutation {
     };
     defer home_dir.close();
 
-    const fx_dir = openExistingPrivateFxDir(&home_dir) catch |err| switch (err) {
+    const lia_dir = openExistingPrivateFxDir(&home_dir) catch |err| switch (err) {
         error.FileNotFound => return null,
         else => return session_presence.storageError(auth_file_name, err),
     };
-    return @as(?Mutation, try lockMutation(fx_dir));
+    return @as(?Mutation, try lockMutation(lia_dir));
 }
 
 fn loadKeychainWithoutProfile(alloc: Allocator) !?Session {
@@ -801,25 +801,25 @@ fn beginMutation() !Mutation {
     };
     defer home_dir.close();
 
-    const fx_dir = try io_mod.openOrCreateVerifiedPrivateDir(&home_dir, profile_paths.rootName());
-    return lockMutation(fx_dir);
+    const lia_dir = try io_mod.openOrCreateVerifiedPrivateDir(&home_dir, profile_paths.rootName());
+    return lockMutation(lia_dir);
 }
 
-fn lockMutation(open_fx_dir: io_mod.VerifiedDir) !Mutation {
-    var probe = MutationLockProbe{ .fx_dir = open_fx_dir.dir };
-    return lockMutationWithOps(open_fx_dir, mutation_lock_wait_ms, .{
+fn lockMutation(open_lia_dir: io_mod.VerifiedDir) !Mutation {
+    var probe = MutationLockProbe{ .lia_dir = open_lia_dir.dir };
+    return lockMutationWithOps(open_lia_dir, mutation_lock_wait_ms, .{
         .ctx = &probe,
         .try_lock = MutationLockProbe.tryLock,
     });
 }
 
 fn lockMutationWithOps(
-    open_fx_dir: io_mod.VerifiedDir,
+    open_lia_dir: io_mod.VerifiedDir,
     wait_ms: i64,
     ops: io_mod.LockOps,
 ) !Mutation {
     return lockMutationWithBackend(
-        open_fx_dir,
+        open_lia_dir,
         wait_ms,
         ops,
         storageBackend(),
@@ -828,29 +828,29 @@ fn lockMutationWithOps(
 }
 
 fn lockMutationWithBackend(
-    open_fx_dir: io_mod.VerifiedDir,
+    open_lia_dir: io_mod.VerifiedDir,
     wait_ms: i64,
     ops: io_mod.LockOps,
     backend: StorageBackend,
     keychain: KeychainBackend,
 ) !Mutation {
-    var fx_dir = open_fx_dir;
-    errdefer fx_dir.close();
+    var lia_dir = open_lia_dir;
+    errdefer lia_dir.close();
 
     const taken = leased_lock.acquire(
-        &fx_dir,
+        &lia_dir,
         mutation_lock_file_name,
         io_mod.awakeMilliTimestamp(),
         wait_ms,
         ops,
         "auth",
-        "fx login",
+        "lia login",
     ) catch |err| return session_presence.storageError(auth_file_name, err);
     var lock = taken.lock;
     errdefer lock.release();
 
     return .{
-        .fx_dir = fx_dir,
+        .lia_dir = lia_dir,
         .lock = lock,
         .stamp_ms = taken.stamp_ms,
         .backend = backend,
@@ -881,12 +881,12 @@ fn openExistingPrivateFxDir(home_dir: *io_mod.VerifiedDir) !io_mod.VerifiedDir {
     return .{ .dir = dir };
 }
 
-fn deleteAuthFile(fx_dir: *std.Io.Dir, ops: io_mod.DurableOps) !DeleteOutcome {
-    fx_dir.deleteFile(io_mod.getIo(), auth_file_name) catch |err| switch (err) {
+fn deleteAuthFile(lia_dir: *std.Io.Dir, ops: io_mod.DurableOps) !DeleteOutcome {
+    lia_dir.deleteFile(io_mod.getIo(), auth_file_name) catch |err| switch (err) {
         error.FileNotFound => return .missing,
         else => return err,
     };
-    ops.sync_dir(ops.ctx, fx_dir.*) catch return .deleted_not_durable;
+    ops.sync_dir(ops.ctx, lia_dir.*) catch return .deleted_not_durable;
     return .deleted;
 }
 
@@ -1193,7 +1193,7 @@ fn testKeychainMutation(dir: std.Io.Dir, keychain: KeychainBackend) !Mutation {
     );
 }
 
-test "the fx login lock is stamped before each Keychain call made under it" {
+test "the lia login lock is stamped before each Keychain call made under it" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

@@ -1,6 +1,6 @@
 ------------------------------- MODULE AcpSpeed -------------------------------
 (***************************************************************************)
-(* Per-session speed contract for fx's ACP server, mirroring the CLI:     *)
+(* Per-session speed contract for lia's ACP server, mirroring the CLI:     *)
 (* one Standard / Fast / Ultrafast choice per chat.                        *)
 (*                                                                         *)
 (*  - A client sees the `fast` option only for models that offer Fast and  *)

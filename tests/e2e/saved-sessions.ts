@@ -1,11 +1,11 @@
-// What fx saved in a test's home: the public view a later fx gives, and the
+// What lia saved in a test's home: the public view a later lia gives, and the
 // store's own files for tests about the disk itself.
 import { expect } from "bun:test";
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { runFx } from "../evals/eval-helpers";
+import { runLia } from "../evals/eval-helpers";
 
-/// A saved session as `fx session --id <id> --json` shows it, whatever the
+/// A saved session as `lia session --id <id> --json` shows it, whatever the
 /// store keeps on disk.
 export type SavedSession = {
   kind: "session_detail";
@@ -17,19 +17,19 @@ export type SavedSession = {
   history: any[];
 };
 
-/// Reads session `id` through the built fx, as a resume would find it.
+/// Reads session `id` through the built lia, as a resume would find it.
 export async function savedSession(home: string, id: string): Promise<SavedSession> {
-  const result = await runFx(["session", "--id", id, "--json"], {
+  const result = await runLia(["session", "--id", id, "--json"], {
     cwd: home,
-    env: { HOME: home, FX_SOUND: "0", FX_AUTO_UPGRADE: "0" },
+    env: { HOME: home, LIA_SOUND: "0", LIA_AUTO_UPGRADE: "0" },
   });
-  if (result.code !== 0) throw new Error(`fx session --id ${id} exited ${result.code}: ${result.stderr}`);
+  if (result.code !== 0) throw new Error(`lia session --id ${id} exited ${result.code}: ${result.stderr}`);
   return JSON.parse(result.stdout);
 }
 
 /// The folder holding every saved session.
 export function storeRoot(home: string): string {
-  return join(home, ".fx", "sessions", "v2");
+  return join(home, ".lia", "sessions", "v2");
 }
 
 /// One session's folder.
@@ -47,8 +47,8 @@ export function savedText(home: string, id: string): string {
 
 export type LogLine = { seq: number; kind: string; type?: string; reason?: string; key?: string };
 
-/// Every complete line of a session's log. A line fx is still appending is
-/// left out, so a test may read the log while fx runs.
+/// Every complete line of a session's log. A line lia is still appending is
+/// left out, so a test may read the log while lia runs.
 function readLog(home: string, id: string): LogLine[] {
   const text = readFileSync(join(sessionDir(home, id), "log.jsonl"), "utf8");
   return text.slice(0, text.lastIndexOf("\n") + 1).split("\n").filter(Boolean).map((line) => JSON.parse(line));
@@ -83,7 +83,7 @@ export function rootSessionIds(home: string): string[] {
   });
 }
 
-/// The parent's lines about its children, with fx's data parsed.
+/// The parent's lines about its children, with lia's data parsed.
 export function childLines(home: string, id: string): any[] {
   return (readLog(home, id) as any[])
     .filter((line) => line.kind === "child_spawned" || line.kind === "child_finished")
@@ -112,14 +112,14 @@ export function compactionRecordPath(home: string, id: string, name: string): st
 }
 
 /// The command replays session `id` kept: each is one of its blobs, named in
-/// the session by its handle, `fx-command-replay-<run>-<hash>.bin` (D44, D91).
+/// the session by its handle, `lia-command-replay-<run>-<hash>.bin` (D44, D91).
 /// A handle from before D91 has no run id.
 export function commandReplays(home: string, id: string): { name: string; path: string }[] {
   const names = [...new Set(savedText(home, id).match(commandReplayHandles) ?? [])];
   return names.map((name) => ({ name, path: join(sessionDir(home, id), "blobs", commandReplayHash(name)) }));
 }
 
-const commandReplayHandles = /fx-command-replay-(?:[0-9a-f]{12}-)?[0-9a-f]{64}\.bin/g;
+const commandReplayHandles = /lia-command-replay-(?:[0-9a-f]{12}-)?[0-9a-f]{64}\.bin/g;
 
 /// The hash of the blob a command replay handle names, which comes last.
 export function commandReplayHash(handle: string): string {
@@ -142,8 +142,8 @@ export function savedToolResults(history: any[]): any[] {
 
 const V1_FIXTURES = join(import.meta.dirname, "..", "fixtures", "v1-sessions");
 
-/// Copies the first `count` sessions an older fx (v0.0.14) saved for fixture
-/// `kind` (`tests/fixtures/v1-sessions/generate.ts`) into `home`'s `~/.fx`,
+/// Copies the first `count` sessions an older lia (v0.0.14) saved for fixture
+/// `kind` (`tests/fixtures/v1-sessions/generate.ts`) into `home`'s `~/.lia`,
 /// private as that release left them, and returns their ids. With
 /// `workspace`, each copy is saved there instead, so the latest session of
 /// that workspace can be resumed.
@@ -151,7 +151,7 @@ export function copyV1Fixture(home: string, kind: string, count = 1, workspace?:
   const manifest = JSON.parse(readFileSync(join(V1_FIXTURES, "manifest.json"), "utf8"));
   const ids: string[] = manifest.kinds[kind].slice(0, count);
   expect(ids).toHaveLength(count);
-  const sessions = join(home, ".fx", "sessions");
+  const sessions = join(home, ".lia", "sessions");
   mkdirSync(sessions, { recursive: true, mode: 0o700 });
   for (const id of ids) {
     const to = join(sessions, id);
@@ -177,13 +177,13 @@ export function copyV1Fixture(home: string, kind: string, count = 1, workspace?:
   return ids;
 }
 
-/// What `fx ask` writes first when converting a session an older fx saved
+/// What `lia ask` writes first when converting a session an older lia saved
 /// takes over 150 ms (`slow_conversion_text` in
 /// `src/core/session/session_adapter.zig`). A busy runner can make any
 /// conversion that slow.
-const SLOW_CONVERSION_NOTICE = "fx ask: Converting this session from the previous session format…\n";
+const SLOW_CONVERSION_NOTICE = "lia ask: Converting this session from the previous session format…\n";
 
-/// `stderr` from an `fx ask` that opened a copied v1 session, without the one
+/// `stderr` from an `lia ask` that opened a copied v1 session, without the one
 /// slow-conversion notice it may start with.
 export function withoutConversionNotice(stderr: string): string {
   return stderr.startsWith(SLOW_CONVERSION_NOTICE) ? stderr.slice(SLOW_CONVERSION_NOTICE.length) : stderr;

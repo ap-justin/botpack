@@ -25,12 +25,12 @@
 (*   MissedPaths  a result enters the turn without a stamp                 *)
 (*   Compactions  compaction takes the turn's first results out of the     *)
 (*                agent's view, so the rebuild no longer lines up          *)
-(*   Recovery     fx stops mid-turn; resuming rebuilds the turn's messages *)
+(*   Recovery     lia stops mid-turn; resuming rebuilds the turn's messages *)
 (*                from its recovery checkpoint and streams a new turn      *)
 (*   Faults       a later rebuild gives a streamed result other content,   *)
 (*                or loses one                                             *)
 (*                                                                         *)
-(* Mutant selects the design. "none" is fx as it is; "restamp" is fx       *)
+(* Mutant selects the design. "none" is lia as it is; "restamp" is lia       *)
 (* before results kept their stamps; the rest are planted bugs.            *)
 (* TurnStreamTrace.tla replays runs of the real binary through this model. *)
 (***************************************************************************)
@@ -60,7 +60,7 @@ VARIABLES
   final,      \* the commit's rebuild
   birthOf,    \* each call's stamp from when the turn took it (history)
   stampedAt,  \* calls whose result had a stamp when the turn took it
-  recovered,  \* whether fx resumed the turn from its checkpoint
+  recovered,  \* whether lia resumed the turn from its checkpoint
   shifted,    \* whether a compaction cut the view since the last write
   supersedes, \* turns closed because their stream differed
   unexplained,\* of those, closed with no fault and no compaction behind it
@@ -206,7 +206,7 @@ Compact(k) ==
                  final, birthOf, stampedAt, recovered, supersedes, unexplained,
                  reparsed, anyParsed, last>>
 
-(* fx stops mid-turn and resumes from the recovery checkpoint, which holds *)
+(* lia stops mid-turn and resumes from the recovery checkpoint, which holds *)
 (* the last rebuild; `appendExecutionMemoryChatMessages` gives each result *)
 (* the stamp the checkpoint saved. Reopening the session ends the stale    *)
 (* turn, and the resumed turn streams afresh.                              *)

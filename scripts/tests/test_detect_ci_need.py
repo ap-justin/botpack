@@ -28,7 +28,7 @@ class DetectCiNeedTests(unittest.TestCase):
         self.git("init", "-q")
         self.write("src/acp/server.zig", "pub fn serve() void {}\n")
         self.write("src/mcp/engine.zig", "pub fn run() void {}\n")
-        self.write("README.md", "fx\n")
+        self.write("README.md", "lia\n")
         self.base = self.commit("base")
 
     def tearDown(self) -> None:
@@ -86,7 +86,7 @@ class DetectCiNeedTests(unittest.TestCase):
                 self.base = self.git("rev-parse", "HEAD")
 
     def test_change_outside_the_check_skips_it(self) -> None:
-        self.write("README.md", "fx docs\n")
+        self.write("README.md", "lia docs\n")
         self.write("src/core/agent/loop.zig", "pub fn run() void {}\n")
         self.write("src/core/cli/cli_flags.zig", "pub fn parse() void {}\n")
         self.write("src/acp/server.zig", "pub fn run() void {}\n")

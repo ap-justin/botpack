@@ -1,6 +1,6 @@
-//! The settings fx knows, like the kernel's sysctl table: every key it reads
+//! The settings lia knows, like the kernel's sysctl table: every key it reads
 //! from the profile `settings.json`, a workspace override inside it, or a
-//! project `.fx.json`. Startup ignores keys missing from this list; `fx doctor`
+//! project `.lia.json`. Startup ignores keys missing from this list; `lia doctor`
 //! reports them.
 
 const std = @import("std");
@@ -9,20 +9,20 @@ const Allocator = std.mem.Allocator;
 
 pub const Where = enum {
     /// Profile `settings.json` and its workspace overrides. A project
-    /// `.fx.json` that sets it is ignored with a warning.
+    /// `.lia.json` that sets it is ignored with a warning.
     profile,
-    /// Also a repo-safe default in a project `.fx.json`.
+    /// Also a repo-safe default in a project `.lia.json`.
     project_safe,
     /// No longer used. Read only so it is ignored without being reported.
     retired,
-    /// Known in every settings file and never read by fx: `$schema`, which
+    /// Known in every settings file and never read by lia: `$schema`, which
     /// editors use to check the file.
     editor,
 };
 
-/// The JSON value fx accepts for a key, as `fx config schema` describes it.
+/// The JSON value lia accepts for a key, as `lia config schema` describes it.
 pub const Kind = enum {
-    /// Anything. Only retired keys, which fx ignores, use it.
+    /// Anything. Only retired keys, which lia ignores, use it.
     any,
     boolean,
     integer,
@@ -35,11 +35,11 @@ pub const Kind = enum {
     string_map,
     /// An object of switches, named by `children`.
     switches,
-    /// An object that fx checks with its own rules, such as `permission`.
+    /// An object that lia checks with its own rules, such as `permission`.
     object,
     /// The `workspaces` map from a workspace path to its overrides.
     workspaces,
-    /// A key fx refuses to load, so a file that has it fails.
+    /// A key lia refuses to load, so a file that has it fails.
     refused,
 };
 
@@ -53,8 +53,8 @@ pub const Key = struct {
     children: []const []const u8 = &.{},
     /// What each of `children` does, in the same order.
     child_descriptions: []const []const u8 = &.{},
-    /// The strings fx accepts for a string key with a fixed set. fx ignores
-    /// case; the schema lists the spellings fx writes and documents.
+    /// The strings lia accepts for a string key with a fixed set. lia ignores
+    /// case; the schema lists the spellings lia writes and documents.
     values: []const []const u8 = &.{},
     /// Inclusive bounds of an integer key.
     minimum: ?i64 = null,
@@ -63,11 +63,11 @@ pub const Key = struct {
     max_items: ?usize = null,
     /// An object whose keys are free-form, such as `models.gateway`.
     map: bool = false,
-    /// The current name of a setting that was renamed. fx still reads the
+    /// The current name of a setting that was renamed. lia still reads the
     /// older name, writes only the current one, and the current one wins for
     /// any value both set.
     renamed_to: ?[]const u8 = null,
-    /// The key that replaced an older form fx still reads but no longer
+    /// The key that replaced an older form lia still reads but no longer
     /// writes, such as `models.gateway` for `model`.
     superseded_by: ?[]const u8 = null,
     /// Read only inside a `workspaces` entry, never at the top of the file.
@@ -91,15 +91,15 @@ pub const Key = struct {
 
 const sound_children = [_][]const u8{ "attention_required", "max", "turn_end" };
 const sound_child_descriptions = [_][]const u8{
-    "Play a sound when fx needs your attention",
+    "Play a sound when lia needs your attention",
     "Play extra interaction sounds when sound is on",
     "Play a sound when a turn finishes",
 };
-const retired_description = "No longer used; fx ignores it";
+const retired_description = "No longer used; lia ignores it";
 
 pub const keys = [_]Key{
     .{ .name = "$schema", .where = .editor, .kind = .string, .top_level_only = true, .description = "The JSON Schema editors use to check this file" },
-    .{ .name = "additional_directories", .where = .profile, .kind = .strings, .workspace_only = true, .description = "Directories added to this workspace; manage them with fx workspace" },
+    .{ .name = "additional_directories", .where = .profile, .kind = .strings, .workspace_only = true, .description = "Directories added to this workspace; manage them with lia workspace" },
     .{ .name = "auto_compact_percent", .where = .profile, .kind = .integer, .minimum = 10, .maximum = 80, .description = "Start automatic compaction at this percentage of usable input capacity" },
     .{ .name = "auto_upgrade", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "cache_warming", .where = .profile, .kind = .boolean, .description = "Keep a waiting Claude conversation's prompt cache alive for up to 30 minutes" },
@@ -107,13 +107,13 @@ pub const keys = [_]Key{
     .{ .name = "collapse_tool_calls", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "context", .where = .project_safe, .kind = .boolean, .description = "Load project instructions such as AGENTS.md" },
     .{ .name = "context_limits", .where = .profile, .kind = .object, .map = true, .description = "Context limits by name, in bytes or off, as --context-limit takes them" },
-    .{ .name = "credential_source", .where = .profile, .kind = .string, .values = &.{ "vercel_oidc_token", "ai_gateway_api_key", "fx_login", "stored_key" }, .description = "The saved credential fx uses; fx login sets it" },
-    .{ .name = "disabledMcpjsonServers", .where = .profile, .kind = .strings, .workspace_only = true, .description = "Project MCP servers rejected in this workspace; manage them with fx mcp approve and reject" },
+    .{ .name = "credential_source", .where = .profile, .kind = .string, .values = &.{ "vercel_oidc_token", "ai_gateway_api_key", "lia_login", "stored_key" }, .description = "The saved credential lia uses; lia login sets it" },
+    .{ .name = "disabledMcpjsonServers", .where = .profile, .kind = .strings, .workspace_only = true, .description = "Project MCP servers rejected in this workspace; manage them with lia mcp approve and reject" },
     .{ .name = "effort", .where = .profile, .kind = .string_or_null, .description = "Reasoning effort: auto or a name the model supports; null means auto" },
-    .{ .name = "enableAllProjectMcpServers", .where = .profile, .kind = .boolean, .workspace_only = true, .description = "Approve every server in this workspace's .mcp.json; manage it with fx mcp approve and reject" },
-    .{ .name = "enabledMcpjsonServers", .where = .profile, .kind = .strings, .workspace_only = true, .description = "Project MCP servers approved in this workspace; manage them with fx mcp approve and reject" },
+    .{ .name = "enableAllProjectMcpServers", .where = .profile, .kind = .boolean, .workspace_only = true, .description = "Approve every server in this workspace's .mcp.json; manage it with lia mcp approve and reject" },
+    .{ .name = "enabledMcpjsonServers", .where = .profile, .kind = .strings, .workspace_only = true, .description = "Project MCP servers approved in this workspace; manage them with lia mcp approve and reject" },
     .{ .name = "fast_mode", .where = .profile, .kind = .boolean, .description = "Use faster inference when the model supports it" },
-    .{ .name = "fast_mode_model_bound", .where = .profile, .kind = .boolean, .description = "Managed by fx alongside fast_mode" },
+    .{ .name = "fast_mode_model_bound", .where = .profile, .kind = .boolean, .description = "Managed by lia alongside fast_mode" },
     .{ .name = "first_call_tool_choice", .where = .profile, .kind = .string, .values = &.{ "auto", "none" }, .description = "Tool choice for the first request of a turn" },
     .{ .name = "grok_model", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "input_appearance", .where = .retired, .kind = .any, .description = retired_description },
@@ -123,8 +123,8 @@ pub const keys = [_]Key{
     .{ .name = "model", .where = .profile, .kind = .string, .superseded_by = "models.gateway", .description = "Older form of models.gateway" },
     .{ .name = "models", .where = .profile, .kind = .string_map, .map = true, .description = "The saved model for each provider or connection, such as {\"gateway\": \"<model id>\"}" },
     .{ .name = "notifications", .where = .profile, .kind = .switches, .children = &sound_children, .child_descriptions = &sound_child_descriptions, .renamed_to = "sound", .description = "Renamed to sound" },
-    .{ .name = "permission", .where = .profile, .kind = .object, .map = true, .description = "Permission rules; fx permissions shows them" },
-    .{ .name = "permission_mode", .where = .profile, .kind = .string, .values = &.{ "ask", "auto", "full-access", "yolo" }, .description = "How fx handles tool calls that need permission; yolo is an older name for full-access" },
+    .{ .name = "permission", .where = .profile, .kind = .object, .map = true, .description = "Permission rules; lia permissions shows them" },
+    .{ .name = "permission_mode", .where = .profile, .kind = .string, .values = &.{ "ask", "auto", "full-access", "yolo" }, .description = "How lia handles tool calls that need permission; yolo is an older name for full-access" },
     .{ .name = "prompt_history", .where = .profile, .kind = .switches, .children = &.{"enabled"}, .child_descriptions = &.{"Save prompts and slash commands for input history"}, .description = "Input history" },
     .{ .name = "provider", .where = .profile, .kind = .string, .description = "The service for model requests: gateway or a name under providers" },
     .{ .name = "provider_order", .where = .project_safe, .kind = .strings, .max_items = 8, .description = "Preferred AI Gateway providers, in order; when unset, Anthropic models try Anthropic first" },
@@ -133,20 +133,20 @@ pub const keys = [_]Key{
     .{ .name = "review_model", .where = .profile, .kind = .string, .description = "The AI Gateway model that reviews actions in auto mode" },
     .{ .name = "sandbox", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "session_titles", .where = .profile, .kind = .boolean, .description = "Name each session from its first prompt" },
-    // Retired, but still read so that fx can explain the migration.
-    .{ .name = "skill_match_fuzzy", .where = .profile, .kind = .refused, .description = "No longer supported; fx refuses a file that sets it, so remove it" },
+    // Retired, but still read so that lia can explain the migration.
+    .{ .name = "skill_match_fuzzy", .where = .profile, .kind = .refused, .description = "No longer supported; lia refuses a file that sets it, so remove it" },
     .{ .name = "skill_symlink_authorities", .where = .profile, .kind = .strings, .description = "Absolute directories that symlinked skills may resolve into" },
     .{ .name = "slash_menu_categories", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "sound", .where = .profile, .kind = .switches, .children = &sound_children, .child_descriptions = &sound_child_descriptions, .description = "Sounds" },
     .{ .name = "startup_scrollback", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "statusLine", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "status_line", .where = .retired, .kind = .any, .description = retired_description },
-    .{ .name = "theme", .where = .profile, .kind = .string, .description = "light, dark, or the name of a theme file in ~/.fx/themes" },
+    .{ .name = "theme", .where = .profile, .kind = .string, .description = "light, dark, or the name of a theme file in ~/.lia/themes" },
     .{ .name = "ultrafast_mode", .where = .profile, .kind = .boolean, .description = "Request the higher-priced Ultrafast tier for an eligible AI Gateway model" },
     .{ .name = "update_channel", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "web_fetch_worker_model", .where = .retired, .kind = .any, .description = retired_description },
     .{ .name = "workspaces", .where = .profile, .kind = .workspaces, .map = true, .top_level_only = true, .description = "Overrides for each workspace, by absolute path" },
-    .{ .name = "yolo_acknowledged", .where = .profile, .kind = .boolean, .description = "Managed by fx after you first confirm full-access mode" },
+    .{ .name = "yolo_acknowledged", .where = .profile, .kind = .boolean, .description = "Managed by lia after you first confirm full-access mode" },
 };
 
 /// The keys a mistyped name may be suggested as. Retired keys are left out,
@@ -173,7 +173,7 @@ pub fn find(name: []const u8) ?Key {
     return null;
 }
 
-/// True when a project `.fx.json` that sets `name` is ignored and the user
+/// True when a project `.lia.json` that sets `name` is ignored and the user
 /// should be told: a known setting that only the profile may set.
 pub fn ignoredInProject(name: []const u8) bool {
     const key = find(name) orelse return false;
@@ -238,7 +238,7 @@ fn appendOlderNames(alloc: Allocator, found: *std.ArrayList(OlderName), object: 
             try found.append(alloc, .{ .older = key.name, .current = current, .both = false, .workspace = workspace });
             continue;
         };
-        // fx ignores a current group that isn't an object and keeps using the
+        // lia ignores a current group that isn't an object and keeps using the
         // older one, so advising to remove the older one would lose settings.
         if (older_value == .object and current_value != .object) continue;
         try found.append(alloc, .{ .older = key.name, .current = current, .workspace = workspace });
@@ -258,7 +258,7 @@ pub const UnknownKey = struct {
     known: []const []const u8,
 };
 
-/// Lists the keys in `root` that fx doesn't know. A profile `settings.json`
+/// Lists the keys in `root` that lia doesn't know. A profile `settings.json`
 /// is also checked inside each `workspaces` override. Values of the wrong
 /// type are left to the settings parser. Caller owns the returned slice;
 /// its strings borrow from `root`.
@@ -354,7 +354,7 @@ test "every key says what it holds and what it does" {
     }
 }
 
-test "both spellings are reported only when fx would use the current one" {
+test "both spellings are reported only when lia would use the current one" {
     const alloc = std.testing.allocator;
     var unused = try std.json.parseFromSlice(std.json.Value, alloc,
         \\{"notifications":{"turn_end":true},"sound":false}
@@ -417,7 +417,7 @@ test "older names map to the current ones, in paths and in files" {
     try std.testing.expectEqualStrings("notifications", twice[1].older);
     try std.testing.expectEqualStrings("/w", twice[1].workspace.?);
 
-    // A top-level older name is reported alone too, so fx doctor can say when
+    // A top-level older name is reported alone too, so lia doctor can say when
     // it stops working.
     var alone = try std.json.parseFromSlice(std.json.Value, alloc,
         \\{"notifications":{"max":true}}
@@ -468,7 +468,7 @@ test "the terminal UI settings load as retired, not unknown" {
     inline for (&.{ "collapse_tool_calls", "slash_menu_categories", "startup_scrollback", "status_line", "statusLine" }) |name| {
         try std.testing.expectEqual(Where.retired, find(name).?.where);
         try std.testing.expect(!ignoredInProject(name));
-        // `fx config` treats a retired key as no setting, as it does `auto_upgrade`.
+        // `lia config` treats a retired key as no setting, as it does `auto_upgrade`.
         try std.testing.expect(unknownPart(name) != null);
     }
     try std.testing.expect(unknownPart("status_line.context") != null);

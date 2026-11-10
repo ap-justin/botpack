@@ -18,7 +18,7 @@
    freed.
 
    Constants select the design or a planted defect:
-     Abandon      FALSE is fx before the open job: cancel waits for the open.
+     Abandon      FALSE is lia before the open job: cancel waits for the open.
      CloseLate    FALSE abandons without closing the late connection.
      AtomicSwap   FALSE splits each side's read and write of the state.
      StopConnect  FALSE leaves an abandoned job in a connect nobody answers.
@@ -137,7 +137,7 @@ WorkerWrite ==
                ELSE UNCHANGED <<state, conn, client>>
     /\ UNCHANGED <<job, cancelled, wseen, jseen>>
 
-\* fx before the open job: the worker can only act once the open is
+\* lia before the open job: the worker can only act once the open is
 \* published.
 WorkerAfterPublish ==
     /\ ~Abandon /\ worker = "waiting" /\ job = "published" /\ state = "handed"

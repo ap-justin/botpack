@@ -1,5 +1,5 @@
 // Salvage of v1 sessions (D64) through the real binary, judged by TLC against
-// tests/tla/session_manager/V1Conversion.tla: `fx session recover` on a v1 id
+// tests/tla/session_manager/V1Conversion.tla: `lia session recover` on a v1 id
 // answers as today's v1 recover answers, copies the same start into a fresh v2
 // session when v1 salvages it, and never changes the v1 session. Each case's
 // oracle is today's v1 writer's own recover on a private copy of the profile,
@@ -31,7 +31,7 @@ function breakLine(f: Fixture, id: string, fromEnd: number) {
   writeFileSync(path, lines.join("\n"));
 }
 
-/// What `fx session recover --json` answered, from fx's own output.
+/// What `lia session recover --json` answered, from lia's own output.
 function recoverAnswer(run: { code: number | null; stdout: string; stderr: string }): { ans: Answer; copy: string | null } {
   let json: any = null;
   try { json = JSON.parse(run.stdout); } catch { /* not JSON */ }
@@ -50,9 +50,9 @@ async function v1Salvage(f: Fixture, id: string) {
   try {
     cpSync(f.home, copy, { recursive: true });
     makePrivate(copy);
-    const opened = await f.fx(false, ["session", id, "--json"], copy);
-    const answer = recoverAnswer(await f.fx(false, ["session", "recover", id, "--json"], copy));
-    const shown = answer.copy ? await f.fx(false, ["session", answer.copy, "--json"], copy) : null;
+    const opened = await f.lia(false, ["session", id, "--json"], copy);
+    const answer = recoverAnswer(await f.lia(false, ["session", "recover", id, "--json"], copy));
+    const shown = answer.copy ? await f.lia(false, ["session", answer.copy, "--json"], copy) : null;
     return { opens: opened.code === 0, ans: answer.ans, history: shown ? JSON.parse(shown.stdout).history : null };
   } finally { rmSync(copy, { recursive: true, force: true }); }
 }
@@ -63,10 +63,10 @@ async function writeSession(f: Fixture, tag: string | null, prompts: string[]) {
   const bin = tag ? olderRelease(tag) : undefined;
   let id: string | null = null;
   for (const prompt of prompts) {
-    const run = await f.fx(false, ["ask", "--json", "--auto", ...(id ? ["--resume-id", id] : []), prompt], f.home, {}, bin);
-    assert.equal(run.code, 0, `fx ${tag ?? "v1"} ask failed: ${run.stderr}${run.stdout}`);
+    const run = await f.lia(false, ["ask", "--json", "--auto", ...(id ? ["--resume-id", id] : []), prompt], f.home, {}, bin);
+    assert.equal(run.code, 0, `lia ${tag ?? "v1"} ask failed: ${run.stderr}${run.stdout}`);
     const said = JSON.parse(run.stdout).session_id || readdirSync(f.v1Root).find(n => existsSync(join(f.v1Root, n, "session.json"))) || null;
-    assert(!id || said === id, `fx ${tag ?? "v1"} did not continue ${id}, it wrote ${said}`);
+    assert(!id || said === id, `lia ${tag ?? "v1"} did not continue ${id}, it wrote ${said}`);
     id ??= said;
   }
   assert(id, "the v1 writer left no session");
@@ -77,11 +77,11 @@ async function writeSession(f: Fixture, tag: string | null, prompts: string[]) {
 /// fresh session, and the v1 session left as it was.
 async function salvage(f: Fixture, o: ReturnType<typeof observer>, id: string) {
   const before = f.fingerprint(id);
-  const run = await f.fx(true, ["session", "recover", id, "--json"]);
+  const run = await f.lia(true, ["session", "recover", id, "--json"]);
   writeFileSync(join(f.root, "recover.json"), JSON.stringify(run, null, 2));
   const answer = recoverAnswer(run);
   const shown = answer.copy && existsSync(join(f.v2Root, answer.copy, "log.jsonl"))
-    ? JSON.parse((await f.fx(true, ["session", answer.copy, "--json"])).stdout).history : null;
+    ? JSON.parse((await f.lia(true, ["session", answer.copy, "--json"])).stdout).history : null;
   if (answer.copy) o.salvaged(answer.copy, shown?.length ?? 0);
   await o.observe("recover", answer.ans);
   expect(f.fingerprint(id)).toBe(before);

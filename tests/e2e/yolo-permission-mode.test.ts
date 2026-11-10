@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runFx } from "../evals/eval-helpers";
+import { runLia } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText,
@@ -19,7 +19,7 @@ import {
 } from "./fake-gateway";
 import { expectPermissionModeContext } from "./permission-mode-context";
 
-const WARNING = "Full access enabled: fx permission checks disabled";
+const WARNING = "Full access enabled: lia permission checks disabled";
 const TIMEOUT = 30_000;
 const CONFIGURED_SANDBOX = process.platform === "darwin" ? "os" : "none";
 
@@ -38,14 +38,14 @@ function createFixture(prefix: string) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".lia"), { recursive: true });
   mkdirSync(workspace);
   tempRoots.push(root);
   return {
     root,
     home,
     workspace: realpathSync(workspace),
-    settingsPath: join(home, ".fx", "settings.json"),
+    settingsPath: join(home, ".lia", "settings.json"),
   };
 }
 
@@ -53,7 +53,7 @@ describe("yolo permission mode", () => {
   test.each(["--full-access", "--yolo"])(
     "%s warns once, bypasses configured denial, and keeps stdout clean",
     async (flag) => {
-      const fixture = createFixture("fx-yolo-headless-");
+      const fixture = createFixture("lia-yolo-headless-");
       const markerPath = join(fixture.workspace, "yolo-command.txt");
       const tracePath = join(fixture.root, "permission-trace.log");
       writeFileSync(
@@ -76,7 +76,7 @@ describe("yolo permission mode", () => {
       ]);
       gateway = fake;
 
-      const result = await runFx(
+      const result = await runLia(
         ["ask", flag, "--json", "--no-save", "Run the fixture command exactly once."],
         {
           cwd: fixture.workspace,
@@ -84,12 +84,12 @@ describe("yolo permission mode", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "fake-yolo-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_AUTO_UPGRADE: "0",
-            FX_GATEWAY_BASE_URL: fake.baseUrl,
-            FX_GATEWAY_CHAT_URL: fake.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_TRACE_LOG: tracePath,
-            FX_TRACE_SCOPES: "permission",
+            LIA_AUTO_UPGRADE: "0",
+            LIA_GATEWAY_BASE_URL: fake.baseUrl,
+            LIA_GATEWAY_CHAT_URL: fake.chatUrl,
+            LIA_MODEL: FAKE_GATEWAY_MODEL,
+            LIA_TRACE_LOG: tracePath,
+            LIA_TRACE_SCOPES: "permission",
           },
           timeoutMs: TIMEOUT,
         },
@@ -129,27 +129,27 @@ describe("yolo permission mode", () => {
   test.each(["full-access", "full access", "yolo"])(
     "status accepts %s in settings and environment without changing JSON",
     async (mode) => {
-      const fixture = createFixture("fx-full-access-status-");
+      const fixture = createFixture("lia-full-access-status-");
       writeFileSync(fixture.settingsPath, JSON.stringify({ permission_mode: mode }));
       const env = {
         HOME: fixture.home,
-        FX_PERMISSION_MODE: undefined,
-        FX_AUTO_UPGRADE: "0",
+        LIA_PERMISSION_MODE: undefined,
+        LIA_AUTO_UPGRADE: "0",
       };
-      const configured = await runFx(["status", "--json"], { cwd: fixture.workspace, env });
+      const configured = await runLia(["status", "--json"], { cwd: fixture.workspace, env });
       expect(configured.code).toBe(0);
       expect(configured.stderr).toBe("");
       expect(JSON.parse(configured.stdout).permission_mode).toBe("full-access");
       const fake = startFakeGateway([fakeGatewayFinalText("ALIAS_WRITE_DONE")]);
       gateway = fake;
-      const request = await runFx(["ask", "--no-save", "--json", "Reply once."], {
+      const request = await runLia(["ask", "--no-save", "--json", "Reply once."], {
         cwd: fixture.workspace,
         env: {
           ...env,
           AI_GATEWAY_API_KEY: "fake-alias-key",
-          FX_GATEWAY_BASE_URL: fake.baseUrl,
-          FX_GATEWAY_CHAT_URL: fake.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
+          LIA_GATEWAY_BASE_URL: fake.baseUrl,
+          LIA_GATEWAY_CHAT_URL: fake.chatUrl,
+          LIA_MODEL: FAKE_GATEWAY_MODEL,
         },
         timeoutMs: TIMEOUT,
       });
@@ -161,15 +161,15 @@ describe("yolo permission mode", () => {
         yolo_acknowledged: true,
       });
       writeFileSync(fixture.settingsPath, JSON.stringify({ permission_mode: "ask" }));
-      const overridden = await runFx(["status", "--json"], {
+      const overridden = await runLia(["status", "--json"], {
         cwd: fixture.workspace,
-        env: { ...env, FX_PERMISSION_MODE: mode },
+        env: { ...env, LIA_PERMISSION_MODE: mode },
       });
       expect(overridden.code).toBe(0);
       expect(JSON.parse(overridden.stdout).permission_mode).toBe("full-access");
-      const text = await runFx(["permissions"], {
+      const text = await runLia(["permissions"], {
         cwd: fixture.workspace,
-        env: { ...env, FX_PERMISSION_MODE: mode },
+        env: { ...env, LIA_PERMISSION_MODE: mode },
       });
       expect(text.code).toBe(0);
       expect(text.stdout).toContain("mode=full access");
@@ -181,7 +181,7 @@ describe("yolo permission mode", () => {
   test(
     "status omits sandbox while preserving the legacy configured value",
     async () => {
-      const fixture = createFixture("fx-yolo-status-");
+      const fixture = createFixture("lia-yolo-status-");
       writeFileSync(
         fixture.settingsPath,
         JSON.stringify({
@@ -191,13 +191,13 @@ describe("yolo permission mode", () => {
         }) + "\n",
       );
 
-      const result = await runFx(["status", "--json"], {
+      const result = await runLia(["status", "--json"], {
         cwd: fixture.workspace,
         env: {
           HOME: fixture.home,
           AI_GATEWAY_API_KEY: undefined,
           VERCEL_OIDC_TOKEN: undefined,
-          FX_PERMISSION_MODE: undefined,
+          LIA_PERMISSION_MODE: undefined,
         },
       });
 
@@ -215,7 +215,7 @@ describe("yolo permission mode", () => {
   test(
     "legacy sandbox config is inert and ps executes once",
     async () => {
-      const fixture = createFixture("fx-legacy-sandbox-ps-");
+      const fixture = createFixture("lia-legacy-sandbox-ps-");
       const psPath = join(fixture.workspace, "ps.txt");
       const attemptsPath = join(fixture.workspace, "attempts.txt");
       writeFileSync(
@@ -237,7 +237,7 @@ describe("yolo permission mode", () => {
       ]);
       gateway = fake;
 
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--yolo", "--json", "--no-save", "Run the ps fixture once."],
         {
           cwd: fixture.workspace,
@@ -245,10 +245,10 @@ describe("yolo permission mode", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "fake-yolo-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_AUTO_UPGRADE: "0",
-            FX_GATEWAY_BASE_URL: fake.baseUrl,
-            FX_GATEWAY_CHAT_URL: fake.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
+            LIA_AUTO_UPGRADE: "0",
+            LIA_GATEWAY_BASE_URL: fake.baseUrl,
+            LIA_GATEWAY_CHAT_URL: fake.chatUrl,
+            LIA_MODEL: FAKE_GATEWAY_MODEL,
           },
           timeoutMs: TIMEOUT,
         },

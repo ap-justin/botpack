@@ -899,7 +899,7 @@ test "read_tool_result rows name the earlier call whose output they read" {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     const registry = test_builtin_tools.advertisement_set.registry;
-    const replay = "fx-command-replay-0123.bin";
+    const replay = "lia-command-replay-0123.bin";
     const earlier_turn = [_]types.ChatMessage{
         .{ .role = .assistant, .tool_calls = &.{.{
             .id = "read-1",
@@ -928,7 +928,7 @@ test "read_tool_result rows name the earlier call whose output they read" {
         .{ .arguments_json = "{\"request\":{\"handle\":\"" ++ replay ++ "\",\"query\":\"error:\"}}", .expected = "zig build test output for \"error:\"" },
         // The model may drop the `.txt` that `validate` restores.
         .{ .arguments_json = "{\"request\":{\"handle\":\"result-read_file-1\"}}", .expected = "more output from src/main.zig" },
-        .{ .arguments_json = "{\"request\":{\"handle\":\"fx-command-replay-ffff.bin\"}}", .expected = null },
+        .{ .arguments_json = "{\"request\":{\"handle\":\"lia-command-replay-ffff.bin\"}}", .expected = null },
         .{ .arguments_json = "{\"request\":{\"handle\":\"T5\"}}", .expected = "earlier tool call T5" },
     };
     for (cases) |case| {
@@ -1258,7 +1258,7 @@ pub fn finishExecutedToolStatus(
             );
             if (std.mem.eql(u8, call.name, "shell")) {
                 if (try tool_result_errors.isTerminalEndedFailure(arena, safe_result)) {
-                    break :blk try arena.print("{s} · ended when fx exited", .{base});
+                    break :blk try arena.print("{s} · ended when lia exited", .{base});
                 }
                 if (try tool_result_errors.inspectTerminalActionFieldCorrection(
                     arena,
@@ -1563,7 +1563,7 @@ fn commandArtifactHandle(
         else => return null,
     };
     const handle = std.Io.Dir.path.basename(output_file);
-    if (!std.mem.startsWith(u8, handle, "fx-command-") or
+    if (!std.mem.startsWith(u8, handle, "lia-command-") or
         !std.mem.endsWith(u8, handle, ".log") or
         std.mem.endsWith(u8, handle, ".stdout.log") or
         std.mem.endsWith(u8, handle, ".stderr.log")) return null;
@@ -2927,7 +2927,7 @@ test "command completion publishes its combined artifact handle" {
         .{
             .model_output = "truncated command preview",
             .command_result_json =
-            \\{"kind":"command","output_file":"/tmp/fx-command-combined.log"}
+            \\{"kind":"command","output_file":"/tmp/lia-command-combined.log"}
             ,
         },
         "truncated command preview",
@@ -2936,7 +2936,7 @@ test "command completion publishes its combined artifact handle" {
             .stored_output_bytes = 128_000,
             .truncated = true,
             .command_output_replay = .{ .available = .{
-                .handle = "fx-command-replay-terminal.bin",
+                .handle = "lia-command-replay-terminal.bin",
                 .framed_bytes = 123,
             } },
         },
@@ -2952,7 +2952,7 @@ test "command completion publishes its combined artifact handle" {
                 terminal.result.?,
             );
             try std.testing.expectEqualStrings(
-                "fx-command-combined.log",
+                "lia-command-combined.log",
                 terminal.command_artifact_handle.?,
             );
             const replay = terminal.result_memory.?.command_output_replay.?;
@@ -2961,7 +2961,7 @@ test "command completion publishes its combined artifact handle" {
                 .unavailable => return error.TestExpectedReplay,
             };
             try std.testing.expectEqualStrings(
-                "fx-command-replay-terminal.bin",
+                "lia-command-replay-terminal.bin",
                 descriptor.handle,
             );
             try std.testing.expectEqual(@as(usize, 123), descriptor.framed_bytes);

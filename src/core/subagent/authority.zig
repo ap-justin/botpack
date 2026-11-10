@@ -141,7 +141,7 @@ pub const HostResolver = struct {
     /// tool call. Without it, or when it returns null, a child keeps the mode
     /// its work was sent under.
     parent_permission_mode_fn: ?*const fn (?*anyopaque, Allocator, []const u8) ?types.PermissionMode = null,
-    /// fx's own tools, MCP integrations, and MCP view for root `root_id`,
+    /// lia's own tools, MCP integrations, and MCP view for root `root_id`,
     /// before any profile: what a profile that sets tools or MCP servers
     /// chooses from, even past its parent's. Without it, such a profile
     /// narrows its parent's instead.
@@ -225,11 +225,11 @@ pub const Snapshot = struct {
 
 /// The profile each child started in, loaded the first time the child's
 /// authority is resolved and kept for the life of the process, so a running
-/// child keeps it whatever is saved later. Profiles resolve from the fx home
-/// and the current directory, as `fx --profile` does.
+/// child keeps it whatever is saved later. Profiles resolve from the lia home
+/// and the current directory, as `lia --profile` does.
 pub const ProfileCache = struct {
     alloc: Allocator,
-    /// Where to look instead of the fx home and the current directory.
+    /// Where to look instead of the lia home and the current directory.
     roots: ?struct { home: ?[]const u8, workspace_root: ?[]const u8 } = null,
     mutex: std.Io.Mutex = .init,
     /// Keyed by child id, owned. Entries live until `deinit`.
@@ -295,7 +295,7 @@ pub const Resolver = struct {
     /// no cache gets no authority.
     profiles: ?*ProfileCache = null,
 
-    /// Whether these children may start subagents of their own. fx nests
+    /// Whether these children may start subagents of their own. lia nests
     /// two levels, an agent's subagents and theirs, so a subagent's own
     /// host clears it and its children are never given `subagent`.
     children_nest: bool = true,
@@ -426,7 +426,7 @@ pub const Resolver = struct {
             };
         };
 
-        // A profile that sets tools or MCP servers decides them from fx's
+        // A profile that sets tools or MCP servers decides them from lia's
         // own, even past what the parent has; what it leaves unset is the
         // parent's.
         const sets_tools = if (current.profile) |profile| profiles.setsTools(profile) else false;
@@ -551,7 +551,7 @@ fn hostGeneration(
     mcp_view: ?*const mcp_access.View,
 ) u64 {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.subagent.host-authority.v3\x00");
+    hash.update("lia.subagent.host-authority.v3\x00");
     for (tools) |tool| hashString(&hash, tool);
     for (integrations) |integration| hashString(&hash, integration);
     for (rules.rules) |rule| {
@@ -582,7 +582,7 @@ fn authorityGeneration(
     host_generation: u64,
 ) u64 {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.subagent.live-authority.v2\x00");
+    hash.update("lia.subagent.live-authority.v2\x00");
     hashString(&hash, child_id);
     hashString(&hash, root_id);
     hashU64(&hash, child_generation);
@@ -919,7 +919,7 @@ test "authority capture permits registry access and rejects changed work" {
     }
 }
 
-test "a subagent's own children are never given subagent, so fx nests two levels" {
+test "a subagent's own children are never given subagent, so lia nests two levels" {
     const Fixture = struct {
         fn resolve(_: ?*anyopaque, alloc: Allocator, _: []const u8) HostResolveError!HostAuthority {
             return HostAuthority.capture(alloc, &.{ "read_file", "subagent" }, &.{}, .{}, &.{}) catch
@@ -985,17 +985,17 @@ test "a subagent's profile narrows its tools, integrations, MCP view, and mode, 
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "fxhome/.fx/agents/reviewer");
+    try tmp.dir.createDirPath(io_mod.getIo(), "fxhome/.lia/agents/reviewer");
     const writeProfile = struct {
         fn run(dir: std.Io.Dir, json: []const u8) !void {
-            var file = try dir.createFile(io_mod.getIo(), "fxhome/.fx/agents/reviewer/profile.json", .{});
+            var file = try dir.createFile(io_mod.getIo(), "fxhome/.lia/agents/reviewer/profile.json", .{});
             defer file.close(io_mod.getIo());
             try file.writeStreamingAll(io_mod.getIo(), json);
         }
     }.run;
     try writeProfile(tmp.dir, "{\"description\": \"Reviewer\", \"tools\": [\"read_file\"], \"mcp_servers\": [\"github\"], \"permission_mode\": \"auto\"}");
-    const fx_home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "fxhome");
-    defer alloc.free(fx_home);
+    const lia_home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "fxhome");
+    defer alloc.free(lia_home);
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
     defer alloc.free(home);
     var parent: child_state.TestParent = undefined;
@@ -1011,7 +1011,7 @@ test "a subagent's profile narrows its tools, integrations, MCP view, and mode, 
     try registry.appendOneOff(alloc, "plain-child", work);
     try store.save(alloc, registry);
 
-    var cache: ProfileCache = .{ .alloc = alloc, .roots = .{ .home = fx_home, .workspace_root = null } };
+    var cache: ProfileCache = .{ .alloc = alloc, .roots = .{ .home = lia_home, .workspace_root = null } };
     defer cache.deinit();
     var resolver = Resolver{ .children = &parent.children, .root_id = parent.parent.id(), .host = .{ .resolve_fn = Host.resolve }, .profiles = &cache };
 
@@ -1048,7 +1048,7 @@ test "a subagent's profile narrows its tools, integrations, MCP view, and mode, 
     try std.testing.expectError(error.HostAuthorityUnavailable, resolver.resolve(alloc, "profiled-child"));
 }
 
-test "a profile that sets tools or MCP servers decides them from fx's own, and one that sets neither copies its parent" {
+test "a profile that sets tools or MCP servers decides them from lia's own, and one that sets neither copies its parent" {
     const Views = struct {
         fn capture(alloc: Allocator, root_id: []const u8, tools: []const []const u8, server_names: []const []const u8) HostResolveError!HostAuthority {
             var servers: [2]mcp_access.ServerIdentity = undefined;
@@ -1071,7 +1071,7 @@ test "a profile that sets tools or MCP servers decides them from fx's own, and o
         fn parent(_: ?*anyopaque, alloc: Allocator, root_id: []const u8) HostResolveError!HostAuthority {
             return capture(alloc, root_id, &.{"read_file"}, &.{"github"});
         }
-        // fx has more tools and both servers.
+        // lia has more tools and both servers.
         fn base(_: ?*anyopaque, alloc: Allocator, root_id: []const u8) HostResolveError!HostAuthority {
             return capture(alloc, root_id, &.{ "read_file", "write_file", "shell", "subagent" }, &.{ "github", "slack" });
         }
@@ -1085,7 +1085,7 @@ test "a profile that sets tools or MCP servers decides them from fx's own, and o
     };
     for (profiles_json) |entry| {
         var path_buf: [96]u8 = undefined;
-        const dir_path = try std.mem.print(&path_buf, "fxhome/.fx/agents/{s}", .{entry.name});
+        const dir_path = try std.mem.print(&path_buf, "fxhome/.lia/agents/{s}", .{entry.name});
         try tmp.dir.createDirPath(io_mod.getIo(), dir_path);
         var file_buf: [128]u8 = undefined;
         const file_path = try std.mem.print(&file_buf, "{s}/profile.json", .{dir_path});
@@ -1093,8 +1093,8 @@ test "a profile that sets tools or MCP servers decides them from fx's own, and o
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(io_mod.getIo(), entry.json);
     }
-    const fx_home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "fxhome");
-    defer alloc.free(fx_home);
+    const lia_home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "fxhome");
+    defer alloc.free(lia_home);
     var parent: child_state.TestParent = undefined;
     try parent.init(alloc);
     defer parent.deinit();
@@ -1109,7 +1109,7 @@ test "a profile that sets tools or MCP servers decides them from fx's own, and o
     try registry.setProfile(alloc, "quiet-child", "quiet");
     try store.save(alloc, registry);
 
-    var cache: ProfileCache = .{ .alloc = alloc, .roots = .{ .home = fx_home, .workspace_root = null } };
+    var cache: ProfileCache = .{ .alloc = alloc, .roots = .{ .home = lia_home, .workspace_root = null } };
     defer cache.deinit();
     var resolver = Resolver{
         .children = &parent.children,
@@ -1137,7 +1137,7 @@ test "a profile that sets tools or MCP servers decides them from fx's own, and o
     try std.testing.expectEqualStrings("github", quiet.integrations[0]);
     try std.testing.expectEqualStrings("github", quiet.mcp_view.?.servers[0].name);
 
-    // Without fx's own set to choose from, a profile narrows its parent's.
+    // Without lia's own set to choose from, a profile narrows its parent's.
     resolver.host.base_fn = null;
     var narrowed = try resolver.resolve(alloc, "builder-child");
     defer narrowed.deinit(alloc);
@@ -1156,14 +1156,14 @@ test "a turn no work started is limited by the child's profile and the user's mo
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "fxhome/.fx/agents/reviewer");
+    try tmp.dir.createDirPath(io_mod.getIo(), "fxhome/.lia/agents/reviewer");
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "fxhome/.fx/agents/reviewer/profile.json", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "fxhome/.lia/agents/reviewer/profile.json", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(io_mod.getIo(), "{\"description\": \"Reviewer\", \"tools\": [\"read_file\"], \"permission_mode\": \"auto\"}");
     }
-    const fx_home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "fxhome");
-    defer alloc.free(fx_home);
+    const lia_home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "fxhome");
+    defer alloc.free(lia_home);
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
     defer alloc.free(home);
     var parent: child_state.TestParent = undefined;
@@ -1182,7 +1182,7 @@ test "a turn no work started is limited by the child's profile and the user's mo
     try registry.finish(alloc, "plain-child", "work-1", .completed, null);
     try store.save(alloc, registry);
 
-    var cache: ProfileCache = .{ .alloc = alloc, .roots = .{ .home = fx_home, .workspace_root = null } };
+    var cache: ProfileCache = .{ .alloc = alloc, .roots = .{ .home = lia_home, .workspace_root = null } };
     defer cache.deinit();
     var resolver = Resolver{ .children = &parent.children, .root_id = parent.parent.id(), .host = .{ .resolve_fn = Host.resolve }, .profiles = &cache };
 
@@ -1239,14 +1239,14 @@ test "a child with no mode of its own follows its parent's current mode, under i
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "fxhome/.fx/agents/reviewer");
+    try tmp.dir.createDirPath(io_mod.getIo(), "fxhome/.lia/agents/reviewer");
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "fxhome/.fx/agents/reviewer/profile.json", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "fxhome/.lia/agents/reviewer/profile.json", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(io_mod.getIo(), "{\"description\": \"Reviewer\", \"permission_mode\": \"auto\"}");
     }
-    const fx_home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "fxhome");
-    defer alloc.free(fx_home);
+    const lia_home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "fxhome");
+    defer alloc.free(lia_home);
     var parent: child_state.TestParent = undefined;
     try parent.init(alloc);
     defer parent.deinit();
@@ -1261,7 +1261,7 @@ test "a child with no mode of its own follows its parent's current mode, under i
     try registry.setProfile(alloc, "profiled-child", "reviewer");
     try store.save(alloc, registry);
 
-    var cache: ProfileCache = .{ .alloc = alloc, .roots = .{ .home = fx_home, .workspace_root = null } };
+    var cache: ProfileCache = .{ .alloc = alloc, .roots = .{ .home = lia_home, .workspace_root = null } };
     defer cache.deinit();
     var parent_mode: ?types.PermissionMode = .yolo;
     var resolver = Resolver{

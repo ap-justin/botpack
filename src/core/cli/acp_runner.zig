@@ -49,7 +49,7 @@ pub const Config = struct {
     /// Provider for every session this server runs, like model_override. Null
     /// keeps the startup provider and each saved session's own provider.
     provider_override: ?model_provider.ProviderId = null,
-    /// The permission mode every new session starts in, as `FX_PERMISSION_MODE`
+    /// The permission mode every new session starts in, as `LIA_PERMISSION_MODE`
     /// sets it, without saving it. A client can still switch modes. Null
     /// starts in the saved mode.
     permission_override: ?types.PermissionMode = null,
@@ -71,7 +71,7 @@ pub const Config = struct {
     allow_native_tools: bool = true,
     minimal_kernel: bool = false,
     /// Raw prompt image and checkpoint bytes from a libfx host. Null for
-    /// hosts that only speak standard ACP, such as `fx acp`.
+    /// hosts that only speak standard ACP, such as `lia acp`.
     host_attachments: ?host_attachments.Store = null,
 };
 

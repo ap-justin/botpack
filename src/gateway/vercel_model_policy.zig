@@ -11,8 +11,8 @@ pub fn capabilitiesForModel(model: []const u8) model_capabilities.Capabilities {
     return capabilities;
 }
 
-/// The cache markers fx sends for `model`. AI Gateway's automatic caching
-/// covers every family; fx adds markers only where the provider honors them:
+/// The cache markers lia sends for `model`. AI Gateway's automatic caching
+/// covers every family; lia adds markers only where the provider honors them:
 /// Anthropic models, and OpenAI GPT-5.6 and later through explicit
 /// breakpoints.
 pub fn cacheMarkers(model: []const u8) model_capabilities.CacheMarkers {
@@ -21,7 +21,7 @@ pub fn cacheMarkers(model: []const u8) model_capabilities.CacheMarkers {
     return .none;
 }
 
-/// The provider order fx sends for `model` when the user set none, or null to
+/// The provider order lia sends for `model` when the user set none, or null to
 /// leave routing to the gateway. Only a request that asks the gateway to cache
 /// is routed, because only it has a cache to return to. A prompt cache lives
 /// with one provider account, so an Anthropic model starts every request on

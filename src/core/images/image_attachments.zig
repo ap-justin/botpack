@@ -17,7 +17,7 @@ const text_utils = @import("../shared/text_utils.zig");
 
 pub const max_image_bytes: usize = 20 * 1024 * 1024;
 /// The most images, and image bytes together, one libfx prompt holds: the
-/// limits `sdk/fx-sdk.js` takes a prompt within (`maxPromptImages` and
+/// limits `sdk/lia-sdk.js` takes a prompt within (`maxPromptImages` and
 /// `maxPromptImagesBytes`), which the core holds a prompt to as well.
 pub const max_libfx_prompt_images: usize = 8;
 pub const max_libfx_prompt_images_bytes: usize = 6 * 1024 * 1024;
@@ -255,7 +255,7 @@ pub fn createTempSnapshotDir(alloc: std.mem.Allocator) ![]u8 {
         // Fixed width, so the model's note naming a snapshot here is the
         // same length in every process.
         const path = try alloc.print(
-            "{s}/fx-image-snapshots-{x:0>16}",
+            "{s}/lia-image-snapshots-{x:0>16}",
             .{ temp_root, suffix },
         );
         errdefer alloc.free(path);
@@ -929,7 +929,7 @@ pub fn withholdEarlierImages(
 ) ![]const types.ChatMessage {
     const reason: []const u8 = switch (held) {
         .none, .attached, .withheld_fallback => return messages,
-        .withheld_unknown => "fx could not confirm image input support for this model (the model is not listed in the model catalog, or the catalog is unavailable). It stays in this session and can be sent again once support is confirmed; until then, ask the user to describe it if you need it.",
+        .withheld_unknown => "lia could not confirm image input support for this model (the model is not listed in the model catalog, or the catalog is unavailable). It stays in this session and can be sent again once support is confirmed; until then, ask the user to describe it if you need it.",
         .withheld_dead_end => "this model does not accept inline images and no vision fallback is available. Ask the user to describe it or switch to a vision-capable model if you need it.",
     };
     var result: ?[]types.ChatMessage = null;
@@ -1223,7 +1223,7 @@ const ImageFile = struct {
         return stat.kind == .file and (source.blob or stat.nlink == 1);
     }
 
-    /// A blob is in fx's own private store, so the folders on its path are
+    /// A blob is in lia's own private store, so the folders on its path are
     /// opened as the path names them, symlinks and all. A snapshot in the
     /// shared temporary folder has no symlink anywhere on its path. Neither
     /// file may itself be a symlink.
@@ -1344,7 +1344,7 @@ pub fn inlineCapturedSnapshots(alloc: std.mem.Allocator, attachments: []types.Im
 /// inline or in its session's blob is those bytes (D84), so its clone
 /// carries them inline and writes no file: a saved session then saves it as
 /// a blob as it does any prompt image, where a copy in the process's
-/// temporary folder would be gone once fx exits (D89).
+/// temporary folder would be gone once lia exits (D89).
 pub fn cloneVerifiedImageAttachment(
     alloc: std.mem.Allocator,
     attachment: types.ImageAttachment,
@@ -2702,7 +2702,7 @@ test "extractInlineImageAttachments replaces supported paths with matching place
 
 test "extractInlineImageAttachments preserves missing and unsupported tokens" {
     const alloc = std.testing.allocator;
-    const input = "look /tmp/fx-definitely-missing-image.png and notes.txt";
+    const input = "look /tmp/lia-definitely-missing-image.png and notes.txt";
     const result = try extractInlineImageAttachments(alloc, "/", input, 1);
     defer result.deinit(alloc);
 
@@ -3301,7 +3301,7 @@ test "requests leave out earlier images the route cannot carry, each with a note
     // withholdDroppedImages.
     try std.testing.expectEqual(@as(usize, 1), unknown[0].images.len);
     try std.testing.expectEqual(@as(usize, 2), unknown[0].images[0].id);
-    try std.testing.expect(std.mem.startsWith(u8, unknown[0].content.?, "[Image #1 was not sent with this request: fx could not confirm image input support for this model"));
+    try std.testing.expect(std.mem.startsWith(u8, unknown[0].content.?, "[Image #1 was not sent with this request: lia could not confirm image input support for this model"));
     try std.testing.expect(std.mem.endsWith(u8, unknown[0].content.?, "]\nLook at [Image #1] [Image #2]"));
     try std.testing.expect(unknown[2].content.?.ptr == messages[2].content.?.ptr);
     try std.testing.expectEqual(@as(usize, 2), messages[0].images.len);
@@ -3459,7 +3459,7 @@ test "requests name the saved file of each attached image, never its source" {
     // (D89); the note names the blob, never the temporary snapshot.
     var in_blob = inline_bytes;
     in_blob.id = 7;
-    in_blob.blob_path = @constCast("/Users/example/.fx/sessions/v2/s/blobs/0123abcd");
+    in_blob.blob_path = @constCast("/Users/example/.lia/sessions/v2/s/blobs/0123abcd");
 
     const images = [_]types.ImageAttachment{ attached, pasted, recalled_file, recalled_paste, inline_bytes, in_memory, in_blob };
     const prompt = "[Image #1] [Image #2] [Image #3] [Image #4] [Image #5] [Image #6] [Image #7]";
@@ -3494,7 +3494,7 @@ test "temporary snapshot folders have names of one length" {
         const path = try createTempSnapshotDir(alloc);
         defer alloc.free(path);
         defer cleanupSnapshotDir(path);
-        try std.testing.expectEqual(@as(usize, "fx-image-snapshots-".len + 16), std.Io.Dir.path.basename(path).len);
+        try std.testing.expectEqual(@as(usize, "lia-image-snapshots-".len + 16), std.Io.Dir.path.basename(path).len);
     }
 }
 
@@ -3506,12 +3506,12 @@ test "image location notes quote the saved path" {
         .id = 7,
         .path = @constCast("/Users/example/Shots/shot.png"),
         .media_type = @constCast("image/jpeg"),
-        .snapshot_path = @constCast("/Users/example/fx \"home\"]\n/sessions/s/images/image-7-0123456789abcdef.bin"),
+        .snapshot_path = @constCast("/Users/example/lia \"home\"]\n/sessions/s/images/image-7-0123456789abcdef.bin"),
     }};
     const messages = [_]types.ChatMessage{.{ .role = .user, .content = "[Image #7]", .images = &images }};
     const projected = try noteAttachmentLocations(arena, &messages);
     try std.testing.expectEqualStrings(
-        "[Image #7 (image/jpeg) is saved at \"/Users/example/fx \\\"home\\\"]\\n/sessions/s/images/image-7-0123456789abcdef.bin\".]\n[Image #7]",
+        "[Image #7 (image/jpeg) is saved at \"/Users/example/lia \\\"home\\\"]\\n/sessions/s/images/image-7-0123456789abcdef.bin\".]\n[Image #7]",
         projected[0].content.?,
     );
 }
@@ -3650,13 +3650,13 @@ test "a withheld prompt image's notice names the blob the note names (D89)" {
     const arena = arena_state.allocator();
     const wide = image_data.testPngHeader(9000, 10);
     var saved = try captureInlineImageBytesInMemory(arena, 1, "image/png", &wide);
-    saved.snapshot_path = @constCast("/tmp/fx-image-snapshots-0123456789abcdef/image-1.bin");
-    saved.blob_path = @constCast("/Users/example/.fx/sessions/v2/s/blobs/0123abcd");
+    saved.snapshot_path = @constCast("/tmp/lia-image-snapshots-0123456789abcdef/image-1.bin");
+    saved.blob_path = @constCast("/Users/example/.lia/sessions/v2/s/blobs/0123abcd");
     var cache: AttachmentDimensionCache = .empty;
     const in_blob = [_]types.ChatMessage{.{ .role = .user, .content = "look", .images = &.{saved} }};
     const named = try withholdOversizedAttachments(arena, arena, &cache, &in_blob, 8000);
     try std.testing.expectEqual(@as(usize, 0), named.messages[0].images.len);
-    try std.testing.expect(std.mem.find(u8, named.messages[0].content.?, "The original is saved at /Users/example/.fx/sessions/v2/s/blobs/0123abcd. ") != null);
+    try std.testing.expect(std.mem.find(u8, named.messages[0].content.?, "The original is saved at /Users/example/.lia/sessions/v2/s/blobs/0123abcd. ") != null);
     // Inline bytes without a blob have no saved file, and the temporary
     // snapshot beside them is never named.
     var unsaved = saved;
@@ -3664,7 +3664,7 @@ test "a withheld prompt image's notice names the blob the note names (D89)" {
     const inline_only = [_]types.ChatMessage{.{ .role = .user, .content = "look", .images = &.{unsaved} }};
     const unnamed = try withholdOversizedAttachments(arena, arena, &cache, &inline_only, 8000);
     try std.testing.expect(std.mem.find(u8, unnamed.messages[0].content.?, "No local image file is available") != null);
-    try std.testing.expect(std.mem.find(u8, unnamed.messages[0].content.?, "fx-image-snapshots") == null);
+    try std.testing.expect(std.mem.find(u8, unnamed.messages[0].content.?, "lia-image-snapshots") == null);
 }
 
 test "reference-only attachments get host recovery guidance without attempting file access" {

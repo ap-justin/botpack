@@ -39,12 +39,12 @@ pub const failed_turn_notice: core_types.SemanticNotice = .{
     .body = "failed",
 };
 
-/// A turn fx itself stopped, by crashing or closing, which the next launch
+/// A turn lia itself stopped, by crashing or closing, which the next launch
 /// sends again.
 pub const stopped_turn_notice: core_types.SemanticNotice = .{
     .topic = "system",
     .tone = .warning,
-    .body = "fx stopped before this turn finished",
+    .body = "lia stopped before this turn finished",
 };
 
 pub fn interruptedTurnNotice(entry: InterruptedHistoryTurn) core_types.SemanticNotice {
@@ -62,26 +62,26 @@ pub const interrupted_turn_context =
     "</turn_aborted>";
 
 /// What the model reads in place of a user message when the app resumes a
-/// request a previous fx process left unfinished. The turn before it is the
+/// request a previous lia process left unfinished. The turn before it is the
 /// interrupted one, and a tool that was running there is answered as
 /// possibly run.
 pub const resumed_request_prompt =
     "<session_resumed>\n" ++
-    "fx stopped before the previous turn finished, because it crashed or its window was closed. " ++
+    "lia stopped before the previous turn finished, because it crashed or its window was closed. " ++
     "A tool that was running may have partly run. Check what finished, rerun only what is safe to repeat, " ++
     "and continue the previous request.\n" ++
     "</session_resumed>";
 
-/// What the model reads in place of `resumed_request_prompt` when the turn fx
+/// What the model reads in place of `resumed_request_prompt` when the turn lia
 /// stopped ran no tool: that turn is projected as the user's own message, so
 /// there is nothing to check and nothing to say no to.
 pub const resumed_request_note_no_tool =
     "<session_resumed>\n" ++
-    "fx stopped before it answered the message above, because it crashed or its window was closed. " ++
+    "lia stopped before it answered the message above, because it crashed or its window was closed. " ++
     "Nothing ran. Answer that message now.\n" ++
     "</session_resumed>";
 
-/// Whether an interrupted turn ran no tool at all. A tool fx stopped in the
+/// Whether an interrupted turn ran no tool at all. A tool lia stopped in the
 /// middle of is not `tool_call`: the session repairs it into a step of its
 /// own, answered as possibly run.
 fn ranNothing(entry: core_types.InterruptedHistoryTurn) bool {
@@ -89,7 +89,7 @@ fn ranNothing(entry: core_types.InterruptedHistoryTurn) bool {
 }
 
 /// Drops trailing interrupted turns that were themselves resumes and ran
-/// nothing, so a request closed twice continues the turn fx stopped first.
+/// nothing, so a request closed twice continues the turn lia stopped first.
 pub fn withoutSupersededResumes(history: []const HistoryTurn) []const HistoryTurn {
     var end = history.len;
     while (end > 0) : (end -= 1) {
@@ -102,7 +102,7 @@ pub fn withoutSupersededResumes(history: []const HistoryTurn) []const HistoryTur
     return history[0..end];
 }
 
-/// Whether a turn is a resume fx sent for a request it stopped. Its saved
+/// Whether a turn is a resume lia sent for a request it stopped. Its saved
 /// text is always `resumed_request_prompt`; the projection picks the note.
 fn isResumeTurn(turn: HistoryTurn) bool {
     const text = switch (turn) {
@@ -113,7 +113,7 @@ fn isResumeTurn(turn: HistoryTurn) bool {
     return std.mem.eql(u8, text, resumed_request_prompt);
 }
 
-/// A resume that ran nothing before fx resumed the request again: the later
+/// A resume that ran nothing before lia resumed the request again: the later
 /// resume dropped it, so every later request drops it too.
 fn isSupersededResume(history: []const HistoryTurn, index: usize) bool {
     if (index + 1 >= history.len) return false;
@@ -123,7 +123,7 @@ fn isSupersededResume(history: []const HistoryTurn, index: usize) bool {
     };
 }
 
-/// Whether fx later resumed the request this interrupted turn left
+/// Whether lia later resumed the request this interrupted turn left
 /// unfinished. Such a turn reads as the resume request read it: with no
 /// abort note, since the request went on.
 fn isResumedLater(history: []const HistoryTurn, index: usize) bool {
@@ -663,9 +663,9 @@ fn make_owned_legacy_image_turn(
     return turn;
 }
 
-test "a turn fx stopped by crashing or closing reads as stopped, not failed or cancelled" {
+test "a turn lia stopped by crashing or closing reads as stopped, not failed or cancelled" {
     const stopped: InterruptedHistoryTurn = .{ .user = .{ .text = @constCast("go") }, .terminal_reason = .failed, .stopped_by_exit = true };
-    try std.testing.expectEqualStrings("fx stopped before this turn finished", interruptedTurnNotice(stopped).body);
+    try std.testing.expectEqualStrings("lia stopped before this turn finished", interruptedTurnNotice(stopped).body);
     try std.testing.expectEqual(core_types.NoticeTone.warning, interruptedTurnNotice(stopped).tone);
     // Esc and a turn that failed keep their own notices.
     const cancelled: InterruptedHistoryTurn = .{ .user = .{ .text = @constCast("go") }, .terminal_reason = .cancelled };
@@ -1441,7 +1441,7 @@ fn collectShellIdsFromExecution(
 /// note at the start of that turn (D93): the instructions stay as they were
 /// cached.
 pub const stale_shell_handles_note =
-    "Runtime context: fx restarted since this session was last active, so earlier shell session_id handles no longer exist; stopping or interacting with them fails with ExecutionNotFound. Their processes are normally terminated when fx exits but can survive an unclean exit, so check for a survivor before starting a duplicate. Otherwise start fresh shell sessions instead of reusing earlier handles.";
+    "Runtime context: lia restarted since this session was last active, so earlier shell session_id handles no longer exist; stopping or interacting with them fails with ExecutionNotFound. Their processes are normally terminated when lia exits but can survive an unclean exit, so check for a survivor before starting a duplicate. Otherwise start fresh shell sessions instead of reusing earlier handles.";
 
 pub fn detectStaleShellHandles(
     alloc: Allocator,
@@ -4569,7 +4569,7 @@ test "the image catalog keeps each image's handle and bytes, so Vision can read 
         .path = @constCast("/Users/example/old.png"),
         .media_type = @constCast("image/png"),
         .snapshot_sha256 = @constCast(digest),
-        .blob_path = @constCast("/Users/example/.fx/sessions/v2/s/blobs/" ++ digest),
+        .blob_path = @constCast("/Users/example/.lia/sessions/v2/s/blobs/" ++ digest),
     }};
     const history = [_]HistoryTurn{.{ .assistant = .{
         .user = .{ .text = @constCast("old image"), .images = &resumed },
@@ -4890,7 +4890,7 @@ test "a resumed request's note names a tool only when the stopped turn ran one" 
     try std.testing.expectEqualStrings(resumed_request_note_no_tool, resumedRequestNote(&.{}));
     const plain = [_]HistoryTurn{.{ .interrupted = .{ .user = .{ .text = prompt } } }};
     try std.testing.expectEqualStrings(resumed_request_note_no_tool, resumedRequestNote(&plain));
-    // A tool fx stopped in the middle of comes back as a step of its own.
+    // A tool lia stopped in the middle of comes back as a step of its own.
     var repaired = [_]core_types.ToolExecutionStep{.{}};
     const running = [_]HistoryTurn{.{ .interrupted = .{ .user = .{ .text = prompt }, .execution = .{ .tool_steps = &repaired } } }};
     try std.testing.expectEqualStrings(resumed_request_prompt, resumedRequestNote(&running));

@@ -755,7 +755,7 @@ fn readStoredTextManaged(
     return file.readToEnd(alloc, stored_text_max_bytes);
 }
 
-/// This session's tool-results folder as fx-compactor's record store, or on
+/// This session's tool-results folder as lia-compactor's record store, or on
 /// v2 its records kept as blobs (D50). The store borrows `capability`.
 pub fn compactorStore(capability: *session_child_store.SessionChildCapability) compactor.Store {
     return .{ .context = capability, .vtable = &.{
@@ -898,7 +898,7 @@ test "a v2 session stores results and images as blobs named by their hash (D44)"
 
     // Every store's blobs share the session: the same blob under a command
     // replay's handle is not a result, so the caller asks that store.
-    const foreign = try std.mem.concat(alloc, u8, &.{ "fx-command-replay-", artifact_digest.blobHash(handle).?, ".bin" });
+    const foreign = try std.mem.concat(alloc, u8, &.{ "lia-command-replay-", artifact_digest.blobHash(handle).?, ".bin" });
     defer alloc.free(foreign);
     try std.testing.expectError(error.ResultHandleNotFound, readByRangeManaged(alloc, &capability, foreign, 1, 4));
     try std.testing.expectError(error.ResultHandleNotFound, searchByQueryManaged(alloc, &capability, foreign, "xxx"));

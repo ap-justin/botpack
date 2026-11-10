@@ -6,7 +6,7 @@
     "invariant": "AnsweredOnce"
   },
   {
-    "description": "A question fx dismisses because the call already holds one replaces it on the call",
+    "description": "A question lia dismisses because the call already holds one replaces it on the call",
     "old": "          /\\ offered' = IF take THEN q ELSE offered",
     "new": "          /\\ offered' = IF calling THEN q ELSE offered",
     "invariant": "DismissedNeverShown"

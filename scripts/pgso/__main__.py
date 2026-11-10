@@ -102,7 +102,7 @@ def _add_common_arguments(parser: argparse.ArgumentParser) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python3 -m scripts.pgso",
-        description="Build and qualify fx PGSO candidates",
+        description="Build and qualify lia PGSO candidates",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     descriptions = {

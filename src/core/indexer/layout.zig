@@ -100,9 +100,9 @@ const GitDirs = struct { git_dir: []const u8, common_dir: []const u8 };
 /// git's is_git_directory: a valid `HEAD` in the git directory, and `objects`
 /// and `refs` directories in the common directory, which `commondir` may
 /// relocate. Discovery must accept exactly the directories git accepts, or git
-/// would walk past one fx stopped at and use another repository's config. A
+/// would walk past one lia stopped at and use another repository's config. A
 /// symlinked `HEAD`, which git accepts when it points into `refs/`, is
-/// rejected here; safe git then refuses because git and fx disagree.
+/// rejected here; safe git then refuses because git and lia disagree.
 fn gitDirs(arena: Allocator, git_dir: []const u8) Allocator.Error!?GitDirs {
     var dir = std.Io.Dir.openDirAbsolute(io_mod.getIo(), git_dir, .{}) catch return null;
     defer dir.close(io_mod.getIo());

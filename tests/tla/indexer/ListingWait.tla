@@ -1,5 +1,5 @@
 ---- MODULE ListingWait ----
-\* The `@` menu's frame wait (picker_state.FileListingWait) inside fx's event
+\* The `@` menu's frame wait (picker_state.FileListingWait) inside lia's event
 \* loop. A keystroke starts a folder listing and requests a frame. Each loop
 \* iteration harvests a finished listing, asks the wait whether to hold the
 \* frame, paints when it does not, and polls again after 1 ms while the wait

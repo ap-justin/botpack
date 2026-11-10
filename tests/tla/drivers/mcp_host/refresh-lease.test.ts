@@ -1,23 +1,23 @@
-// RefreshLease: real fx processes refresh one login through its refresh
+// RefreshLease: real lia processes refresh one login through its refresh
 // lock on the file store, against the fake OAuth server
 // (../mcp/fakes/oauth.ts), which answers the first refreshes late. The
-// harness freezes or kills the fx holding the lock, or holds it itself with
-// no stamp as an older fx does. Each process is `fx mcp show web` with the
+// harness freezes or kills the lia holding the lock, or holds it itself with
+// no stamp as an older lia does. Each process is `lia mcp show web` with the
 // saved login expired, so it refreshes before its first request. Their
 // "MCP refresh lock" and "MCP refresh went ahead" trace lines and the
 // harness's steps are checked by TLC against RefreshLeaseTrace.tla, the
 // rules of RefreshLease.tla on the real clock, and each run asserts what it
-// must show. `fx mcp show` refreshes while it starts the server, which the
+// must show. `lia mcp show` refreshes while it starts the server, which the
 // engine gives 10 s (src/mcp/core/era.zig probe_timeout_ms), so one that
 // waits longer reports the server as retrying whatever the lock does: these
-// runs check the lock, and tests/e2e/mcp-auth.test.ts checks fx processes
+// runs check the lock, and tests/e2e/mcp-auth.test.ts checks lia processes
 // already connected.
 import { expect, test } from "bun:test";
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { artifacts, binary } from "../lib/context";
-import { cliLogin, fixture, fxEnv, save, startFake, storePath, waitFor, writeProfile, type Fixture } from "./driver";
+import { cliLogin, fixture, liaEnv, save, startFake, storePath, waitFor, writeProfile, type Fixture } from "./driver";
 import { checkTrace, type TraceRecord, type Verdict } from "./trace";
 
 /** runtime.zig refresh_answer_ms, credentials.zig call_budget_ms and hold_slack_ms. */
@@ -27,7 +27,7 @@ const SLACK = 2_000;
 /** Scheduling noise allowed around every deadline. */
 const TOLERANCE = 600;
 
-// fx times its stamps on Zig's awake clock, CLOCK_UPTIME_RAW on macOS and
+// lia times its stamps on Zig's awake clock, CLOCK_UPTIME_RAW on macOS and
 // CLOCK_MONOTONIC on Linux. Bun's hrtime is neither, so both are read from libc.
 const uptime = process.platform === "darwin"
   ? dlopen("/usr/lib/libSystem.B.dylib", { clock_gettime_nsec_np: { args: [FFIType.i32], returns: FFIType.u64 } }).symbols
@@ -46,7 +46,7 @@ function awakeMs(): number {
 interface Proc { label: string; child: ReturnType<typeof Bun.spawn>; trace: string; done: Promise<{ code: number; out: string; err: string }> }
 interface Scene { f: Fixture; fake: Awaited<ReturnType<typeof startFake>>; t0: number; records: TraceRecord[]; procs: Proc[]; holders: ReturnType<typeof Bun.spawn>[] }
 
-/** A signed-in login to the fake, saved and then expired, so the next fx refreshes it. */
+/** A signed-in login to the fake, saved and then expired, so the next lia refreshes it. */
 async function scene(name: string, server: Record<string, unknown>): Promise<Scene> {
   const f = fixture(artifacts, name);
   const fake = await startFake(f, server);
@@ -81,7 +81,7 @@ function note(s: Scene, event: string, p: string) {
 function start(s: Scene, label: string): Proc {
   const trace = join(s.f.base, `${label}.trace`);
   const child = Bun.spawn([binary, "mcp", "show", "web"], {
-    cwd: s.f.workspace, env: fxEnv(s.f, { FX_TRACE_LOG: trace, FX_TRACE_SCOPES: "mcp" }), stdin: "ignore", stdout: "pipe", stderr: "pipe",
+    cwd: s.f.workspace, env: liaEnv(s.f, { LIA_TRACE_LOG: trace, LIA_TRACE_SCOPES: "mcp" }), stdin: "ignore", stdout: "pipe", stderr: "pipe",
   });
   const done = Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]).then(([code, out, err]) => ({ code, out, err }));
   const p = { label, child, trace, done };
@@ -102,7 +102,7 @@ function seen(s: Scene, p: Proc): Seen {
     if (m) out.events.push({ event: "stamp", at: Number(m[1]) - s.t0 });
     m = /MCP refresh lock released stamp=\d+ at=(\d+)/.exec(line);
     if (m) out.events.push({ event: "release", at: Number(m[1]) - s.t0 });
-    m = /MCP refresh went ahead server=\S+ reason=another fx stopped refreshing started=(\d+) at=(\d+)/.exec(line);
+    m = /MCP refresh went ahead server=\S+ reason=another lia stopped refreshing started=(\d+) at=(\d+)/.exec(line);
     if (m) out.events.push({ event: "goahead", started: Number(m[1]) - s.t0, at: Number(m[2]) - s.t0 });
   }
   for (const e of out.events) {
@@ -147,7 +147,7 @@ function cleanup(s: Scene) {
   s.fake.stop();
 }
 
-test("a refresh answered 15 s late: the next fx waits for it and takes the login it saved", async () => {
+test("a refresh answered 15 s late: the next lia waits for it and takes the login it saved", async () => {
   const s = await scene("rl-slow", { refreshDelayMs: [15_000] });
   try {
     const first = start(s, "first");
@@ -159,12 +159,12 @@ test("a refresh answered 15 s late: the next fx waits for it and takes the login
     expect(refreshes(s).length).toBe(1);
     expect(all.map((v) => v.goaheads.length)).toEqual([0, 0]);
     expect(all[1]!.takes[0]!).toBeGreaterThanOrEqual(all[0]!.releases[0]!);
-    expect(readFileSync(second.trace, "utf8")).toContain("MCP refresh replaced server=web reason=another fx refreshed");
+    expect(readFileSync(second.trace, "utf8")).toContain("MCP refresh replaced server=web reason=another lia refreshed");
     expect(verdict.verdict).toBe("ACCEPTED");
   } finally { cleanup(s); }
 }, 120_000);
 
-test("a refresher frozen with its refresh out: the next fx goes ahead 32 s after its stamp, not before", async () => {
+test("a refresher frozen with its refresh out: the next lia goes ahead 32 s after its stamp, not before", async () => {
   // rotate false: the token the frozen one sent still works, so the next one's refresh succeeds.
   const s = await scene("rl-frozen", { refreshDelayMs: [60_000], rotate: false });
   try {
@@ -187,14 +187,14 @@ test("a refresher frozen with its refresh out: the next fx goes ahead 32 s after
   } finally { cleanup(s); }
 }, 120_000);
 
-test("an older fx holds the refresh lock and stamps nothing: the next fx goes ahead 32 s after it starts", async () => {
+test("an older lia holds the refresh lock and stamps nothing: the next lia goes ahead 32 s after it starts", async () => {
   const s = await scene("rl-older", { rotate: false });
   try {
     // One refresh first, so the lock file exists, and the login expired again.
     const once = start(s, "once");
     expect((await once.done).code).toBe(0);
     expire(s.f);
-    const dir = join(s.f.home, ".fx", "mcp-credentials");
+    const dir = join(s.f.home, ".lia", "mcp-credentials");
     const lock = readdirSync(dir).find((n) => /^refresh-v3-.*\.lock$/.test(n));
     if (!lock) throw new Error("no refresh lock file");
     const holder = Bun.spawn(["perl", "-e", 'use Fcntl qw(:flock); open(my $f, ">>", $ARGV[0]) or die; flock($f, LOCK_EX) or die; $| = 1; print "held\\n"; sleep $ARGV[1];', join(dir, lock), "60"], { stdout: "pipe" });
@@ -214,7 +214,7 @@ test("an older fx holds the refresh lock and stamps nothing: the next fx goes ah
   } finally { cleanup(s); }
 }, 120_000);
 
-test("a refresher killed mid-refresh: the next fx takes the lock at once and refreshes", async () => {
+test("a refresher killed mid-refresh: the next lia takes the lock at once and refreshes", async () => {
   const s = await scene("rl-kill", { refreshDelayMs: [30_000], rotate: false });
   try {
     const first = start(s, "first");

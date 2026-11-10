@@ -314,7 +314,7 @@ pub fn preparedRequestFingerprint(
     request: permission_request.PermissionRequest,
 ) [32]u8 {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.subagent.approval.v1\x00");
+    hash.update("lia.subagent.approval.v1\x00");
     hashString(&hash, request.label);
     hashOptional(&hash, request.explanation);
     hashOptional(&hash, request.tool_arguments_preview);
@@ -330,7 +330,7 @@ pub fn stableApprovalId(
     prepared: [32]u8,
 ) [64]u8 {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.subagent.approval-id.v1\x00");
+    hash.update("lia.subagent.approval-id.v1\x00");
     hashString(&hash, child_id);
     hashString(&hash, work_id);
     hash.update(&prepared);

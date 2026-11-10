@@ -10,7 +10,7 @@ pub const Method = enum {
 };
 
 /// How long a request without its own deadline may take, in milliseconds,
-/// in the transport fx sends sign-in requests through (`builtins/gateway.zig`).
+/// in the transport lia sends sign-in requests through (`builtins/gateway.zig`).
 pub const default_request_timeout_ms: i64 = 15_000;
 
 pub const Request = struct {

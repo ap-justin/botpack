@@ -29,12 +29,12 @@ pub const TopLevelKind = enum {
     completion,
 };
 
-/// The release that drops every old spelling fx still reads with a warning,
-/// such as `fx setup`, `--sessions-v2`, and `/allowlist user`. The CLI shape
-/// check fails once fx's version reaches it, so they come out on time.
+/// The release that drops every old spelling lia still reads with a warning,
+/// such as `lia setup`, `--sessions-v2`, and `/allowlist user`. The CLI shape
+/// check fails once lia's version reaches it, so they come out on time.
 pub const old_spelling_removal = "0.0.18";
 /// What every warning about an old spelling says.
-pub const deprecated_until = "is deprecated and stops working in fx " ++ old_spelling_removal;
+pub const deprecated_until = "is deprecated and stops working in lia " ++ old_spelling_removal;
 
 pub const OptionDoc = struct {
     flag: []const u8,
@@ -45,14 +45,14 @@ pub const OptionDoc = struct {
     /// Help omits it, but the parser still reads it: a deprecated spelling
     /// that keeps working with a warning, such as `--sessions-v2`.
     hidden: bool = false,
-    /// The fixed values the flag takes, which `fx completion` offers. A value
+    /// The fixed values the flag takes, which `lia completion` offers. A value
     /// written in the flag itself, such as `--period <today|7d|month>`, needs no
     /// list here. Leave it empty for free-form values.
     values: []const []const u8 = &.{},
 };
 
-/// A word that may follow a command, such as `set` in `fx config set`. Help
-/// lists these under "Commands:", and `fx completion` offers them.
+/// A word that may follow a command, such as `set` in `lia config set`. Help
+/// lists these under "Commands:", and `lia completion` offers them.
 pub const SubcommandDoc = struct {
     /// The word, then its arguments as help shows them: `set <key> <value>`.
     /// A `<key>` right after the word means the next argument is a setting
@@ -64,7 +64,7 @@ pub const SubcommandDoc = struct {
     /// The flags this word takes. Completion offers these, not the
     /// command's, after the word.
     options: []const OptionDoc = &.{},
-    /// The `<key>` is one `fx config set` changes, so completion offers only
+    /// The `<key>` is one `lia config set` changes, so completion offers only
     /// those keys.
     settable_key: bool = false,
 
@@ -180,7 +180,7 @@ pub fn renderTopLevelHelpWithStyle(alloc: Allocator, registry: TopLevelRegistry,
     try writeWrappedStyledLine(&out.writer, "", "", registry.interactive_hint, width, style, .muted);
 
     try writeSectionHeading(&out.writer, style, "Usage:");
-    try writeWrappedStyledLine(&out.writer, "  ", "  ", "fx <command> [...flags] [...args]", width, style, .syntax);
+    try writeWrappedStyledLine(&out.writer, "  ", "  ", "lia <command> [...flags] [...args]", width, style, .syntax);
 
     try writeSectionHeading(&out.writer, style, "Commands:");
     for (registry.help_groups, 0..) |group, group_index| {
@@ -219,12 +219,12 @@ pub fn renderTopLevelCommandHelp(alloc: Allocator, registry: TopLevelRegistry, k
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
 
-    try out.writer.writeAll("fx ");
+    try out.writer.writeAll("lia ");
     try out.writer.writeAll(spec.token);
     try out.writer.writeAll("\n\n");
     try out.writer.writeAll(spec.summary);
     try out.writer.writeAll("\n\nUsage:\n");
-    try out.writer.writeAll("  fx ");
+    try out.writer.writeAll("  lia ");
     try out.writer.writeAll(spec.usage);
     try out.writer.writeByte('\n');
 
@@ -308,7 +308,7 @@ pub fn deprecationWarning(alloc: Allocator, registry: TopLevelRegistry, kind: To
     for (registry.specs) |spec| {
         if (spec.kind != kind) continue;
         const replacement = spec.replaced_by orelse return null;
-        return try alloc.print("fx {s} " ++ deprecated_until ++ "; use {s}\n", .{ spec.token, replacement });
+        return try alloc.print("lia {s} " ++ deprecated_until ++ "; use {s}\n", .{ spec.token, replacement });
     }
     return null;
 }
@@ -589,8 +589,8 @@ test "rendered top-level help is a complete CLI navigation page" {
 
     try std.testing.expect(std.mem.startsWith(u8, text, "𝒇x v9.8.7\nFast, native coding agent for the terminal."));
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, text, "𝒇x"));
-    try std.testing.expect(std.mem.find(u8, text, "fx is a command-line coding agent.") != null);
-    try std.testing.expect(std.mem.find(u8, text, "fx <command> [...flags] [...args]") != null);
+    try std.testing.expect(std.mem.find(u8, text, "lia is a command-line coding agent.") != null);
+    try std.testing.expect(std.mem.find(u8, text, "lia <command> [...flags] [...args]") != null);
     try std.testing.expect(std.mem.find(u8, text, "Commands:") != null);
     try std.testing.expect(std.mem.find(u8, text, "ask <prompt>") != null);
     try std.testing.expect(std.mem.find(u8, text, "Run one noninteractive request") != null);
@@ -604,7 +604,7 @@ test "rendered top-level help is a complete CLI navigation page" {
     // ChatGPT and Grok sign-in are gone; nothing offers another provider to sign in to.
     try std.testing.expect(std.mem.find(u8, text, "a model provider") == null);
     try std.testing.expect(std.mem.find(u8, text, "selected provider") == null);
-    // `fx setup` is deprecated and hidden; `fx login --api-key` replaces it.
+    // `lia setup` is deprecated and hidden; `lia login --api-key` replaces it.
     try std.testing.expect(std.mem.find(u8, text, "Configure a Vercel AI Gateway API key") == null);
     try std.testing.expect(std.mem.find(u8, text, "login [vercel] [--api-key]") != null);
     try std.testing.expect(std.mem.find(u8, text, "Choose a Vercel AI Gateway team") != null);
@@ -617,15 +617,14 @@ test "rendered top-level help is a complete CLI navigation page" {
     try std.testing.expect(std.mem.find(u8, text, "-v, --version") != null);
     try std.testing.expect(std.mem.find(u8, text, "Must appear before the command. Accepted names:") == null);
     try std.testing.expect(std.mem.find(u8, text, "skill_description_bytes, skill_catalog_bytes") == null);
-    try std.testing.expect(std.mem.find(u8, text, "FX_EXPERIMENTAL_WORKSPACE_ACCESS=1") == null);
+    try std.testing.expect(std.mem.find(u8, text, "LIA_EXPERIMENTAL_WORKSPACE_ACCESS=1") == null);
     try std.testing.expect(std.mem.find(u8, text, "Supported for ask, ACP, PR, and issue launches") == null);
     try std.testing.expect(std.mem.find(u8, text, "Examples:") != null);
-    try std.testing.expect(std.mem.find(u8, text, "fx ask \"Explain the changes in this repository\"") != null);
-    try std.testing.expect(std.mem.find(u8, text, "fx status --json") != null);
-    try std.testing.expect(std.mem.find(u8, text, "Run `fx <command> --help` for command-specific usage and options.") != null);
+    try std.testing.expect(std.mem.find(u8, text, "lia ask \"Explain the changes in this repository\"") != null);
+    try std.testing.expect(std.mem.find(u8, text, "lia status --json") != null);
+    try std.testing.expect(std.mem.find(u8, text, "Run `lia <command> --help` for command-specific usage and options.") != null);
     try std.testing.expect(std.mem.find(u8, text, "command-specific options and examples") == null);
-    try std.testing.expect(std.mem.find(u8, text, "Learn more about fx:  https://fx.sh/docs") != null);
-    try std.testing.expect(std.mem.find(u8, text, "\n\n\nRun `fx <command> --help`") == null);
+    try std.testing.expect(std.mem.find(u8, text, "\n\n\nRun `lia <command> --help`") == null);
     try std.testing.expect(std.mem.find(u8, text, "Start:") == null);
     try std.testing.expect(std.mem.find(u8, text, "  Work      ") == null);
     try std.testing.expect(std.mem.find(u8, text, "More:") == null);
@@ -658,7 +657,6 @@ test "terminal top-level help adds styling without changing visible content" {
     try std.testing.expect(std.mem.find(u8, terminal, "\x1b[1mUsage:\x1b[0m") != null);
     try std.testing.expect(std.mem.find(u8, terminal, "\x1b[39mask <prompt>\x1b[0m") != null);
     try std.testing.expect(std.mem.find(u8, terminal, "\x1b[38;5;243mFast, native coding agent") != null);
-    try std.testing.expect(std.mem.find(u8, terminal, "\x1b[4mhttps://fx.sh/docs\x1b[0m") != null);
     try std.testing.expect(std.mem.find(u8, terminal, "\x1b[38;5;252m") == null);
     try std.testing.expect(std.mem.find(u8, terminal, "\x1b[38;5;245m") == null);
     try std.testing.expectEqualStrings(plain, stripped);
@@ -672,7 +670,7 @@ test "top-level help renders flags as compact aligned rows" {
 
     try std.testing.expect(lineContainsBoth(wide, "--context-limit <spec>", "Set name=bytes|off; repeatable"));
     try std.testing.expect(lineContainsBoth(wide, "--add-dir <path>", "Add a workspace directory; repeatable"));
-    try std.testing.expect(std.mem.find(u8, wide, "Print the fx version and exit\n\nExamples:") != null);
+    try std.testing.expect(std.mem.find(u8, wide, "Print the lia version and exit\n\nExamples:") != null);
     try std.testing.expect(std.mem.find(u8, wide, "List available models\n\n  teams") != null);
     try std.testing.expect(std.mem.find(u8, wide, "Show Vercel AI Gateway credits\n\n  usage") != null);
     try expectAllLinesFit(narrow, 60);
@@ -721,8 +719,8 @@ test "per-command help renders header usage options and details" {
     const text = try renderTopLevelCommandHelp(std.testing.allocator, testTopLevelRegistry(), .permissions);
     defer std.testing.allocator.free(text);
 
-    try std.testing.expect(std.mem.find(u8, text, "fx permissions\n") != null);
-    try std.testing.expect(std.mem.find(u8, text, "Usage:\n  fx permissions [--json]") != null);
+    try std.testing.expect(std.mem.find(u8, text, "lia permissions\n") != null);
+    try std.testing.expect(std.mem.find(u8, text, "Usage:\n  lia permissions [--json]") != null);
     try std.testing.expect(std.mem.find(u8, text, "Options:") != null);
     try std.testing.expect(std.mem.find(u8, text, "--json") != null);
     try std.testing.expect(std.mem.find(u8, text, "Modes:") != null);
@@ -732,8 +730,8 @@ test "ACP help documents accepted options" {
     const text = try renderTopLevelCommandHelp(std.testing.allocator, testTopLevelRegistry(), .acp);
     defer std.testing.allocator.free(text);
 
-    try std.testing.expect(std.mem.find(u8, text, "fx acp\n") != null);
-    try std.testing.expect(std.mem.find(u8, text, "Usage:\n  fx acp [--permission-mode <mode>|--ask|--auto|--full-access] [--provider <name>] [--model <id>] [--effort <level>] [--fast|--no-fast] [--ultrafast|--no-ultrafast] [--log-file <path>]") != null);
+    try std.testing.expect(std.mem.find(u8, text, "lia acp\n") != null);
+    try std.testing.expect(std.mem.find(u8, text, "Usage:\n  lia acp [--permission-mode <mode>|--ask|--auto|--full-access] [--provider <name>] [--model <id>] [--effort <level>] [--fast|--no-fast] [--ultrafast|--no-ultrafast] [--log-file <path>]") != null);
     try std.testing.expect(std.mem.find(u8, text, "--model <id>") != null);
     try std.testing.expect(std.mem.find(u8, text, "--effort <level>") != null);
     try std.testing.expect(std.mem.find(u8, text, "--log-file <path>") != null);
@@ -787,7 +785,7 @@ test "a deprecated command warns with its replacement and a current one does not
     const alloc = std.testing.allocator;
     const warning = (try deprecationWarning(alloc, testTopLevelRegistry(), .setup)).?;
     defer alloc.free(warning);
-    try std.testing.expectEqualStrings("fx setup is deprecated and stops working in fx 0.0.18; use fx login vercel --api-key\n", warning);
+    try std.testing.expectEqualStrings("lia setup is deprecated and stops working in lia 0.0.18; use lia login vercel --api-key\n", warning);
     try std.testing.expect((try deprecationWarning(alloc, testTopLevelRegistry(), .login)) == null);
 }
 

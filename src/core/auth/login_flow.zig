@@ -109,7 +109,7 @@ pub const TeamSelection = struct {
         errdefer alloc.free(team_slug);
         return .{
             .token = token,
-            .source = .fx_login,
+            .source = .lia_login,
             .team_id = team_id,
             .team_slug = team_slug,
         };
@@ -330,7 +330,7 @@ pub const SignInRuntime = struct {
     /// the input loop can open the browser for it.
     browser_pending: bool = false,
 
-    /// Starts an fx login sign-in. On native hosts the issuer discovery and
+    /// Starts an lia login sign-in. On native hosts the issuer discovery and
     /// device-code request run on the sign-in worker, so the input loop never
     /// waits on them; `snapshot().preparing` holds until the code arrives.
     pub fn start(
@@ -690,7 +690,7 @@ fn prepareLogin(
     alloc: Allocator,
     transport: oauth_transport.Provider,
 ) !PreparedLogin {
-    try credentials.requireSignInStorage(.fx_login);
+    try credentials.requireSignInStorage(.lia_login);
     var client_id = oauth_session.configuredClientId() orelse return LoginError.ClientIdMissing;
     const issuer_url = try oauth_session.configuredIssuerUrl();
 
@@ -902,7 +902,7 @@ pub fn logout(
     return result;
 }
 
-/// The outcome of deleting the saved fx login session, with the deleted
+/// The outcome of deleting the saved lia login session, with the deleted
 /// session kept so its tokens can still be revoked.
 pub const LocalLogout = struct {
     result: LogoutResult = .{},
@@ -911,7 +911,7 @@ pub const LocalLogout = struct {
     session: ?oauth_session.Session = null,
 };
 
-/// Deletes the saved fx login session without contacting the issuer. Revoke
+/// Deletes the saved lia login session without contacting the issuer. Revoke
 /// the returned session with `revokeLoggedOutSession`, then release it.
 pub fn logoutLocally(alloc: Allocator) LogoutError!LocalLogout {
     var session: ?oauth_session.Session = null;
@@ -1161,7 +1161,7 @@ const BrowserOpenPrompt = struct {
         const stdin_is_tty = try std.Io.File.stdin().isTty(io_mod.getIo());
         return .{
             .url = url,
-            .enabled = browserOpenEnabled(io_mod.getenv("FX_NO_OPEN_BROWSER") != null, stdin_is_tty, host.current()),
+            .enabled = browserOpenEnabled(io_mod.getenv("LIA_NO_OPEN_BROWSER") != null, stdin_is_tty, host.current()),
         };
     }
 
@@ -1688,7 +1688,7 @@ test "team selection stages an owned validation credential before commit" {
     var candidate = try selection.validationCredential(alloc, 0);
     defer candidate.deinit(alloc);
 
-    try std.testing.expectEqual(credentials.Source.fx_login, candidate.source);
+    try std.testing.expectEqual(credentials.Source.lia_login, candidate.source);
     try std.testing.expectEqualStrings("access-token", candidate.token);
     try std.testing.expectEqualStrings("team_new", candidate.team_id.?);
     try std.testing.expectEqualStrings("new-team", candidate.team_slug.?);

@@ -1,14 +1,14 @@
 [
  {
-  "description": "Fx never tells the helper a reaped group is gone, so its id, come round for a stranger, is killed",
+  "description": "lia never tells the helper a reaped group is gone, so its id, come round for a stranger, is killed",
   "old": "    /\\ st' = [st EXCEPT ![i] = \"reaped\"]\n    /\\ pipe' = Append(pipe, <<\"-\", i>>)",
   "new": "    /\\ st' = [st EXCEPT ![i] = \"reaped\"]\n    /\\ pipe' = pipe",
   "invariant": "NoStrayKill"
  },
  {
   "description": "The helper acts on the close without reading the rest of the pipe",
-  "old": "    /\\ helper = \"reading\" /\\ fx = \"gone\" /\\ pipe = <<>>",
-  "new": "    /\\ helper = \"reading\" /\\ fx = \"gone\"",
+  "old": "    /\\ helper = \"reading\" /\\ lia = \"gone\" /\\ pipe = <<>>",
+  "new": "    /\\ helper = \"reading\" /\\ lia = \"gone\"",
   "invariant": "NoStrayKill"
  },
  {

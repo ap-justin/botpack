@@ -21,13 +21,13 @@ On Linux, build the native binary and run the local Gateway fixture:
 
 ```sh
 zig build -Doptimize=ReleaseSafe
-python3 benchmarks/long_turn_memory.py --output /tmp/fx-memory-proof --steps 1000
+python3 benchmarks/long_turn_memory.py --output /tmp/lia-memory-proof --steps 1000
 ```
 
 The output directory must not already exist. Each step reads a changing file
 of approximately 1 KiB. The fixture supplies deterministic responses and never
-contacts a paid model. It discards request bodies and samples only fx RSS from
-`/proc/<pid>/status` every 100 ms. The fx process has a 2 GiB address-space limit,
+contacts a paid model. It discards request bodies and samples only lia RSS from
+`/proc/<pid>/status` every 100 ms. The lia process has a 2 GiB address-space limit,
 a 600-second deadline and disabled core dumps. Use `--steps 5` for a short smoke.
 
 `measurements.json` records the binary SHA-256, RSS samples, request count and

@@ -2,11 +2,11 @@
 \* The MCP credential store's lock with the Keychain backend
 \* (src/core/mcp_host/credentials.zig Store.lock), on a whole-second clock.
 \*
-\* Holders, other fx processes, read and write the Keychain while they hold
+\* Holders, other lia processes, read and write the Keychain while they hold
 \* credentials-v3.lock, each call an osascript child with its own timeout
 \* (src/core/hosts/native_keychain.zig keychain_process_timeout). One
 \* waiter polls the lock every 10 ms. When it gives up, a refreshed login it
-\* was saving is dropped (runtime.zig saveCredential): "another fx kept it
+\* was saving is dropped (runtime.zig saveCredential): "another lia kept it
 \* busy".
 \*
 \* The design: before each Keychain call it makes, a holder writes the awake
@@ -23,7 +23,7 @@
 EXTENDS Naturals
 
 CONSTANTS
-    Holders,   \* the other fx processes that take the lock
+    Holders,   \* the other lia processes that take the lock
     CallMax,   \* one Keychain call's own timeout (s)
     MaxCalls,  \* Keychain calls one hold makes, at most
     Budget,    \* how old a live holder's stamp gets (s): call_budget_ms
@@ -68,7 +68,7 @@ TypeOK ==
 
 Init ==
     /\ awake = 0 /\ real = 0 /\ slept = FALSE
-    \* Another fx holds the lock, stamped, as the waiter starts: the worst case.
+    \* Another lia holds the lock, stamped, as the waiter starts: the worst case.
     /\ owner \in Holders
     /\ state = [h \in Holders |-> IF h = owner THEN "holding" ELSE "ready"]
     /\ needs \in [Holders -> 1..MaxCalls]
@@ -80,7 +80,7 @@ Init ==
     /\ frozen = [h \in Holders |-> FALSE]
     /\ waiter = "waiting" /\ wStart = 0
 
-\* Another fx takes the free lock between the waiter's polls.
+\* Another lia takes the free lock between the waiter's polls.
 Acquire(h) ==
     /\ owner = "none" /\ state[h] = "ready" /\ waiter = "waiting"
     /\ owner' = h

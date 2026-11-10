@@ -1,8 +1,8 @@
 ---------------------------- MODULE ShellSnapshot ----------------------------
 (***************************************************************************)
-(* fx's in-memory shell snapshot owner (src/core/terminal/shell_snapshot). *)
+(* lia's in-memory shell snapshot owner (src/core/terminal/shell_snapshot). *)
 (*                                                                          *)
-(* One owner per fx process, shared by the root agent and every subagent.   *)
+(* One owner per lia process, shared by the root agent and every subagent.   *)
 (* After admission, a captured shell.run under the user profile does one    *)
 (* of the following:                                                        *)
 (*   - leases the ready snapshot generation and runs `zsh -f` / clean bash   *)

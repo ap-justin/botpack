@@ -68,7 +68,7 @@ pub const CurrentFile = struct {
 const max_opens = 3;
 
 /// Opens login file `name` in `dir` for reading, without following a link or
-/// waiting for a writer when it's a fifo. Null when there's none. Another fx
+/// waiting for a writer when it's a fifo. Null when there's none. Another lia
 /// that saves the login replaces the file, and one that signs out deletes it,
 /// so a file opened just before has no links left; the name then holds the
 /// new file, or none, and is opened again. The caller closes the file.
@@ -77,7 +77,7 @@ pub fn openCurrent(dir: std.Io.Dir, name: []const u8) !?CurrentFile {
 }
 
 /// `openCurrent`, with `between` run after each open and before its check,
-/// as another fx's save or logout can.
+/// as another lia's save or logout can.
 fn openCurrentWith(dir: std.Io.Dir, name: []const u8, between: ?*const fn (std.Io.Dir, []const u8) void) !?CurrentFile {
     for (0..max_opens) |_| {
         var file = io_mod.openExistingReadOnlyRegularFile(dir, name, .no_follow) catch |err| switch (err) {
@@ -131,12 +131,12 @@ fn profileFileFromHome(
     return .present;
 }
 
-test "a login file another fx replaces after this one opened it is opened again" {
+test "a login file another lia replaces after this one opened it is opened again" {
     if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "auth.json", .data = "old", .flags = .{ .permissions = .fromMode(0o600) } });
-    // Another fx saves a new login over it, by rename, once.
+    // Another lia saves a new login over it, by rename, once.
     const Save = struct {
         var done = false;
         var failed: ?anyerror = null;
@@ -162,12 +162,12 @@ test "a login file another fx replaces after this one opened it is opened again"
     try std.testing.expectEqualStrings("new", bytes);
 }
 
-test "a login file another fx deletes after this one opened it is none" {
+test "a login file another lia deletes after this one opened it is none" {
     if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "auth.json", .data = "old", .flags = .{ .permissions = .fromMode(0o600) } });
-    // Another fx signs out.
+    // Another lia signs out.
     const Logout = struct {
         var failed: ?anyerror = null;
         fn run(dir: std.Io.Dir, name: []const u8) void {
@@ -195,9 +195,9 @@ test "a private sign-in file is present, and a fifo in its place is unavailable 
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(std.testing.io, ".fx");
+    try tmp.dir.createDirPath(std.testing.io, ".lia");
     {
-        var file = try tmp.dir.createFile(std.testing.io, ".fx/auth.json", .{
+        var file = try tmp.dir.createFile(std.testing.io, ".lia/auth.json", .{
             .permissions = std.Io.File.Permissions.fromMode(0o600),
         });
         defer file.close(std.testing.io);
@@ -208,9 +208,9 @@ test "a private sign-in file is present, and a fifo in its place is unavailable 
     try std.testing.expectEqual(host.SecretStorePresence.present, profileFileFromHome(home, "auth.json", 1024));
 
     // Opening a fifo for reading waits for a writer that never comes.
-    try tmp.dir.deleteFile(std.testing.io, ".fx/auth.json");
+    try tmp.dir.deleteFile(std.testing.io, ".lia/auth.json");
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const fifo = try std.mem.printSentinel(&path_buf, "{s}/.fx/auth.json", .{home}, 0);
+    const fifo = try std.mem.printSentinel(&path_buf, "{s}/.lia/auth.json", .{home}, 0);
     if (mkfifo(fifo, 0o600) != 0) return error.SkipZigTest;
     try std.testing.expectEqual(host.SecretStorePresence.unavailable, profileFileFromHome(home, "auth.json", 1024));
 }

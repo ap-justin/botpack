@@ -2,8 +2,8 @@
 //!
 //! Decoding scans one message once with `std.json.Scanner` and returns slices
 //! of the input: no allocation, no copies, no tree. Encoding streams through
-//! `std.json.Stringify` into the caller's writer. fx already links both, so
-//! this file adds only its own logic to the fx binary.
+//! `std.json.Stringify` into the caller's writer. lia already links both, so
+//! this file adds only its own logic to the lia binary.
 //!
 //! Encoded messages never contain a CR or LF byte, so each is one stdio line.
 
@@ -740,7 +740,7 @@ test "encodes a 2026 request with _meta first in params" {
         .modern = .{
             .protocol_version = "2026-07-28",
             .client_capabilities = "{}",
-            .client_info = .{ .name = "fx", .version = "0.0.0" },
+            .client_info = .{ .name = "lia", .version = "0.0.0" },
         },
     });
     try w.field("name");
@@ -751,7 +751,7 @@ test "encodes a 2026 request with _meta first in params" {
     try testing.expectEqualStrings(
         "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/call\",\"params\":{\"_meta\":{\"progressToken\":7," ++
             "\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}," ++
-            "\"io.modelcontextprotocol/clientInfo\":{\"name\":\"fx\",\"version\":\"0.0.0\"}}," ++
+            "\"io.modelcontextprotocol/clientInfo\":{\"name\":\"lia\",\"version\":\"0.0.0\"}}," ++
             "\"name\":\"search\",\"arguments\":{   \"q\": \"a\\nb\"  }}}",
         out.written(),
     );

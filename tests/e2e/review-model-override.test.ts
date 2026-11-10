@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FX_BIN, runFx } from "../evals/eval-helpers";
+import { LIA_BIN, runLia } from "../evals/eval-helpers";
 import {
   fakeGatewayFinalText,
   fakeShellRun,
@@ -34,14 +34,14 @@ afterEach(() => {
 
 function createIsolatedRoot(settings: Record<string, unknown> = {}): IsolatedRoot {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), "fx-review-model-override-e2e-")),
+    mkdtempSync(join(tmpdir(), "lia-review-model-override-e2e-")),
   );
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".lia"), { recursive: true });
   mkdirSync(workspace, { recursive: true });
   writeFileSync(
-    join(home, ".fx", "settings.json"),
+    join(home, ".lia", "settings.json"),
     JSON.stringify({ sandbox: "none", permission: {}, ...settings }),
   );
   roots.push(root);
@@ -97,11 +97,11 @@ function overrideEnv(
     HOME: root.home,
     AI_GATEWAY_API_KEY: "fake-review-model-override-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_MODEL: MODEL,
-    FX_PERMISSION_MODE: "auto",
-    FX_AUTO_UPGRADE: "0",
+    LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+    LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_MODEL: MODEL,
+    LIA_PERMISSION_MODE: "auto",
+    LIA_AUTO_UPGRADE: "0",
     NO_COLOR: "1",
     ...extra,
   };
@@ -109,7 +109,7 @@ function overrideEnv(
 
 describe("review model override", () => {
   test(
-    "FX_REVIEW_MODEL=typesafeai/jev routes the review to the System One endpoint and executes a cleared action",
+    "LIA_REVIEW_MODEL=typesafeai/jev routes the review to the System One endpoint and executes a cleared action",
     async () => {
       const root = createIsolatedRoot();
       const jev = startJevStub("clear");
@@ -118,12 +118,12 @@ describe("review model override", () => {
         fakeGatewayFinalText("Ran the command."),
       ]);
       gateways.push(gateway);
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--auto", "--quiet", "--json", "Print the marker."],
         {
           cwd: root.workspace,
           env: overrideEnv(root, gateway, {
-            FX_REVIEW_MODEL: JEV_MODEL_ID,
+            LIA_REVIEW_MODEL: JEV_MODEL_ID,
             TYPESAFE_API_KEY: "e2e-typesafe-key",
             TYPESAFE_BASE_URL: jev.url,
           }),
@@ -162,12 +162,12 @@ describe("review model override", () => {
         fakeGatewayFinalText("Understood, leaving it unexecuted."),
       ]);
       gateways.push(gateway);
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--auto", "--quiet", "--json", "Print the marker."],
         {
           cwd: root.workspace,
           env: overrideEnv(root, gateway, {
-            FX_REVIEW_MODEL: JEV_MODEL_ID,
+            LIA_REVIEW_MODEL: JEV_MODEL_ID,
             TYPESAFE_API_KEY: "e2e-typesafe-key",
             TYPESAFE_BASE_URL: jev.url,
           }),
@@ -192,12 +192,12 @@ describe("review model override", () => {
         fakeGatewayFinalText("Ran the command."),
       ]);
       gateways.push(gateway);
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--auto", "--quiet", "--json", "Print the marker."],
         {
           cwd: root.workspace,
           env: overrideEnv(root, gateway, {
-            FX_REVIEW_MODEL: undefined,
+            LIA_REVIEW_MODEL: undefined,
             TYPESAFE_API_KEY: "e2e-typesafe-key",
             TYPESAFE_BASE_URL: jev.url,
           }),
@@ -222,12 +222,12 @@ describe("review model override", () => {
         fakeGatewayFinalText("Ran the command."),
       ]);
       gateways.push(gateway);
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--auto", "--quiet", "--json", "Print the marker."],
         {
           cwd: root.workspace,
           env: overrideEnv(root, gateway, {
-            FX_REVIEW_MODEL: undefined,
+            LIA_REVIEW_MODEL: undefined,
             TYPESAFE_API_KEY: "e2e-typesafe-key",
             TYPESAFE_BASE_URL: jev.url,
           }),
@@ -246,7 +246,7 @@ describe("review model override", () => {
   );
 
   test(
-    "without FX_REVIEW_MODEL the default gateway reviewer is used even when TypeSafe credentials exist",
+    "without LIA_REVIEW_MODEL the default gateway reviewer is used even when TypeSafe credentials exist",
     async () => {
       const root = createIsolatedRoot();
       const jev = startJevStub("clear");
@@ -255,12 +255,12 @@ describe("review model override", () => {
         fakeGatewayFinalText("Ran the command."),
       ]);
       gateways.push(gateway);
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--auto", "--quiet", "--json", "Print the marker."],
         {
           cwd: root.workspace,
           env: overrideEnv(root, gateway, {
-            FX_REVIEW_MODEL: undefined,
+            LIA_REVIEW_MODEL: undefined,
             TYPESAFE_API_KEY: "e2e-typesafe-key",
             TYPESAFE_BASE_URL: jev.url,
           }),
@@ -287,12 +287,12 @@ describe("review model override", () => {
         fakeGatewayFinalText("Ran the command."),
       ]);
       gateways.push(gateway);
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--auto", "--quiet", "--json", "Print the marker."],
         {
           cwd: root.workspace,
           env: overrideEnv(root, gateway, {
-            FX_REVIEW_MODEL: JEV_MODEL_ID,
+            LIA_REVIEW_MODEL: JEV_MODEL_ID,
             TYPESAFE_API_KEY: undefined,
             TYPESAFE_BASE_URL: undefined,
           }),
@@ -332,12 +332,12 @@ describe("review model override", () => {
         },
       );
       gateways.push(gateway);
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--auto", "--quiet", "--json", "Print the marker."],
         {
           cwd: root.workspace,
           env: overrideEnv(root, gateway, {
-            FX_REVIEW_MODEL: JEV_MODEL_ID,
+            LIA_REVIEW_MODEL: JEV_MODEL_ID,
             TYPESAFE_API_KEY: undefined,
             TYPESAFE_BASE_URL: undefined,
           }),

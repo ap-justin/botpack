@@ -311,7 +311,7 @@ pub const Journal = struct {
         return self.appendMarked(alloc, session_id, event, false);
     }
 
-    /// `append`, telling the host with `barrier` that fx waits for the event
+    /// `append`, telling the host with `barrier` that lia waits for the event
     /// to be stored before it goes on, so the host can store the events
     /// nobody waits for more lazily.
     pub fn appendMarked(self: *Journal, alloc: Allocator, session_id: []const u8, event: Event, barrier: bool) !void {
@@ -1103,7 +1103,7 @@ test "a progress after its turn's first carries only what is new, and the next t
     var progress = try testProgress(alloc);
     defer progress.deinit(alloc);
 
-    // A turn's first progress is one fx waits for; the host hears so.
+    // A turn's first progress is one lia waits for; the host hears so.
     session.barrier_next_progress = true;
     try session.appendProgress(alloc, alloc, "session", progress, "fake/model");
     session.barrier_next_progress = false;

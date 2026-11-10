@@ -2,7 +2,7 @@
 (***************************************************************************)
 (* The lean /usage refresh model (src/usage/policy.zig, view.zig).        *)
 (*                                                                         *)
-(* Several fx processes share one cache file. Each process may have the   *)
+(* Several lia processes share one cache file. Each process may have the   *)
 (* dashboard open, holds one active credential identity, and runs at most *)
 (* one fetch at a time. A fetch always reads "today" and, at most once per *)
 (* UTC day per identity, the finished days of the 7d and 30d windows.      *)

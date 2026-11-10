@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Checks logs fx saved against TurnLifecycle.tla and Subagents.tla.
+"""Checks logs lia saved against TurnLifecycle.tla and Subagents.tla.
 
 usage: check_saved_logs.py ROOT...    each ROOT holds session folders
-                                      ({id}/log.jsonl), as ~/.fx/sessions/v2
+                                      ({id}/log.jsonl), as ~/.lia/sessions/v2
        check_saved_logs.py --selftest planted logs: each must get its verdict
 
 JOBS=N runs N TLC checks at once (default 6).
@@ -126,7 +126,7 @@ def tla_record(r):
 
 
 def run_tlc(module, spec_files, generated, cfg, invariant="NotWritten"):
-    work = tempfile.mkdtemp(prefix="fx-log-check-")
+    work = tempfile.mkdtemp(prefix="lia-log-check-")
     try:
         for f in spec_files:
             shutil.copy(f, work)

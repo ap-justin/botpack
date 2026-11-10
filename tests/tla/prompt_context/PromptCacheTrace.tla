@@ -1,6 +1,6 @@
 -------------------------- MODULE PromptCacheTrace --------------------------
 (***************************************************************************)
-(* Replays the requests the real fx binary sent (recorded by               *)
+(* Replays the requests the real lia binary sent (recorded by               *)
 (* tests/tla/drivers/prompt_context/) through PromptCache's provider cache *)
 (* and checks them against one modeled design.                             *)
 (*                                                                         *)
@@ -36,7 +36,7 @@ Has(req, kind) == \E j \in 1..Len(req) : req[j].k = kind
 \* The messages of a request that carry a change (Carrier "message").
 Carried(req) == Cardinality({j \in 1..Len(req) : req[j].k \in {"asstc", "userc"}})
 
-\* Blocks fx before P6 adds ahead of the history mid-session, and the blocks a
+\* Blocks lia before P6 adds ahead of the history mid-session, and the blocks a
 \* note carrier adds inside it. With Carrier = "message" a change is part of
 \* the message that caused it, so no block of its own may appear.
 Inserted == {"scoped", "skill"}

@@ -463,7 +463,7 @@ fn parseObject(
     if (.object_begin != try source.next()) return error.UnexpectedToken;
 
     var seen: std.bit_set.Static(max_fields) = .empty;
-    // fx writes fields in declaration order, so the next key is usually the
+    // lia writes fields in declaration order, so the next key is usually the
     // field after the last one matched; try it before scanning.
     var expected: usize = 0;
     while (true) {
@@ -519,7 +519,7 @@ fn parseObject(
     }
 }
 
-/// Parses one value, handling strings and scalars, most of what fx parses,
+/// Parses one value, handling strings and scalars, most of what lia parses,
 /// without a call; anything else goes through `parseInto`.
 inline fn parseLeaf(
     allocator: Allocator,

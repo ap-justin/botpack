@@ -1,6 +1,6 @@
-//! fx's side of the MCP engine. One thread owns the engine, which is
+//! lia's side of the MCP engine. One thread owns the engine, which is
 //! single-threaded: other threads send it requests through a queue, wake it,
-//! and read copied status snapshots. The owner turns fx's MCP config into the
+//! and read copied status snapshots. The owner turns lia's MCP config into the
 //! engine's servers (`config.zig`), keeps sign-in credentials
 //! (`credentials.zig`), and runs logins on a loopback listener (`login.zig`).
 //!
@@ -101,7 +101,7 @@ pub const Status = struct {
     signing_in: bool = false,
     /// The variable a `missing_env` or `invalid_env` server names.
     missing: ?[]const u8 = null,
-    /// What the server told fx to tell the model about it.
+    /// What the server told lia to tell the model about it.
     instructions: ?[]const u8 = null,
 };
 
@@ -125,7 +125,7 @@ pub const CallResult = union(enum) {
     unknown_server,
 };
 
-/// A question an MCP server asks during a call, for fx's question UI.
+/// A question an MCP server asks during a call, for lia's question UI.
 pub const Question = struct {
     server: []const u8,
     /// MCP's `inputRequests` object: each key with its `elicitation/create`
@@ -171,13 +171,13 @@ pub const Options = struct {
     /// The workspace whose `.mcp.json` servers keep their own logins.
     workspace_root: []const u8 = "",
     notify: ?Notify = null,
-    /// The questions fx's UI on this surface can ask, declared to servers so
+    /// The questions lia's UI on this surface can ask, declared to servers so
     /// they only ask those.
     questions: elicitation.Capabilities = .{},
     /// Where a 2025 server's URL completions go: ACP sends the editor
     /// `elicitation/complete`.
     url_completions: ?tool_mcp_runtime.LegacyUrlCompletionSink = null,
-    /// The surface takes slash commands, as fx's shell does, so the model
+    /// The surface takes slash commands, as lia's shell does, so the model
     /// tells the user to sign in with `/mcp login NAME`, not in a terminal.
     slash_commands: bool = false,
 };
@@ -196,7 +196,7 @@ pub const Error = Allocator.Error || error{
     Cancelled,
     /// The engine refused the request; the trace says why.
     Failed,
-    /// The saved sign-ins can't be read, damaged or saved by a newer fx, so a
+    /// The saved sign-ins can't be read, damaged or saved by a newer lia, so a
     /// sign-in or sign-out changes nothing.
     CredentialStoreUnreadable,
     /// Another program holds the sign-in's fixed callback port.
@@ -224,8 +224,8 @@ const Request = struct {
     question: ?Pending = null,
     /// Set by the owner before a logout ends: why the saved login stayed.
     logout_kept: ?anyerror = null,
-    /// Owner thread only: fx declined the server's question, so the call's
-    /// cancellation is fx's answer, not the user's.
+    /// Owner thread only: lia declined the server's question, so the call's
+    /// cancellation is lia's answer, not the user's.
     declined: bool = false,
     /// Owner thread only: the URLs a 2025 server's -32042 answer listed,
     /// held with the call while the user opens them and the server
@@ -248,7 +248,7 @@ const Request = struct {
         login: struct { server: []const u8, open_browser: bool },
         finish_login: struct { server: []const u8, url: []const u8 },
         logout: []const u8,
-        /// Servers that need a login take one another fx saved since.
+        /// Servers that need a login take one another lia saved since.
         pick_up,
         /// What the user answered, posted by the caller that asked.
         answer: struct { pending: Pending, json: ?[]u8 },
@@ -494,7 +494,7 @@ pub const Runtime = struct {
         for (r.tools_epochs) |*e| e.* = .init(0);
         // The engine copies what it keeps, so the rest of the config goes.
         try r.engine.init(io, gpa, .{ .context = r, .allow = allow, .log = log }, .{
-            .client = .{ .info = .{ .name = "fx", .version = options.client_version }, .capabilities = declaredCapabilities(options.questions) },
+            .client = .{ .info = .{ .name = "lia", .version = options.client_version }, .capabilities = declaredCapabilities(options.questions) },
         }, resolved.engine);
         errdefer r.engine.deinit();
         try r.publish();
@@ -646,7 +646,7 @@ pub const Runtime = struct {
         };
     }
 
-    /// Calls `tool` with a JSON object (or null), after fx's permission
+    /// Calls `tool` with a JSON object (or null), after lia's permission
     /// allowed it; blocks until it ends. Setting `cancel` cancels it. The
     /// server's questions go to `asker`, and are declined without one.
     pub fn call(
@@ -687,14 +687,14 @@ pub const Runtime = struct {
 
     /// Signs out: the token is revoked where the server can, and forgotten.
     /// Returns why the saved login couldn't be removed, if it couldn't: this
-    /// fx is signed out, but every other fx, and the next one, still has it.
+    /// lia is signed out, but every other lia, and the next one, still has it.
     pub fn logout(r: *Runtime, server: []const u8) Error!?anyerror {
         var req: Request = .{ .kind = .{ .logout = server }, .alloc = r.gpa };
         try r.submitOk(&req);
         return req.logout_kept;
     }
 
-    /// Every server that needs a login takes one saved since by another fx,
+    /// Every server that needs a login takes one saved since by another lia,
     /// if there is one, before a status is shown.
     pub fn pickUpLogins(r: *Runtime) Error!void {
         var req: Request = .{ .kind = .pick_up, .alloc = r.gpa };
@@ -1026,7 +1026,7 @@ pub const Runtime = struct {
                 const i = r.engineServer(name) orelse return r.finish(req, .{ .failed = error.UnknownServer });
                 const s = r.resolved.servers[i];
                 if (s.transport != .http) return r.finish(req, .{ .failed = error.NotHttp });
-                // The saved login is the one every other fx uses, and another fx
+                // The saved login is the one every other lia uses, and another lia
                 // may have saved it after this one took its own: it's revoked
                 // too, or it would stay valid at the server
                 // (`tests/tla/mcp_host/SharedLogins.tla` LogoutRevokesSaved).
@@ -1050,7 +1050,7 @@ pub const Runtime = struct {
                 }
                 try r.engine.signOut(s.name);
                 if (saved) |c| if (!r.holds(i, c) and try r.engine.adoptCredential(s.name, c)) {
-                    debug_trace.logf("mcp", "MCP logout also revokes server={s} reason=another fx saved a newer login", .{s.name});
+                    debug_trace.logf("mcp", "MCP logout also revokes server={s} reason=another lia saved a newer login", .{s.name});
                     try r.engine.signOut(s.name);
                 };
                 r.flags[i] = .{};
@@ -1214,15 +1214,15 @@ pub const Runtime = struct {
                     return r.finish(req, .{ .failed = err });
                 };
                 if (req.declined and result == .ended and result.ended.outcome == .cancelled) result.ended.outcome = .unsupported_input;
-                // fx dropped the reply, and a stdio server with it: the
+                // lia dropped the reply, and a stdio server with it: the
                 // server didn't go away by itself.
                 if (c.oversized and result == .ended) {
                     const s = r.resolved.servers[i];
                     debug_trace.logf("mcp", "MCP call reply dropped server={s} transport={s} reason=too_large", .{ s.name, @tagName(s.transport) });
                     result.ended.why = if (s.transport == .stdio)
-                        "its reply was larger than fx reads in one message, so fx restarted the server"
+                        "its reply was larger than lia reads in one message, so lia restarted the server"
                     else
-                        "its reply was larger than fx reads in one message, so fx dropped it";
+                        "its reply was larger than lia reads in one message, so lia dropped it";
                 }
                 if (result == .ended and result.ended.outcome == .transport_failed) {
                     const down = if (r.enginePhase(i)) |p| p == .backoff or p == .failed else false;
@@ -1618,12 +1618,12 @@ pub const Runtime = struct {
             // the store holds.
             r.flags[i].signed_in = false;
             const own = r.flags[i].tried orelse return debug_trace.logf("mcp", "MCP login dropped server={s} saved=none", .{s.name});
-            // Only this process's own login goes: one another fx saved since
+            // Only this process's own login goes: one another lia saved since
             // stays, for the next request to take.
             const removed = r.options.credentials.store.removeIfSame(r.gpa, s.credentialKey(), own) catch |err| {
                 return debug_trace.logf("mcp", "MCP credential not removed server={s} err={s}", .{ s.name, @errorName(err) });
             };
-            debug_trace.logf("mcp", "MCP login dropped server={s} saved={s}", .{ s.name, if (removed) "removed" else "kept, another fx saved a newer one" });
+            debug_trace.logf("mcp", "MCP login dropped server={s} saved={s}", .{ s.name, if (removed) "removed" else "kept, another lia saved a newer one" });
         }
     }
 
@@ -1714,7 +1714,7 @@ pub const Runtime = struct {
                 .outcome = .cancelled,
                 .maybe_ran = r.engine.callSent(waiting.handle),
                 .timed_out = false,
-                .why = "the MCP config changed, and fx stopped the server",
+                .why = "the MCP config changed, and lia stopped the server",
             } } });
         }
         var k: usize = 0;
@@ -1757,7 +1757,7 @@ pub const Runtime = struct {
                 k += 1;
                 continue;
             }
-            r.endHeld(req, .{ .call = .{ .ended = .{ .outcome = .cancelled, .maybe_ran = false, .timed_out = false, .why = "the MCP config changed, and fx stopped the server" } } });
+            r.endHeld(req, .{ .call = .{ .ended = .{ .outcome = .cancelled, .maybe_ran = false, .timed_out = false, .why = "the MCP config changed, and lia stopped the server" } } });
         }
         k = 0;
         while (k < r.required.items.len) {
@@ -2075,7 +2075,7 @@ pub const Runtime = struct {
         return out;
     }
 
-    /// A login saved since by another fx, taken in place of asking for one;
+    /// A login saved since by another lia, taken in place of asking for one;
     /// true when server `i` took it. One already had or tried is skipped,
     /// and so is a server signing in here.
     fn pickUpLogin(r: *Runtime, i: usize) !bool {
@@ -2084,7 +2084,7 @@ pub const Runtime = struct {
         if (!try r.takeSaved(i)) return false;
         r.flags[i].needs_login = false;
         r.flags[i].signed_in = true;
-        debug_trace.logf("mcp", "MCP login saved by another fx taken server={s}", .{s.name});
+        debug_trace.logf("mcp", "MCP login saved by another lia taken server={s}", .{s.name});
         r.notify(.{ .signed_in = s.name });
         return true;
     }
@@ -2097,9 +2097,9 @@ pub const Runtime = struct {
         try r.tryRefresh(&r.refreshes.items[r.refreshes.items.len - 1]);
     }
 
-    /// Under the login's refresh lock, one fx refreshes it at a time: this one
-    /// takes the login another fx saved meanwhile, or refreshes its own. It
-    /// waits for as long as the fx holding the lock is still refreshing;
+    /// Under the login's refresh lock, one lia refreshes it at a time: this one
+    /// takes the login another lia saved meanwhile, or refreshes its own. It
+    /// waits for as long as the lia holding the lock is still refreshing;
     /// behind one that stopped (ctrl+z), or without the lock at all, it
     /// refreshes anyway.
     fn tryRefresh(r: *Runtime, f: *Refresh) !void {
@@ -2109,7 +2109,7 @@ pub const Runtime = struct {
                 f.lock = lock;
             } else if (!r.options.credentials.store.refreshHolderStopped(s.credentialKey(), f.started_ms, refresh_answer_ms)) {
                 return;
-            } else debug_trace.logf("mcp", "MCP refresh went ahead server={s} reason=another fx stopped refreshing started={d} at={d}", .{ s.name, f.started_ms, r.nowMs() });
+            } else debug_trace.logf("mcp", "MCP refresh went ahead server={s} reason=another lia stopped refreshing started={d} at={d}", .{ s.name, f.started_ms, r.nowMs() });
         } else |err| debug_trace.logf("mcp", "MCP refresh went ahead server={s} reason=no refresh lock err={s}", .{ s.name, @errorName(err) });
         f.sent = true;
         const saved = r.options.credentials.store.lookup(r.gpa, s.credentialKey()) catch |err| switch (err) {
@@ -2122,13 +2122,13 @@ pub const Runtime = struct {
         };
         if (saved) |c| {
             defer secret.zeroAndFree(r.gpa, c);
-            if (try r.take(f.server, c)) debug_trace.logf("mcp", "MCP refresh replaced server={s} reason=another fx refreshed", .{s.name});
+            if (try r.take(f.server, c)) debug_trace.logf("mcp", "MCP refresh replaced server={s} reason=another lia refreshed", .{s.name});
         } else if (r.flags[f.server].tried != null) {
-            // This fx's login was saved and is gone: another fx logged out of
+            // This lia's login was saved and is gone: another lia logged out of
             // it, or removed the server. Refreshing would save it back and
-            // undo that, so this fx signs out too
+            // undo that, so this lia signs out too
             // (`tests/tla/mcp_host/SharedLogins.tla` LogoutStays).
-            debug_trace.logf("mcp", "MCP login ended server={s} reason=signed out in another fx", .{s.name});
+            debug_trace.logf("mcp", "MCP login ended server={s} reason=signed out in another lia", .{s.name});
             if (f.lock) |*l| l.release();
             f.lock = null;
             try r.engine.signOut(s.name);
@@ -2167,7 +2167,7 @@ pub const Runtime = struct {
         };
     }
 
-    /// The login another fx saved under server `i`'s key, given to it; false
+    /// The login another lia saved under server `i`'s key, given to it; false
     /// when there is none, it's one `i` had or tried already, or the server
     /// can't use it.
     fn takeSaved(r: *Runtime, i: usize) !bool {
@@ -2222,13 +2222,13 @@ pub const Runtime = struct {
             };
             r.flags[i].signed_in = true;
             // The login this process starts with, so a refusal removes only
-            // its own and a login another fx saves since is taken.
+            // its own and a login another lia saves since is taken.
             r.flags[i].tried = credentials.digest(credential);
         }
         r.publish() catch |err| debug_trace.logf("mcp", "MCP status not published err={s}", .{@errorName(err)});
     }
 
-    /// Permission is fx's tool admission, before the call reaches the
+    /// Permission is lia's tool admission, before the call reaches the
     /// runtime, and only the runtime calls the engine.
     fn allow(_: *anyopaque, _: []const u8, _: []const u8, _: ?[]const u8) bool {
         return true;
@@ -2251,15 +2251,15 @@ fn declaredCapabilities(questions: elicitation.Capabilities) []const u8 {
 /// it gave some.
 fn signInFailure(buffer: []u8, why: mcp.auth.client.Failure, message: ?[]const u8) []const u8 {
     const what = switch (why) {
-        .discovery => "fx couldn't find how to sign in to it",
-        .registration => "it didn't register fx as a client; set oauth.client_id for it in mcp.json",
+        .discovery => "lia couldn't find how to sign in to it",
+        .registration => "it didn't register lia as a client; set oauth.client_id for it in mcp.json",
         .response => "the sign-in page returned an error",
         .mismatch => "the answer that came back wasn't for this sign-in",
         .redemption => "it didn't accept the sign-in",
         .cancelled => "the sign-in was cancelled",
-        .refused => "fx has tried to sign in to it too many times; restart fx to try again",
+        .refused => "lia has tried to sign in to it too many times; restart lia to try again",
         .insecure_endpoint => "its sign-in server uses plain HTTP, not HTTPS",
-        .internal_endpoint => "its sign-in server points at an internal address fx won't contact",
+        .internal_endpoint => "its sign-in server points at an internal address lia won't contact",
         .metadata_not_json => "its sign-in metadata isn't JSON",
     };
     var said = std.mem.trimEnd(u8, message orelse return what, ". \t\r\n");
@@ -2277,7 +2277,7 @@ test "a failed sign-in says why in words, with the server's own" {
     var buffer: [512]u8 = undefined;
     try std.testing.expectEqualStrings("it didn't accept the sign-in (invalid_grant: The code expired)", signInFailure(&buffer, .redemption, "invalid_grant: The code expired."));
     try std.testing.expectEqualStrings("the sign-in was cancelled", signInFailure(&buffer, .cancelled, null));
-    try std.testing.expectEqualStrings("it didn't register fx as a client; set oauth.client_id for it in mcp.json", signInFailure(&buffer, .registration, null));
+    try std.testing.expectEqualStrings("it didn't register lia as a client; set oauth.client_id for it in mcp.json", signInFailure(&buffer, .registration, null));
     try std.testing.expectEqualStrings("the sign-in page returned an error", signInFailure(&buffer, .response, " . "));
     try std.testing.expectEqualStrings("the answer that came back wasn't for this sign-in", signInFailure(&buffer, .mismatch, null));
     const long = text_utils.repeat("\xc3\xa9", 200);
@@ -2290,9 +2290,9 @@ test "a failed sign-in says why in words, with the server's own" {
 /// -32020 or -32021 answer to discovery.
 fn writeFailure(w: *std.Io.Writer, why: []const u8, said: ?[]const u8, refusal: ?[]const u8, exit: ?mcp.stdio.Exit, stray: ?[]const u8, tail: ?[]const u8) std.Io.Writer.Error!void {
     const versions = isOneOf(why, &version_failures) or (said != null and isOneOf(why, &refusals));
-    try w.writeAll(if (versions and std.mem.eql(u8, why, "rejected")) "it refused fx's MCP version" else describeFailure(why));
+    try w.writeAll(if (versions and std.mem.eql(u8, why, "rejected")) "it refused lia's MCP version" else describeFailure(why));
     if (versions) {
-        try w.print(" (fx speaks {s}; the server {s}{s})", .{ fx_versions, if (said != null) "named " else "named no version", said orelse "" });
+        try w.print(" (lia speaks {s}; the server {s}{s})", .{ lia_versions, if (said != null) "named " else "named no version", said orelse "" });
     } else if (refusal) |message| if (isOneOf(why, &refused_requests)) try w.print(": {s}", .{message});
     // "its process exited" says how; another failure adds it.
     const own = std.mem.eql(u8, why, "process");
@@ -2304,7 +2304,7 @@ fn writeFailure(w: *std.Io.Writer, why: []const u8, said: ?[]const u8, refusal: 
     if (tail) |t| try w.print("; its last stderr lines: \"{s}\"", .{t});
 }
 
-/// The failures that mean fx and the server found no MCP version in common.
+/// The failures that mean lia and the server found no MCP version in common.
 const version_failures = [_][]const u8{ "no_shared_version", "unsupported_version" };
 /// Failures that are about versions only when the server named some:
 /// `initialize_failed` also covers a timeout or a crash, and `rejected`
@@ -2319,28 +2319,28 @@ fn isOneOf(why: []const u8, names: []const []const u8) bool {
     return false;
 }
 
-/// The MCP versions fx speaks, most preferred first.
-const fx_versions = blk: {
+/// The MCP versions lia speaks, most preferred first.
+const lia_versions = blk: {
     const defaults: mcp.core.era.Config = .{};
     var list: []const u8 = "";
     for (defaults.preferred ++ defaults.legacy) |version| list = list ++ (if (list.len == 0) "" else ", ") ++ version;
     break :blk list;
 };
 
-/// The engine names why a server is down; fx says it in words. Anything else,
+/// The engine names why a server is down; lia says it in words. Anything else,
 /// such as an HTTP failure's own text, is shown as it is.
 fn describeFailure(why: []const u8) []const u8 {
     const known = [_]struct { []const u8, []const u8 }{
-        .{ "no_shared_version", "it supports no MCP version fx speaks" },
-        .{ "rejected", "it refused fx's request" },
-        .{ "headers_refused", "it refused fx's request headers (a proxy may be dropping them)" },
+        .{ "no_shared_version", "it supports no MCP version lia speaks" },
+        .{ "rejected", "it refused lia's request" },
+        .{ "headers_refused", "it refused lia's request headers (a proxy may be dropping them)" },
         .{ "went_quiet", "it stopped answering while starting" },
-        .{ "unsupported_version", "it answered with an MCP version fx doesn't support" },
-        .{ "initialize_failed", "it refused or never answered fx's initialize request" },
+        .{ "unsupported_version", "it answered with an MCP version lia doesn't support" },
+        .{ "initialize_failed", "it refused or never answered lia's initialize request" },
         .{ "session", "its session ended" },
-        .{ "initialized_timed_out", "it never answered fx's initialized notification" },
+        .{ "initialized_timed_out", "it never answered lia's initialized notification" },
         .{ "needs_auth", "it needs a login" },
-        .{ "auth_unavailable", "its login couldn't be renewed: the sign-in server didn't answer; fx tries again" },
+        .{ "auth_unavailable", "its login couldn't be renewed: the sign-in server didn't answer; lia tries again" },
         .{ "process", "its process exited" },
         .{ "FileNotFound", "its command was not found" },
         .{ "AccessDenied", "its command could not be run (permission denied)" },
@@ -2367,12 +2367,12 @@ fn inputValues(a: Allocator, json: []const u8, keys: []const []const u8) ?[]cons
     return values;
 }
 
-/// A held call that ended with its -32042 answer because fx failed at `step`.
+/// A held call that ended with its -32042 answer because lia failed at `step`.
 fn logUrlCallEnded(server: []const u8, step: []const u8, err: anyerror) void {
     debug_trace.logf("mcp", "MCP URL call ended server={s} step={s} err={s}", .{ server, step, @errorName(err) });
 }
 
-/// The user's choice for a held call's `n` URLs, from fx's `inputResponses`
+/// The user's choice for a held call's `n` URLs, from lia's `inputResponses`
 /// object: accepted only when every URL was.
 fn urlChoice(a: Allocator, json: ?[]const u8, n: usize) enum { accepted, declined, cancelled } {
     const answers = std.json.parseFromSliceLeaky(std.json.Value, a, json orelse return .cancelled, .{ .parse_numbers = false }) catch return .cancelled;
@@ -2389,7 +2389,7 @@ fn urlChoice(a: Allocator, json: ?[]const u8, n: usize) enum { accepted, decline
     return if (declined) .declined else .accepted;
 }
 
-/// A 2025 elicitation's answer from fx's `inputResponses` object.
+/// A 2025 elicitation's answer from lia's `inputResponses` object.
 fn elicitAnswer(a: Allocator, json: ?[]const u8) ?mcp.elicitation.Answer {
     const answers = std.json.parseFromSliceLeaky(std.json.Value, a, json orelse return null, .{ .parse_numbers = false }) catch return null;
     if (answers != .object) return null;
@@ -2528,32 +2528,32 @@ fn refusedFake(comptime mode: fake_server.Mode, arena: Allocator) ![]const u8 {
     return listed.failed;
 }
 
-test "a server that lists no version fx speaks fails, naming both sides' versions" {
+test "a server that lists no version lia speaks fails, naming both sides' versions" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
     const said = try refusedFake(.unsupported_discover, arena.allocator());
-    try testing.expectEqualStrings("it supports no MCP version fx speaks (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2027-01-01)", said);
+    try testing.expectEqualStrings("it supports no MCP version lia speaks (lia speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2027-01-01)", said);
 }
 
-test "a server that answers initialize with a version fx doesn't speak fails, naming both sides' versions" {
+test "a server that answers initialize with a version lia doesn't speak fails, naming both sides' versions" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
     const said = try refusedFake(.unsupported_initialize, arena.allocator());
-    try testing.expectEqualStrings("it answered with an MCP version fx doesn't support (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2024-11-05)", said);
+    try testing.expectEqualStrings("it answered with an MCP version lia doesn't support (lia speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2024-11-05)", said);
 }
 
-test "a server that refuses initialize listing only versions fx doesn't speak fails, naming both sides' versions" {
+test "a server that refuses initialize listing only versions lia doesn't speak fails, naming both sides' versions" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
     const said = try refusedFake(.unsupported_initialize_error, arena.allocator());
-    try testing.expectEqualStrings("it refused or never answered fx's initialize request (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2024-11-05)", said);
+    try testing.expectEqualStrings("it refused or never answered lia's initialize request (lia speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2024-11-05)", said);
 }
 
 test "a server that refuses even the version it lists is offered it once, then fails naming it" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
     const said = try refusedFake(.older_error_stuck, arena.allocator());
-    try testing.expectEqualStrings("it refused or never answered fx's initialize request (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2025-06-18)", said);
+    try testing.expectEqualStrings("it refused or never answered lia's initialize request (lia speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2025-06-18)", said);
 }
 
 test "a 2026 server whose -32020 a bridge forwards over stdio is reached through initialize, which discovery doesn't try again" {
@@ -2582,7 +2582,7 @@ test "a server whose -32020 a bridge forwards over stdio, for initialize too, sa
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
     const said = try refusedFake(.header_stripped_refused, arena.allocator());
-    try testing.expectEqualStrings("it refused fx's request headers (a proxy may be dropping them): " ++ fake_server.header_mismatch_message, said);
+    try testing.expectEqualStrings("it refused lia's request headers (a proxy may be dropping them): " ++ fake_server.header_mismatch_message, said);
 }
 
 const HttpFake = fake_server.HttpFake;
@@ -2656,12 +2656,12 @@ fn refusedHttpFake(mode: fake_server.HttpMode, arena: Allocator, discovers: *u32
     return listed.failed;
 }
 
-test "a 2026 server over HTTP that lists no version fx speaks fails, naming both sides' versions" {
+test "a 2026 server over HTTP that lists no version lia speaks fails, naming both sides' versions" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
     var discovers: u32 = 0;
     const said = try refusedHttpFake(.unsupported_discover, arena.allocator(), &discovers);
-    try testing.expectEqualStrings("it supports no MCP version fx speaks (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2027-01-01)", said);
+    try testing.expectEqualStrings("it supports no MCP version lia speaks (lia speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2027-01-01)", said);
     // -32022 doesn't fall back to initialize.
     try testing.expectEqual(@as(u32, 1), discovers);
 }
@@ -2671,7 +2671,7 @@ test "a server behind a proxy that drops request headers and refuses initialize 
     defer arena.deinit();
     var discovers: u32 = 0;
     const said = try refusedHttpFake(.header_stripped_refused, arena.allocator(), &discovers);
-    try testing.expectEqualStrings("it refused fx's request headers (a proxy may be dropping them): " ++ fake_server.header_mismatch_message, said);
+    try testing.expectEqualStrings("it refused lia's request headers (a proxy may be dropping them): " ++ fake_server.header_mismatch_message, said);
     // The refused initialize hints at a modern server: one more probe, no more.
     try testing.expectEqual(@as(u32, 2), discovers);
 }
@@ -2681,16 +2681,16 @@ test "a server behind a proxy that drops request headers whose initialize fails 
     defer arena.deinit();
     var discovers: u32 = 0;
     const said = try refusedHttpFake(.header_stripped_failing, arena.allocator(), &discovers);
-    try testing.expectEqualStrings("it refused or never answered fx's initialize request", said);
+    try testing.expectEqualStrings("it refused or never answered lia's initialize request", said);
     try testing.expectEqual(@as(u32, 1), discovers);
 }
 
-test "a server that refuses fx for a missing capability says so with its message, not as a version refusal" {
+test "a server that refuses lia for a missing capability says so with its message, not as a version refusal" {
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
     var discovers: u32 = 0;
     const said = try refusedHttpFake(.missing_capability, arena.allocator(), &discovers);
-    try testing.expectEqualStrings("it refused fx's request: " ++ fake_server.missing_capability_message, said);
+    try testing.expectEqualStrings("it refused lia's request: " ++ fake_server.missing_capability_message, said);
     try testing.expect(std.mem.find(u8, said, "MCP version") == null);
     try testing.expectEqual(@as(u32, 1), discovers);
 }
@@ -3000,7 +3000,7 @@ test "a reload ends a call on a server it drops, and a call on a server it keeps
     try testing.expectEqual(engine.Outcome.cancelled, gone.ended.?.outcome);
     // It reached the server, so it may have run there.
     try testing.expect(gone.ended.?.maybe_ran);
-    try testing.expectEqualStrings("the MCP config changed, and fx stopped the server", gone.why[0..gone.why_len]);
+    try testing.expectEqualStrings("the MCP config changed, and lia stopped the server", gone.why[0..gone.why_len]);
     // The kept server's call is still out; only its cancel ends it.
     std.Io.sleep(testing.io, .fromMilliseconds(200), .awake) catch {};
     try testing.expect(!kept.done.load(.acquire));
@@ -3069,23 +3069,23 @@ test "a failure says how the process ended, what it wrote instead of MCP, and it
     try testing.expectEqualStrings("its process exited with code 7; its last stderr lines: \"npm error code E401 / npm error Incorrect or missing password.\"", w.buffered());
     w = .fixed(&buf);
     try writeFailure(&w, "initialize_failed", null, null, .{ .signal = 15 }, "not json", null);
-    try testing.expectEqualStrings("it refused or never answered fx's initialize request; its process exited on signal 15; it wrote \"not json\" instead of MCP", w.buffered());
+    try testing.expectEqualStrings("it refused or never answered lia's initialize request; its process exited on signal 15; it wrote \"not json\" instead of MCP", w.buffered());
     w = .fixed(&buf);
     try writeFailure(&w, "FileNotFound", null, null, null, null, null);
     try testing.expectEqualStrings("its command was not found", w.buffered());
 }
 
-test "a version failure names the versions fx speaks and the ones the server named" {
+test "a version failure names the versions lia speaks and the ones the server named" {
     var buf: [512]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
     try writeFailure(&w, "rejected", "2025-06-18, 2024-11-05", null, null, null, null);
-    try testing.expectEqualStrings("it refused fx's MCP version (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2025-06-18, 2024-11-05)", w.buffered());
+    try testing.expectEqualStrings("it refused lia's MCP version (lia speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2025-06-18, 2024-11-05)", w.buffered());
     w = .fixed(&buf);
     try writeFailure(&w, "initialize_failed", "2024-11-05", null, null, null, null);
-    try testing.expectEqualStrings("it refused or never answered fx's initialize request (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2024-11-05)", w.buffered());
+    try testing.expectEqualStrings("it refused or never answered lia's initialize request (lia speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2024-11-05)", w.buffered());
     w = .fixed(&buf);
     try writeFailure(&w, "no_shared_version", null, null, null, null, null);
-    try testing.expectEqualStrings("it supports no MCP version fx speaks (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named no version)", w.buffered());
+    try testing.expectEqualStrings("it supports no MCP version lia speaks (lia speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named no version)", w.buffered());
     w = .fixed(&buf);
     try writeFailure(&w, "process", "2025-06-18", null, null, null, null);
     try testing.expectEqualStrings("its process exited", w.buffered());
@@ -3095,23 +3095,23 @@ test "a refusal that names no version says nothing about versions, since it may 
     var buf: [512]u8 = undefined;
     var w: std.Io.Writer = .fixed(&buf);
     try writeFailure(&w, "rejected", null, null, null, null, null);
-    try testing.expectEqualStrings("it refused fx's request", w.buffered());
+    try testing.expectEqualStrings("it refused lia's request", w.buffered());
     w = .fixed(&buf);
     try writeFailure(&w, "rejected", null, "Missing required client capability", null, null, null);
-    try testing.expectEqualStrings("it refused fx's request: Missing required client capability", w.buffered());
+    try testing.expectEqualStrings("it refused lia's request: Missing required client capability", w.buffered());
     w = .fixed(&buf);
     try writeFailure(&w, "headers_refused", null, "the Mcp-Method header is absent", null, null, null);
-    try testing.expectEqualStrings("it refused fx's request headers (a proxy may be dropping them): the Mcp-Method header is absent", w.buffered());
+    try testing.expectEqualStrings("it refused lia's request headers (a proxy may be dropping them): the Mcp-Method header is absent", w.buffered());
     w = .fixed(&buf);
     try writeFailure(&w, "rejected", "2025-06-18", "x", null, null, null);
-    try testing.expectEqualStrings("it refused fx's MCP version (fx speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2025-06-18)", w.buffered());
+    try testing.expectEqualStrings("it refused lia's MCP version (lia speaks 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26; the server named 2025-06-18)", w.buffered());
     w = .fixed(&buf);
     // A refusal's message goes only with the failure it explains.
     try writeFailure(&w, "initialize_failed", null, "x", null, null, null);
-    try testing.expectEqualStrings("it refused or never answered fx's initialize request", w.buffered());
+    try testing.expectEqualStrings("it refused or never answered lia's initialize request", w.buffered());
     w = .fixed(&buf);
     try writeFailure(&w, "initialize_failed", null, null, null, null, null);
-    try testing.expectEqualStrings("it refused or never answered fx's initialize request", w.buffered());
+    try testing.expectEqualStrings("it refused or never answered lia's initialize request", w.buffered());
 }
 
 test "a question no call can show is answered cancel, and the server goes on" {
@@ -3126,7 +3126,7 @@ test "a question no call can show is answered cancel, and the server goes on" {
     defer r.deinit();
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena.deinit();
-    // fx can take questions, but this call has no one to ask.
+    // lia can take questions, but this call has no one to ask.
     const result = try r.call(arena.allocator(), "fake", "echo", "{\"text\":\"confirm\"}", null, null);
     try testing.expect(result == .result);
     try testing.expectEqualStrings("[{\"type\":\"text\",\"text\":\"c1=cancel\"}]", result.result.content);

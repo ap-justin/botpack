@@ -1,5 +1,5 @@
 // D61's converter behaviors through the real binary: older v1 formats,
-// `--resume last`, the read-only `fx session`, `fx sessions convert`, the
+// `--resume last`, the read-only `lia session`, `lia sessions convert`, the
 // unreadable and slow-conversion messages, a crash's orphan child reused,
 // and two processes converting one family. Every step that involves a
 // request is observed and judged by TLC as in runtime.test.ts.
@@ -56,7 +56,7 @@ function olderReplies(f: Fixture, [tool, input]: [string, object]) {
 scenario("a current-format session with a side file, written by the last v1 build, converts and the model sees the same", async f => {
   writeFileSync(join(f.workspace, "big.txt"), Array.from({ length: 4000 }, (_, n) => `line ${n} of a file read into a side file\n`).join(""));
   olderReplies(f, ["read_file", { path: "big.txt" }]);
-  const run = await f.fx(false, ["ask", "--json", "--auto", "CONV_FIRST"], f.home, { FX_PERMISSION_MODE: "auto" });
+  const run = await f.lia(false, ["ask", "--json", "--auto", "CONV_FIRST"], f.home, { LIA_PERMISSION_MODE: "auto" });
   assert.equal(run.code, 0, `the last v1 build's ask failed: ${run.stderr}${run.stdout}`);
   const id: string = JSON.parse(run.stdout).session_id;
   const results = join(f.v1Root, id, "tool-results");
@@ -74,9 +74,9 @@ scenario("a current-format session with a side file, written by the last v1 buil
   expect(o.matchedBlobs.length, "the observer matched no v2 blob to v1's side file").toBeGreaterThan(0);
 });
 
-// A subagent's own subagent, which fx v0.0.7 still let a subagent create:
+// A subagent's own subagent, which lia v0.0.7 still let a subagent create:
 // the parent creates "helper", whose first turn creates "inner" and waits
-// for it. No fx opens "inner" now (a subagent has had no subagent tool since
+// for it. No lia opens "inner" now (a subagent has had no subagent tool since
 // v0.0.8), so conversion keeps it as it is and names it (D88); the family
 // around it converts as any family does.
 function nestedReplies(f: Fixture) {
@@ -94,11 +94,11 @@ function nestedReplies(f: Fixture) {
   });
 }
 
-scenario("a subagent's own subagent, written by fx v0.0.7, is kept as it is and named, and its family converts (D88)", async f => {
+scenario("a subagent's own subagent, written by lia v0.0.7, is kept as it is and named, and its family converts (D88)", async f => {
   const older = olderRelease("v0.0.7");
   nestedReplies(f);
-  const run = await f.fx(false, ["ask", "--json", "--auto", "CONV_NESTED"], f.home, { FX_PERMISSION_MODE: "auto" }, older);
-  assert.equal(run.code, 0, `fx v0.0.7 ask failed: ${run.stderr}${run.stdout}`);
+  const run = await f.lia(false, ["ask", "--json", "--auto", "CONV_NESTED"], f.home, { LIA_PERMISSION_MODE: "auto" }, older);
+  assert.equal(run.code, 0, `lia v0.0.7 ask failed: ${run.stderr}${run.stdout}`);
   const id: string = JSON.parse(run.stdout).session_id;
   const parentOf = (n: string) => {
     const control = join(f.v1Root, n, "subagent/control.json");
@@ -107,7 +107,7 @@ scenario("a subagent's own subagent, written by fx v0.0.7, is kept as it is and 
   const ids = readdirSync(f.v1Root).filter(n => existsSync(join(f.v1Root, n, "session.json")));
   const helper = ids.find(n => parentOf(n) === id);
   const inner = helper && ids.find(n => parentOf(n) === helper);
-  assert(helper && inner, `Owned fault boundary not reached: fx v0.0.7 wrote no subagent of a subagent: ${ids.join(", ")}`);
+  assert(helper && inner, `Owned fault boundary not reached: lia v0.0.7 wrote no subagent of a subagent: ${ids.join(", ")}`);
   const kept = f.fingerprint(inner);
   const o = observer(f, id, f.home, true);
   await o.observe("create");
@@ -119,30 +119,30 @@ scenario("a subagent's own subagent, written by fx v0.0.7, is kept as it is and 
   await requireAccepted(o, "older-v0.0.7-nested");
 
   const converted = await convertAll(f);
-  const reason = `it is a subagent of the earlier subagent ${helper}, which no fx opens`;
+  const reason = `it is a subagent of the earlier subagent ${helper}, which no lia opens`;
   expect(JSON.parse(converted.run.stdout).kept).toEqual([{ id: inner, reason }]);
   expect(f.fingerprint(inner)).toBe(kept);
-  const doctor = await f.fx(true, ["doctor"]);
-  expect(doctor.stdout).toContain(`session ${inner}, a subagent an older fx saved, is kept as it is: ${reason}`);
+  const doctor = await f.lia(true, ["doctor"]);
+  expect(doctor.stdout).toContain(`session ${inner}, a subagent an older lia saved, is kept as it is: ${reason}`);
 });
 
 for (const { name, tag, family, marker, private: hidden, run: command } of FORMATS) {
-  scenario(`${name}, written by fx ${tag}, converts and the model sees the same`, async f => {
+  scenario(`${name}, written by lia ${tag}, converts and the model sees the same`, async f => {
     const older = olderRelease(tag);
     olderReplies(f, command);
-    const run = await f.fx(false, ["ask", "--json", "--auto", family ? "CONV_FAMILY" : "CONV_FIRST"], f.home, { FX_PERMISSION_MODE: "auto" }, older);
-    assert.equal(run.code, 0, `fx ${tag} ask failed: ${run.stderr}${run.stdout}`);
+    const run = await f.lia(false, ["ask", "--json", "--auto", family ? "CONV_FAMILY" : "CONV_FIRST"], f.home, { LIA_PERMISSION_MODE: "auto" }, older);
+    assert.equal(run.code, 0, `lia ${tag} ask failed: ${run.stderr}${run.stdout}`);
     const ids = readdirSync(f.v1Root).filter(n => existsSync(join(f.v1Root, n, "session.json")));
     const id: string = JSON.parse(run.stdout).session_id ?? ids[0];
     const dir = join(f.v1Root, id);
-    assert.equal(existsSync(join(dir, "authority.json")), marker, `fx ${tag} did not write the expected format: ${readdirSync(dir).join(", ")}`);
+    assert.equal(existsSync(join(dir, "authority.json")), marker, `lia ${tag} did not write the expected format: ${readdirSync(dir).join(", ")}`);
     // Legacy keeps a large result in tool-results/, schema 3 a command replay in logs/commands/.
     const sides = ["tool-results", "logs/commands"].filter(sub => existsSync(join(dir, sub)));
-    assert(family ? ids.length > 1 : sides.length > 0, `fx ${tag} wrote no ${family ? "child" : "side file"}: ${ids.join(", ")}`);
+    assert(family ? ids.length > 1 : sides.length > 0, `lia ${tag} wrote no ${family ? "child" : "side file"}: ${ids.join(", ")}`);
     if (hidden) makePrivate(f.home);
     const o = observer(f, id, f.home, true);
     await o.observe("create");
-    assert(!family || o.childId, `the observer found no child of the fx ${tag} family`);
+    assert(!family || o.childId, `the observer found no child of the lia ${tag} family`);
     const snapshot = join(f.root, "snapshot");
     cpSync(f.home, snapshot, { recursive: true });
     await o.observe("list");
@@ -188,14 +188,14 @@ scenario("a legacy reply over the 64 MiB an event holds is refused with the reas
     ...Array.from({ length: 70 * 16 }, () => ({ type: "text-delta", id: "answer_1", delta: piece })),
     { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: { inputTokens: { total: 3 }, outputTokens: { total: 5 } } },
   ]));
-  const run = await f.fx(false, ["ask", "--json", "--auto", "CONV_FIRST"], f.home, {}, olderRelease("v0.3.15"));
-  assert.equal(run.code, 0, `fx v0.3.15 ask failed: ${run.stderr}${run.stdout.slice(0, 300)}`);
+  const run = await f.lia(false, ["ask", "--json", "--auto", "CONV_FIRST"], f.home, {}, olderRelease("v0.3.15"));
+  assert.equal(run.code, 0, `lia v0.3.15 ask failed: ${run.stderr}${run.stdout.slice(0, 300)}`);
   const id: string = JSON.parse(run.stdout).session_id;
   plainReplies(f);
   const premise = join(f.root, "v1-premise");
   cpSync(f.home, premise, { recursive: true });
   makePrivate(premise);
-  const migrated = await f.fx(false, ["session", "migrate", id, "--allow-large", "--json"], premise);
+  const migrated = await f.lia(false, ["session", "migrate", id, "--allow-large", "--json"], premise);
   rmSync(premise, { recursive: true, force: true });
   assert.notEqual(migrated.code, 0, "today's v1 migrates the session, so the new build must open it");
   // v1's migration of it fails, so it is read without migrating.
@@ -229,14 +229,14 @@ scenario("a schema 3 session whose prompt is not UTF-8 is shown, refused with th
   await o.observe("create");
   expect(await o.damage(NOT_UTF8)).toBe("lost");
   await o.observe("damage");
-  const v1Shown = await f.fx(false, ["session", NOT_UTF8, "--json"]);
+  const v1Shown = await f.lia(false, ["session", NOT_UTF8, "--json"]);
   assert.equal(v1Shown.code, 0, `v1 no longer shows the session: ${v1Shown.stdout}`);
   const copy = join(f.root, "v1-continue");
   cpSync(f.home, copy, { recursive: true });
-  const v1Continued = await f.fx(false, ["ask", "--json", "--auto", "--resume-id", NOT_UTF8, "CONV_NEXT"], copy);
+  const v1Continued = await f.lia(false, ["ask", "--json", "--auto", "--resume-id", NOT_UTF8, "CONV_NEXT"], copy);
   assert.notEqual(v1Continued.code, 0, "v1 continues the session, so the new build must too");
   const before = f.fingerprint(NOT_UTF8);
-  const shown = await f.fx(true, ["session", NOT_UTF8, "--json"]);
+  const shown = await f.lia(true, ["session", NOT_UTF8, "--json"]);
   expect(shown.code).toBe(0);
   expect(JSON.parse(shown.stdout).history).toEqual(JSON.parse(v1Shown.stdout).history);
   for (const via of ["ask", "acp"] as const) {
@@ -249,9 +249,9 @@ scenario("a schema 3 session whose prompt is not UTF-8 is shown, refused with th
 
 // --- --resume last ----------------------------------------------------------------
 
-// The session `--resume last` opened, by its id, from fx ask's own JSON.
+// The session `--resume last` opened, by its id, from lia ask's own JSON.
 async function resumeLast(f: Fixture): Promise<string | null> {
-  const run = await f.fx(true, ["ask", "--json", "--auto", "--resume", "last", "CONV_NEXT"]);
+  const run = await f.lia(true, ["ask", "--json", "--auto", "--resume", "last", "CONV_NEXT"]);
   return run.code === 0 ? JSON.parse(run.stdout).session_id : null;
 }
 
@@ -263,7 +263,7 @@ for (const host of ["ask"] as const) {
       const o = observer(f, v1);
       await o.observe("create");
       await Bun.sleep(1_100);
-      const created = await f.fx(true, ["ask", "--json", "--auto", "CONV_V2_FIRST"]);
+      const created = await f.lia(true, ["ask", "--json", "--auto", "CONV_V2_FIRST"]);
       assert.equal(created.code, 0, `v2 ask failed: ${created.stderr}${created.stdout}`);
       const v2: string = JSON.parse(created.stdout).session_id;
       o.fresh(v2);
@@ -288,27 +288,27 @@ for (const host of ["ask"] as const) {
   }
 }
 
-// --- fx session, read only ----------------------------------------------------
+// --- lia session, read only ----------------------------------------------------
 
-scenario("fx session shows an unconverted v1 session read-only, as v1 reads it", async f => {
+scenario("lia session shows an unconverted v1 session read-only, as v1 reads it", async f => {
   plainReplies(f);
   const id = (await f.v1Ask(["CONV_FIRST"])).session_id;
   await f.v1Ask(["--resume-id", id, "CONV_MORE"]);
   const o = observer(f, id);
   await o.observe("create");
-  const v1 = await f.fx(false, ["session", id, "--json"]);
-  const v2 = await f.fx(true, ["session", id, "--json"]);
+  const v1 = await f.lia(false, ["session", id, "--json"]);
+  const v2 = await f.lia(true, ["session", id, "--json"]);
   writeFileSync(join(f.root, "session-detail.json"), JSON.stringify({ v1: v1.stdout, v2: v2.stdout, v2Stderr: v2.stderr }, null, 2));
   await o.observe("list");
-  expect(v2.code, `fx session in v2 failed: ${v2.stderr}${v2.stdout}`).toBe(0);
+  expect(v2.code, `lia session in v2 failed: ${v2.stderr}${v2.stdout}`).toBe(0);
   expect(JSON.parse(v2.stdout).history).toEqual(JSON.parse(v1.stdout).history);
   await o.observe("open", await openVia(f, id, "ask"));
   await requireAccepted(o, "session-read-only");
 });
 
-// --- fx sessions convert ----------------------------------------------------------
+// --- lia sessions convert ----------------------------------------------------------
 
-scenario("fx sessions convert converts a family, skips a busy and an unreadable session, and says so", async f => {
+scenario("lia sessions convert converts a family, skips a busy and an unreadable session, and says so", async f => {
   familyReplies(f);
   const family = (await f.v1Ask(["CONV_FAMILY"])).session_id;
   plainReplies(f);
@@ -348,7 +348,7 @@ scenario("fx sessions convert converts a family, skips a busy and an unreadable 
   expect(text.run.code).toBe(1);
   const [counts, ...lines] = text.run.stdout.trimEnd().split("\n");
   expect(counts).toBe("converted 0, busy 1, unreadable 1");
-  expect(lines.sort()).toEqual([`${busy}: busy, open in another fx`, `${damaged}: unreadable: ${skips[damaged].reason}`].sort());
+  expect(lines.sort()).toEqual([`${busy}: busy, open in another lia`, `${damaged}: unreadable: ${skips[damaged].reason}`].sort());
   expect(skips[damaged]?.reason).toMatch(/session\.json \S/);
   for (const id of roots) await requireAccepted(o[id], `convert-all-${id === family ? "family" : id === busy ? "busy" : "unreadable"}`);
 });
@@ -373,7 +373,7 @@ scenario("a side file too large for the new store is left out, named, and kept i
   const all = await convertAll(f, false);
   await o.observe("all", all.answer(id));
   expect(all.run.stdout).toContain(`${id}: converted without logs/commands/replay.bin because it is ${MAX_BLOB_BYTES + 1} bytes, `
-    + `more than the ${MAX_BLOB_BYTES} the new store keeps in one file; ~/.fx/sessions/${id} keeps it`);
+    + `more than the ${MAX_BLOB_BYTES} the new store keeps in one file; ~/.lia/sessions/${id} keeps it`);
   await o.observe("open", await openVia(f, id, "ask"));
   truncateSync(replay, 1);
   await o.observe("open", await openVia(f, id, "ask"));
@@ -382,7 +382,7 @@ scenario("a side file too large for the new store is left out, named, and kept i
   expect(statSync(replay).size).toBe(1);
 });
 
-// Hosted terminal state the copy can't take, here a link no fx writes, is
+// Hosted terminal state the copy can't take, here a link no lia writes, is
 // left out and named, and the session's v1 folder keeps it, by what the
 // copy recorded, even once the link is gone (D56).
 scenario("hosted terminal state the copy can't take is left out, named, and kept in the session's v1 folder (D56)", async f => {
@@ -395,7 +395,7 @@ scenario("hosted terminal state the copy can't take is left out, named, and kept
   await o.observe("create");
   await o.observe("open", await openVia(f, id, "ask"));
   expect(f.said).toContain(`This session was converted without terminal/state/stray-link because it is not a file or folder. `
-    + `Its earlier folder ~/.fx/sessions/${id} keeps it.`);
+    + `Its earlier folder ~/.lia/sessions/${id} keeps it.`);
   expect(readlinkSync(join(state, "stray-link"))).toBe("elsewhere");
   rmSync(join(state, "stray-link"));
   await o.observe("open", await openVia(f, id, "ask"));
@@ -406,7 +406,7 @@ scenario("hosted terminal state the copy can't take is left out, named, and kept
 
 // --- why a damaged session can't be converted -------------------------------------
 
-scenario("a damaged session's error names the file and the reason in fx ask, ACP and the app", async f => {
+scenario("a damaged session's error names the file and the reason in lia ask, ACP and the app", async f => {
   plainReplies(f);
   const id = (await f.v1Ask(["CONV_FIRST"])).session_id;
   const o = observer(f, id);
@@ -430,7 +430,7 @@ scenario("a damaged session's error names the file and the reason in fx ask, ACP
 
 const NOTICE = "Converting this session from the previous session format";
 
-// What the host showed of the notice: fx ask's stderr, ACP agent text
+// What the host showed of the notice: lia ask's stderr, ACP agent text
 // updates.
 function notices(f: Fixture, via: "ask" | "acp") {
   if (via === "ask") return f.runs.at(-1)!.stderr;

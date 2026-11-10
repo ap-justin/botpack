@@ -61,7 +61,7 @@ pub const Projection = struct {
                 const attempts = try std.math.add(usize, self.ids.count(), 1);
                 for (0..attempts) |attempt| {
                     var buffer: [max_id_bytes]u8 = undefined;
-                    const candidate = try std.mem.print(&buffer, "fx_{s}_{d}", .{ &hex, attempt });
+                    const candidate = try std.mem.print(&buffer, "lia_{s}_{d}", .{ &hex, attempt });
                     if (self.ids.contains(candidate)) {
                         // Opaque state may refer to an alias from an earlier request.
                         if (opaque_history) return error.ProtectedToolCallId;
@@ -179,7 +179,7 @@ test "tool call id projection never rewrites protected identities" {
     var native = try Projection.init(alloc, &.{.{ .role = .assistant, .tool_calls = &.{call} }});
     defer native.deinit(alloc);
     try std.testing.expectEqualStrings(call.id, native.resolve(call.id));
-    call.provenance = .fx_local;
+    call.provenance = .lia_local;
     var projection = try Projection.init(alloc, &.{.{ .role = .assistant, .tool_calls = &.{call}, .provider_replay = .{ .source = .{ .provider = .gateway, .model = "test" }, .parts_json = "opaque" } }});
     defer projection.deinit(alloc);
     try std.testing.expectEqualStrings(call.id, projection.resolve(call.id));

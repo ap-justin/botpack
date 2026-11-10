@@ -4,7 +4,7 @@
 //! or its own start if later, is `wait_ms` old: that bound plus `slack_ms`. So
 //! a live holder is never given up on however long its work, and one frozen
 //! holding the lock (ctrl+z) costs a waiter `wait_ms`. A stamp from the
-//! future, a damaged one, or none, as from an older fx, counts as the waiter's
+//! future, a damaged one, or none, as from an older lia, counts as the waiter's
 //! start (`tests/tla/mcp_host/StoreLockBudget.tla`).
 
 const std = @import("std");
@@ -55,7 +55,7 @@ pub fn restamp(file: std.Io.File, scope: []const u8, label: []const u8) i64 {
 
 /// Writes a stamp over the lock file's first 8 bytes. A holder whose stamp
 /// didn't land still holds the lock; its waiters time it from an older stamp
-/// or their own start, as with an older fx.
+/// or their own start, as with an older lia.
 pub fn writeStamp(file: std.Io.File, now_ms: i64, scope: []const u8) void {
     var bytes: [8]u8 = undefined;
     std.mem.writeInt(i64, &bytes, now_ms, .little);

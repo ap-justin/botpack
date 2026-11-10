@@ -23,12 +23,12 @@ const pending_tool_review_result_text = "Tool call has not executed; it is pendi
 
 /// Marks a system message as the end of a cacheable prefix. AI Gateway passes
 /// it to the provider alongside its own `caching: "auto"` markers; Anthropic
-/// accepts at most four markers per request, and fx adds at most two.
+/// accepts at most four markers per request, and lia adds at most two.
 const anthropic_cache_breakpoint = ",\"providerOptions\":{\"anthropic\":{\"cacheControl\":{\"type\":\"ephemeral\"}}}";
 
 /// The same mark for OpenAI GPT-5.6 and later: an explicit breakpoint beside
 /// the implicit one. A request makes at most four cache writes, the implicit
-/// breakpoint takes one, and fx adds at most two.
+/// breakpoint takes one, and lia adds at most two.
 const openai_cache_breakpoint = ",\"providerOptions\":{\"openai\":{\"promptCacheBreakpoint\":{\"mode\":\"explicit\"}}}";
 
 pub fn roleName(role: ChatRole) []const u8 {
@@ -1326,7 +1326,7 @@ test "gateway request serializes an optional structured response format" {
         null,
         null,
         .{
-            .name = "fx_vision_evidence",
+            .name = "lia_vision_evidence",
             .description = "Evidence \"only\"",
             .schema = schema.value,
         },
@@ -1338,7 +1338,7 @@ test "gateway request serializes an optional structured response format" {
     defer parsed.deinit();
     const format = parsed.value.object.get("responseFormat").?;
     try std.testing.expectEqualStrings("json", format.object.get("type").?.string);
-    try std.testing.expectEqualStrings("fx_vision_evidence", format.object.get("name").?.string);
+    try std.testing.expectEqualStrings("lia_vision_evidence", format.object.get("name").?.string);
     try std.testing.expectEqualStrings("Evidence \"only\"", format.object.get("description").?.string);
     try std.testing.expectEqualStrings("object", format.object.get("schema").?.object.get("type").?.string);
 

@@ -143,7 +143,7 @@ pub const Owner = struct {
     /// report, since nobody is left to take one. A quit leaves it false, so
     /// its reports stay owed.
     tree_closed: bool = false,
-    /// Set when fx starts to quit, so a work its quit cancels says so in
+    /// Set when lia starts to quit, so a work its quit cancels says so in
     /// its report.
     quitting: std.atomic.Value(bool) = .init(false),
     /// Told each time a work ends, set by the host.
@@ -358,7 +358,7 @@ pub const Owner = struct {
         started_by: reports.StartedBy,
         stopped_by: StoppedBy,
     ) TurnWorkEnd {
-        // Only the user, the parent, or fx's quit cancels a turn the user
+        // Only the user, the parent, or lia's quit cancels a turn the user
         // started, so one with no stop recorded is the user's.
         const cause: ?child_state.Cause = if (stopped_by == .parent) null else self.cancelCause(outcome, stopped_by == .user) orelse
             if (outcome == .cancelled and started_by == .user) .user_stop else null;
@@ -378,17 +378,17 @@ pub const Owner = struct {
         }
     }
 
-    /// fx is quitting: the works its quit cancels say so in their reports.
+    /// lia is quitting: the works its quit cancels say so in their reports.
     pub fn noteQuitting(self: *Owner) void {
         self.quitting.store(true, .seq_cst);
     }
 
-    /// Why a work that ended with `outcome` was cancelled, when fx knows.
+    /// Why a work that ended with `outcome` was cancelled, when lia knows.
     /// The user's stop wins over a quit that came after it.
     fn cancelCause(self: *const Owner, outcome: child_state.Outcome, stopped_by_user: bool) ?child_state.Cause {
         if (outcome != .cancelled) return null;
         if (stopped_by_user) return .user_stop;
-        if (self.quitting.load(.seq_cst)) return .fx_quit;
+        if (self.quitting.load(.seq_cst)) return .lia_quit;
         return null;
     }
 
@@ -594,14 +594,14 @@ fn destroySlot(owner: *Owner, slot: *Slot) void {
     owner.alloc.destroy(slot);
 }
 
-test "a cancelled work's cause is the user's stop, else fx's quit, else unknown" {
+test "a cancelled work's cause is the user's stop, else lia's quit, else unknown" {
     var owner = Owner{ .alloc = std.testing.allocator, .children = undefined, .state_store = undefined, .services = undefined, .authority_resolver = undefined, .approvals = undefined };
     const none: ?child_state.Cause = null;
     try std.testing.expectEqual(none, owner.cancelCause(.cancelled, false));
     try std.testing.expectEqual(@as(?child_state.Cause, .user_stop), owner.cancelCause(.cancelled, true));
     try std.testing.expectEqual(none, owner.cancelCause(.completed, true));
     owner.noteQuitting();
-    try std.testing.expectEqual(@as(?child_state.Cause, .fx_quit), owner.cancelCause(.cancelled, false));
+    try std.testing.expectEqual(@as(?child_state.Cause, .lia_quit), owner.cancelCause(.cancelled, false));
     // The user's stop came first.
     try std.testing.expectEqual(@as(?child_state.Cause, .user_stop), owner.cancelCause(.cancelled, true));
     // A crash or a lost child is its own outcome.
@@ -742,7 +742,7 @@ fn runOne(slot: *Slot) OneOutcome {
         return fallbackOutcome(owner.alloc, "unknown", .failed);
 
     // In the interactive app the child's own agent holds its session and
-    // saves its turns, as main does; only fx ask and ACP open it for a
+    // saves its turns, as main does; only lia ask and ACP open it for a
     // run.
     const hosted = owner.services.bind_fn != null;
     var child: ?OpenChild = if (hosted) null else OpenChild.open(owner, slot.child_id, snapshot.instructions) catch |err|

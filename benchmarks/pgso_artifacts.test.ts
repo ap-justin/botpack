@@ -114,7 +114,7 @@ type Sample = { lane: "control" | "candidate"; pair: number; elapsedMs: number; 
 
 function loadInputs(): Inputs {
   requireValue(process.platform === "darwin" && process.arch === "arm64", "native macOS arm64 is required");
-  const input = process.env.FX_PGSO_COMPARE_INPUT, output = process.env.FX_PGSO_COMPARE_OUTPUT;
+  const input = process.env.LIA_PGSO_COMPARE_INPUT, output = process.env.LIA_PGSO_COMPARE_OUTPUT;
   requireValue(input && output, "artifact input and comparison output directories are required");
   const root = realpathSync(input);
   const read = (path: string) => JSON.parse(readFileSync(join(root, path), "utf8"));
@@ -125,7 +125,7 @@ function loadInputs(): Inputs {
   mkdirSync(output, { recursive: true });
   const binaries = { control: "", candidate: "" };
   for (const [label, provenance] of [["control", control], ["candidate", candidate]] as const) {
-    const source = join(root, label, "candidate/fx");
+    const source = join(root, label, "candidate/lia");
     requireValue(lstatSync(source).isFile() && !lstatSync(source).isSymbolicLink() && realpathSync(source).startsWith(root + sep), "candidate path escapes artifact directory");
     requireValue(lstatSync(source).size <= 16 * 1024 * 1024, "candidate exceeds input bound");
     const bytes = readFileSync(source);
@@ -140,7 +140,7 @@ function loadInputs(): Inputs {
     platform: process.platform, arch: process.arch, control, candidate,
     model: FAKE_GATEWAY_MODEL, planned_memory_pairs: 100, planned_timing_pairs: 50, timing_warmup_pairs: 5,
     bootstrap: { samples: 10_000, seed: 4112026, generator: "lcg32", confidence: 0.95 },
-    boundary: "native fx process; Gateway memory excluded; timing and memory collected separately",
+    boundary: "native lia process; Gateway memory excluded; timing and memory collected separately",
     claim_limit: "normal and recovered no-history flows; not a universal performance or leak proof",
   }, null, 2));
   return { control, candidate, binaries, output };
@@ -155,7 +155,7 @@ async function runCohort(inputs: Inputs, cohort: Cohort): Promise<Record<Scenari
   for (const [label, lane] of [["control", cohort.reverse ? 1 : 0], ["candidate", cohort.reverse ? 0 : 1]] as const) {
     const path = join(directory, `lane-${lane}`);
     mkdirSync(path);
-    binaries[label] = join(path, "fx");
+    binaries[label] = join(path, "lia");
     copyFileSync(inputs.binaries[cohort.calibration ? "control" : label], binaries[label]);
     chmodSync(binaries[label], 0o755);
     validateBinary(readFileSync(binaries[label]), (cohort.calibration ? inputs.control : inputs[label]).manifest.evidence.artifacts.candidate);
@@ -167,7 +167,7 @@ async function runCohort(inputs: Inputs, cohort: Cohort): Promise<Record<Scenari
     for (const scenario of ["normal", "recovered"] as const) {
       mkdirSync(join(directory, scenario));
       for (let pair = -cohort.warmups; pair < cohort.pairs; pair++) {
-        const fixture = mkdtempSync(join(tmpdir(), "fx-pgso-pair-"));
+        const fixture = mkdtempSync(join(tmpdir(), "lia-pgso-pair-"));
         const workspace = join(fixture, "workspace");
         mkdirSync(workspace);
         let reference: string | null = null;
@@ -175,8 +175,8 @@ async function runCohort(inputs: Inputs, cohort: Cohort): Promise<Record<Scenari
           const order = Boolean(pair % 2) !== cohort.reverse ? ["candidate", "control"] as const : ["control", "candidate"] as const;
           for (const lane of order) {
             const home = join(fixture, lane === "control" ? "home-0" : "home-1");
-            mkdirSync(join(home, ".fx"), { recursive: true });
-            writeFileSync(join(home, ".fx/settings.json"), "{}");
+            mkdirSync(join(home, ".lia"), { recursive: true });
+            writeFileSync(join(home, ".lia/settings.json"), "{}");
             requireValue(replies.length === 0 && gateway.requests.length === 0 && gateway.modelRequests.length === 0 && gateway.classifierRequests.length === 0 && gateway.titleRequests.length === 0, "Gateway state leaked between children");
             if (scenario === "recovered") replies.push(fakeGatewaySse([
               { type: "tool-input-start", id: "read_1", toolName: "read_file" },
@@ -189,10 +189,10 @@ async function runCohort(inputs: Inputs, cohort: Cohort): Promise<Record<Scenari
             const result = await runCommand(argv, { cwd: workspace, env: {
               PATH: process.env.PATH ?? "", TMPDIR: fixture, LANG: "en_US.UTF-8", TZ: "UTC", HOME: home,
               AI_GATEWAY_API_KEY: "synthetic-memory-fixture", VERCEL_OIDC_TOKEN: "",
-              FX_DISABLE_KEYCHAIN: "1", FX_SOUND: "0", FX_AUTO_UPGRADE: "0", FX_TEST_SKIP_ONBOARDING: "1",
-              FX_E2E_DISABLE_DOTENV: "1", FX_MODEL: FAKE_GATEWAY_MODEL,
-              FX_GATEWAY_BASE_URL: gateway.baseUrl, FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+              LIA_DISABLE_KEYCHAIN: "1", LIA_SOUND: "0", LIA_AUTO_UPGRADE: "0", LIA_TEST_SKIP_ONBOARDING: "1",
+              LIA_E2E_DISABLE_DOTENV: "1", LIA_MODEL: FAKE_GATEWAY_MODEL,
+              LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
             } });
             const requests = gateway.requests.map((request) => request.body);
             const { resources, resourceError } = cohort.kind === "memory" ? resourceOutput(resourcePath) : { resources: null, resourceError: null };
@@ -280,7 +280,7 @@ function validateProvenance(control: Provenance, candidate: Provenance): void {
     const releaseControl = value === control && run.path === ".github/workflows/release.yml" &&
       run.head_branch === "main" && (run.event === "push" || run.event === "workflow_dispatch");
     requireValue((run.path === ".github/workflows/pgso-macos-arm64.yml" || releaseControl) && run.status === "completed" && run.conclusion === "success", "source run did not pass PGSO");
-    requireValue(run.repository.full_name === "vercel-labs/fx" && run.head_repository.full_name === "vercel-labs/fx", "foreign repository");
+    requireValue(run.repository.full_name === "ap-justin/lia" && run.head_repository.full_name === "ap-justin/lia", "foreign repository");
     requireValue(artifact.workflow_run.repository_id === run.repository.id && artifact.workflow_run.head_repository_id === run.head_repository.id, "artifact repository mismatch");
     requireValue(artifact.workflow_run.id === run.id && artifact.workflow_run.head_sha === run.head_sha, "artifact run mismatch");
     requireValue(manifest.stage === "complete" && manifest.status === "passed" && manifest.eligible === true, "artifact is not qualified");
@@ -345,7 +345,7 @@ function provenanceFixture(): [Provenance, Provenance] {
     artifact: { id, name: `pgso-evidence-macos-arm64-${source}`, expired: false,
       workflow_run: { id: id + 10, head_sha: sha, repository_id: 1, head_repository_id: 1 } },
     run: { id: id + 10, path: ".github/workflows/pgso-macos-arm64.yml", status: "completed", conclusion: "success", run_attempt: 1,
-      head_sha: sha, head_branch: branch, event, repository: { id: 1, full_name: "vercel-labs/fx" }, head_repository: { id: 1, full_name: "vercel-labs/fx" } },
+      head_sha: sha, head_branch: branch, event, repository: { id: 1, full_name: "ap-justin/lia" }, head_repository: { id: 1, full_name: "ap-justin/lia" } },
     source: { sha: source, parents: source === merge ? [{ sha: base }, { sha: head }] : [] },
     manifest: { stage: "complete", status: "passed", eligible: true, evidence: {
       identity: { source_sha: source, target: "aarch64-macos", host_arch: "arm64", zig_version: "0.17.0", llvm_version: "22.1.8" },
@@ -523,7 +523,7 @@ test("PGSO command capture stops and joins its owned process group", async () =>
   expect(bounded.failure).toBe("output limit");
   expect(bounded.stdout).toBe("x".repeat(16));
   expect(() => process.kill(bounded.pid!, 0)).toThrow();
-  const missing = await runCommand(["/nonexistent/fx-pgso-test-command"], options);
+  const missing = await runCommand(["/nonexistent/lia-pgso-test-command"], options);
   expect(missing.failure).toContain("ENOENT");
 });
 
@@ -559,7 +559,7 @@ test("PGSO resource accounting requires one positive native value per metric", (
 });
 
 test("PGSO resource accounting retains failed-command diagnostics and missing reports", async () => {
-  const fixture = mkdtempSync(join(tmpdir(), "fx-pgso-failed-resources-"));
+  const fixture = mkdtempSync(join(tmpdir(), "lia-pgso-failed-resources-"));
   try {
     const path = join(fixture, "resources.txt");
     const failed = await runCommand(["/bin/sh", "-c", 'printf "retained report" > "$1"; printf "failed command" >&2; exit 3', "fixture", path], {

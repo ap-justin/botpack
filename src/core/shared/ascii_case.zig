@@ -1,5 +1,5 @@
 //! ASCII case-insensitive search. It imports only `std`, so modules that
-//! must stay free of fx's I/O, such as the fuzzy matcher, can share it with
+//! must stay free of lia's I/O, such as the fuzzy matcher, can share it with
 //! `text_utils.zig`.
 
 const std = @import("std");
@@ -50,7 +50,7 @@ test "hasMajorVersionAtLeast reads the major version after the family" {
 
 test "containsIgnoreCase finds a needle anywhere, ignoring ASCII case" {
     try std.testing.expect(containsIgnoreCase("Session/Model-Picker", "model"));
-    try std.testing.expect(containsIgnoreCase("fx-commit", "FX-C"));
+    try std.testing.expect(containsIgnoreCase("lia-commit", "FX-C"));
     try std.testing.expect(containsIgnoreCase("abc", "abc"));
     try std.testing.expect(containsIgnoreCase("abc", ""));
     try std.testing.expect(containsIgnoreCase("", ""));

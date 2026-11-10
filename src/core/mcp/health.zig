@@ -1,5 +1,5 @@
-//! What fx knows of a configured MCP server: its config, as `fx status`
-//! and `fx doctor` inspect it, and the status the model catalog gives it.
+//! What lia knows of a configured MCP server: its config, as `lia status`
+//! and `lia doctor` inspect it, and the status the model catalog gives it.
 
 const std = @import("std");
 const mcp_contract = @import("mcp_contract.zig");

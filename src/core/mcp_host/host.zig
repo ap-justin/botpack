@@ -1,4 +1,4 @@
-//! fx's side of the MCP engine in one place: the runtime that owns the
+//! lia's side of the MCP engine in one place: the runtime that owns the
 //! engine, and the catalog the model sees.
 
 const std = @import("std");
@@ -23,7 +23,7 @@ pub const waitRetired = runtime_mod.waitRetired;
 pub const menu = @import("menu.zig");
 
 pub const Extras = struct {
-    /// The questions fx's UI on this surface can ask.
+    /// The questions lia's UI on this surface can ask.
     questions: elicitation.Capabilities = .{},
     /// Gets sign-in notices.
     notify: ?runtime_mod.Notify = null,

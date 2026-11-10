@@ -21,10 +21,10 @@ import { join, sep } from "node:path";
 import {
   cleanupIsolatedTestHome,
   createIsolatedTestHome,
-  FX_BIN,
+  LIA_BIN,
   HAS_API_KEY,
   REPO_ROOT,
-  runFx,
+  runLia,
 } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
@@ -48,22 +48,22 @@ const NO_GATEWAY_AUTH = {
   AI_GATEWAY_API_KEY: undefined,
   VERCEL_OIDC_TOKEN: undefined,
 };
-// `fx config` shows these when they're set, so its tests clear them.
+// `lia config` shows these when they're set, so its tests clear them.
 const NO_SETTING_ENV = Object.fromEntries(
   [
-    "FX_PROVIDER", "FX_MODEL", "FX_ULTRAFAST", "FX_REVIEW_MODEL", "FX_PROVIDER_ORDER", "FX_PROVIDER_STRICT",
-    "FX_PERMISSION_MODE", "FX_MAX_AGENT_STEPS", "FX_AUTO_COMPACT_PERCENT", "FX_THEME", "FX_SOUND", "FX_AUTO_UPGRADE",
+    "LIA_PROVIDER", "LIA_MODEL", "LIA_ULTRAFAST", "LIA_REVIEW_MODEL", "LIA_PROVIDER_ORDER", "LIA_PROVIDER_STRICT",
+    "LIA_PERMISSION_MODE", "LIA_MAX_AGENT_STEPS", "LIA_AUTO_COMPACT_PERCENT", "LIA_THEME", "LIA_SOUND", "LIA_AUTO_UPGRADE",
   ].map((name) => [name, undefined]),
 );
 const MISSING_AUTH_MESSAGE =
-  "fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.";
+  "lia needs access to Vercel AI Gateway. Run lia login to sign in, lia login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.";
 const MODERN_MCP_FIXTURE = join(
   import.meta.dirname,
   "fixtures",
   "mcp-modern-stdio.mjs",
 );
 
-const KEYCHAIN_SERVICE = "FX_AI_GATEWAY_API_KEY";
+const KEYCHAIN_SERVICE = "LIA_AI_GATEWAY_API_KEY";
 
 function maxLineWidth(text: string): number {
   return Math.max(...text.split(/\r?\n/).map((line) => Bun.stringWidth(line)));
@@ -88,16 +88,16 @@ function doctorSessionDiagnosticsLimit(): number {
 
 const SEEDED_GATEWAY_TOKEN = "seeded-access-token";
 
-function writeSeededFxAuth(
+function writeSeededLiaAuth(
   home: string,
   teamId?: string,
   issuer = "https://vercel.com",
   expiresAtMs = Date.now() + 60 * 60 * 1000,
 ): void {
-  const fxDir = join(home, ".fx");
-  mkdirSync(fxDir, { recursive: true, mode: 0o700 });
-  chmodSync(fxDir, 0o700);
-  const authPath = join(fxDir, "auth.json");
+  const liaDir = join(home, ".lia");
+  mkdirSync(liaDir, { recursive: true, mode: 0o700 });
+  chmodSync(liaDir, 0o700);
+  const authPath = join(liaDir, "auth.json");
   const auth: Record<string, string | number> = {
     version: 1,
     issuer,
@@ -241,10 +241,10 @@ function writeLegacySession(
     historyLen?: number;
   } = {},
 ): void {
-  const sessionDir = join(home, ".fx", "sessions", sessionId);
+  const sessionDir = join(home, ".lia", "sessions", sessionId);
   mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
-  chmodSync(join(home, ".fx"), 0o700);
-  chmodSync(join(home, ".fx", "sessions"), 0o700);
+  chmodSync(join(home, ".lia"), 0o700);
+  chmodSync(join(home, ".lia", "sessions"), 0o700);
   chmodSync(sessionDir, 0o700);
   const historyLen = opts.historyLen ?? 0;
   writeFileSync(
@@ -277,10 +277,10 @@ function writeConversationSession(
     turns?: string[];
   } = {},
 ): void {
-  const sessionDir = join(home, ".fx", "sessions", sessionId);
+  const sessionDir = join(home, ".lia", "sessions", sessionId);
   mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
-  chmodSync(join(home, ".fx"), 0o700);
-  chmodSync(join(home, ".fx", "sessions"), 0o700);
+  chmodSync(join(home, ".lia"), 0o700);
+  chmodSync(join(home, ".lia", "sessions"), 0o700);
   chmodSync(sessionDir, 0o700);
   writeFileSync(
     join(sessionDir, "session.json"),
@@ -335,7 +335,7 @@ describe("cli: help", () => {
     async () => {
       const outputs: string[] = [];
       for (const args of [["help"], ["--help"], ["-h"]]) {
-        const result = await runFx(args);
+        const result = await runLia(args);
         expect(result.code).toBe(0);
         expect(result.stderr).toBe("");
         outputs.push(result.stdout);
@@ -350,12 +350,12 @@ describe("cli: help", () => {
         `𝒇x v${sourceVersion()}\nFast, native coding agent for the terminal.\n`,
       );
       expect(stdout.match(/𝒇x/g) ?? []).toHaveLength(1);
-      expect(stdout).toContain("fx is a command-line coding agent.");
+      expect(stdout).toContain("lia is a command-line coding agent.");
       expect(stdout).toContain("Commands:\n");
       expect(stdout).toContain("Run one noninteractive request");
       expect(stdout).toContain("Sign in to Vercel AI Gateway");
       expect(stdout).toContain("Sign out of Vercel AI Gateway");
-      // runFx inherits COLUMNS, and at the 80-column default the summary wraps
+      // runLia inherits COLUMNS, and at the 80-column default the summary wraps
       // "connection" onto the next line, so accept it on either line.
       const providerRow = stdout.indexOf("  provider <name>");
       expect(providerRow).toBeGreaterThanOrEqual(0);
@@ -363,7 +363,7 @@ describe("cli: help", () => {
       const summaryStart = providerLine.indexOf("Choose AI Gateway or a configured");
       expect(summaryStart).toBeGreaterThanOrEqual(0);
       expect(stdout.indexOf("connection", providerRow)).toBeGreaterThan(providerRow + summaryStart);
-      // `fx setup` is deprecated and hidden; `fx login --api-key` replaces it.
+      // `lia setup` is deprecated and hidden; `lia login --api-key` replaces it.
       expect(stdout).not.toContain("Configure a Vercel AI Gateway API key");
       expect(stdout).toContain("login [vercel] [--api-key]");
       expect(stdout).toContain("Choose a Vercel AI Gateway team");
@@ -381,39 +381,39 @@ describe("cli: help", () => {
       expect(stdout).not.toContain("--resume-<id>");
       expect(stdout).not.toContain("session resume");
       expect(stdout).toContain("-v, --version");
-      expect(stdout).toContain("Print the fx version and exit");
+      expect(stdout).toContain("Print the lia version and exit");
       expect(stdout).not.toContain("Must appear before the command");
       expect(stdout).toContain("Examples:\n");
-      expect(stdout).toContain("https://fx.sh/docs");
+      expect(stdout).not.toContain("fx.sh");
       expect(stdout).toContain(
-        "Run `fx <command> --help` for command-specific usage and options.",
+        "Run `lia <command> --help` for command-specific usage and options.",
       );
       expect(stdout).not.toContain("command-specific options and examples");
       expect(stdout).not.toContain("  Work      ");
-      expect(stdout).not.toContain("\n\n\nRun `fx <command> --help`");
+      expect(stdout).not.toContain("\n\n\nRun `lia <command> --help`");
     },
     TIMEOUT,
   );
 
   test(
-    "fx ask help renders documented options through both aliases",
+    "lia ask help renders documented options through both aliases",
     async () => {
       const env = {
         ...NO_GATEWAY_AUTH,
-        FX_DISABLE_KEYCHAIN: "1",
+        LIA_DISABLE_KEYCHAIN: "1",
       };
-      const expected = `fx ask
+      const expected = `lia ask
 
 Run one noninteractive request
 
 Usage:
-  fx ask [--permission-mode <mode>|--ask|--auto|--full-access] [--provider <name>] [--model <id>] [--effort <level>] [--fast|--no-fast] [--ultrafast|--no-ultrafast] [--provider-order <a,b,...>] [--provider-strict|--no-provider-strict] [--image PATH] [--system TEXT] [--json] [--quiet] [--prompt-permissions] [--timeout <seconds>] [--config <key=value>] [--no-save] [--no-color] [--resume <last|<id>>] [--] <prompt>
+  lia ask [--permission-mode <mode>|--ask|--auto|--full-access] [--provider <name>] [--model <id>] [--effort <level>] [--fast|--no-fast] [--ultrafast|--no-ultrafast] [--provider-order <a,b,...>] [--provider-strict|--no-provider-strict] [--image PATH] [--system TEXT] [--json] [--quiet] [--prompt-permissions] [--timeout <seconds>] [--config <key=value>] [--no-save] [--no-color] [--resume <last|<id>>] [--] <prompt>
 
 Options:
   --permission-mode <mode>    Set the permission mode for this request: ask, auto, or full-access
   --ask                       Ask before each action that needs permission
   --auto                      Automatically review unresolved permission requests
-  --full-access               Disable fx permission checks
+  --full-access               Disable lia permission checks
   --yolo                      Alias for --full-access
   --provider <name>           Override the model provider for this request (gateway or a configured name)
   --model <id>                Override the model for this request
@@ -431,7 +431,7 @@ Options:
   --quiet                     Suppress assistant output
   --prompt-permissions        Prompt for Y/N permission approval when stdin is a TTY
   --timeout <seconds>         Time limit for each shell command the agent runs
-  --config <key=value>        Override a setting for this request, with the keys fx config set takes; repeatable
+  --config <key=value>        Override a setting for this request, with the keys lia config set takes; repeatable
   --no-save                   Do not save the session; incompatible with --resume
   --no-color                  Print the full-access warning on stderr without color; NO_COLOR or TERM=dumb also turns color off
   --resume <last|<id>>        Continue the last session or a session by id
@@ -446,7 +446,7 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
 `;
 
       for (const alias of ["--help", "-h"]) {
-        const result = await runFx(["ask", alias], { env });
+        const result = await runLia(["ask", alias], { env });
         expect(result.code).toBe(0);
         expect(result.stderr).toBe("");
         expect(result.stdout).toBe(expected);
@@ -456,10 +456,10 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
   );
 
   test(
-    "fx session help documents inspect and recover",
+    "lia session help documents inspect and recover",
     async () => {
       for (const args of [["session", "--help"]]) {
-        const r = await runFx(args);
+        const r = await runLia(args);
         expect(r.code).toBe(0);
         expect(r.stderr).toBe("");
         expect(r.stdout).toContain("Inspect or recover saved sessions");
@@ -475,14 +475,14 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
   );
 
   test(
-    "fx acp help documents accepted options",
+    "lia acp help documents accepted options",
     async () => {
       for (const alias of ["--help", "-h"]) {
-        const r = await runFx(["acp", alias]);
+        const r = await runLia(["acp", alias]);
         expect(r.code).toBe(0);
         expect(r.stderr).toBe("");
         expect(r.stdout).toContain(
-          "Usage:\n  fx acp [--permission-mode <mode>|--ask|--auto|--full-access] [--provider <name>] [--model <id>] [--effort <level>] [--fast|--no-fast] [--ultrafast|--no-ultrafast] [--log-file <path>]",
+          "Usage:\n  lia acp [--permission-mode <mode>|--ask|--auto|--full-access] [--provider <name>] [--model <id>] [--effort <level>] [--fast|--no-fast] [--ultrafast|--no-ultrafast] [--log-file <path>]",
         );
         expect(r.stdout).toContain("--model <id>");
         expect(r.stdout).toContain("--ultrafast");
@@ -494,25 +494,25 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
   );
 
   test(
-    "fx acp rejects unknown options and missing option values",
+    "lia acp rejects unknown options and missing option values",
     async () => {
       const cases: [string[], string][] = [
-        [["--bogus"], "fx acp: unknown flag --bogus\n"],
-        [["--model"], "fx acp: --model needs a value\n"],
-        [["--log-file"], "fx acp: --log-file needs a value\n"],
-        [["--effort", "high effort"], "fx acp: invalid value for --effort: high effort\n"],
-        [["--permission-mode", "never"], "fx acp: invalid value for --permission-mode: never\n"],
+        [["--bogus"], "lia acp: unknown flag --bogus\n"],
+        [["--model"], "lia acp: --model needs a value\n"],
+        [["--log-file"], "lia acp: --log-file needs a value\n"],
+        [["--effort", "high effort"], "lia acp: invalid value for --effort: high effort\n"],
+        [["--permission-mode", "never"], "lia acp: invalid value for --permission-mode: never\n"],
         // ACP sessions don't apply gateway provider routing.
-        [["--provider-order", "a"], "fx acp: unknown flag --provider-order\n"],
-        [["--add-dir", "/tmp"], "fx acp: unknown flag --add-dir; it goes before the command: fx --add-dir <path> acp\n"],
+        [["--provider-order", "a"], "lia acp: unknown flag --provider-order\n"],
+        [["--add-dir", "/tmp"], "lia acp: unknown flag --add-dir; it goes before the command: lia --add-dir <path> acp\n"],
       ];
       for (const [args, problem] of cases) {
-        const result = await runFx(["acp", ...args]);
+        const result = await runLia(["acp", ...args]);
         expect(result.code).toBe(2);
         expect(result.stdout).toBe("");
         expect(result.stderr).toBe(
           problem +
-            "usage: fx acp [--permission-mode <mode>|--ask|--auto|--full-access] [--provider <name>] [--model <id>] [--effort <level>] [--fast|--no-fast] [--ultrafast|--no-ultrafast] [--log-file <path>]\n",
+            "usage: lia acp [--permission-mode <mode>|--ask|--auto|--full-access] [--provider <name>] [--model <id>] [--effort <level>] [--fast|--no-fast] [--ultrafast|--no-ultrafast] [--log-file <path>]\n",
         );
       }
     },
@@ -521,9 +521,9 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
 
   for (const alias of ["help", "--help", "-h"]) {
     test(
-      `fx ${alias} respects COLUMNS=60`,
+      `lia ${alias} respects COLUMNS=60`,
       async () => {
-        const r = await runFx([alias], { env: { COLUMNS: "60" } });
+        const r = await runLia([alias], { env: { COLUMNS: "60" } });
         expect(r.code).toBe(0);
         expect(r.stderr).toBe("");
         expect(r.stdout).toContain("Commands:");
@@ -539,9 +539,9 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
 
   for (const alias of ["help", "--help", "-h"]) {
     test(
-      `fx ${alias} hides developer recording surfaces`,
+      `lia ${alias} hides developer recording surfaces`,
       async () => {
-        const r = await runFx([alias]);
+        const r = await runLia([alias]);
         expect(r.code).toBe(0);
         expect(r.stdout).not.toContain("--record");
         expect(r.stdout).not.toContain("replay <tape>");
@@ -552,11 +552,11 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
   }
 
   test(
-    "fx rejects the removed record flag as unknown input",
+    "lia rejects the removed record flag as unknown input",
     async () => {
-      const r = await runFx(["--record"]);
+      const r = await runLia(["--record"]);
       expect(r.code).toBe(2);
-      expect(r.stderr).toContain("fx: unknown flag --record");
+      expect(r.stderr).toContain("lia: unknown flag --record");
       expect(r.stderr).not.toContain("visual terminal capture:");
     },
     TIMEOUT,
@@ -566,9 +566,9 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
 describe("cli: version", () => {
   for (const alias of ["--version", "-v"]) {
     test(
-      `fx ${alias} prints the source version`,
+      `lia ${alias} prints the source version`,
       async () => {
-        const r = await runFx([alias]);
+        const r = await runLia([alias]);
         expect(r.code).toBe(0);
         expect(r.stdout).toBe(`${sourceVersion()}\n`);
         expect(r.stderr).toBe("");
@@ -587,20 +587,20 @@ describe("cli: output errors", () => {
       try {
         for (const args of [["--version"], ["status"]]) {
           // `>&-` closes stdout, so every write to it fails.
-          const result = spawnSync("sh", ["-c", 'exec "$0" "$@" >&-', FX_BIN, ...args], {
+          const result = spawnSync("sh", ["-c", 'exec "$0" "$@" >&-', LIA_BIN, ...args], {
             encoding: "utf8",
             env: {
               PATH: process.env.PATH,
               HOME: home,
-              FX_SOUND: "0",
-              FX_AUTO_UPGRADE: "0",
-              FX_DISABLE_KEYCHAIN: "1",
-              FX_TRACE_LOG: tracePath,
-              FX_TRACE_SCOPES: "core",
+              LIA_SOUND: "0",
+              LIA_AUTO_UPGRADE: "0",
+              LIA_DISABLE_KEYCHAIN: "1",
+              LIA_TRACE_LOG: tracePath,
+              LIA_TRACE_SCOPES: "core",
             },
           });
           expect(result.status, args.join(" ")).toBe(1);
-          expect(result.stderr).toBe("fx: couldn't write the output\n");
+          expect(result.stderr).toBe("lia: couldn't write the output\n");
         }
         // The raw name stays in the trace.
         const trace = readFileSync(tracePath, "utf8");
@@ -615,9 +615,9 @@ describe("cli: output errors", () => {
 
   for (const [label, flags] of [["text", []], ["--json", ["--json"]]] as const) {
     test(
-      `fx ask ${label} that can't write its answer fails and keeps the answer in the session`,
+      `lia ask ${label} that can't write its answer fails and keeps the answer in the session`,
       async () => {
-        const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-ask-closed-stdout-")));
+        const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-ask-closed-stdout-")));
         const home = join(root, "home");
         const workspace = join(root, "workspace");
         const tracePath = join(root, "trace.log");
@@ -626,8 +626,8 @@ describe("cli: output errors", () => {
         const gateway = startFakeGateway([fakeGatewayFinalText("ANSWER_KEPT_IN_SESSION")]);
         try {
           // `>&-` closes stdout, so the answer can't be written. The fake
-          // gateway answers from this process, so fx runs asynchronously.
-          const proc = Bun.spawn(["sh", "-c", 'exec "$0" "$@" >&-', FX_BIN, "ask", ...flags, "--auto", "Say the answer."], {
+          // gateway answers from this process, so lia runs asynchronously.
+          const proc = Bun.spawn(["sh", "-c", 'exec "$0" "$@" >&-', LIA_BIN, "ask", ...flags, "--auto", "Say the answer."], {
             cwd: workspace,
             stdin: "ignore",
             stdout: "ignore",
@@ -636,32 +636,32 @@ describe("cli: output errors", () => {
               PATH: process.env.PATH,
               HOME: home,
               AI_GATEWAY_API_KEY: "closed-stdout-key",
-              FX_MODEL: FAKE_GATEWAY_MODEL,
-              FX_DISABLE_KEYCHAIN: "1",
-              FX_AUTO_UPGRADE: "0",
-              FX_SOUND: "0",
-              FX_GATEWAY_BASE_URL: gateway.baseUrl,
-              FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
-              FX_TRACE_LOG: tracePath,
-              FX_TRACE_SCOPES: "core",
+              LIA_MODEL: FAKE_GATEWAY_MODEL,
+              LIA_DISABLE_KEYCHAIN: "1",
+              LIA_AUTO_UPGRADE: "0",
+              LIA_SOUND: "0",
+              LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+              LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+              LIA_TRACE_LOG: tracePath,
+              LIA_TRACE_SCOPES: "core",
             },
           });
           const stderr = await new Response(proc.stderr).text();
           expect(await proc.exited, stderr).toBe(1);
-          expect(stderr).toBe("fx: couldn't write the output\n");
+          expect(stderr).toBe("lia: couldn't write the output\n");
           const trace = readFileSync(tracePath, "utf8");
           expect(trace).toContain("ask output write failed err=");
           expect(trace).toContain("command error err=OutputWriteFailed");
 
-          // No file fx opened took stdout's place, such as the store's lock.
-          const lock = join(home, ".fx", "sessions", "v2", "index.lock");
+          // No file lia opened took stdout's place, such as the store's lock.
+          const lock = join(home, ".lia", "sessions", "v2", "index.lock");
           if (existsSync(lock)) expect(readFileSync(lock, "utf8")).not.toContain("ANSWER_KEPT_IN_SESSION");
 
           // The turn is saved, so the answer can still be read.
           const sessionId = onlySessionId(home);
           expect(savedText(home, sessionId)).toContain("ANSWER_KEPT_IN_SESSION");
-          const detail = await runFx(["session", "--id", sessionId, "--json"], { cwd: workspace, env: { HOME: home } });
+          const detail = await runLia(["session", "--id", sessionId, "--json"], { cwd: workspace, env: { HOME: home } });
           expect(detail.code, detail.stderr).toBe(0);
           expect(JSON.parse(detail.stdout).history_len).toBe(1);
         } finally {
@@ -675,16 +675,16 @@ describe("cli: output errors", () => {
 });
 
 describe("cli: closed output pipe", () => {
-  // The reader exits at once, and the short sleep lets it go before fx
+  // The reader exits at once, and the short sleep lets it go before lia
   // writes, as `| head` leaves a pipe once it has read enough.
   async function runWithReaderGone(args: string[], env: Record<string, string | undefined>, cwd?: string) {
-    const statusPath = join(env.HOME!, "fx.status");
-    const proc = Bun.spawn(["sh", "-c", '(sleep 0.2; "$0" "$@"; echo $? > "$FX_STATUS_PATH") | true', FX_BIN, ...args], {
+    const statusPath = join(env.HOME!, "lia.status");
+    const proc = Bun.spawn(["sh", "-c", '(sleep 0.2; "$0" "$@"; echo $? > "$LIA_STATUS_PATH") | true', LIA_BIN, ...args], {
       cwd,
       stdin: "ignore",
       stdout: "ignore",
       stderr: "pipe",
-      env: { ...env, FX_STATUS_PATH: statusPath },
+      env: { ...env, LIA_STATUS_PATH: statusPath },
     });
     const stderr = await new Response(proc.stderr).text();
     await proc.exited;
@@ -696,9 +696,9 @@ describe("cli: closed output pipe", () => {
     async () => {
       const home = createIsolatedTestHome();
       try {
-        const env = { PATH: process.env.PATH, HOME: home, FX_SOUND: "0", FX_AUTO_UPGRADE: "0", FX_DISABLE_KEYCHAIN: "1" };
-        // `fx --version` ends before fx's I/O starts, so SIGPIPE ends it;
-        // `fx status` gets the closed pipe as a failed write.
+        const env = { PATH: process.env.PATH, HOME: home, LIA_SOUND: "0", LIA_AUTO_UPGRADE: "0", LIA_DISABLE_KEYCHAIN: "1" };
+        // `lia --version` ends before lia's I/O starts, so SIGPIPE ends it;
+        // `lia status` gets the closed pipe as a failed write.
         for (const args of [["--version"], ["status"]]) {
           const result = await runWithReaderGone(args, env);
           expect(result.status, args.join(" ")).toBe(141);
@@ -713,9 +713,9 @@ describe("cli: closed output pipe", () => {
 
   for (const [label, flags] of [["text", []], ["--json", ["--json"]]] as const) {
     test(
-      `fx ask ${label} whose reader went away ends quietly and still saves the answer`,
+      `lia ask ${label} whose reader went away ends quietly and still saves the answer`,
       async () => {
-        const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-ask-reader-gone-")));
+        const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-ask-reader-gone-")));
         const home = join(root, "home");
         const workspace = join(root, "workspace");
         mkdirSync(home);
@@ -726,20 +726,20 @@ describe("cli: closed output pipe", () => {
             PATH: process.env.PATH,
             HOME: home,
             AI_GATEWAY_API_KEY: "reader-gone-key",
-            FX_MODEL: FAKE_GATEWAY_MODEL,
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_AUTO_UPGRADE: "0",
-            FX_SOUND: "0",
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+            LIA_MODEL: FAKE_GATEWAY_MODEL,
+            LIA_DISABLE_KEYCHAIN: "1",
+            LIA_AUTO_UPGRADE: "0",
+            LIA_SOUND: "0",
+            LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+            LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+            LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
           }, workspace);
           expect(result.status, result.stderr).toBe(141);
           expect(result.stderr).toBe("");
           // The turn finished and was saved, so a resume sees it whole.
           const sessionId = onlySessionId(home);
           expect(savedText(home, sessionId)).toContain("ANSWER_SAVED_AFTER_READER_LEFT");
-          const detail = await runFx(["session", "--id", sessionId, "--json"], { cwd: workspace, env: { HOME: home } });
+          const detail = await runLia(["session", "--id", sessionId, "--json"], { cwd: workspace, env: { HOME: home } });
           expect(detail.code, detail.stderr).toBe(0);
           expect(JSON.parse(detail.stdout).history_len).toBe(1);
         } finally {
@@ -756,13 +756,13 @@ describe("cli: status", () => {
   test(
     "status and doctor expose the MCP profile error that blocks ask startup",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-mcp-config-diagnostic-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-mcp-config-diagnostic-"));
       const home = join(root, "home");
       const workspace = join(root, "workspace");
-      const fxDir = join(home, ".fx");
-      mkdirSync(fxDir, { recursive: true, mode: 0o700 });
+      const liaDir = join(home, ".lia");
+      mkdirSync(liaDir, { recursive: true, mode: 0o700 });
       mkdirSync(workspace);
-      writeFileSync(join(fxDir, "mcp.json"), "{invalid json", { mode: 0o600 });
+      writeFileSync(join(liaDir, "mcp.json"), "{invalid json", { mode: 0o600 });
       const gateway = startFakeGateway([]);
 
       try {
@@ -770,19 +770,19 @@ describe("cli: status", () => {
           HOME: realpathSync(home),
           AI_GATEWAY_API_KEY: "mcp-config-diagnostic-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_DISABLE_KEYCHAIN: "1",
-          FX_AUTO_UPGRADE: "0",
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+          LIA_DISABLE_KEYCHAIN: "1",
+          LIA_AUTO_UPGRADE: "0",
+          LIA_MODEL: FAKE_GATEWAY_MODEL,
+          LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
         };
         const cwd = realpathSync(workspace);
         const before = snapshotTree(home);
 
-        const statusText = await runFx(["status"], { cwd, env });
-        const statusJsonResult = await runFx(["status", "--json"], { cwd, env });
-        const doctorText = await runFx(["doctor"], { cwd, env });
-        const doctorJsonResult = await runFx(["doctor", "--json"], { cwd, env });
-        const ask = await runFx(
+        const statusText = await runLia(["status"], { cwd, env });
+        const statusJsonResult = await runLia(["status", "--json"], { cwd, env });
+        const doctorText = await runLia(["doctor"], { cwd, env });
+        const doctorJsonResult = await runLia(["doctor", "--json"], { cwd, env });
+        const ask = await runLia(
           ["ask", "--json", "--no-save", "Do nothing."],
           { cwd, env },
         );
@@ -799,7 +799,7 @@ describe("cli: status", () => {
           mcp_config_error: "McpConfigInvalidJson",
         });
         expect(doctorText.stdout).toContain(
-          "[fail] mcp_config: failed to load ~/.fx/mcp.json: McpConfigInvalidJson\n",
+          "[fail] mcp_config: failed to load ~/.lia/mcp.json: McpConfigInvalidJson\n",
         );
         const doctorJson = JSON.parse(doctorJsonResult.stdout);
         expect(doctorJson.fail_count).toBe(1);
@@ -811,7 +811,7 @@ describe("cli: status", () => {
           {
             name: "mcp_config",
             status: "fail",
-            detail: "failed to load ~/.fx/mcp.json: McpConfigInvalidJson",
+            detail: "failed to load ~/.lia/mcp.json: McpConfigInvalidJson",
           },
         ]);
         expect(ask.code).toBe(1);
@@ -824,14 +824,14 @@ describe("cli: status", () => {
         expect(snapshotTree(home)).toEqual(before);
 
         writeFileSync(
-          join(fxDir, "mcp.json"),
+          join(liaDir, "mcp.json"),
           JSON.stringify({
             "MCP-Servers": { fixture: { command: "node" } },
           }) + "\n",
           { mode: 0o600 },
         );
-        const warningStatus = await runFx(["status", "--json"], { cwd, env });
-        const warningDoctor = await runFx(["doctor", "--json"], { cwd, env });
+        const warningStatus = await runLia(["status", "--json"], { cwd, env });
+        const warningDoctor = await runLia(["doctor", "--json"], { cwd, env });
         expect(JSON.parse(warningStatus.stdout)).toMatchObject({
           mcp_config_warning: {
             cause: "suspicious_server_key",
@@ -845,10 +845,10 @@ describe("cli: status", () => {
           ),
         ).toMatchObject({ status: "warn" });
 
-        writeFileSync(join(fxDir, "mcp.json"), '{"mcp":{}}\n', { mode: 0o600 });
+        writeFileSync(join(liaDir, "mcp.json"), '{"mcp":{}}\n', { mode: 0o600 });
         const validBefore = snapshotTree(home);
-        const validStatus = await runFx(["status", "--json"], { cwd, env });
-        const validDoctor = await runFx(["doctor", "--json"], { cwd, env });
+        const validStatus = await runLia(["status", "--json"], { cwd, env });
+        const validDoctor = await runLia(["doctor", "--json"], { cwd, env });
         expect(validStatus.code).toBe(0);
         expect(validDoctor.code).toBe(0);
         expect(JSON.parse(validStatus.stdout)).not.toHaveProperty("mcp_config_error");
@@ -870,14 +870,14 @@ describe("cli: status", () => {
   test(
     "doctor names unknown settings keys while status stays quiet",
     async () => {
-      const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-e2e-unknown-settings-")));
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-e2e-unknown-settings-")));
       try {
         const home = join(root, "home");
         const cwd = join(root, "workspace");
-        mkdirSync(join(home, ".fx"), { recursive: true });
+        mkdirSync(join(home, ".lia"), { recursive: true });
         mkdirSync(cwd);
         writeFileSync(
-          join(home, ".fx", "settings.json"),
+          join(home, ".lia", "settings.json"),
           JSON.stringify({
             $schema: "https://fx.sh/schemas/settings.json",
             fast_mdoe: true,
@@ -888,24 +888,24 @@ describe("cli: status", () => {
           }) + "\n",
           { mode: 0o600 },
         );
-        writeFileSync(join(cwd, ".fx.json"), JSON.stringify({ $schema: "https://fx.sh/schemas/fx.json", max_agent_step: 5 }) + "\n");
-        const env = { ...NO_GATEWAY_AUTH, HOME: home, FX_DISABLE_KEYCHAIN: "1" };
+        writeFileSync(join(cwd, ".lia.json"), JSON.stringify({ $schema: "https://fx.sh/schemas/fx.json", max_agent_step: 5 }) + "\n");
+        const env = { ...NO_GATEWAY_AUTH, HOME: home, LIA_DISABLE_KEYCHAIN: "1" };
 
-        const doctor = await runFx(["doctor", "--json"], { cwd, env });
+        const doctor = await runLia(["doctor", "--json"], { cwd, env });
         expect(doctor.code).toBe(0);
         const warnings = JSON.parse(doctor.stdout)
           .checks.filter((check: { name: string; status: string }) => check.name === "config" && check.status === "warn")
           .map((check: { detail: string }) => check.detail);
         expect(warnings).toEqual([
-          "unknown setting fast_mdoe in ~/.fx/settings.json (did you mean fast_mode?)",
-          `unknown setting efort in ~/.fx/settings.json for workspace ${cwd} (did you mean effort?)`,
-          "unknown setting max_agent_step in .fx.json (did you mean max_agent_steps?)",
+          "unknown setting fast_mdoe in ~/.lia/settings.json (did you mean fast_mode?)",
+          `unknown setting efort in ~/.lia/settings.json for workspace ${cwd} (did you mean effort?)`,
+          "unknown setting max_agent_step in .lia.json (did you mean max_agent_steps?)",
         ]);
         // statusLine and status_line are retired: loaded and ignored, never diagnosed.
         expect(doctor.stdout).not.toContain("statusLine");
         expect(doctor.stdout).not.toContain("status_line");
 
-        const status = await runFx(["status"], { cwd, env });
+        const status = await runLia(["status"], { cwd, env });
         expect(status.code).toBe(0);
         expect(status.stderr).toBe("");
       } finally {
@@ -916,16 +916,16 @@ describe("cli: status", () => {
   );
 
   test(
-    "fx config schema prints the settings.json and .fx.json schemas",
+    "lia config schema prints the settings.json and .lia.json schemas",
     async () => {
-      const home = realpathSync(mkdtempSync(join(tmpdir(), "fx-e2e-config-schema-")));
+      const home = realpathSync(mkdtempSync(join(tmpdir(), "lia-e2e-config-schema-")));
       try {
         const env = { ...NO_GATEWAY_AUTH, HOME: home };
-        const profile = await runFx(["config", "schema"], { env });
+        const profile = await runLia(["config", "schema"], { env });
         expect(profile.code).toBe(0);
         expect(profile.stderr).toBe("");
         const schema = JSON.parse(profile.stdout);
-        expect(schema.$id).toBe("https://fx.sh/schemas/settings.json");
+        expect(schema.$id).toBeUndefined();
         expect(schema.additionalProperties).toBe(false);
         expect(schema.properties.fast_mode).toEqual({ description: "Use faster inference when the model supports it", type: "boolean" });
         expect(schema.properties.permission_mode.enum).toEqual(["ask", "auto", "full-access", "yolo"]);
@@ -936,10 +936,10 @@ describe("cli: status", () => {
         expect(schema.$defs.workspace.properties.additional_directories.type).toBe("array");
         expect(schema.$defs.workspace.properties.providers).toBeUndefined();
 
-        const project = await runFx(["config", "schema", "--project"], { env });
+        const project = await runLia(["config", "schema", "--project"], { env });
         expect(project.code).toBe(0);
         const projectSchema = JSON.parse(project.stdout);
-        expect(projectSchema.$id).toBe("https://fx.sh/schemas/fx.json");
+        expect(projectSchema.$id).toBeUndefined();
         expect(Object.keys(projectSchema.properties)).toEqual([
           "$schema",
           "context",
@@ -949,10 +949,10 @@ describe("cli: status", () => {
           "provider_strict",
         ]);
 
-        const misplaced = await runFx(["config", "list", "--project"], { env });
+        const misplaced = await runLia(["config", "list", "--project"], { env });
         expect(misplaced.code).toBe(2);
         expect(misplaced.stdout).toBe("");
-        expect(misplaced.stderr).toContain("usage: fx config [list|get <key>|set <key> <value>|unset <key>|schema [--project]]");
+        expect(misplaced.stderr).toContain("usage: lia config [list|get <key>|set <key> <value>|unset <key>|schema [--project]]");
       } finally {
         rmSync(home, { recursive: true, force: true });
       }
@@ -961,15 +961,15 @@ describe("cli: status", () => {
   );
 
   test(
-    "fx config lists settings in precedence order and gets the value fx uses",
+    "lia config lists settings in precedence order and gets the value lia uses",
     async () => {
-      const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-e2e-config-")));
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-e2e-config-")));
       try {
         const home = join(root, "home");
         const cwd = join(root, "workspace");
-        mkdirSync(join(home, ".fx"), { recursive: true });
+        mkdirSync(join(home, ".lia"), { recursive: true });
         mkdirSync(cwd);
-        const settingsPath = join(home, ".fx", "settings.json");
+        const settingsPath = join(home, ".lia", "settings.json");
         writeFileSync(
           settingsPath,
           JSON.stringify({
@@ -982,69 +982,69 @@ describe("cli: status", () => {
           }) + "\n",
           { mode: 0o600 },
         );
-        writeFileSync(join(cwd, ".fx.json"), JSON.stringify({ max_agent_steps: 7, model: "ignored/here" }) + "\n");
-        const env = { ...NO_GATEWAY_AUTH, ...NO_SETTING_ENV, HOME: home, FX_DISABLE_KEYCHAIN: "1" };
+        writeFileSync(join(cwd, ".lia.json"), JSON.stringify({ max_agent_steps: 7, model: "ignored/here" }) + "\n");
+        const env = { ...NO_GATEWAY_AUTH, ...NO_SETTING_ENV, HOME: home, LIA_DISABLE_KEYCHAIN: "1" };
         const before = readFileSync(settingsPath, "utf8");
 
-        const list = await runFx(["config", "list", "--show-origin"], { cwd, env });
+        const list = await runLia(["config", "list", "--show-origin"], { cwd, env });
         expect(list.code).toBe(0);
         expect(list.stdout).toBe(
           [
-            "file:.fx.json\tmax_agent_steps=7",
-            "file:~/.fx/settings.json\tfast_mode=true",
-            "file:~/.fx/settings.json\tmodels.gateway=openai/gpt-5.5",
-            'file:~/.fx/settings.json\tprovider_order=["a","b"]',
+            "file:.lia.json\tmax_agent_steps=7",
+            "file:~/.lia/settings.json\tfast_mode=true",
+            "file:~/.lia/settings.json\tmodels.gateway=openai/gpt-5.5",
+            'file:~/.lia/settings.json\tprovider_order=["a","b"]',
             `workspace:${cwd}\tfast_mode=false`,
             "",
           ].join("\n"),
         );
-        expect(list.stderr).toBe("fx config: unknown setting fast_mdoe in ~/.fx/settings.json (did you mean fast_mode?)\n");
+        expect(list.stderr).toBe("lia config: unknown setting fast_mdoe in ~/.lia/settings.json (did you mean fast_mode?)\n");
 
-        // The retired statusLine in the file is ignored, and fx config refuses it as unknown.
+        // The retired statusLine in the file is ignored, and lia config refuses it as unknown.
         for (const key of ["statusLine.context", "status_line.context"]) {
-          const retired = await runFx(["config", "get", key], { cwd, env });
+          const retired = await runLia(["config", "get", key], { cwd, env });
           expect([retired.code, retired.stdout]).toEqual([2, ""]);
-          expect(retired.stderr).toStartWith(`fx config: unknown setting ${key.split(".")[0]}\nusage: fx config`);
+          expect(retired.stderr).toStartWith(`lia config: unknown setting ${key.split(".")[0]}\nusage: lia config`);
         }
 
         // get reads the settings the runtime resolves, so it gives the same
-        // warnings a run does: this .fx.json sets a profile-only key.
-        const projectWarning = "fx: config project: ignored_project_user_only_setting; key=model\n";
-        const get = await runFx(["config", "get", "fast_mode"], { cwd, env });
+        // warnings a run does: this .lia.json sets a profile-only key.
+        const projectWarning = "lia: config project: ignored_project_user_only_setting; key=model\n";
+        const get = await runLia(["config", "get", "fast_mode"], { cwd, env });
         expect([get.code, get.stdout, get.stderr]).toEqual([0, "false\n", projectWarning]);
-        const global = await runFx(["config", "get", "fast_mode", "--global"], { cwd, env });
+        const global = await runLia(["config", "get", "fast_mode", "--global"], { cwd, env });
         expect([global.code, global.stdout]).toEqual([0, "true\n"]);
-        const unset = await runFx(["config", "get", "theme"], { cwd, env });
+        const unset = await runLia(["config", "get", "theme"], { cwd, env });
         expect([unset.code, unset.stdout, unset.stderr]).toEqual([1, "", projectWarning]);
-        // A key nothing sets gives the value fx uses, labeled default.
-        const fallback = await runFx(["config", "get", "--show-origin", "permission_mode"], { cwd, env });
+        // A key nothing sets gives the value lia uses, labeled default.
+        const fallback = await runLia(["config", "get", "--show-origin", "permission_mode"], { cwd, env });
         expect([fallback.code, fallback.stdout]).toEqual([0, "default\tauto\n"]);
 
-        const typo = await runFx(["config", "get", "fast_mdoe"], { cwd, env });
+        const typo = await runLia(["config", "get", "fast_mdoe"], { cwd, env });
         expect(typo.code).toBe(2);
-        expect(typo.stderr).toStartWith("fx config: unknown setting fast_mdoe (did you mean fast_mode?)\nusage: fx config");
+        expect(typo.stderr).toStartWith("lia config: unknown setting fast_mdoe (did you mean fast_mode?)\nusage: lia config");
 
-        // Documented FX_* overrides come last, as fx applies them; an ignored value doesn't show.
-        const withEnv = { ...env, FX_MAX_AGENT_STEPS: "20", FX_SOUND: "off" };
-        const fromEnv = await runFx(["config", "list", "--show-origin"], { cwd, env: withEnv });
+        // Documented LIA_* overrides come last, as lia applies them; an ignored value doesn't show.
+        const withEnv = { ...env, LIA_MAX_AGENT_STEPS: "20", LIA_SOUND: "off" };
+        const fromEnv = await runLia(["config", "list", "--show-origin"], { cwd, env: withEnv });
         expect(fromEnv.stdout.trimEnd().split("\n").slice(-4)).toEqual([
-          "env:FX_MAX_AGENT_STEPS\tmax_agent_steps=20",
-          "env:FX_SOUND\tsound.turn_end=false",
-          "env:FX_SOUND\tsound.attention_required=false",
-          "env:FX_SOUND\tsound.max=false",
+          "env:LIA_MAX_AGENT_STEPS\tmax_agent_steps=20",
+          "env:LIA_SOUND\tsound.turn_end=false",
+          "env:LIA_SOUND\tsound.attention_required=false",
+          "env:LIA_SOUND\tsound.max=false",
         ]);
-        const envGet = await runFx(["config", "get", "max_agent_steps"], { cwd, env: withEnv });
+        const envGet = await runLia(["config", "get", "max_agent_steps"], { cwd, env: withEnv });
         expect([envGet.code, envGet.stdout]).toEqual([0, "20\n"]);
-        const ignored = await runFx(["config", "get", "max_agent_steps"], { cwd, env: { ...env, FX_MAX_AGENT_STEPS: "many" } });
+        const ignored = await runLia(["config", "get", "max_agent_steps"], { cwd, env: { ...env, LIA_MAX_AGENT_STEPS: "many" } });
         expect([ignored.code, ignored.stdout]).toEqual([0, "7\n"]);
-        const scoped = await runFx(["config", "list", "--global", "--show-origin"], { cwd, env: withEnv });
+        const scoped = await runLia(["config", "list", "--global", "--show-origin"], { cwd, env: withEnv });
         expect(scoped.stdout).not.toContain("env:");
 
-        const json = await runFx(["config", "--workspace", "--json"], { cwd, env });
+        const json = await runLia(["config", "--workspace", "--json"], { cwd, env });
         expect(json.code).toBe(0);
         expect(JSON.parse(json.stdout)).toEqual({
           kind: "config",
-          entries: [{ key: "fast_mode", value: false, origin: "workspace", file: "~/.fx/settings.json", workspace: cwd }],
+          entries: [{ key: "fast_mode", value: false, origin: "workspace", file: "~/.lia/settings.json", workspace: cwd }],
           unknown: [],
         });
 
@@ -1057,24 +1057,24 @@ describe("cli: status", () => {
   );
 
   test(
-    "fx config set and unset change plain preferences and refuse the rest",
+    "lia config set and unset change plain preferences and refuse the rest",
     async () => {
-      const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-e2e-config-set-")));
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-e2e-config-set-")));
       try {
         const home = join(root, "home");
         const cwd = join(root, "workspace");
-        mkdirSync(join(home, ".fx"), { recursive: true });
+        mkdirSync(join(home, ".lia"), { recursive: true });
         mkdirSync(cwd);
-        const settingsPath = join(home, ".fx", "settings.json");
+        const settingsPath = join(home, ".lia", "settings.json");
         writeFileSync(settingsPath, JSON.stringify({ statusLine: { session: true } }) + "\n", { mode: 0o600 });
-        const env = { ...NO_GATEWAY_AUTH, ...NO_SETTING_ENV, HOME: home, FX_DISABLE_KEYCHAIN: "1" };
+        const env = { ...NO_GATEWAY_AUTH, ...NO_SETTING_ENV, HOME: home, LIA_DISABLE_KEYCHAIN: "1" };
         const settings = () => JSON.parse(readFileSync(settingsPath, "utf8"));
 
-        const set = await runFx(["config", "set", "fast_mode", "on"], { cwd, env });
-        expect([set.code, set.stdout, set.stderr]).toEqual([0, "fast_mode set to true in ~/.fx/settings.json.\n", ""]);
-        const again = await runFx(["config", "set", "fast_mode", "true"], { cwd, env });
+        const set = await runLia(["config", "set", "fast_mode", "on"], { cwd, env });
+        expect([set.code, set.stdout, set.stderr]).toEqual([0, "fast_mode set to true in ~/.lia/settings.json.\n", ""]);
+        const again = await runLia(["config", "set", "fast_mode", "true"], { cwd, env });
         expect([again.code, again.stdout]).toEqual([0, "fast_mode is already true.\n"]);
-        const steps = await runFx(["config", "set", "max_agent_steps", "40", "--json"], { cwd, env });
+        const steps = await runLia(["config", "set", "max_agent_steps", "40", "--json"], { cwd, env });
         expect(steps.code).toBe(0);
         expect(JSON.parse(steps.stdout)).toEqual({
           kind: "config",
@@ -1082,35 +1082,35 @@ describe("cli: status", () => {
           key: "max_agent_steps",
           value: 40,
           changed: true,
-          file: "~/.fx/settings.json",
+          file: "~/.lia/settings.json",
         });
         // Saving drops the retired statusLine the file started with.
         expect(settings()).toEqual({ fast_mode: true, max_agent_steps: 40 });
         for (const [verb, key] of [["unset", "statusLine.session"], ["set", "status_line.context"], ["set", "startup_scrollback"]]) {
-          const retired = await runFx(["config", verb!, key!, ...(verb === "set" ? ["false"] : [])], { cwd, env });
+          const retired = await runLia(["config", verb!, key!, ...(verb === "set" ? ["false"] : [])], { cwd, env });
           expect([retired.code, retired.stdout]).toEqual([2, ""]);
-          expect(retired.stderr).toStartWith(`fx config: unknown setting ${key!.split(".")[0]}\nusage: fx config`);
+          expect(retired.stderr).toStartWith(`lia config: unknown setting ${key!.split(".")[0]}\nusage: lia config`);
         }
-        const get = await runFx(["config", "get", "max_agent_steps"], { cwd, env });
+        const get = await runLia(["config", "get", "max_agent_steps"], { cwd, env });
         expect([get.code, get.stdout]).toEqual([0, "40\n"]);
 
         const before = readFileSync(settingsPath, "utf8");
         const refusals: Array<[string[], string]> = [
           [
             ["config", "set", "permission_mode", "full-access"],
-            "fx config: can't change permission_mode with fx config; use --permission-mode for one run, or edit ~/.fx/settings.json\n",
+            "lia config: can't change permission_mode with lia config; use --permission-mode for one run, or edit ~/.lia/settings.json\n",
           ],
-          [["config", "set", "fast_mode", "maybe"], "fx config: invalid value for fast_mode: maybe (use true or false)\n"],
-          [["config", "set", "models.gateway", "openai/gpt-5.5"], "fx config: can't change models.gateway with fx config; use --model for one run, or edit ~/.fx/settings.json\n"],
+          [["config", "set", "fast_mode", "maybe"], "lia config: invalid value for fast_mode: maybe (use true or false)\n"],
+          [["config", "set", "models.gateway", "openai/gpt-5.5"], "lia config: can't change models.gateway with lia config; use --model for one run, or edit ~/.lia/settings.json\n"],
         ];
         for (const [args, stderr] of refusals) {
-          const result = await runFx(args, { cwd, env });
+          const result = await runLia(args, { cwd, env });
           expect([result.code, result.stdout, result.stderr]).toEqual([2, "", stderr]);
         }
-        const workspace = await runFx(["config", "set", "--workspace", "fast_mode", "off"], { cwd, env });
+        const workspace = await runLia(["config", "set", "--workspace", "fast_mode", "off"], { cwd, env });
         expect(workspace.code).toBe(2);
         expect(workspace.stderr).toStartWith(
-          "fx config: preferences apply to every workspace, so set and unset don't take --workspace\nusage: fx config",
+          "lia config: preferences apply to every workspace, so set and unset don't take --workspace\nusage: lia config",
         );
         expect(readFileSync(settingsPath, "utf8")).toBe(before);
       } finally {
@@ -1123,15 +1123,15 @@ describe("cli: status", () => {
   test(
     "status and doctor share the missing auth snapshot",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-status-noauth-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-status-noauth-"));
       try {
         const env = {
           ...NO_GATEWAY_AUTH,
           HOME: realpathSync(root),
-          FX_DISABLE_KEYCHAIN: "1",
+          LIA_DISABLE_KEYCHAIN: "1",
         };
-        const status = await runFx(["status", "--json"], { env });
-        const doctor = await runFx(["doctor", "--json"], { env });
+        const status = await runLia(["status", "--json"], { env });
+        const doctor = await runLia(["doctor", "--json"], { env });
 
         expect(status.code).toBe(0);
         expect(doctor.code).toBe(0);
@@ -1161,21 +1161,21 @@ describe("cli: status", () => {
 
   for (const scenario of [
     { name: "automatic Gateway", provider: "gateway", source: undefined, help: MISSING_AUTH_MESSAGE },
-    { name: "an exact Gateway login", provider: "gateway", source: "fx_login", help: "fx login is selected but unavailable. Run fx login to reconnect; no other credential was selected." },
-    { name: "an exact OIDC token", provider: "gateway", source: "vercel_oidc_token", help: "VERCEL_OIDC_TOKEN is selected but unavailable. Set VERCEL_OIDC_TOKEN before starting fx; no other credential was selected." },
-    { name: "an exact environment key", provider: "gateway", source: "ai_gateway_api_key", help: "AI_GATEWAY_API_KEY is selected but unavailable. Set AI_GATEWAY_API_KEY before starting fx; no other credential was selected." },
-    { name: "an exact stored key", provider: "gateway", source: "stored_key", help: "A stored API key is selected but unavailable. Run fx login vercel --api-key to save a key again, or fx login to sign in instead; no other credential was selected." },
+    { name: "an exact Gateway login", provider: "gateway", source: "lia_login", help: "lia login is selected but unavailable. Run lia login to reconnect; no other credential was selected." },
+    { name: "an exact OIDC token", provider: "gateway", source: "vercel_oidc_token", help: "VERCEL_OIDC_TOKEN is selected but unavailable. Set VERCEL_OIDC_TOKEN before starting lia; no other credential was selected." },
+    { name: "an exact environment key", provider: "gateway", source: "ai_gateway_api_key", help: "AI_GATEWAY_API_KEY is selected but unavailable. Set AI_GATEWAY_API_KEY before starting lia; no other credential was selected." },
+    { name: "an exact stored key", provider: "gateway", source: "stored_key", help: "A stored API key is selected but unavailable. Run lia login vercel --api-key to save a key again, or lia login to sign in instead; no other credential was selected." },
   ]) {
     test(
       `status and doctor respect ${scenario.name} when credentials are missing`,
       async () => {
-        const root = mkdtempSync(join(tmpdir(), "fx-e2e-provider-diagnostics-"));
+        const root = mkdtempSync(join(tmpdir(), "lia-e2e-provider-diagnostics-"));
         try {
           const home = join(root, "home");
           const workspace = join(root, "workspace");
-          mkdirSync(join(home, ".fx"), { recursive: true });
+          mkdirSync(join(home, ".lia"), { recursive: true });
           mkdirSync(workspace);
-          const settingsPath = join(home, ".fx", "settings.json");
+          const settingsPath = join(home, ".lia", "settings.json");
           const settings = JSON.stringify({
             provider: scenario.provider,
             models: { [scenario.provider]: "test-model" },
@@ -1184,12 +1184,12 @@ describe("cli: status", () => {
           writeFileSync(settingsPath, settings);
           const options = {
             cwd: realpathSync(workspace),
-            env: { ...NO_GATEWAY_AUTH, HOME: realpathSync(home), FX_DISABLE_KEYCHAIN: "1" },
+            env: { ...NO_GATEWAY_AUTH, HOME: realpathSync(home), LIA_DISABLE_KEYCHAIN: "1" },
           };
 
           for (const command of ["status", "doctor"]) {
-            const text = await runFx([command], options);
-            const json = await runFx([command, "--json"], options);
+            const text = await runLia([command], options);
+            const json = await runLia([command, "--json"], options);
             expect(text.code).toBe(0);
             expect(json.code).toBe(0);
             expect(text.stderr).toBe("");
@@ -1207,7 +1207,7 @@ describe("cli: status", () => {
             }
           }
 
-          const ask = await runFx(["ask", "--json", "--no-save", "Say hello."], options);
+          const ask = await runLia(["ask", "--json", "--no-save", "Say hello."], options);
           expect(ask.code).toBe(1);
           expect(JSON.parse(ask.stdout).error).toBe("MissingCredentials");
           expect(ask.stderr).toContain(scenario.help);
@@ -1220,70 +1220,70 @@ describe("cli: status", () => {
     );
   }
 
-  test("FX_HOME holds settings and sessions in place of ~/.fx", async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-home-")));
+  test("LIA_HOME holds settings and sessions in place of ~/.lia", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-home-")));
     const gateway = startFakeGateway([fakeGatewayFinalText("SAVED_UNDER_FX_HOME")]);
     try {
       const home = join(root, "home");
       const workspace = join(root, "workspace");
-      const fxHome = join(root, "profile");
+      const liaHome = join(root, "profile");
       mkdirSync(home);
       mkdirSync(workspace);
       const options = {
         cwd: workspace,
         env: {
           HOME: home,
-          FX_HOME: fxHome,
-          AI_GATEWAY_API_KEY: "fx-home-key",
+          LIA_HOME: liaHome,
+          AI_GATEWAY_API_KEY: "lia-home-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_DISABLE_KEYCHAIN: "1",
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+          LIA_MODEL: FAKE_GATEWAY_MODEL,
+          LIA_DISABLE_KEYCHAIN: "1",
+          LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+          LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+          LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
         },
       };
 
-      const set = await runFx(["config", "set", "theme", "light"], options);
+      const set = await runLia(["config", "set", "theme", "light"], options);
       expect(set.code).toBe(0);
-      expect(set.stdout).toBe("theme set to light in $FX_HOME/settings.json.\n");
-      expect(JSON.parse(readFileSync(join(fxHome, "settings.json"), "utf8")).theme).toBe("light");
+      expect(set.stdout).toBe("theme set to light in $LIA_HOME/settings.json.\n");
+      expect(JSON.parse(readFileSync(join(liaHome, "settings.json"), "utf8")).theme).toBe("light");
 
-      const status = await runFx(["status", "--json"], options);
+      const status = await runLia(["status", "--json"], options);
       expect(status.code).toBe(0);
-      expect(JSON.parse(status.stdout).fx_home).toBe(fxHome);
+      expect(JSON.parse(status.stdout).lia_home).toBe(liaHome);
 
-      const asked = await runFx(["ask", "--json", "Say something."], options);
+      const asked = await runLia(["ask", "--json", "Say something."], options);
       expect(asked.code).toBe(0);
       const sessionId = JSON.parse(asked.stdout).session_id;
-      expect(existsSync(join(fxHome, "sessions"))).toBe(true);
-      const sessions = await runFx(["sessions", "--json"], options);
+      expect(existsSync(join(liaHome, "sessions"))).toBe(true);
+      const sessions = await runLia(["sessions", "--json"], options);
       expect(sessions.stdout).toContain(sessionId);
 
-      expect(existsSync(join(home, ".fx"))).toBe(false);
+      expect(existsSync(join(home, ".lia"))).toBe(false);
 
-      const relative = await runFx(["status"], { ...options, env: { ...options.env, FX_HOME: "profile" } });
+      const relative = await runLia(["status"], { ...options, env: { ...options.env, LIA_HOME: "profile" } });
       expect(relative.code).toBe(1);
-      expect(relative.stderr).toBe("fx: FX_HOME must be an absolute path\n");
+      expect(relative.stderr).toBe("lia: LIA_HOME must be an absolute path\n");
 
-      // A relative HOME counts as unset, so with FX_HOME unset fx has no
+      // A relative HOME counts as unset, so with LIA_HOME unset lia has no
       // folder of its own, and status names none.
-      const relativeHome = await runFx(["status", "--json"], {
+      const relativeHome = await runLia(["status", "--json"], {
         ...options,
-        env: { ...options.env, HOME: "relative/home", FX_HOME: undefined },
+        env: { ...options.env, HOME: "relative/home", LIA_HOME: undefined },
       });
       expect(relativeHome.code).toBe(0);
-      expect(JSON.parse(relativeHome.stdout).fx_home).toBeUndefined();
+      expect(JSON.parse(relativeHome.stdout).lia_home).toBeUndefined();
 
-      // With FX_HOME set, a relative HOME counts as unset the same way, so
-      // FX_HOME still holds fx's files.
-      const relativeWithFxHome = { ...options, env: { ...options.env, HOME: "relative/home" } };
-      const statusWithFxHome = await runFx(["status", "--json"], relativeWithFxHome);
-      expect(statusWithFxHome.code).toBe(0);
-      expect(JSON.parse(statusWithFxHome.stdout).fx_home).toBe(fxHome);
-      const added = await runFx(["mcp", "add", "probe", "--", "/bin/echo", "hi"], relativeWithFxHome);
+      // With LIA_HOME set, a relative HOME counts as unset the same way, so
+      // LIA_HOME still holds lia's files.
+      const relativeWithLiaHome = { ...options, env: { ...options.env, HOME: "relative/home" } };
+      const statusWithLiaHome = await runLia(["status", "--json"], relativeWithLiaHome);
+      expect(statusWithLiaHome.code).toBe(0);
+      expect(JSON.parse(statusWithLiaHome.stdout).lia_home).toBe(liaHome);
+      const added = await runLia(["mcp", "add", "probe", "--", "/bin/echo", "hi"], relativeWithLiaHome);
       expect(added.code).toBe(0);
-      expect(added.stdout).toBe("Added probe to $FX_HOME/mcp.json.\n");
+      expect(added.stdout).toBe("Added probe to $LIA_HOME/mcp.json.\n");
       expect(existsSync(join(workspace, "relative"))).toBe(false);
     } finally {
       gateway.stop();
@@ -1292,7 +1292,7 @@ describe("cli: status", () => {
   }, TIMEOUT);
 
   test("fresh and resumed asks retain an unavailable exact login with an environment key", async () => {
-    const root = mkdtempSync(join(tmpdir(), "fx-ask-exact-source-"));
+    const root = mkdtempSync(join(tmpdir(), "lia-ask-exact-source-"));
     const gateway = startFakeGateway([
       fakeGatewayFinalText("SESSION_SEEDED"),
       fakeGatewayFinalText("AUTOMATIC_KEY_WORKS"),
@@ -1300,9 +1300,9 @@ describe("cli: status", () => {
     try {
       const home = join(root, "home");
       const workspace = join(root, "workspace");
-      mkdirSync(join(home, ".fx"), { recursive: true });
+      mkdirSync(join(home, ".lia"), { recursive: true });
       mkdirSync(workspace);
-      const settingsPath = join(home, ".fx", "settings.json");
+      const settingsPath = join(home, ".lia", "settings.json");
       const settings = { provider: "gateway", models: { gateway: FAKE_GATEWAY_MODEL } };
       writeFileSync(settingsPath, JSON.stringify(settings));
       const options = {
@@ -1311,27 +1311,27 @@ describe("cli: status", () => {
           HOME: realpathSync(home),
           AI_GATEWAY_API_KEY: "exact-source-control-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_MODEL: undefined,
-          FX_DISABLE_KEYCHAIN: "1",
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+          LIA_MODEL: undefined,
+          LIA_DISABLE_KEYCHAIN: "1",
+          LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+          LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+          LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
         },
       };
-      const seeded = await runFx(["ask", "--json", "Create a short greeting."], options);
+      const seeded = await runLia(["ask", "--json", "Create a short greeting."], options);
       expect(seeded.code).toBe(0);
       const sessionId = JSON.parse(seeded.stdout).session_id;
       expect(sessionId.length).toBeGreaterThan(0);
       expect(gateway.requests).toHaveLength(1);
 
-      const pinned = JSON.stringify({ ...settings, credential_source: "fx_login" });
+      const pinned = JSON.stringify({ ...settings, credential_source: "lia_login" });
       writeFileSync(settingsPath, pinned);
-      const status = await runFx(["status", "--json"], options);
+      const status = await runLia(["status", "--json"], options);
       const help = JSON.parse(status.stdout).auth_help;
-      expect(help).toContain("fx login is selected but unavailable");
+      expect(help).toContain("lia login is selected but unavailable");
       for (const resumed of [false, true]) {
         for (const json of [false, true]) {
-          const result = await runFx([
+          const result = await runLia([
             "ask", ...(json ? ["--json"] : []),
             ...(resumed ? ["--resume", sessionId] : ["--no-save"]),
             "Continue with a greeting.",
@@ -1346,7 +1346,7 @@ describe("cli: status", () => {
       }
 
       writeFileSync(settingsPath, JSON.stringify(settings));
-      const automatic = await runFx(["ask", "--json", "--no-save", "Give a greeting."], options);
+      const automatic = await runLia(["ask", "--json", "--no-save", "Give a greeting."], options);
       expect(automatic.code).toBe(0);
       expect(JSON.parse(automatic.stdout).output).toContain("AUTOMATIC_KEY_WORKS");
       expect(gateway.requests).toHaveLength(2);
@@ -1357,40 +1357,40 @@ describe("cli: status", () => {
   }, TIMEOUT);
 
   test(
-    "status and doctor share fx login source, team, and refreshability",
+    "status and doctor share lia login source, team, and refreshability",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-status-auth-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-status-auth-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
         mkdirSync(home);
         mkdirSync(workspace);
-        writeSeededFxAuth(home, "team_123");
+        writeSeededLiaAuth(home, "team_123");
         const env = {
           ...NO_GATEWAY_AUTH,
           HOME: realpathSync(home),
-          FX_DISABLE_KEYCHAIN: "1",
+          LIA_DISABLE_KEYCHAIN: "1",
         };
         const cwd = realpathSync(workspace);
 
-        const statusText = await runFx(["status"], { cwd, env });
-        const statusJsonResult = await runFx(["status", "--json"], { cwd, env });
-        const doctorText = await runFx(["doctor"], { cwd, env });
-        const doctorJsonResult = await runFx(["doctor", "--json"], { cwd, env });
+        const statusText = await runLia(["status"], { cwd, env });
+        const statusJsonResult = await runLia(["status", "--json"], { cwd, env });
+        const doctorText = await runLia(["doctor"], { cwd, env });
+        const doctorJsonResult = await runLia(["doctor", "--json"], { cwd, env });
 
         expect(statusText.code).toBe(0);
         expect(statusJsonResult.code).toBe(0);
         expect(doctorText.code).toBe(0);
         expect(doctorJsonResult.code).toBe(0);
         const expectedAuth = {
-          auth: "fx login",
+          auth: "lia login",
           auth_refreshable: true,
           team: "vercel-labs",
         };
         expect(JSON.parse(statusJsonResult.stdout.trim())).toMatchObject(expectedAuth);
         expect(JSON.parse(doctorJsonResult.stdout.trim())).toMatchObject(expectedAuth);
         for (const output of [statusText.stdout, doctorText.stdout]) {
-          expect(output).toContain("auth=fx login");
+          expect(output).toContain("auth=lia login");
           expect(output).toContain("auth_refreshable=true");
           expect(output).toContain("team=vercel-labs");
         }
@@ -1413,14 +1413,14 @@ describe("cli: status", () => {
   test(
     "status and doctor inspect an expired login without refreshing it",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-status-expired-auth-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-status-expired-auth-"));
       const requestCatcher = startRequestCatcher();
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
         mkdirSync(home);
         mkdirSync(workspace);
-        writeSeededFxAuth(
+        writeSeededLiaAuth(
           home,
           "team_123",
           requestCatcher.issuerUrl,
@@ -1429,18 +1429,18 @@ describe("cli: status", () => {
         const env = {
           ...NO_GATEWAY_AUTH,
           HOME: realpathSync(home),
-          FX_DISABLE_KEYCHAIN: "1",
-          FX_TEST_OAUTH_ISSUER_URL: requestCatcher.issuerUrl,
+          LIA_DISABLE_KEYCHAIN: "1",
+          LIA_TEST_OAUTH_ISSUER_URL: requestCatcher.issuerUrl,
         };
         const cwd = realpathSync(workspace);
 
-        const status = await runFx(["status", "--json"], { cwd, env });
-        const doctor = await runFx(["doctor", "--json"], { cwd, env });
+        const status = await runLia(["status", "--json"], { cwd, env });
+        const doctor = await runLia(["doctor", "--json"], { cwd, env });
 
         expect(status.code).toBe(0);
         expect(doctor.code).toBe(0);
         const expectedAuth = {
-          auth: "fx login",
+          auth: "lia login",
           auth_refreshable: true,
           team: "vercel-labs",
         };
@@ -1458,19 +1458,19 @@ describe("cli: status", () => {
   test(
     "a new status process keeps normal credential precedence",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-status-precedence-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-status-precedence-"));
       try {
-        writeSeededFxAuth(root, "team_123");
+        writeSeededLiaAuth(root, "team_123");
         const envToken = "preferred-environment-token";
         const env = {
           HOME: realpathSync(root),
           VERCEL_OIDC_TOKEN: undefined,
           AI_GATEWAY_API_KEY: envToken,
-          FX_DISABLE_KEYCHAIN: "1",
+          LIA_DISABLE_KEYCHAIN: "1",
         };
 
-        const status = await runFx(["status", "--json"], { env });
-        const doctor = await runFx(["doctor", "--json"], { env });
+        const status = await runLia(["status", "--json"], { env });
+        const doctor = await runLia(["doctor", "--json"], { env });
 
         const expectedAuth = {
           auth: "AI_GATEWAY_API_KEY",
@@ -1488,9 +1488,9 @@ describe("cli: status", () => {
   );
 
   test(
-    "fx status --json returns valid status JSON",
+    "lia status --json returns valid status JSON",
     async () => {
-      const r = await runFx(["status", "--json"]);
+      const r = await runLia(["status", "--json"]);
       expect(r.code).toBe(0);
       const json = JSON.parse(r.stdout.trim());
       expect(json.kind).toBe("status");
@@ -1511,30 +1511,30 @@ describe("cli: status", () => {
   );
 
   test(
-    "fx status reports the effort a new session starts with, workspace override first",
+    "lia status reports the effort a new session starts with, workspace override first",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-status-effort-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-status-effort-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
         const elsewhere = join(root, "elsewhere");
-        mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+        mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
         mkdirSync(workspace);
         mkdirSync(elsewhere);
         const env = { ...NO_GATEWAY_AUTH, HOME: home };
 
-        const unset = await runFx(["status", "--json"], { cwd: realpathSync(elsewhere), env });
+        const unset = await runLia(["status", "--json"], { cwd: realpathSync(elsewhere), env });
         expect(unset.code).toBe(0);
         expect(JSON.parse(unset.stdout.trim()).effort).toBe("auto");
 
         writeFileSync(
-          join(home, ".fx", "settings.json"),
+          join(home, ".lia", "settings.json"),
           JSON.stringify({ effort: "xhigh", workspaces: { [realpathSync(workspace)]: { effort: "low" } } }) + "\n",
           { mode: 0o600 },
         );
-        const inWorkspace = await runFx(["status", "--json"], { cwd: realpathSync(workspace), env });
-        const global = await runFx(["status", "--json"], { cwd: realpathSync(elsewhere), env });
-        const text = await runFx(["status"], { cwd: realpathSync(elsewhere), env });
+        const inWorkspace = await runLia(["status", "--json"], { cwd: realpathSync(workspace), env });
+        const global = await runLia(["status", "--json"], { cwd: realpathSync(elsewhere), env });
+        const text = await runLia(["status"], { cwd: realpathSync(elsewhere), env });
         for (const result of [inWorkspace, global, text]) {
           expect(result.code).toBe(0);
           expect(result.stderr).toBe("");
@@ -1550,19 +1550,19 @@ describe("cli: status", () => {
   );
 
   test(
-    "fx status loads settings left by the retired auto_upgrade and update_channel keys without a warning",
+    "lia status loads settings left by the retired auto_upgrade and update_channel keys without a warning",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-status-retired-update-keys-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-status-retired-update-keys-"));
       try {
         const home = join(root, "home");
-        mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+        mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
         writeFileSync(
-          join(home, ".fx", "settings.json"),
+          join(home, ".lia", "settings.json"),
           JSON.stringify({ auto_upgrade: false, update_channel: "dev", effort: "low" }) + "\n",
           { mode: 0o600 },
         );
 
-        const result = await runFx(["status", "--json"], { env: { ...NO_GATEWAY_AUTH, HOME: home } });
+        const result = await runLia(["status", "--json"], { env: { ...NO_GATEWAY_AUTH, HOME: home } });
         expect(result.code).toBe(0);
         expect(result.stderr).toBe("");
         // The same file's live key still applies, so the file was read, not skipped.
@@ -1575,16 +1575,16 @@ describe("cli: status", () => {
   );
 
   test(
-    "fx mcp list reports bad arguments as JSON when --json is given",
+    "lia mcp list reports bad arguments as JSON when --json is given",
     async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-mcp-list-json-"));
+      const home = mkdtempSync(join(tmpdir(), "lia-mcp-list-json-"));
       try {
         for (const [args, error] of [
           [["mcp", "list", "--bogus", "--json"], "unknown flag --bogus"],
           [["mcp", "list", "--json", "--bogus"], "unknown flag --bogus"],
-          [["mcp", "list", "extra", "--json"], "fx mcp list takes no server name."],
+          [["mcp", "list", "extra", "--json"], "lia mcp list takes no server name."],
         ] as const) {
-          const result = await runFx([...args], { env: { HOME: home } });
+          const result = await runLia([...args], { env: { HOME: home } });
           expect(result.code).toBe(2);
           expect(result.stderr).toBe("");
           expect(JSON.parse(result.stdout)).toEqual({
@@ -1593,10 +1593,10 @@ describe("cli: status", () => {
             code: "InvalidLocalSurfaceArgs",
           });
         }
-        const text = await runFx(["mcp", "list", "--bogus"], { env: { HOME: home } });
+        const text = await runLia(["mcp", "list", "--bogus"], { env: { HOME: home } });
         expect(text.code).toBe(2);
         expect(text.stdout).toBe("");
-        expect(text.stderr).toStartWith("fx mcp list: unknown flag --bogus\nusage: fx mcp list");
+        expect(text.stderr).toStartWith("lia mcp list: unknown flag --bogus\nusage: lia mcp list");
       } finally {
         rmSync(home, { recursive: true, force: true });
       }
@@ -1605,21 +1605,21 @@ describe("cli: status", () => {
   );
 
   test(
-    "fx status --json defaults permission mode to auto",
+    "lia status --json defaults permission mode to auto",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-permission-default-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-permission-default-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
         mkdirSync(home);
         mkdirSync(workspace);
 
-        const r = await runFx(["status", "--json"], {
+        const r = await runLia(["status", "--json"], {
           cwd: realpathSync(workspace),
           env: {
             ...NO_GATEWAY_AUTH,
             HOME: realpathSync(home),
-            FX_PERMISSION_MODE: undefined,
+            LIA_PERMISSION_MODE: undefined,
           },
         });
         expect(r.code).toBe(0);
@@ -1633,9 +1633,9 @@ describe("cli: status", () => {
   );
 
   test(
-    "status and doctor apply an exact FX_MAX_AGENT_STEPS override",
+    "status and doctor apply an exact LIA_MAX_AGENT_STEPS override",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-agent-step-limit-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-agent-step-limit-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
@@ -1644,10 +1644,10 @@ describe("cli: status", () => {
         const env = {
           ...NO_GATEWAY_AUTH,
           HOME: realpathSync(home),
-          FX_MAX_AGENT_STEPS: "3",
+          LIA_MAX_AGENT_STEPS: "3",
         };
 
-        const status = await runFx(["status", "--json"], {
+        const status = await runLia(["status", "--json"], {
           cwd: realpathSync(workspace),
           env,
           timeoutMs: TIMEOUT,
@@ -1655,7 +1655,7 @@ describe("cli: status", () => {
         expect(status.code).toBe(0);
         expect(JSON.parse(status.stdout.trim()).agent_step_limit).toBe(3);
 
-        const doctor = await runFx(["doctor", "--json"], {
+        const doctor = await runLia(["doctor", "--json"], {
           cwd: realpathSync(workspace),
           env,
           timeoutMs: TIMEOUT,
@@ -1675,31 +1675,31 @@ describe("cli: status", () => {
   test(
     "project profile-only settings are ignored before parsing and profile overrides win",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-profile-config-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-profile-config-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
-        mkdirSync(join(home, ".fx"), { recursive: true });
+        mkdirSync(join(home, ".lia"), { recursive: true });
         mkdirSync(workspace);
         const homeRoot = realpathSync(home);
         const workspaceRoot = realpathSync(workspace);
         const env = {
           ...NO_GATEWAY_AUTH,
           HOME: homeRoot,
-          FX_MODEL: undefined,
-          FX_PERMISSION_MODE: undefined,
-          FX_MAX_AGENT_STEPS: undefined,
+          LIA_MODEL: undefined,
+          LIA_PERMISSION_MODE: undefined,
+          LIA_MAX_AGENT_STEPS: undefined,
         };
 
         writeFileSync(
-          join(home, ".fx", "settings.json"),
+          join(home, ".lia", "settings.json"),
           JSON.stringify({
             model: "anthropic/claude-sonnet-4.6",
             permission_mode: "auto",
           }) + "\n",
         );
         writeFileSync(
-          join(workspace, ".fx.json"),
+          join(workspace, ".lia.json"),
           JSON.stringify({
             model: 123,
             permission_mode: "danger",
@@ -1709,7 +1709,7 @@ describe("cli: status", () => {
           }) + "\n",
         );
 
-        const status = await runFx(["status", "--json"], {
+        const status = await runLia(["status", "--json"], {
           cwd: workspaceRoot,
           env,
           timeoutMs: TIMEOUT,
@@ -1720,20 +1720,20 @@ describe("cli: status", () => {
         expect(first.permission_mode).toBe("auto");
         expect(first.agent_step_limit).toBe(7);
         expect(status.stderr).toContain(
-          "fx: config project: ignored_project_user_only_setting; key=model",
+          "lia: config project: ignored_project_user_only_setting; key=model",
         );
         expect(status.stderr).toContain(
-          "fx: config project: ignored_project_user_only_setting; key=permission_mode",
+          "lia: config project: ignored_project_user_only_setting; key=permission_mode",
         );
         expect(status.stderr).toContain(
-          "fx: config project: ignored_project_user_only_setting; key=permission",
+          "lia: config project: ignored_project_user_only_setting; key=permission",
         );
         // statusLine is retired, so a project file's copy is ignored without a warning.
         expect(status.stderr).not.toContain("key=statusLine");
         expect(status.stderr).not.toContain("danger");
 
         writeFileSync(
-          join(home, ".fx", "settings.json"),
+          join(home, ".lia", "settings.json"),
           JSON.stringify({
             model: "anthropic/claude-sonnet-4.6",
             permission_mode: "auto",
@@ -1745,7 +1745,7 @@ describe("cli: status", () => {
           }) + "\n",
         );
 
-        const overridden = await runFx(["status", "--json"], {
+        const overridden = await runLia(["status", "--json"], {
           cwd: workspaceRoot,
           env,
           timeoutMs: TIMEOUT,
@@ -1766,26 +1766,26 @@ describe("cli: status", () => {
     "special settings files fail closed without blocking CLI startup",
     async () => {
       if (platform() === "win32") return;
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-config-special-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-config-special-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
-        const fxDir = join(home, ".fx");
-        mkdirSync(fxDir, { recursive: true, mode: 0o700 });
+        const liaDir = join(home, ".lia");
+        mkdirSync(liaDir, { recursive: true, mode: 0o700 });
         mkdirSync(workspace);
-        chmodSync(fxDir, 0o700);
+        chmodSync(liaDir, 0o700);
 
         const env = {
           ...NO_GATEWAY_AUTH,
           HOME: home,
-          FX_DISABLE_KEYCHAIN: "1",
-          FX_TEST_SKIP_ONBOARDING: "1",
-          FX_SOUND: "0",
+          LIA_DISABLE_KEYCHAIN: "1",
+          LIA_TEST_SKIP_ONBOARDING: "1",
+          LIA_SOUND: "0",
         };
 
-        expect(spawnSync("mkfifo", [join(fxDir, "settings.json")]).status).toBe(0);
+        expect(spawnSync("mkfifo", [join(liaDir, "settings.json")]).status).toBe(0);
         const userStartedAt = Date.now();
-        const user = await runFx(["status", "--json"], {
+        const user = await runLia(["status", "--json"], {
           cwd: workspace,
           env,
           timeoutMs: 3_000,
@@ -1793,12 +1793,12 @@ describe("cli: status", () => {
         expect(Date.now() - userStartedAt).toBeLessThan(3_000);
         expect(user.code).toBe(0);
         expect(JSON.parse(user.stdout)).toMatchObject({ kind: "status" });
-        expect(user.stderr).toContain("fx: config user: durable_path_unsafe");
+        expect(user.stderr).toContain("lia: config user: durable_path_unsafe");
 
-        rmSync(join(fxDir, "settings.json"));
-        expect(spawnSync("mkfifo", [join(workspace, ".fx.json")]).status).toBe(0);
+        rmSync(join(liaDir, "settings.json"));
+        expect(spawnSync("mkfifo", [join(workspace, ".lia.json")]).status).toBe(0);
         const projectStartedAt = Date.now();
-        const project = await runFx(["status", "--json"], {
+        const project = await runLia(["status", "--json"], {
           cwd: workspace,
           env,
           timeoutMs: 3_000,
@@ -1806,7 +1806,7 @@ describe("cli: status", () => {
         expect(Date.now() - projectStartedAt).toBeLessThan(3_000);
         expect(project.code).toBe(0);
         expect(JSON.parse(project.stdout)).toMatchObject({ kind: "status" });
-        expect(project.stderr).toContain("fx: config project: durable_path_unsafe");
+        expect(project.stderr).toContain("lia: config project: durable_path_unsafe");
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -1859,14 +1859,14 @@ describe("cli: usage", () => {
   }
 
   test(
-    "fx usage without a sign-in says so, reads nothing, and leaves the profile alone",
+    "lia usage without a sign-in says so, reads nothing, and leaves the profile alone",
     async () => {
-      const fixture = usageFixture("fx-e2e-usage-none-");
+      const fixture = usageFixture("lia-e2e-usage-none-");
       try {
-        const text = await runFx(["usage"], { env: fixture.env });
+        const text = await runLia(["usage"], { env: fixture.env });
         expect(text.code).toBe(1);
-        expect(text.stdout).toContain("Usage needs an AI Gateway sign-in: run fx login or set an API key.");
-        const json = await runFx(["usage", "--json"], { env: fixture.env });
+        expect(text.stdout).toContain("Usage needs an AI Gateway sign-in: run lia login or set an API key.");
+        const json = await runLia(["usage", "--json"], { env: fixture.env });
         expect(json.code).toBe(1);
         expect(JSON.parse(json.stdout)).toMatchObject({
           kind: "usage",
@@ -1885,12 +1885,12 @@ describe("cli: usage", () => {
   );
 
   test(
-    "fx usage reads an API key's spend from AI Gateway and fetches finished days once a day",
+    "lia usage reads an API key's spend from AI Gateway and fetches finished days once a day",
     async () => {
-      const fixture = usageFixture("fx-e2e-usage-key-");
+      const fixture = usageFixture("lia-e2e-usage-key-");
       const env = { ...fixture.env, AI_GATEWAY_API_KEY: "e2e-usage-key" };
       try {
-        const month = await runFx(["usage", "--json"], { env });
+        const month = await runLia(["usage", "--json"], { env });
         expect(month.code).toBe(0);
         expect(month.stderr).toBe("");
         const report = JSON.parse(month.stdout);
@@ -1916,7 +1916,7 @@ describe("cli: usage", () => {
         }
 
         // Later the same day only today is read again; the cache answers the rest.
-        const week = await runFx(["usage", "--period", "7d"], { env });
+        const week = await runLia(["usage", "--period", "7d"], { env });
         expect(week.code).toBe(0);
         expect(week.stderr).toBe("");
         expect(week.stdout).toContain("Usage (7d, UTC) from AI Gateway");
@@ -1926,7 +1926,7 @@ describe("cli: usage", () => {
 
         // A new UTC day reads its finished days again.
         writeUsageClock(fixture.clock, USAGE_NOW_MS + DAY_MS);
-        const next = await runFx(["usage", "--json", "--period", "today"], { env });
+        const next = await runLia(["usage", "--json", "--period", "today"], { env });
         expect(next.code).toBe(0);
         expect(fixture.fake.reportRanges().slice(4)).toEqual([
           "2026-10-13..2026-10-13",
@@ -1943,17 +1943,17 @@ describe("cli: usage", () => {
   );
 
   test(
-    "fx usage with fx login reads the member's team spend and budget",
+    "lia usage with lia login reads the member's team spend and budget",
     async () => {
-      const fixture = usageFixture("fx-e2e-usage-member-", {
+      const fixture = usageFixture("lia-e2e-usage-member-", {
         budget: {
           users: [{ budget: { limitAmount: 50, currentSpend: 12, refreshPeriod: "monthly" } }],
         },
       });
-      writeSeededFxAuth(fixture.home, "team_e2e", fixture.gateway.baseUrl);
-      const env = { ...fixture.env, FX_TEST_OAUTH_ISSUER_URL: fixture.gateway.baseUrl };
+      writeSeededLiaAuth(fixture.home, "team_e2e", fixture.gateway.baseUrl);
+      const env = { ...fixture.env, LIA_TEST_OAUTH_ISSUER_URL: fixture.gateway.baseUrl };
       try {
-        const json = await runFx(["usage", "--json"], { env });
+        const json = await runLia(["usage", "--json"], { env });
         expect(json.code).toBe(0);
         expect(json.stderr).toBe("");
         expect(JSON.parse(json.stdout)).toMatchObject({
@@ -1971,7 +1971,7 @@ describe("cli: usage", () => {
         expect(budget?.query.get("teamId")).toBe("team_e2e");
         expect(budget?.query.get("scope")).toBe("user");
 
-        const text = await runFx(["usage"], { env });
+        const text = await runLia(["usage"], { env });
         expect(text.code).toBe(0);
         expect(text.stdout).toContain("Budget        $12.00 of $50.00 this month");
         expect(text.stdout).not.toContain(SEEDED_GATEWAY_TOKEN);
@@ -1983,16 +1983,16 @@ describe("cli: usage", () => {
   );
 
   test(
-    "fx usage keeps its cache in FX_HOME",
+    "lia usage keeps its cache in LIA_HOME",
     async () => {
-      const fixture = usageFixture("fx-e2e-usage-fx-home-");
-      const fxHome = join(realpathSync(fixture.root), "profile");
-      const env = { ...fixture.env, AI_GATEWAY_API_KEY: "e2e-usage-key", FX_HOME: fxHome };
+      const fixture = usageFixture("lia-e2e-usage-lia-home-");
+      const liaHome = join(realpathSync(fixture.root), "profile");
+      const env = { ...fixture.env, AI_GATEWAY_API_KEY: "e2e-usage-key", LIA_HOME: liaHome };
       try {
-        const json = await runFx(["usage", "--json"], { env });
+        const json = await runLia(["usage", "--json"], { env });
         expect(json.code).toBe(0);
-        expect(readdirSync(join(fxHome, "usage-cache")).length).toBeGreaterThan(0);
-        expect(existsSync(join(fixture.home, ".fx"))).toBe(false);
+        expect(readdirSync(join(liaHome, "usage-cache")).length).toBeGreaterThan(0);
+        expect(existsSync(join(fixture.home, ".lia"))).toBe(false);
       } finally {
         fixture.stop();
       }
@@ -2001,25 +2001,25 @@ describe("cli: usage", () => {
   );
 
   test(
-    "fx usage keeps the last numbers when AI Gateway refuses the sign-in",
+    "lia usage keeps the last numbers when AI Gateway refuses the sign-in",
     async () => {
       let refuse = false;
-      const fixture = usageFixture("fx-e2e-usage-refused-", {
+      const fixture = usageFixture("lia-e2e-usage-refused-", {
         report: (start, end) =>
           refuse ? new Response("unauthorized", { status: 401 }) : reportRow(start, end),
       });
       const env = { ...fixture.env, AI_GATEWAY_API_KEY: "e2e-usage-key" };
       try {
-        expect((await runFx(["usage", "--json"], { env })).code).toBe(0);
+        expect((await runLia(["usage", "--json"], { env })).code).toBe(0);
         refuse = true;
         // Past the one-minute floor, so the second process fetches again.
         writeUsageClock(fixture.clock, USAGE_NOW_MS + 2 * 60 * 1000);
-        const json = await runFx(["usage", "--json"], { env });
+        const json = await runLia(["usage", "--json"], { env });
         expect(json.code).toBe(1);
         const report = JSON.parse(json.stdout);
         expect(report).toMatchObject({ status: "failed", reason: "refused" });
         expect(report.totals.request_count).toBe(7);
-        const text = await runFx(["usage"], { env });
+        const text = await runLia(["usage"], { env });
         expect(text.stdout).toContain("Refresh failed: AI Gateway refused this sign-in.");
         expect(text.stdout).toContain("Requests      7");
       } finally {
@@ -2032,9 +2032,9 @@ describe("cli: usage", () => {
 
 describe("cli: permissions", () => {
   test(
-    "fx permissions --json returns valid permissions JSON",
+    "lia permissions --json returns valid permissions JSON",
     async () => {
-      const r = await runFx(["permissions", "--json"]);
+      const r = await runLia(["permissions", "--json"]);
       expect(r.code).toBe(0);
       const json = JSON.parse(r.stdout.trim());
       expect(json.kind).toBe("permissions");
@@ -2052,16 +2052,16 @@ describe("cli: permissions", () => {
 
 describe("cli: doctor", () => {
   test(
-    "fx doctor --json returns valid doctor JSON",
+    "lia doctor --json returns valid doctor JSON",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-doctor-json-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-doctor-json-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
         mkdirSync(home);
         mkdirSync(workspace);
 
-        const r = await runFx(["doctor", "--json"], {
+        const r = await runLia(["doctor", "--json"], {
           cwd: realpathSync(workspace),
           env: {
             ...NO_GATEWAY_AUTH,
@@ -2095,16 +2095,16 @@ describe("cli: doctor", () => {
   );
 
   test(
-    "fx doctor --json leaves an empty home unchanged",
+    "lia doctor --json leaves an empty home unchanged",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-doctor-no-create-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-doctor-no-create-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
         mkdirSync(home);
         mkdirSync(workspace);
 
-        const r = await runFx(["doctor", "--json"], {
+        const r = await runLia(["doctor", "--json"], {
           cwd: realpathSync(workspace),
           env: {
             ...NO_GATEWAY_AUTH,
@@ -2115,7 +2115,7 @@ describe("cli: doctor", () => {
 
         expect(r.code).toBe(0);
         expect(JSON.parse(r.stdout.trim()).kind).toBe("doctor");
-        expect(existsSync(join(home, ".fx"))).toBe(false);
+        expect(existsSync(join(home, ".lia"))).toBe(false);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -2124,9 +2124,9 @@ describe("cli: doctor", () => {
   );
 
   test(
-    "fx doctor --json bounds diagnostics while reporting the cache-free session count",
+    "lia doctor --json bounds diagnostics while reporting the cache-free session count",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-doctor-bounded-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-doctor-bounded-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
@@ -2144,9 +2144,9 @@ describe("cli: doctor", () => {
           );
         }
 
-        expect(existsSync(join(home, ".fx", "sessions", "summary.json"))).toBe(false);
+        expect(existsSync(join(home, ".lia", "sessions", "summary.json"))).toBe(false);
 
-        const r = await runFx(["doctor", "--json"], {
+        const r = await runLia(["doctor", "--json"], {
           cwd: workspaceRoot,
           env: {
             ...NO_GATEWAY_AUTH,
@@ -2173,10 +2173,10 @@ describe("cli: doctor", () => {
             expect.objectContaining({
               name: "sessions",
               status: "ok",
-              // Sessions an older fx saved, each converted when first
+              // Sessions an older lia saved, each converted when first
               // opened (D73).
               detail: expect.stringContaining(
-                `${sessionCount} session(s) saved by an older fx`,
+                `${sessionCount} session(s) saved by an older lia`,
               ),
             }),
           ]),
@@ -2191,24 +2191,24 @@ describe("cli: doctor", () => {
 
 describe("cli: logout", () => {
   test(
-    "fx logout revokes refresh and access tokens after local deletion",
+    "lia logout revokes refresh and access tokens after local deletion",
     async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-e2e-logout-revocation-"));
-      const authPath = join(home, ".fx", "auth.json");
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-revocation-"));
+      const authPath = join(home, ".lia", "auth.json");
       const issuer = startLogoutIssuer([200, 200], authPath);
       try {
-        writeSeededFxAuth(home, undefined, issuer.issuerUrl);
+        writeSeededLiaAuth(home, undefined, issuer.issuerUrl);
 
-        const logout = await runFx(["logout"], {
+        const logout = await runLia(["logout"], {
           env: {
             ...NO_GATEWAY_AUTH,
             HOME: realpathSync(home),
-            FX_DISABLE_KEYCHAIN: "1",
+            LIA_DISABLE_KEYCHAIN: "1",
           },
         });
 
         expect(logout.code).toBe(0);
-        expect(logout.stdout).toBe("Signed out of fx.\n");
+        expect(logout.stdout).toBe("Signed out of lia.\n");
         expect(logout.stderr).toBe("");
         expect(existsSync(authPath)).toBe(false);
         expect(issuer.requests).toEqual([
@@ -2245,24 +2245,24 @@ describe("cli: logout", () => {
   );
 
   test(
-    "fx logout warns once and sends no tokens without a revocation endpoint",
+    "lia logout warns once and sends no tokens without a revocation endpoint",
     async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-e2e-logout-no-revocation-"));
-      const authPath = join(home, ".fx", "auth.json");
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-no-revocation-"));
+      const authPath = join(home, ".lia", "auth.json");
       const issuer = startLogoutIssuer([], authPath, null);
       try {
-        writeSeededFxAuth(home, undefined, issuer.issuerUrl);
+        writeSeededLiaAuth(home, undefined, issuer.issuerUrl);
 
-        const logout = await runFx(["logout"], {
+        const logout = await runLia(["logout"], {
           env: {
             ...NO_GATEWAY_AUTH,
             HOME: realpathSync(home),
-            FX_DISABLE_KEYCHAIN: "1",
+            LIA_DISABLE_KEYCHAIN: "1",
           },
         });
 
         expect(logout.code).toBe(0);
-        expect(logout.stdout).toBe("Signed out of fx.\n");
+        expect(logout.stdout).toBe("Signed out of lia.\n");
         expect(logout.stderr).toBe(
           "Warning: signed out locally, but the remote session could not be revoked.\n",
         );
@@ -2279,25 +2279,25 @@ describe("cli: logout", () => {
   );
 
   test(
-    "fx logout warns once and sends no tokens to an invalid revocation endpoint",
+    "lia logout warns once and sends no tokens to an invalid revocation endpoint",
     async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-e2e-logout-invalid-revocation-"));
-      const authPath = join(home, ".fx", "auth.json");
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-invalid-revocation-"));
+      const authPath = join(home, ".lia", "auth.json");
       const catcher = startRequestCatcher();
       const issuer = startLogoutIssuer([], authPath, catcher.endpoint);
       try {
-        writeSeededFxAuth(home, undefined, issuer.issuerUrl);
+        writeSeededLiaAuth(home, undefined, issuer.issuerUrl);
 
-        const logout = await runFx(["logout"], {
+        const logout = await runLia(["logout"], {
           env: {
             ...NO_GATEWAY_AUTH,
             HOME: realpathSync(home),
-            FX_DISABLE_KEYCHAIN: "1",
+            LIA_DISABLE_KEYCHAIN: "1",
           },
         });
 
         expect(logout.code).toBe(0);
-        expect(logout.stdout).toBe("Signed out of fx.\n");
+        expect(logout.stdout).toBe("Signed out of lia.\n");
         expect(catcher.requests).toEqual([]);
         expect(logout.stderr).toBe(
           "Warning: signed out locally, but the remote session could not be revoked.\n",
@@ -2316,25 +2316,25 @@ describe("cli: logout", () => {
   );
 
   test(
-    "fx logout removes an unsafe saved login and warns that it could not revoke it",
+    "lia logout removes an unsafe saved login and warns that it could not revoke it",
     async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-e2e-logout-rejected-login-"));
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-rejected-login-"));
       const issuer = startLogoutIssuer([200, 200]);
-      const authPath = join(home, ".fx", "auth.json");
+      const authPath = join(home, ".lia", "auth.json");
       try {
-        writeSeededFxAuth(home, undefined, issuer.issuerUrl);
+        writeSeededLiaAuth(home, undefined, issuer.issuerUrl);
         chmodSync(authPath, 0o644);
 
-        const logout = await runFx(["logout"], {
+        const logout = await runLia(["logout"], {
           env: {
             ...NO_GATEWAY_AUTH,
             HOME: realpathSync(home),
-            FX_DISABLE_KEYCHAIN: "1",
+            LIA_DISABLE_KEYCHAIN: "1",
           },
         });
 
         expect(logout.code).toBe(0);
-        expect(logout.stdout).toBe("Signed out of fx.\n");
+        expect(logout.stdout).toBe("Signed out of lia.\n");
         expect(logout.stderr).toBe(
           "Warning: signed out locally, but the remote session could not be revoked.\n",
         );
@@ -2357,34 +2357,34 @@ describe("cli: logout", () => {
   );
 
   test(
-    "fx logout fails when the saved login cannot be deleted",
+    "lia logout fails when the saved login cannot be deleted",
     async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-e2e-logout-delete-failure-"));
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-delete-failure-"));
       const issuer = startLogoutIssuer([200, 200]);
-      const fxDir = join(home, ".fx");
-      const authPath = join(fxDir, "auth.json");
+      const liaDir = join(home, ".lia");
+      const authPath = join(liaDir, "auth.json");
       try {
-        writeSeededFxAuth(home, undefined, issuer.issuerUrl);
-        chmodSync(fxDir, 0o500);
+        writeSeededLiaAuth(home, undefined, issuer.issuerUrl);
+        chmodSync(liaDir, 0o500);
 
         const env = {
           ...NO_GATEWAY_AUTH,
           HOME: realpathSync(home),
-          FX_DISABLE_KEYCHAIN: "1",
+          LIA_DISABLE_KEYCHAIN: "1",
         };
-        const logout = await runFx(["logout"], { env });
-        const status = await runFx(["status", "--json"], { env });
+        const logout = await runLia(["logout"], { env });
+        const status = await runLia(["status", "--json"], { env });
 
         expect(logout.code).toBe(1);
         expect(logout.stdout).toBe("");
         expect(logout.stderr).toBe(
-          "fx logout: failed to durably remove saved fx login\n",
+          "lia logout: failed to durably remove saved lia login\n",
         );
         expect(existsSync(authPath)).toBe(true);
-        expect(JSON.parse(status.stdout).auth).toBe("fx login");
+        expect(JSON.parse(status.stdout).auth).toBe("lia login");
         expect(issuer.requests).toEqual([]);
       } finally {
-        chmodSync(fxDir, 0o700);
+        chmodSync(liaDir, 0o700);
         issuer.stop();
         rmSync(home, { recursive: true, force: true });
       }
@@ -2393,29 +2393,29 @@ describe("cli: logout", () => {
   );
 
   test(
-    "fx logout deletes only the saved login and keeps environment credentials available",
+    "lia logout deletes only the saved login and keeps environment credentials available",
     async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-e2e-logout-env-"));
-      const authPath = join(home, ".fx", "auth.json");
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-env-"));
+      const authPath = join(home, ".lia", "auth.json");
       const issuer = startLogoutIssuer([500, 200], authPath);
       const oidcToken = "logout-oidc-token";
       const apiToken = "logout-api-key-token";
       try {
-        writeSeededFxAuth(home, undefined, issuer.issuerUrl);
+        writeSeededLiaAuth(home, undefined, issuer.issuerUrl);
         const env = {
           HOME: realpathSync(home),
           VERCEL_OIDC_TOKEN: oidcToken,
           AI_GATEWAY_API_KEY: apiToken,
-          FX_DISABLE_KEYCHAIN: "1",
+          LIA_DISABLE_KEYCHAIN: "1",
         };
 
-        const logout = await runFx(["logout"], { env });
+        const logout = await runLia(["logout"], { env });
         expect(logout.code).toBe(0);
-        expect(logout.stdout).toBe("Signed out of fx.\n");
+        expect(logout.stdout).toBe("Signed out of lia.\n");
         expect(logout.stderr).toBe(
           "Warning: signed out locally, but the remote session could not be revoked.\n",
         );
-        expect(existsSync(join(home, ".fx", "auth.json"))).toBe(false);
+        expect(existsSync(join(home, ".lia", "auth.json"))).toBe(false);
         expect(issuer.requests).toEqual([
           { method: "GET", path: "/.well-known/openid-configuration" },
           {
@@ -2434,10 +2434,10 @@ describe("cli: logout", () => {
           },
         ]);
 
-        const oidcStatus = await runFx(["status", "--json"], { env });
+        const oidcStatus = await runLia(["status", "--json"], { env });
         const apiEnv = { ...env, VERCEL_OIDC_TOKEN: undefined };
-        const apiStatus = await runFx(["status", "--json"], { env: apiEnv });
-        const doctor = await runFx(["doctor", "--json"], { env: apiEnv });
+        const apiStatus = await runLia(["status", "--json"], { env: apiEnv });
+        const doctor = await runLia(["doctor", "--json"], { env: apiEnv });
         expect(JSON.parse(oidcStatus.stdout)).toMatchObject({
           auth: "VERCEL_OIDC_TOKEN",
           auth_refreshable: false,
@@ -2477,22 +2477,22 @@ describe("cli: logout", () => {
   );
 
   test(
-    "fx logout leaves an active API key unchanged when no login exists",
+    "lia logout leaves an active API key unchanged when no login exists",
     async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-e2e-logout-no-login-"));
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-no-login-"));
       const apiToken = "logout-existing-api-key";
       try {
         const env = {
           HOME: realpathSync(home),
           VERCEL_OIDC_TOKEN: undefined,
           AI_GATEWAY_API_KEY: apiToken,
-          FX_DISABLE_KEYCHAIN: "1",
+          LIA_DISABLE_KEYCHAIN: "1",
         };
-        const logout = await runFx(["logout"], { env });
-        const status = await runFx(["status", "--json"], { env });
+        const logout = await runLia(["logout"], { env });
+        const status = await runLia(["status", "--json"], { env });
 
         expect(logout.code).toBe(0);
-        expect(logout.stdout).toBe("No fx login session found.\n");
+        expect(logout.stdout).toBe("No lia login session found.\n");
         expect(logout.stderr).toBe("");
         expect(JSON.parse(status.stdout)).toMatchObject({
           auth: "AI_GATEWAY_API_KEY",
@@ -2508,12 +2508,12 @@ describe("cli: logout", () => {
   );
 
   test.skipIf(platform() !== "darwin")(
-    "fx logout leaves the macOS Keychain API key untouched",
+    "lia logout leaves the macOS Keychain API key untouched",
     async () => {
       const runId = `${process.pid}-${Date.now()}`;
-      const account = `fx-e2e-logout-${runId}`;
+      const account = `lia-e2e-logout-${runId}`;
       const keychainToken = `vca_fake_logout_key_${runId}`;
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-logout-keychain-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-logout-keychain-"));
       const home = join(root, "home");
       mkdirSync(join(home, "Library"), { recursive: true });
       symlinkSync(
@@ -2530,15 +2530,15 @@ describe("cli: logout", () => {
           { encoding: "utf8" },
         );
         expect(store.status, store.stderr).toBe(0);
-        writeSeededFxAuth(home, undefined, issuer.issuerUrl);
+        writeSeededLiaAuth(home, undefined, issuer.issuerUrl);
 
         const env = {
           ...NO_GATEWAY_AUTH,
           HOME: realpathSync(home),
           USER: account,
         };
-        const logout = await runFx(["logout"], { env });
-        const status = await runFx(["status", "--json"], { env });
+        const logout = await runLia(["logout"], { env });
+        const status = await runLia(["status", "--json"], { env });
         const stored = spawnSync(
           "/usr/bin/security",
           ["find-generic-password", "-a", account, "-s", KEYCHAIN_SERVICE, "-w"],
@@ -2547,10 +2547,10 @@ describe("cli: logout", () => {
 
         expect(logout.code).toBe(0);
         expect(logout.stderr).toBe("");
-        expect(existsSync(join(home, ".fx", "auth.json"))).toBe(false);
+        expect(existsSync(join(home, ".lia", "auth.json"))).toBe(false);
         expect(stored.status).toBe(0);
         expect(stored.stdout.trim()).toBe(keychainToken);
-        expect(JSON.parse(status.stdout).auth).not.toBe("fx login");
+        expect(JSON.parse(status.stdout).auth).not.toBe("lia login");
         expect(logout.stdout).not.toContain(keychainToken);
         expect(status.stdout).not.toContain(keychainToken);
       } finally {
@@ -2569,42 +2569,42 @@ describe("cli: logout", () => {
 
 describe("cli: setup", () => {
   test(
-    "fx setup is a top-level command and fails cleanly when Keychain is disabled",
+    "lia setup is a top-level command and fails cleanly when Keychain is disabled",
     async () => {
-      const r = await runFx(["setup"], {
-        env: { ...NO_GATEWAY_AUTH, FX_DISABLE_KEYCHAIN: "1" },
+      const r = await runLia(["setup"], {
+        env: { ...NO_GATEWAY_AUTH, LIA_DISABLE_KEYCHAIN: "1" },
       });
       expect(r.code).toBe(1);
       expect(r.stdout).toBe("");
       expect(r.stderr).toBe(
-        "fx setup is deprecated and stops working in fx 0.0.18; use fx login vercel --api-key\n" +
-          "fx setup: stored API keys are disabled by FX_DISABLE_KEYCHAIN\n",
+        "lia setup is deprecated and stops working in lia 0.0.18; use lia login vercel --api-key\n" +
+          "lia setup: stored API keys are disabled by LIA_DISABLE_KEYCHAIN\n",
       );
     },
     TIMEOUT,
   );
 
   test(
-    "fx login --api-key replaces fx setup and is only for vercel",
+    "lia login --api-key replaces lia setup and is only for vercel",
     async () => {
       for (const args of [["login", "--api-key"], ["login", "vercel", "--api-key"]]) {
-        const disabled = await runFx(args, { env: { ...NO_GATEWAY_AUTH, FX_DISABLE_KEYCHAIN: "1" } });
+        const disabled = await runLia(args, { env: { ...NO_GATEWAY_AUTH, LIA_DISABLE_KEYCHAIN: "1" } });
         expect(disabled.code).toBe(1);
         expect(disabled.stdout).toBe("");
-        expect(disabled.stderr).toBe("fx login: stored API keys are disabled by FX_DISABLE_KEYCHAIN\n");
+        expect(disabled.stderr).toBe("lia login: stored API keys are disabled by LIA_DISABLE_KEYCHAIN\n");
       }
 
-      const noTerminal = await runFx(["login", "--api-key"], { env: { ...NO_GATEWAY_AUTH } });
+      const noTerminal = await runLia(["login", "--api-key"], { env: { ...NO_GATEWAY_AUTH } });
       expect(noTerminal.code).toBe(1);
-      expect(noTerminal.stderr).toBe("fx login: an interactive terminal is required to paste an API key\n");
+      expect(noTerminal.stderr).toBe("lia login: an interactive terminal is required to paste an API key\n");
 
-      const usage = "usage: fx login [vercel] [--api-key]\n";
+      const usage = "usage: lia login [vercel] [--api-key]\n";
       const cases: [string[], string][] = [
-        [["login", "--bogus"], "fx login: unknown flag --bogus\n" + usage],
+        [["login", "--bogus"], "lia login: unknown flag --bogus\n" + usage],
         [["login", "vercel", "extra"], usage],
       ];
       for (const [args, stderr] of cases) {
-        const r = await runFx(args, { env: { ...NO_GATEWAY_AUTH } });
+        const r = await runLia(args, { env: { ...NO_GATEWAY_AUTH } });
         expect(r.code).toBe(2);
         expect(r.stdout).toBe("");
         expect(r.stderr).toBe(stderr);
@@ -2614,10 +2614,10 @@ describe("cli: setup", () => {
   );
 
   test(
-    "fx setup never invokes the configured Vercel CLI",
+    "lia setup never invokes the configured Vercel CLI",
     async () => {
       const runId = `${process.pid}-${Date.now()}`;
-      const fakeDir = mkdtempSync(join(tmpdir(), "fx-e2e-vercel-cli-"));
+      const fakeDir = mkdtempSync(join(tmpdir(), "lia-e2e-vercel-cli-"));
       const fakeCli = join(fakeDir, "vc");
       const invocationLog = join(fakeDir, "invoked");
 
@@ -2632,17 +2632,17 @@ exit 99
       );
 
       try {
-        const r = await runFx(["setup"], {
+        const r = await runLia(["setup"], {
           env: {
             ...NO_GATEWAY_AUTH,
-            USER: `fx-e2e-setup-${runId}`,
-            FX_VERCEL_CLI_PATH: fakeCli,
+            USER: `lia-e2e-setup-${runId}`,
+            LIA_VERCEL_CLI_PATH: fakeCli,
           },
           timeoutMs: TIMEOUT,
         });
         expect(r.code).toBe(1);
         expect(r.stdout).toBe("");
-        expect(r.stderr).toContain("fx setup is deprecated and stops working in fx 0.0.18; use fx login vercel --api-key\n");
+        expect(r.stderr).toContain("lia setup is deprecated and stops working in lia 0.0.18; use lia login vercel --api-key\n");
         expect(r.stderr).toContain("interactive terminal is required");
         expect(existsSync(invocationLog)).toBe(false);
       } finally {
@@ -2658,17 +2658,17 @@ describe("cli: stored key file backend", () => {
   test.skipIf(platform() === "darwin")(
     "a 0600 key file resolves, and a loosened one is refused rather than reported absent",
     async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-stored-key-file-"));
-      const fxDir = join(home, ".fx");
-      mkdirSync(fxDir, { recursive: true, mode: 0o700 });
-      chmodSync(fxDir, 0o700);
-      const keyPath = join(fxDir, "api-key");
+      const home = mkdtempSync(join(tmpdir(), "lia-stored-key-file-"));
+      const liaDir = join(home, ".lia");
+      mkdirSync(liaDir, { recursive: true, mode: 0o700 });
+      chmodSync(liaDir, 0o700);
+      const keyPath = join(liaDir, "api-key");
       writeFileSync(keyPath, "vca_file_backend_key", { mode: 0o600 });
       chmodSync(keyPath, 0o600);
       const env = { ...NO_GATEWAY_AUTH, HOME: realpathSync(home) };
 
       try {
-        const readable = await runFx(["status", "--json"], { env });
+        const readable = await runLia(["status", "--json"], { env });
         expect(readable.code).toBe(0);
         const readableJson = JSON.parse(readable.stdout);
         expect(readableJson.auth).toBe("stored API key (profile file)");
@@ -2676,7 +2676,7 @@ describe("cli: stored key file backend", () => {
         expect(readable.stdout).not.toContain("vca_file_backend_key");
 
         chmodSync(keyPath, 0o644);
-        const refused = await runFx(["status", "--json"], { env });
+        const refused = await runLia(["status", "--json"], { env });
         expect(refused.code).toBe(0);
         const refusedJson = JSON.parse(refused.stdout);
         expect(refusedJson.auth).toBe("missing");
@@ -2685,7 +2685,7 @@ describe("cli: stored key file backend", () => {
         expect(refusedJson.auth_help).not.toBe(MISSING_AUTH_MESSAGE);
 
         rmSync(keyPath);
-        const absent = await runFx(["status", "--json"], { env });
+        const absent = await runLia(["status", "--json"], { env });
         const absentJson = JSON.parse(absent.stdout);
         expect(absentJson.auth).toBe("missing");
         expect(absentJson.auth_help).toBe(MISSING_AUTH_MESSAGE);
@@ -2699,12 +2699,12 @@ describe("cli: stored key file backend", () => {
 
 describe("cli: Keychain authentication", () => {
   test.skipIf(platform() !== "darwin")(
-    "fx ask reads an existing Keychain credential without onboarding",
+    "lia ask reads an existing Keychain credential without onboarding",
     async () => {
       const runId = `${process.pid}-${Date.now()}`;
-      const account = `fx-e2e-ask-${runId}`;
+      const account = `lia-e2e-ask-${runId}`;
       const fakeKey = `vca_fake_ask_key_${runId}`;
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-ask-keychain-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-ask-keychain-"));
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       mkdirSync(join(home, "Library"), { recursive: true });
@@ -2757,7 +2757,7 @@ describe("cli: Keychain authentication", () => {
         expect(lookup.status, lookup.stderr).toBe(0);
         expect(lookup.stdout.trim()).toBe(fakeKey);
 
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -2771,11 +2771,11 @@ describe("cli: Keychain authentication", () => {
               ...NO_GATEWAY_AUTH,
               HOME: realpathSync(home),
               USER: account,
-              FX_GATEWAY_BASE_URL: gateway.baseUrl,
-              FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_MODEL: FAKE_GATEWAY_MODEL,
-              FX_AUTO_UPGRADE: "0",
+              LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+              LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_MODEL: FAKE_GATEWAY_MODEL,
+              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: TIMEOUT,
           },
@@ -2787,7 +2787,7 @@ describe("cli: Keychain authentication", () => {
           "Keychain ask complete",
         );
         expect(result.stdout).not.toContain(fakeKey);
-        expect(existsSync(join(home, ".fx"))).toBe(false);
+        expect(existsSync(join(home, ".lia"))).toBe(false);
         expect(gateway.requests).toHaveLength(1);
         expect(gateway.requests[0]!.headers.get("authorization")).toBe(
           `Bearer ${fakeKey}`,
@@ -2825,7 +2825,7 @@ describe("cli: read-only no-create matrix", () => {
     test(
       `${probe.args.join(" ")} leaves an empty home unchanged`,
       async () => {
-        const root = mkdtempSync(join(tmpdir(), "fx-e2e-no-create-"));
+        const root = mkdtempSync(join(tmpdir(), "lia-e2e-no-create-"));
         try {
           const home = join(root, "home");
           const workspace = join(root, "workspace");
@@ -2833,12 +2833,12 @@ describe("cli: read-only no-create matrix", () => {
           mkdirSync(workspace);
           const before = snapshotTree(home);
 
-          const result = await runFx([...probe.args], {
+          const result = await runLia([...probe.args], {
             cwd: realpathSync(workspace),
             env: {
               ...NO_GATEWAY_AUTH,
               HOME: realpathSync(home),
-              FX_TEST_FAIL_ON_DURABLE_MUTATION: "1",
+              LIA_TEST_FAIL_ON_DURABLE_MUTATION: "1",
             },
             timeoutMs: TIMEOUT,
           });
@@ -2854,7 +2854,7 @@ describe("cli: read-only no-create matrix", () => {
             expect(result.stderr).toBe("");
           }
           expect(snapshotTree(home)).toEqual(before);
-          expect(existsSync(join(home, ".fx"))).toBe(false);
+          expect(existsSync(join(home, ".lia"))).toBe(false);
         } finally {
           rmSync(root, { recursive: true, force: true });
         }
@@ -2868,7 +2868,7 @@ describe("cli: missing durable home", () => {
   test(
     "read-only commands tolerate a nonexistent HOME and saved ask bootstraps it",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-missing-home-path-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-missing-home-path-"));
       const home = join(root, "missing-home");
       const workspace = join(root, "workspace");
       const gateway = startFakeGateway([
@@ -2880,11 +2880,11 @@ describe("cli: missing durable home", () => {
         const baseEnv = {
           HOME: home,
           VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
-          FX_DISABLE_KEYCHAIN: "1",
+          LIA_AUTO_UPGRADE: "0",
+          LIA_DISABLE_KEYCHAIN: "1",
         };
 
-        const status = await runFx(["status", "--json"], {
+        const status = await runLia(["status", "--json"], {
           cwd,
           env: { ...baseEnv, AI_GATEWAY_API_KEY: undefined },
           timeoutMs: TIMEOUT,
@@ -2894,7 +2894,7 @@ describe("cli: missing durable home", () => {
         expect(JSON.parse(status.stdout).kind).toBe("status");
         expect(existsSync(home)).toBe(false);
 
-        const listed = await runFx(["sessions", "--json"], {
+        const listed = await runLia(["sessions", "--json"], {
           cwd,
           env: { ...baseEnv, AI_GATEWAY_API_KEY: undefined },
           timeoutMs: TIMEOUT,
@@ -2907,16 +2907,16 @@ describe("cli: missing durable home", () => {
         });
         expect(existsSync(home)).toBe(false);
 
-        const asked = await runFx(
+        const asked = await runLia(
           ["ask", "--json", "--auto", "Persist under the new home."],
           {
             cwd,
             env: {
               ...baseEnv,
               AI_GATEWAY_API_KEY: "missing-home-key",
-              FX_GATEWAY_BASE_URL: gateway.baseUrl,
-              FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_MODEL: FAKE_GATEWAY_MODEL,
+              LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+              LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_MODEL: FAKE_GATEWAY_MODEL,
             },
             timeoutMs: TIMEOUT,
           },
@@ -2925,7 +2925,7 @@ describe("cli: missing durable home", () => {
         expect(JSON.parse(asked.stdout).output.trim()).toBe(
           "missing home persisted",
         );
-        expect(existsSync(join(home, ".fx", "sessions"))).toBe(true);
+        expect(existsSync(join(home, ".lia", "sessions"))).toBe(true);
         expect(gateway.requests).toHaveLength(1);
       } finally {
         gateway.stop();
@@ -2938,7 +2938,7 @@ describe("cli: missing durable home", () => {
   test(
     "session commands fail precisely while doctor remains available without HOME",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-no-home-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-no-home-"));
       try {
         const workspace = join(root, "workspace");
         mkdirSync(workspace);
@@ -2953,7 +2953,7 @@ describe("cli: missing durable home", () => {
           ["session", "last", "--json"],
           ["session", "--id", "missing.valid-id", "--json"],
         ]) {
-          const result = await runFx(args, { cwd, env, timeoutMs: TIMEOUT });
+          const result = await runLia(args, { cwd, env, timeoutMs: TIMEOUT });
           expect(result.code).toBe(1);
           expect(result.stderr).toBe("");
           expect(JSON.parse(result.stdout)).toEqual(
@@ -2963,7 +2963,7 @@ describe("cli: missing durable home", () => {
           );
         }
 
-        const doctor = await runFx(["doctor", "--json"], {
+        const doctor = await runLia(["doctor", "--json"], {
           cwd,
           env,
           timeoutMs: TIMEOUT,
@@ -2987,11 +2987,11 @@ describe("cli: missing durable home", () => {
 
 describe("cli: sessions", () => {
   test(
-    "fx sessions --json returns valid sessions JSON",
+    "lia sessions --json returns valid sessions JSON",
     async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-e2e-sessions-empty-"));
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-sessions-empty-"));
       try {
-        const r = await runFx(["sessions", "--json"], { env: { HOME: home } });
+        const r = await runLia(["sessions", "--json"], { env: { HOME: home } });
         expect(r.code).toBe(0);
         const json = JSON.parse(r.stdout.trim());
         expect(json.kind).toBe("sessions");
@@ -3005,16 +3005,16 @@ describe("cli: sessions", () => {
   );
 
   test(
-    "fx sessions text shows named, unnamed, and renamed sessions",
+    "lia sessions text shows named, unnamed, and renamed sessions",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-session-names-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-session-names-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
-        const sessionsDir = join(home, ".fx", "sessions");
+        const sessionsDir = join(home, ".lia", "sessions");
         mkdirSync(sessionsDir, { recursive: true, mode: 0o700 });
         mkdirSync(workspace);
-        chmodSync(join(home, ".fx"), 0o700);
+        chmodSync(join(home, ".lia"), 0o700);
         chmodSync(sessionsDir, 0o700);
         const workspaceRoot = realpathSync(workspace);
         writeConversationSession(home, workspaceRoot, "named-session", {
@@ -3033,7 +3033,7 @@ describe("cli: sessions", () => {
         });
 
         // Updated times show in the local zone, fixed here at five and a half hours east of UTC.
-        const first = await runFx(["sessions"], {
+        const first = await runLia(["sessions"], {
           cwd: workspaceRoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH, TZ: "IST-5:30" },
           timeoutMs: TIMEOUT,
@@ -3052,7 +3052,7 @@ describe("cli: sessions", () => {
         expect(first.stdout).not.toContain("updated_at_ms");
         expect(first.stdout).not.toContain("language=");
 
-        const structured = await runFx(["sessions", "--json"], {
+        const structured = await runLia(["sessions", "--json"], {
           cwd: workspaceRoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH },
           timeoutMs: TIMEOUT,
@@ -3071,7 +3071,7 @@ describe("cli: sessions", () => {
         writeFileSync(namedPath, JSON.stringify(renamedMetadata) + "\n", {
           mode: 0o600,
         });
-        const renamed = await runFx(["sessions"], {
+        const renamed = await runLia(["sessions"], {
           cwd: workspaceRoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH },
           timeoutMs: TIMEOUT,
@@ -3090,9 +3090,9 @@ describe("cli: sessions", () => {
   );
 
   test(
-    "fx sessions text applies daylight saving time for each session's own date",
+    "lia sessions text applies daylight saving time for each session's own date",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-session-dst-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-session-dst-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
@@ -3109,7 +3109,7 @@ describe("cli: sessions", () => {
           updatedAtMs: 1_700_000_000_123,
         });
 
-        const listed = await runFx(["sessions"], {
+        const listed = await runLia(["sessions"], {
           cwd: workspaceRoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH, TZ: "EST5EDT,M3.2.0,M11.1.0" },
           timeoutMs: TIMEOUT,
@@ -3132,14 +3132,14 @@ describe("cli: sessions", () => {
   test(
     "session listing pages direct metadata without an index",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-session-pages-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-session-pages-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
-        const sessionsDir = join(home, ".fx", "sessions");
+        const sessionsDir = join(home, ".lia", "sessions");
         mkdirSync(sessionsDir, { recursive: true, mode: 0o700 });
         mkdirSync(workspace);
-        chmodSync(join(home, ".fx"), 0o700);
+        chmodSync(join(home, ".lia"), 0o700);
         chmodSync(sessionsDir, 0o700);
         const workspaceRoot = realpathSync(workspace);
         for (let index = 0; index < 201; index += 1) {
@@ -3152,7 +3152,7 @@ describe("cli: sessions", () => {
         }
         expect(existsSync(join(sessionsDir, "index.json"))).toBe(false);
 
-        const first = await runFx(["sessions", "--json"], {
+        const first = await runLia(["sessions", "--json"], {
           cwd: workspaceRoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH },
           timeoutMs: TIMEOUT,
@@ -3174,7 +3174,7 @@ describe("cli: sessions", () => {
         });
         expect(firstJson.sessions[99].id).toBe("direct-session-00099");
 
-        const second = await runFx(
+        const second = await runLia(
           ["sessions", "--json", "--cursor", firstJson.next_cursor],
           {
             cwd: workspaceRoot,
@@ -3193,7 +3193,7 @@ describe("cli: sessions", () => {
         expect(secondJson.sessions[0].id).toBe("direct-session-00100");
         expect(secondJson.sessions[99].id).toBe("direct-session-00199");
 
-        const one = await runFx(["sessions", "--json", "--limit", "1"], {
+        const one = await runLia(["sessions", "--json", "--limit", "1"], {
           cwd: workspaceRoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH },
           timeoutMs: TIMEOUT,
@@ -3205,7 +3205,7 @@ describe("cli: sessions", () => {
           sessions: [{ id: "direct-session-00000" }],
         });
 
-        const invalid = await runFx(["sessions", "--limit", "0"], {
+        const invalid = await runLia(["sessions", "--limit", "0"], {
           cwd: workspaceRoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH },
           timeoutMs: TIMEOUT,
@@ -3221,7 +3221,7 @@ describe("cli: sessions", () => {
   test(
     "session lists use projections when event logs are unreadable",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-session-projections-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-session-projections-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
@@ -3246,8 +3246,8 @@ describe("cli: sessions", () => {
         );
         expect(fixture.status).toBe(0);
 
-        const before = snapshotTree(join(home, ".fx"));
-        const listed = await runFx(["sessions", "--json"], {
+        const before = snapshotTree(join(home, ".lia"));
+        const listed = await runLia(["sessions", "--json"], {
           cwd: workspaceRoot,
           env: { HOME: home },
           timeoutMs: TIMEOUT,
@@ -3281,9 +3281,9 @@ describe("cli: sessions", () => {
             },
           ],
         });
-        expect(snapshotTree(join(home, ".fx"))).toEqual(before);
+        expect(snapshotTree(join(home, ".lia"))).toEqual(before);
 
-        const latest = await runFx(["session", "last", "--json"], {
+        const latest = await runLia(["session", "last", "--json"], {
           cwd: workspaceRoot,
           env: { HOME: home },
           timeoutMs: TIMEOUT,
@@ -3301,9 +3301,9 @@ describe("cli: sessions", () => {
           history_len: 1,
           conversation_language: "en",
         });
-        expect(snapshotTree(join(home, ".fx"))).toEqual(before);
+        expect(snapshotTree(join(home, ".lia"))).toEqual(before);
 
-        const detail = await runFx(
+        const detail = await runLia(
           ["session", "--id", "benchmark-session-00", "--json"],
           {
             cwd: workspaceRoot,
@@ -3317,8 +3317,8 @@ describe("cli: sessions", () => {
         const failure = JSON.parse(detail.stdout);
         expect(failure.code).toBe("InvalidSessionFormat");
         expect(failure.error).toContain("AccessDenied");
-        expect(failure.error).toContain("run `fx doctor`");
-        expect(snapshotTree(join(home, ".fx"))).toEqual(before);
+        expect(failure.error).toContain("run `lia doctor`");
+        expect(snapshotTree(join(home, ".lia"))).toEqual(before);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -3329,7 +3329,7 @@ describe("cli: sessions", () => {
   test(
     "workspace-scoped session discovery filters list and last by cwd",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-workspace-sessions-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-workspace-sessions-"));
       try {
         const home = join(root, "home");
         const workspaceA = join(root, "workspace-a");
@@ -3350,7 +3350,7 @@ describe("cli: sessions", () => {
           updatedAtMs: 80,
         });
 
-        const listA = await runFx(["sessions", "--json"], {
+        const listA = await runLia(["sessions", "--json"], {
           cwd: workspaceARoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH },
           timeoutMs: TIMEOUT,
@@ -3362,7 +3362,7 @@ describe("cli: sessions", () => {
         expect(jsonA.sessions.map((session: { id: string }) => session.id))
           .toEqual(["workspace-a-latest", "workspace-a-older"]);
 
-        const lastA = await runFx(["session", "last", "--json"], {
+        const lastA = await runLia(["session", "last", "--json"], {
           cwd: workspaceARoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH },
           timeoutMs: TIMEOUT,
@@ -3370,7 +3370,7 @@ describe("cli: sessions", () => {
         expect(lastA.code).toBe(0);
         expect(JSON.parse(lastA.stdout).id).toBe("workspace-a-latest");
 
-        const listB = await runFx(["sessions", "--json"], {
+        const listB = await runLia(["sessions", "--json"], {
           cwd: workspaceBRoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH },
           timeoutMs: TIMEOUT,
@@ -3381,7 +3381,7 @@ describe("cli: sessions", () => {
         expect(jsonB.sessions.map((session: { id: string }) => session.id))
           .toEqual(["workspace-b-newest"]);
 
-        const exactForeign = await runFx(
+        const exactForeign = await runLia(
           ["session", "--id", "workspace-b-newest", "--json"],
           {
             cwd: workspaceARoot,
@@ -3401,7 +3401,7 @@ describe("cli: sessions", () => {
   test(
     "session discovery reports corrupt records and distinguishes an unreadable latest session",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-corrupt-sessions-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-corrupt-sessions-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
@@ -3415,14 +3415,14 @@ describe("cli: sessions", () => {
           ["invalid-json", "{"],
           ["truncated", '{"schema_version":2,"id":"truncated"}'],
         ] as const) {
-          const directory = join(home, ".fx", "sessions", id);
+          const directory = join(home, ".lia", "sessions", id);
           mkdirSync(directory, { recursive: true, mode: 0o700 });
           writeFileSync(join(directory, "session.json"), contents, {
             mode: 0o600,
           });
         }
 
-        const listed = await runFx(["sessions", "--json"], {
+        const listed = await runLia(["sessions", "--json"], {
           cwd: workspaceRoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH },
           timeoutMs: TIMEOUT,
@@ -3435,11 +3435,11 @@ describe("cli: sessions", () => {
           sessions: [{ id: "readable-session" }],
         });
 
-        rmSync(join(home, ".fx", "sessions", "readable-session"), {
+        rmSync(join(home, ".lia", "sessions", "readable-session"), {
           recursive: true,
           force: true,
         });
-        const latest = await runFx(["session", "last", "--json"], {
+        const latest = await runLia(["session", "last", "--json"], {
           cwd: workspaceRoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH },
           timeoutMs: TIMEOUT,
@@ -3459,7 +3459,7 @@ describe("cli: sessions", () => {
   test(
     "profile-wide session discovery recovers sessions after a workspace rename",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-renamed-workspace-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-renamed-workspace-"));
       try {
         const home = join(root, "home");
         const original = join(root, "workspace-before");
@@ -3473,14 +3473,14 @@ describe("cli: sessions", () => {
         renameSync(original, renamed);
         const renamedRoot = realpathSync(renamed);
 
-        const scoped = await runFx(["sessions", "--json"], {
+        const scoped = await runLia(["sessions", "--json"], {
           cwd: renamedRoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH },
           timeoutMs: TIMEOUT,
         });
         expect(JSON.parse(scoped.stdout)).toMatchObject({ count: 0, sessions: [] });
 
-        const recovered = await runFx(["sessions", "--all", "--json"], {
+        const recovered = await runLia(["sessions", "--all", "--json"], {
           cwd: renamedRoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH },
           timeoutMs: TIMEOUT,
@@ -3503,18 +3503,18 @@ describe("cli: sessions", () => {
   );
 
   test(
-    "fx sessions --json ignores malformed and oversized list caches",
+    "lia sessions --json ignores malformed and oversized list caches",
     async () => {
       for (const cached of ["{", "x".repeat(4 * 1024 * 1024 + 1)]) {
-        const root = mkdtempSync(join(tmpdir(), "fx-e2e-sessions-cache-"));
+        const root = mkdtempSync(join(tmpdir(), "lia-e2e-sessions-cache-"));
         try {
           const home = join(root, "home");
           const workspace = join(root, "workspace");
-          mkdirSync(join(home, ".fx", "sessions"), { recursive: true });
+          mkdirSync(join(home, ".lia", "sessions"), { recursive: true });
           mkdirSync(workspace, { recursive: true });
-          writeFileSync(join(home, ".fx", "sessions", "list.json"), cached);
+          writeFileSync(join(home, ".lia", "sessions", "list.json"), cached);
 
-          const r = await runFx(["sessions", "--json"], {
+          const r = await runLia(["sessions", "--json"], {
             cwd: realpathSync(workspace),
             env: { HOME: home },
             timeoutMs: TIMEOUT,
@@ -3536,7 +3536,7 @@ describe("cli: sessions", () => {
   test(
     "exact session flags address special-token and 255-byte IDs literally",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-session-exact-ids-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-session-exact-ids-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
@@ -3553,7 +3553,7 @@ describe("cli: sessions", () => {
         for (const id of ids) writeLegacySession(home, workspaceRoot, id);
 
         for (const id of ids) {
-          const result = await runFx(
+          const result = await runLia(
             ["session", "--id", id, "--json"],
             {
               cwd: workspaceRoot,
@@ -3574,7 +3574,7 @@ describe("cli: sessions", () => {
   test(
     "expected json failures emit machine-readable stdout",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-json-errors-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-json-errors-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
@@ -3609,7 +3609,7 @@ describe("cli: sessions", () => {
         ];
 
         for (const item of cases) {
-          const result = await runFx(item.args, {
+          const result = await runLia(item.args, {
             cwd: workspaceRoot,
             env: { HOME: home, ...NO_GATEWAY_AUTH },
             timeoutMs: TIMEOUT,
@@ -3633,17 +3633,17 @@ describe("cli: sessions", () => {
 
 describe("cli: removed task and background commands", () => {
   test(
-    "fx task, fx tasks, and fx background are not commands",
+    "lia task, lia tasks, and lia background are not commands",
     async () => {
       for (const command of ["task", "tasks"]) {
-        const result = await runFx([command], { env: NO_GATEWAY_AUTH });
+        const result = await runLia([command], { env: NO_GATEWAY_AUTH });
         expect(result.code).toBe(2);
-        expect(result.stderr).toContain(`fx: unknown command ${command} (did you mean ask?)`);
+        expect(result.stderr).toContain(`lia: unknown command ${command} (did you mean ask?)`);
       }
       // A word that isn't close to a command is a first prompt for a session.
-      const background = await runFx(["background"], { env: NO_GATEWAY_AUTH });
+      const background = await runLia(["background"], { env: NO_GATEWAY_AUTH });
       expect(background.code).toBe(1);
-      expect(background.stderr).toContain("fx: this build has no interactive terminal UI; use fx ask or fx acp");
+      expect(background.stderr).toContain("lia: this build has no interactive terminal UI; use lia ask or lia acp");
     },
     TIMEOUT,
   );
@@ -3651,7 +3651,7 @@ describe("cli: removed task and background commands", () => {
   test(
     "legacy tasks files are ignored by ordinary session loading",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-legacy-tasks-ignored-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-legacy-tasks-ignored-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
@@ -3659,11 +3659,11 @@ describe("cli: removed task and background commands", () => {
         mkdirSync(workspace, { recursive: true });
         const workspaceRoot = realpathSync(workspace);
         writeLegacySession(home, workspaceRoot, "legacy-tasks-session");
-        const tasksDir = join(home, ".fx", "sessions", "legacy-tasks-session", "tasks");
+        const tasksDir = join(home, ".lia", "sessions", "legacy-tasks-session", "tasks");
         mkdirSync(tasksDir, { recursive: true });
         writeFileSync(join(tasksDir, "unreadable-legacy-shape.json"), "not json\n");
 
-        const result = await runFx(
+        const result = await runLia(
           ["session", "--id", "legacy-tasks-session", "--json"],
           {
             cwd: workspaceRoot,
@@ -3687,9 +3687,9 @@ function modelsGatewayEnv(home: string, modelsUrl: string) {
     AI_GATEWAY_API_KEY: SEEDED_GATEWAY_TOKEN,
     VERCEL_OIDC_TOKEN: undefined,
     HOME: home,
-    FX_DISABLE_KEYCHAIN: "1",
-    FX_AUTO_UPGRADE: "0",
-    FX_TEST_GATEWAY_MODELS_URL: modelsUrl,
+    LIA_DISABLE_KEYCHAIN: "1",
+    LIA_AUTO_UPGRADE: "0",
+    LIA_TEST_GATEWAY_MODELS_URL: modelsUrl,
   };
 }
 
@@ -3715,7 +3715,7 @@ describe("cli: models", () => {
     },
   ]) {
     test(
-      `fx models renders exact text for ${scenario.name}`,
+      `lia models renders exact text for ${scenario.name}`,
       async () => {
         const home = createIsolatedTestHome();
         const gateway = startFakeGateway([], {
@@ -3728,7 +3728,7 @@ describe("cli: models", () => {
         });
 
         try {
-          const result = await runFx(["models"], {
+          const result = await runLia(["models"], {
             env: {
               ...modelsGatewayEnv(home, `${gateway.baseUrl}/coding-agent/v1/models`),
               ...(scenario.authenticated ? {} : NO_GATEWAY_AUTH),
@@ -3755,7 +3755,7 @@ describe("cli: models", () => {
   }
 
   test(
-    "fx models retries a rejected API key exactly once without authentication",
+    "lia models retries a rejected API key exactly once without authentication",
     async () => {
       for (const rejectedStatus of [401, 403]) {
         const home = createIsolatedTestHome();
@@ -3770,11 +3770,11 @@ describe("cli: models", () => {
         });
 
         try {
-          const result = await runFx(["models", "--json"], {
+          const result = await runLia(["models", "--json"], {
             env: {
               ...modelsGatewayEnv(home, `${gateway.baseUrl}/coding-agent/v1/models`),
-              FX_TRACE_LOG: tracePath,
-              FX_TRACE_SCOPES: "catalog",
+              LIA_TRACE_LOG: tracePath,
+              LIA_TRACE_SCOPES: "catalog",
             },
           });
 
@@ -3814,7 +3814,7 @@ describe("cli: models", () => {
   );
 
   test(
-    "fx models --json describes each Gateway model's name, efforts, and speed lanes",
+    "lia models --json describes each Gateway model's name, efforts, and speed lanes",
     async () => {
       const home = createIsolatedTestHome();
       const gateway = startFakeGateway([], {
@@ -3838,7 +3838,7 @@ describe("cli: models", () => {
       });
 
       try {
-        const result = await runFx(["models", "--json"], {
+        const result = await runLia(["models", "--json"], {
           env: modelsGatewayEnv(home, `${gateway.baseUrl}/coding-agent/v1/models`),
         });
 
@@ -3861,14 +3861,14 @@ describe("cli: models", () => {
   );
 
   test(
-    "fx models preserves network and 5xx failures without anonymous retry",
+    "lia models preserves network and 5xx failures without anonymous retry",
     async () => {
       const unavailableHome = createIsolatedTestHome();
       const gateway = startFakeGateway([], {
         models: () => Response.json({ error: "unavailable" }, { status: 500 }),
       });
       try {
-        const result = await runFx(["models", "--json"], {
+        const result = await runLia(["models", "--json"], {
           env: modelsGatewayEnv(unavailableHome, `${gateway.baseUrl}/coding-agent/v1/models`),
         });
         expect(result.code).not.toBe(0);
@@ -3896,7 +3896,7 @@ describe("cli: models", () => {
         const address = server.address();
         if (address === null || typeof address === "string") throw new Error("missing server address");
         const env = modelsGatewayEnv(home, `http://127.0.0.1:${address.port}/v1/models`);
-        const result = await runFx(["models", "--json"], { env });
+        const result = await runLia(["models", "--json"], { env });
         expect(result.code).not.toBe(0);
         expect(result.stderr).toBe("");
         expect(JSON.parse(result.stdout.trim()).code).toBe("TransportFailure");
@@ -3905,24 +3905,24 @@ describe("cli: models", () => {
         );
         expect(connections).toBe(1);
 
-        const text = await runFx(["models"], { env });
+        const text = await runLia(["models"], { env });
         expect(text.code).not.toBe(0);
         expect(text.stderr).toBe(
-          "fx models: could not list models: couldn't connect to AI Gateway; check your network connection or firewall\n",
+          "lia models: could not list models: couldn't connect to AI Gateway; check your network connection or firewall\n",
         );
 
         // Switching to the Gateway from another provider loads its catalog
         // the same way, and a failed switch keeps the saved provider.
-        const settingsPath = join(home, ".fx", "settings.json");
-        mkdirSync(join(home, ".fx"), { recursive: true });
+        const settingsPath = join(home, ".lia", "settings.json");
+        mkdirSync(join(home, ".lia"), { recursive: true });
         writeFileSync(settingsPath, JSON.stringify({
           provider: "local",
           providers: { local: { protocol: "openai-chat-completions", base_url: "http://127.0.0.1:1/v1", auth: { type: "none" } } },
         }));
-        const selection = await runFx(["provider", "gateway"], { env });
+        const selection = await runLia(["provider", "gateway"], { env });
         expect(selection.code).not.toBe(0);
         expect(selection.stderr).toBe(
-          "fx provider: couldn't connect to AI Gateway to load the target model catalog; check your network connection or firewall\n",
+          "lia provider: couldn't connect to AI Gateway to load the target model catalog; check your network connection or firewall\n",
         );
         expect(JSON.parse(readFileSync(settingsPath, "utf8")).provider).toBe("local");
       } finally {
@@ -3963,12 +3963,12 @@ describe("cli: models", () => {
     },
   ]) {
     test(
-      `fx models preserves ${scenario.name} without anonymous retry`,
+      `lia models preserves ${scenario.name} without anonymous retry`,
       async () => {
         const home = createIsolatedTestHome();
         const gateway = startFakeGateway([], { models: scenario.response });
         try {
-          const result = await runFx(["models", "--json"], {
+          const result = await runLia(["models", "--json"], {
             env: modelsGatewayEnv(home, `${gateway.baseUrl}/coding-agent/v1/models`),
           });
 
@@ -3987,13 +3987,13 @@ describe("cli: models", () => {
   }
 
   test(
-    "cancelling fx models does not retry anonymously",
+    "cancelling lia models does not retry anonymously",
     async () => {
       const home = createIsolatedTestHome();
       const gateway = startFakeGateway([], {
         models: () => new Promise<Response>(() => {}),
       });
-      const proc = Bun.spawn([FX_BIN, "models", "--json"], {
+      const proc = Bun.spawn([LIA_BIN, "models", "--json"], {
         cwd: REPO_ROOT,
         env: {
           ...process.env,
@@ -4027,7 +4027,7 @@ describe("cli: models", () => {
   );
 
   test(
-    "fx models rejects E2E gateway redirects without contacting the target",
+    "lia models rejects E2E gateway redirects without contacting the target",
     async () => {
       const home = createIsolatedTestHome();
       const captureRequests: string[] = [];
@@ -4050,13 +4050,13 @@ describe("cli: models", () => {
       });
 
       try {
-        const r = await runFx(["models", "--json"], {
+        const r = await runLia(["models", "--json"], {
           env: {
             HOME: home,
-            FX_DISABLE_KEYCHAIN: "1",
+            LIA_DISABLE_KEYCHAIN: "1",
             AI_GATEWAY_API_KEY: "redirect-proof-key",
             VERCEL_OIDC_TOKEN: undefined,
-            FX_TEST_GATEWAY_MODELS_URL: `http://127.0.0.1:${redirectServer.port}/v1/models`,
+            LIA_TEST_GATEWAY_MODELS_URL: `http://127.0.0.1:${redirectServer.port}/v1/models`,
           },
         });
 
@@ -4081,8 +4081,8 @@ describe("cli: models", () => {
   for (const scenario of [
     {
       name: "uses the anonymous public catalog without a credential",
-      seedFxLogin: false,
-      expiredFxLogin: false,
+      seedLiaLogin: false,
+      expiredLiaLogin: false,
       authEnv: {},
       expectAuthHeader: false,
       expectPrivate: false,
@@ -4090,31 +4090,31 @@ describe("cli: models", () => {
         "requested_access=public_only credential_source=none effective_access=public_only public_only_reason=no_credential anonymous_fallback=false outcome=loaded failure_category=none http_status=none retryable=none",
     },
     {
-      name: "uses the selected fx login team catalog",
-      seedFxLogin: true,
-      expiredFxLogin: false,
+      name: "uses the selected lia login team catalog",
+      seedLiaLogin: true,
+      expiredLiaLogin: false,
       authEnv: {},
       expectAuthHeader: true,
       expectPrivate: true,
       expectedTeamQuery: "team_123",
       expectedTrace:
-        "requested_access=authenticated credential_source=fx_login effective_access=authenticated public_only_reason=none anonymous_fallback=false outcome=loaded failure_category=none http_status=none retryable=none",
+        "requested_access=authenticated credential_source=lia_login effective_access=authenticated public_only_reason=none anonymous_fallback=false outcome=loaded failure_category=none http_status=none retryable=none",
     },
     {
-      name: "refreshes an expired fx login before loading the selected team catalog",
-      seedFxLogin: true,
-      expiredFxLogin: true,
+      name: "refreshes an expired lia login before loading the selected team catalog",
+      seedLiaLogin: true,
+      expiredLiaLogin: true,
       authEnv: {},
       expectAuthHeader: true,
       expectPrivate: true,
       expectedTeamQuery: "team_123",
       expectedTrace:
-        "requested_access=authenticated credential_source=fx_login effective_access=authenticated public_only_reason=none anonymous_fallback=false outcome=loaded failure_category=none http_status=none retryable=none",
+        "requested_access=authenticated credential_source=lia_login effective_access=authenticated public_only_reason=none anonymous_fallback=false outcome=loaded failure_category=none http_status=none retryable=none",
     },
     {
       name: "sends an API key so the catalog includes team-private models",
-      seedFxLogin: false,
-      expiredFxLogin: false,
+      seedLiaLogin: false,
+      expiredLiaLogin: false,
       authEnv: { AI_GATEWAY_API_KEY: SEEDED_GATEWAY_TOKEN },
       expectAuthHeader: true,
       expectPrivate: true,
@@ -4123,8 +4123,8 @@ describe("cli: models", () => {
     },
     {
       name: "sends deployment OIDC so the catalog includes team-private models",
-      seedFxLogin: false,
-      expiredFxLogin: false,
+      seedLiaLogin: false,
+      expiredLiaLogin: false,
       authEnv: { VERCEL_OIDC_TOKEN: SEEDED_GATEWAY_TOKEN },
       expectAuthHeader: true,
       expectPrivate: true,
@@ -4133,9 +4133,9 @@ describe("cli: models", () => {
     },
   ]) {
     test(
-      `fx models --json ${scenario.name}`,
+      `lia models --json ${scenario.name}`,
       async () => {
-        const root = mkdtempSync(join(tmpdir(), "fx-e2e-team-models-"));
+        const root = mkdtempSync(join(tmpdir(), "lia-e2e-team-models-"));
         const requests: Array<{ headers: Headers; teamId: string | null }> = [];
         const oauthRequests: string[] = [];
         const server = Bun.serve({
@@ -4167,7 +4167,7 @@ describe("cli: models", () => {
             requests.push({ headers, teamId: url.searchParams.get("teamId") });
             const seededAuth =
               headers.get("authorization") === `Bearer ${SEEDED_GATEWAY_TOKEN}` &&
-              (!scenario.seedFxLogin || url.searchParams.get("teamId") === "team_123");
+              (!scenario.seedLiaLogin || url.searchParams.get("teamId") === "team_123");
             return Response.json({
               data: [
                 { id: "public/sentinel", type: "language", tags: ["tool-use"] },
@@ -4185,29 +4185,29 @@ describe("cli: models", () => {
           const tracePath = join(root, "catalog-trace.log");
           mkdirSync(home);
           mkdirSync(workspace);
-          if (scenario.seedFxLogin) {
-            writeSeededFxAuth(
+          if (scenario.seedLiaLogin) {
+            writeSeededLiaAuth(
               home,
               "team_123",
               `http://127.0.0.1:${server.port}`,
-              scenario.expiredFxLogin
+              scenario.expiredLiaLogin
                 ? Date.now() - 60_000
                 : Date.now() + 60 * 60 * 1000,
             );
           }
 
-          const r = await runFx(["models", "--json"], {
+          const r = await runLia(["models", "--json"], {
             cwd: realpathSync(workspace),
             env: {
               ...NO_GATEWAY_AUTH,
               ...scenario.authEnv,
               HOME: realpathSync(home),
-              FX_DISABLE_KEYCHAIN: "1",
-              FX_AUTO_UPGRADE: "0",
-              FX_GATEWAY_BASE_URL: `http://127.0.0.1:${server.port}`,
-              FX_TEST_GATEWAY_MODELS_URL: undefined,
-              FX_TRACE_LOG: tracePath,
-              FX_TRACE_SCOPES: "catalog",
+              LIA_DISABLE_KEYCHAIN: "1",
+              LIA_AUTO_UPGRADE: "0",
+              LIA_GATEWAY_BASE_URL: `http://127.0.0.1:${server.port}`,
+              LIA_TEST_GATEWAY_MODELS_URL: undefined,
+              LIA_TRACE_LOG: tracePath,
+              LIA_TRACE_SCOPES: "catalog",
             },
             timeoutMs: TIMEOUT,
           });
@@ -4225,7 +4225,7 @@ describe("cli: models", () => {
           }
           expect(requests[0]!.teamId).toBe(scenario.expectedTeamQuery ?? null);
           expect(oauthRequests).toEqual(
-            scenario.expiredFxLogin
+            scenario.expiredLiaLogin
               ? ["/.well-known/openid-configuration", "/oauth/token"]
               : [],
           );
@@ -4236,7 +4236,7 @@ describe("cli: models", () => {
             expect(json.ids).not.toContain("private/blue-hornbill");
           }
           expect(json.private_models_hidden).toBe(!scenario.expectPrivate);
-          if (scenario.seedFxLogin && !scenario.expiredFxLogin) {
+          if (scenario.seedLiaLogin && !scenario.expiredLiaLogin) {
             expect(requests[0]!.headers.get("x-vercel-ai-gateway-team")).toBeNull();
           }
 
@@ -4262,9 +4262,9 @@ describe("cli: models", () => {
   }
 
   test.skipIf(!HAS_API_KEY)(
-    "fx models --json returns valid models JSON",
+    "lia models --json returns valid models JSON",
     async () => {
-      const r = await runFx(["models", "--json"], { timeoutMs: 30_000 });
+      const r = await runLia(["models", "--json"], { timeoutMs: 30_000 });
       expect(r.code).toBe(0);
       const json = JSON.parse(r.stdout.trim());
       expect(json.kind).toBe("models");
@@ -4278,7 +4278,7 @@ describe("cli: models", () => {
 
 describe("cli: credits", () => {
   test(
-    "fx credits --json preserves Gateway HTTP denial details",
+    "lia credits --json preserves Gateway HTTP denial details",
     async () => {
       const home = createIsolatedTestHome();
       const requests: Array<{
@@ -4305,13 +4305,13 @@ describe("cli: credits", () => {
       });
 
       try {
-        const r = await runFx(["credits", "--json"], {
+        const r = await runLia(["credits", "--json"], {
           env: {
             AI_GATEWAY_API_KEY: "credits-fake-key",
             VERCEL_OIDC_TOKEN: undefined,
             HOME: realpathSync(home),
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_TEST_GATEWAY_CREDITS_URL: `http://127.0.0.1:${server.port}/v1/credits`,
+            LIA_DISABLE_KEYCHAIN: "1",
+            LIA_TEST_GATEWAY_CREDITS_URL: `http://127.0.0.1:${server.port}/v1/credits`,
             HOME: home,
           },
         });
@@ -4337,9 +4337,9 @@ describe("cli: credits", () => {
   );
 
   test.skipIf(!HAS_API_KEY)(
-    "fx credits --json returns credits JSON or exits non-zero",
+    "lia credits --json returns credits JSON or exits non-zero",
     async () => {
-      const r = await runFx(["credits", "--json"], { timeoutMs: 30_000 });
+      const r = await runLia(["credits", "--json"], { timeoutMs: 30_000 });
       if (r.code === 0 && r.stdout.trim()) {
         const json = JSON.parse(r.stdout.trim());
         expect(json.kind).toBe("credits");
@@ -4353,9 +4353,9 @@ describe("cli: credits", () => {
 
 describe("cli: ask input validation", () => {
   test(
-    "fx ask rejects invalid UTF-8 stdin before Gateway or session effects",
+    "lia ask rejects invalid UTF-8 stdin before Gateway or session effects",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-ask-invalid-utf8-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-ask-invalid-utf8-"));
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       mkdirSync(home);
@@ -4371,14 +4371,14 @@ describe("cli: ask input validation", () => {
       });
 
       try {
-        const result = await runFx(["ask", "--json", "--no-save"], {
+        const result = await runLia(["ask", "--json", "--no-save"], {
           cwd: realpathSync(workspace),
           env: {
             ...NO_GATEWAY_AUTH,
             HOME: realpathSync(home),
             AI_GATEWAY_API_KEY: "invalid-utf8-proof-key",
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_TEST_GATEWAY_CHAT_URL: `http://127.0.0.1:${server.port}/ai/v1/chat/completions`,
+            LIA_DISABLE_KEYCHAIN: "1",
+            LIA_TEST_GATEWAY_CHAT_URL: `http://127.0.0.1:${server.port}/ai/v1/chat/completions`,
           },
           stdin: Uint8Array.from([0xff, 0xfe, 0x80, 0x68, 0x69]),
           timeoutMs: TIMEOUT,
@@ -4391,7 +4391,7 @@ describe("cli: ask input validation", () => {
           error: "InvalidPromptText",
         });
         expect(requests).toEqual([]);
-        expect(existsSync(join(home, ".fx"))).toBe(false);
+        expect(existsSync(join(home, ".lia"))).toBe(false);
       } finally {
         server.stop(true);
         rmSync(root, { recursive: true, force: true });
@@ -4403,22 +4403,22 @@ describe("cli: ask input validation", () => {
 
 describe("cli: session", () => {
   test(
-    "fx session with no id exits non-zero or shows usage",
+    "lia session with no id exits non-zero or shows usage",
     async () => {
-      const r = await runFx(["session"]);
+      const r = await runLia(["session"]);
       expect(r.code).not.toBe(0);
     },
     TIMEOUT,
   );
 
   test(
-    "fx session exact id hides managed child detail",
+    "lia session exact id hides managed child detail",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-private-child-detail-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-private-child-detail-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
-        mkdirSync(join(home, ".fx", "sessions"), {
+        mkdirSync(join(home, ".lia", "sessions"), {
           recursive: true,
           mode: 0o700,
         });
@@ -4431,7 +4431,7 @@ describe("cli: session", () => {
         writeLegacySession(home, workspaceRoot, childId);
         const childControl = join(
           home,
-          ".fx",
+          ".lia",
           "sessions",
           childId,
           "subagent",
@@ -4443,11 +4443,11 @@ describe("cli: session", () => {
           { mode: 0o600 },
         );
 
-        const parent = await runFx(
+        const parent = await runLia(
           ["session", "--id", parentId, "--json"],
           {
             cwd: workspaceRoot,
-            env: { HOME: home, FX_DISABLE_KEYCHAIN: "1" },
+            env: { HOME: home, LIA_DISABLE_KEYCHAIN: "1" },
           },
         );
         expect(parent).toMatchObject({ code: 0, stderr: "" });
@@ -4456,11 +4456,11 @@ describe("cli: session", () => {
           id: parentId,
         });
 
-        const child = await runFx(
+        const child = await runLia(
           ["session", "--id", childId, "--json"],
           {
             cwd: workspaceRoot,
-            env: { HOME: home, FX_DISABLE_KEYCHAIN: "1" },
+            env: { HOME: home, LIA_DISABLE_KEYCHAIN: "1" },
           },
         );
         expect(child.code).toBe(1);
@@ -4481,25 +4481,25 @@ describe("cli: session", () => {
 
 describe("cli: interactive startup", () => {
   test(
-    "fx explains a first argument it can't take as a command or a prompt",
+    "lia explains a first argument it can't take as a command or a prompt",
     async () => {
       const cases: Array<[string[], string]> = [
-        [["fix", "the", "login", "bug"], 'fx: put the prompt in quotes: fx "fix the login bug"\n'],
-        [["stauts"], "fx: unknown command stauts (did you mean status?)\n"],
-        [["-p", "fix the bug"], 'fx: -p isn\'t an fx flag; to run one request and exit, use fx ask "fix the bug"\n'],
-        [["--print"], 'fx: --print isn\'t an fx flag; to run one request and exit, use fx ask "<prompt>"\n'],
-        [[""], "fx: the prompt is empty\n"],
+        [["fix", "the", "login", "bug"], 'lia: put the prompt in quotes: lia "fix the login bug"\n'],
+        [["stauts"], "lia: unknown command stauts (did you mean status?)\n"],
+        [["-p", "fix the bug"], 'lia: -p isn\'t an lia flag; to run one request and exit, use lia ask "fix the bug"\n'],
+        [["--print"], 'lia: --print isn\'t an lia flag; to run one request and exit, use lia ask "<prompt>"\n'],
+        [[""], "lia: the prompt is empty\n"],
       ];
       for (const [args, stderr] of cases) {
-        const r = await runFx(args, { env: NO_GATEWAY_AUTH });
+        const r = await runLia(args, { env: NO_GATEWAY_AUTH });
         expect(r.code, args.join(" ")).toBe(2);
         expect(r.stdout).toBe("");
         expect(r.stderr).toBe(stderr);
       }
       for (const args of [["--modle", "x"], ["fix it", "--modle=x"]]) {
-        const r = await runFx(args, { env: NO_GATEWAY_AUTH });
+        const r = await runLia(args, { env: NO_GATEWAY_AUTH });
         expect(r.code, args.join(" ")).toBe(2);
-        expect(r.stderr.split("\n")[0]).toBe("fx: unknown flag --modle (did you mean --model?)");
+        expect(r.stderr.split("\n")[0]).toBe("lia: unknown flag --modle (did you mean --model?)");
       }
     },
     TIMEOUT,
@@ -4515,12 +4515,12 @@ describe("cli: interactive startup", () => {
       ];
 
       for (const args of cases) {
-        const home = realpathSync(mkdtempSync(join(tmpdir(), "fx-e2e-no-tty-")));
+        const home = realpathSync(mkdtempSync(join(tmpdir(), "lia-e2e-no-tty-")));
         try {
-          const r = await runFx(args, { env: { HOME: home } });
+          const r = await runLia(args, { env: { HOME: home } });
           expect(r.code).toBe(1);
           expect(r.stdout).toBe("");
-          expect(r.stderr).toBe("fx: this build has no interactive terminal UI; use fx ask or fx acp\n");
+          expect(r.stderr).toBe("lia: this build has no interactive terminal UI; use lia ask or lia acp\n");
           expect(readdirSync(home)).toEqual([]);
         } finally {
           rmSync(home, { recursive: true, force: true });
@@ -4534,15 +4534,15 @@ describe("cli: interactive startup", () => {
     "command flag errors name the flag and the last repeated flag wins",
     async () => {
       const failures: [string[], string][] = [
-        [["status", "--jsno"], "fx status: unknown flag --jsno (did you mean --json?)\nusage: fx status [--json]\n"],
-        [["sessions", "--limit"], "fx sessions: --limit needs a value\n"],
-        [["usage", "--perod", "7d"], "fx usage: unknown flag --perod (did you mean --period?)\n"],
-        [["workspace", "--json=1"], "fx workspace: --json doesn't take a value\n"],
+        [["status", "--jsno"], "lia status: unknown flag --jsno (did you mean --json?)\nusage: lia status [--json]\n"],
+        [["sessions", "--limit"], "lia sessions: --limit needs a value\n"],
+        [["usage", "--perod", "7d"], "lia usage: unknown flag --perod (did you mean --period?)\n"],
+        [["workspace", "--json=1"], "lia workspace: --json doesn't take a value\n"],
       ];
       for (const [args, stderr] of failures) {
-        const home = realpathSync(mkdtempSync(join(tmpdir(), "fx-e2e-flag-errors-")));
+        const home = realpathSync(mkdtempSync(join(tmpdir(), "lia-e2e-flag-errors-")));
         try {
-          const r = await runFx(args, { env: { HOME: home } });
+          const r = await runLia(args, { env: { HOME: home } });
           expect(r.code).toBe(2);
           expect(r.stdout).toBe("");
           expect(r.stderr.startsWith(stderr)).toBe(true);
@@ -4551,9 +4551,9 @@ describe("cli: interactive startup", () => {
         }
       }
 
-      const home = realpathSync(mkdtempSync(join(tmpdir(), "fx-e2e-flag-last-")));
+      const home = realpathSync(mkdtempSync(join(tmpdir(), "lia-e2e-flag-last-")));
       try {
-        const r = await runFx(["sessions", "--limit=5", "--limit", "2", "--json", "--json"], { env: { HOME: home } });
+        const r = await runLia(["sessions", "--limit=5", "--limit", "2", "--json", "--json"], { env: { HOME: home } });
         expect(r.code).toBe(0);
         expect(JSON.parse(r.stdout).kind).toBe("sessions");
       } finally {
@@ -4567,12 +4567,12 @@ describe("cli: interactive startup", () => {
 
 describe("cli: pr", () => {
   test(
-    "fx pr without gateway auth exits non-zero",
+    "lia pr without gateway auth exits non-zero",
     async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-e2e-noauth-"));
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-noauth-"));
       try {
-        const r = await runFx(["pr"], {
-          env: { ...NO_GATEWAY_AUTH, HOME: home, FX_DISABLE_KEYCHAIN: "1" },
+        const r = await runLia(["pr"], {
+          env: { ...NO_GATEWAY_AUTH, HOME: home, LIA_DISABLE_KEYCHAIN: "1" },
         });
         expect(r.code).not.toBe(0);
         expect(r.stderr).toContain(MISSING_AUTH_MESSAGE);
@@ -4586,12 +4586,12 @@ describe("cli: pr", () => {
 
 describe("cli: issue", () => {
   test(
-    "fx issue without gateway auth exits non-zero",
+    "lia issue without gateway auth exits non-zero",
     async () => {
-      const home = mkdtempSync(join(tmpdir(), "fx-e2e-noauth-"));
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-noauth-"));
       try {
-        const r = await runFx(["issue"], {
-          env: { ...NO_GATEWAY_AUTH, HOME: home, FX_DISABLE_KEYCHAIN: "1" },
+        const r = await runLia(["issue"], {
+          env: { ...NO_GATEWAY_AUTH, HOME: home, LIA_DISABLE_KEYCHAIN: "1" },
         });
         expect(r.code).not.toBe(0);
         expect(r.stderr).toContain(MISSING_AUTH_MESSAGE);
@@ -4605,12 +4605,12 @@ describe("cli: issue", () => {
 
 describe("cli: ask success", () => {
   test(
-    "fx ask binds an explicitly invoked skill into the prompt",
+    "lia ask binds an explicitly invoked skill into the prompt",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-ask-explicit-skill-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-ask-explicit-skill-"));
       const home = join(root, "home");
       const workspace = join(root, "workspace");
-      const skillDirectory = join(home, ".fx", "skills", "cli-explicit");
+      const skillDirectory = join(home, ".lia", "skills", "cli-explicit");
       const skillBody = "CLI_EXPLICIT_SKILL_BODY";
       const gateway = startFakeGateway([
         fakeGatewayFinalText("explicit skill ask complete"),
@@ -4623,7 +4623,7 @@ describe("cli: ask success", () => {
           `---\nname: cli-explicit\ndescription: explicit CLI fixture\n---\n\n${skillBody}\n`,
         );
 
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -4637,10 +4637,10 @@ describe("cli: ask success", () => {
               HOME: realpathSync(home),
               AI_GATEWAY_API_KEY: "fake-explicit-skill-key",
               VERCEL_OIDC_TOKEN: undefined,
-              FX_GATEWAY_BASE_URL: gateway.baseUrl,
-              FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_MODEL: FAKE_GATEWAY_MODEL,
-              FX_AUTO_UPGRADE: "0",
+              LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+              LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_MODEL: FAKE_GATEWAY_MODEL,
+              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: TIMEOUT,
           },
@@ -4671,9 +4671,9 @@ describe("cli: ask success", () => {
   );
 
   test(
-    "fx ask stdin prompts above the old 1 MiB limit reach Gateway byte-for-byte",
+    "lia ask stdin prompts above the old 1 MiB limit reach Gateway byte-for-byte",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-ask-large-stdin-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-ask-large-stdin-"));
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const sizes = [1024 * 1024 - 1, 1024 * 1024, 1024 * 1024 + 1, 3 * 1024 * 1024];
@@ -4689,13 +4689,13 @@ describe("cli: ask success", () => {
         }] },
       );
       try {
-        mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+        mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
         mkdirSync(workspace);
-        writeFileSync(join(home, ".fx", "settings.json"), "{}\n");
+        writeFileSync(join(home, ".lia", "settings.json"), "{}\n");
 
         for (const [index, size] of sizes.entries()) {
           const prompt = `B${"x".repeat(size - 2)}E`;
-          const result = await runFx(
+          const result = await runLia(
             ["ask", "--json", "--auto", "--no-save"],
             {
               cwd: realpathSync(workspace),
@@ -4703,10 +4703,10 @@ describe("cli: ask success", () => {
                 HOME: home,
                 AI_GATEWAY_API_KEY: "fake-large-stdin-key",
                 VERCEL_OIDC_TOKEN: undefined,
-                FX_GATEWAY_BASE_URL: gateway.baseUrl,
-                FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-                FX_MODEL: FAKE_GATEWAY_MODEL,
-                FX_AUTO_UPGRADE: "0",
+                LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+                LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+                LIA_MODEL: FAKE_GATEWAY_MODEL,
+                LIA_AUTO_UPGRADE: "0",
               },
               stdin: prompt,
               timeoutMs: 60_000,
@@ -4733,23 +4733,23 @@ describe("cli: ask success", () => {
   );
 
   test(
-    "fx ask stdin resource overflow has distinct text and JSON errors",
+    "lia ask stdin resource overflow has distinct text and JSON errors",
     async () => {
       const oversized = Buffer.alloc(8 * 1024 * 1024 + 1, 0x78);
 
-      const textResult = await runFx(["ask", "--auto", "--no-save"], {
-        env: { ...NO_GATEWAY_AUTH, FX_DISABLE_KEYCHAIN: "1" },
+      const textResult = await runLia(["ask", "--auto", "--no-save"], {
+        env: { ...NO_GATEWAY_AUTH, LIA_DISABLE_KEYCHAIN: "1" },
         stdin: oversized,
         timeoutMs: 60_000,
       });
       expect(textResult.code).toBe(1);
       expect(textResult.stdout).toBe("");
       expect(textResult.stderr).toBe(
-        "fx ask: prompt exceeds the local input safety limit\n",
+        "lia ask: prompt exceeds the local input safety limit\n",
       );
 
-      const jsonResult = await runFx(["ask", "--json", "--auto", "--no-save"], {
-        env: { ...NO_GATEWAY_AUTH, FX_DISABLE_KEYCHAIN: "1" },
+      const jsonResult = await runLia(["ask", "--json", "--auto", "--no-save"], {
+        env: { ...NO_GATEWAY_AUTH, LIA_DISABLE_KEYCHAIN: "1" },
         stdin: oversized,
         timeoutMs: 60_000,
       });
@@ -4763,9 +4763,9 @@ describe("cli: ask success", () => {
   );
 
   test(
-    "fx ask sends catalog-backed portable reasoning",
+    "lia ask sends catalog-backed portable reasoning",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-ask-portable-reasoning-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-ask-portable-reasoning-"));
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const model = "provider/new-reasoning-model";
@@ -4783,14 +4783,14 @@ describe("cli: ask success", () => {
         },
       );
       try {
-        mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+        mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
         mkdirSync(workspace);
         writeFileSync(
-          join(home, ".fx", "settings.json"),
+          join(home, ".lia", "settings.json"),
           `${JSON.stringify({ model, effort: "high" })}\n`,
         );
 
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--json", "--auto", "--no-save", "Use portable reasoning."],
           {
             cwd: realpathSync(workspace),
@@ -4798,9 +4798,9 @@ describe("cli: ask success", () => {
               HOME: home,
               AI_GATEWAY_API_KEY: "fake-portable-ask-key",
               VERCEL_OIDC_TOKEN: undefined,
-              FX_GATEWAY_BASE_URL: gateway.baseUrl,
-              FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+              LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+              LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
             },
             timeoutMs: 60_000,
           },
@@ -4810,11 +4810,11 @@ describe("cli: ask success", () => {
         expect(
           result.stderr
             .replace(
-              /fx ask: warning: skipped \d+ invalid or unreadable skill candidates?; relaunch with FX_TRACE=1 to write a trace log\n/g,
+              /lia ask: warning: skipped \d+ invalid or unreadable skill candidates?; relaunch with LIA_TRACE=1 to write a trace log\n/g,
               "",
             )
             .replace(
-              /\[notice\] skill discovery warning: [^\n]*; relaunch with FX_TRACE=1 to write a trace log\n/g,
+              /\[notice\] skill discovery warning: [^\n]*; relaunch with LIA_TRACE=1 to write a trace log\n/g,
               "",
             ),
         ).toBe("");
@@ -4843,39 +4843,39 @@ describe("cli: ask success", () => {
   test.skipIf(!HAS_API_KEY)(
     "live Gateway accepts catalog-backed portable reasoning",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-live-portable-reasoning-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-live-portable-reasoning-"));
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const tracePath = join(root, "trace.log");
       try {
-        mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+        mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
         mkdirSync(workspace);
         writeFileSync(
-          join(home, ".fx", "settings.json"),
+          join(home, ".lia", "settings.json"),
           `${JSON.stringify({
             model: "openai/gpt-5.6-sol",
             effort: "high",
           })}\n`,
         );
 
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
             "--auto",
             "--no-save",
-            "Reply with exactly: FX_PORTABLE_REASONING_LIVE_OK",
+            "Reply with exactly: LIA_PORTABLE_REASONING_LIVE_OK",
           ],
           {
             cwd: realpathSync(workspace),
             env: {
               HOME: home,
-              FX_MODEL: undefined,
-              FX_TRACE: "1",
-              FX_TRACE_LOG: tracePath,
-              FX_GATEWAY_BASE_URL: undefined,
-              FX_GATEWAY_CHAT_URL: undefined,
-              FX_TEST_GATEWAY_MODELS_URL: undefined,
+              LIA_MODEL: undefined,
+              LIA_TRACE: "1",
+              LIA_TRACE_LOG: tracePath,
+              LIA_GATEWAY_BASE_URL: undefined,
+              LIA_GATEWAY_CHAT_URL: undefined,
+              LIA_TEST_GATEWAY_MODELS_URL: undefined,
               VERCEL_OIDC_TOKEN: undefined,
             },
             timeoutMs: 120_000,
@@ -4884,7 +4884,7 @@ describe("cli: ask success", () => {
 
         expect(result.code).toBe(0);
         expect(JSON.parse(result.stdout).output).toContain(
-          "FX_PORTABLE_REASONING_LIVE_OK",
+          "LIA_PORTABLE_REASONING_LIVE_OK",
         );
         expect(readFileSync(tracePath, "utf8")).toContain(
           "reasoning=selected",
@@ -4926,9 +4926,9 @@ describe("cli: ask success", () => {
       json: false,
     },
   ])(
-    "fx ask usage $name",
+    "lia ask usage $name",
     async ({ reportedUsage, expectedUsage, toolLoop, json }) => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-ask-usage-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-ask-usage-"));
       const answer = "Usage fixture complete.\n";
       const gateway = startFakeGateway([
         fakeGatewaySse([
@@ -4957,7 +4957,7 @@ describe("cli: ask success", () => {
         mkdirSync(workspace);
         writeFileSync(join(workspace, "fixture.txt"), "usage fixture contents\n");
 
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             ...(json ? ["--json"] : []),
@@ -4971,13 +4971,13 @@ describe("cli: ask success", () => {
               HOME: realpathSync(home),
               AI_GATEWAY_API_KEY: "fake-ask-usage-key",
               VERCEL_OIDC_TOKEN: undefined,
-              FX_DISABLE_KEYCHAIN: "1",
-              FX_GATEWAY_BASE_URL: gateway.baseUrl,
-              FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
-              FX_MODEL: FAKE_GATEWAY_MODEL,
-              FX_AUTO_UPGRADE: "0",
+              LIA_DISABLE_KEYCHAIN: "1",
+              LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+              LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+              LIA_MODEL: FAKE_GATEWAY_MODEL,
+              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: 60_000,
           },
@@ -5005,7 +5005,7 @@ describe("cli: ask success", () => {
         }
         expect(gateway.requests).toHaveLength(toolLoop ? 2 : 1);
         expect(gateway.classifierRequests).toHaveLength(0);
-        expect(existsSync(join(home, ".fx"))).toBe(false);
+        expect(existsSync(join(home, ".lia"))).toBe(false);
       } finally {
         gateway.stop();
         rmSync(root, { recursive: true, force: true });
@@ -5017,7 +5017,7 @@ describe("cli: ask success", () => {
   test(
     "saved ask resumes the exact session while no-save creates no durable state",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-ask-persistence-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-ask-persistence-"));
       const gateway = startFakeGateway([
         fakeGatewayFinalText("orange triangle"),
         fakeGatewayFinalText("blue circle"),
@@ -5032,7 +5032,7 @@ describe("cli: ask success", () => {
         mkdirSync(workspace);
         const workspaceRoot = realpathSync(workspace);
 
-        const first = await runFx(
+        const first = await runLia(
           ["ask", "--json", "--auto", "Reply with exactly: orange triangle"],
           {
             cwd: workspaceRoot,
@@ -5040,11 +5040,11 @@ describe("cli: ask success", () => {
               HOME: realpathSync(savedHome),
               AI_GATEWAY_API_KEY: "fake-ask-persistence-key",
               VERCEL_OIDC_TOKEN: undefined,
-              FX_GATEWAY_BASE_URL: gateway.baseUrl,
-              FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_MODEL: FAKE_GATEWAY_MODEL,
-              FX_AUTO_UPGRADE: "0",
+              LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+              LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_MODEL: FAKE_GATEWAY_MODEL,
+              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: 60_000,
           },
@@ -5066,7 +5066,7 @@ describe("cli: ask success", () => {
         ).toBe("true");
         expect(existsSync(sessionDir(savedHome, firstJson.session_id))).toBe(true);
 
-        const resumed = await runFx(
+        const resumed = await runLia(
           [
             "ask",
             "--json",
@@ -5081,11 +5081,11 @@ describe("cli: ask success", () => {
               HOME: realpathSync(savedHome),
               AI_GATEWAY_API_KEY: "fake-ask-persistence-key",
               VERCEL_OIDC_TOKEN: undefined,
-              FX_GATEWAY_BASE_URL: gateway.baseUrl,
-              FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_MODEL: FAKE_GATEWAY_MODEL,
-              FX_AUTO_UPGRADE: "0",
+              LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+              LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_MODEL: FAKE_GATEWAY_MODEL,
+              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: 60_000,
           },
@@ -5101,7 +5101,7 @@ describe("cli: ask success", () => {
         expect(gateway.requests[1]?.headers.get("x-session-affinity")).toBe(
           firstJson.session_id,
         );
-        const detail = await runFx(
+        const detail = await runLia(
           ["session", "--id", firstJson.session_id, "--json"],
           {
             cwd: workspaceRoot,
@@ -5112,7 +5112,7 @@ describe("cli: ask success", () => {
         expect(detail.code).toBe(0);
         expect(JSON.parse(detail.stdout).history_len).toBe(2);
 
-        const noSave = await runFx(
+        const noSave = await runLia(
           ["ask", "--json", "--auto", "--no-save", "Reply with exactly: green square"],
           {
             cwd: workspaceRoot,
@@ -5120,11 +5120,11 @@ describe("cli: ask success", () => {
               HOME: realpathSync(noSaveHome),
               AI_GATEWAY_API_KEY: "fake-ask-persistence-key",
               VERCEL_OIDC_TOKEN: undefined,
-              FX_GATEWAY_BASE_URL: gateway.baseUrl,
-              FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
-              FX_MODEL: FAKE_GATEWAY_MODEL,
-              FX_AUTO_UPGRADE: "0",
+              LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+              LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+              LIA_MODEL: FAKE_GATEWAY_MODEL,
+              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: 60_000,
           },
@@ -5136,7 +5136,7 @@ describe("cli: ask success", () => {
         expect(noSaveJson.usage).toEqual({ input_tokens: 3, output_tokens: 5 });
         expect(gateway.requests[2]?.headers.get("x-session-id")).toBeNull();
         expect(gateway.requests[2]?.headers.get("x-session-affinity")).toBeNull();
-        expect(existsSync(join(noSaveHome, ".fx"))).toBe(false);
+        expect(existsSync(join(noSaveHome, ".lia"))).toBe(false);
         expect(gateway.requests).toHaveLength(3);
       } finally {
         gateway.stop();
@@ -5149,7 +5149,7 @@ describe("cli: ask success", () => {
   test(
     "saved ask converts a legacy session once and continues after restart",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-ask-legacy-convert-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-ask-legacy-convert-"));
       const gateway = startFakeGateway([
         fakeGatewayFinalText("LEGACY_CONVERTED_OK"),
         fakeGatewayFinalText("LEGACY_RESTART_OK"),
@@ -5162,7 +5162,7 @@ describe("cli: ask success", () => {
         const workspaceRoot = realpathSync(workspace);
         const sessionId = "legacy-ask-convert";
         writeLegacySession(home, workspaceRoot, sessionId);
-        const legacyDir = join(home, ".fx", "sessions", sessionId);
+        const legacyDir = join(home, ".lia", "sessions", sessionId);
         const legacyPath = join(legacyDir, "session.json");
         const legacy = JSON.parse(readFileSync(legacyPath, "utf8"));
         const legacyOutput = "LEGACY_AVAILABLE_RESULT_BYTES";
@@ -5200,14 +5200,14 @@ describe("cli: ask success", () => {
           HOME: home,
           AI_GATEWAY_API_KEY: "fake-legacy-convert-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_AUTO_UPGRADE: "0",
+          LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+          LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+          LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+          LIA_MODEL: FAKE_GATEWAY_MODEL,
+          LIA_AUTO_UPGRADE: "0",
         };
 
-        const first = await runFx(
+        const first = await runLia(
           ["ask", "--json", "--auto", "--resume", sessionId, "Convert and continue."],
           { cwd: workspaceRoot, env, timeoutMs: 60_000 },
         );
@@ -5222,7 +5222,7 @@ describe("cli: ask success", () => {
         expect(existsSync(sessionDir(home, sessionId))).toBe(true);
         expect(existsSync(legacyDir)).toBe(false);
 
-        const second = await runFx(
+        const second = await runLia(
           ["ask", "--json", "--auto", "--resume", sessionId, "Continue after restart."],
           { cwd: workspaceRoot, env, timeoutMs: 60_000 },
         );
@@ -5266,7 +5266,7 @@ describe("cli: ask success", () => {
   test(
     "saved asks remain discoverable and resumable without session caches",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-session-cache-free-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-session-cache-free-"));
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const unrelatedReply = `unrelated saved turn ${"x".repeat(64 * 1024)}`;
@@ -5287,14 +5287,14 @@ describe("cli: ask success", () => {
           HOME: realpathSync(home),
           AI_GATEWAY_API_KEY: "fake-session-cache-free-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_AUTO_UPGRADE: "0",
+          LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+          LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+          LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+          LIA_MODEL: FAKE_GATEWAY_MODEL,
+          LIA_AUTO_UPGRADE: "0",
         };
 
-        const unrelated = await runFx(
+        const unrelated = await runLia(
           ["ask", "--json", "--auto", "Save an unrelated long turn."],
           { cwd: workspaceRoot, env, timeoutMs: 60_000 },
         );
@@ -5304,19 +5304,19 @@ describe("cli: ask success", () => {
         const unrelatedSessionId = unrelatedJson.session_id as string;
         expect(unrelatedJson.output).toBe(unrelatedReply);
 
-        const first = await runFx(
+        const first = await runLia(
           ["ask", "--json", "--auto", "Reply with the first saved turn."],
           { cwd: workspaceRoot, env, timeoutMs: 60_000 },
         );
         expect(first.code).toBe(0);
         expect(first.stderr).toBe("");
         const sessionId = JSON.parse(first.stdout).session_id as string;
-        const sessionsDir = join(home, ".fx", "sessions");
+        const sessionsDir = join(home, ".lia", "sessions");
         expect(existsSync(join(sessionsDir, "index.json"))).toBe(false);
         expect(existsSync(join(sessionsDir, "latest"))).toBe(false);
         expect(existsSync(join(sessionsDir, "latest.lock"))).toBe(false);
 
-        const createdNext = await runFx(
+        const createdNext = await runLia(
           ["ask", "--json", "--auto", "Create another saved turn."],
           { cwd: workspaceRoot, env, timeoutMs: 60_000 },
         );
@@ -5326,7 +5326,7 @@ describe("cli: ask success", () => {
         const createdNextId = createdNextJson.session_id as string;
         expect(createdNextJson.output.trim()).toBe("second saved turn");
 
-        const exact = await runFx(
+        const exact = await runLia(
           [
             "ask",
             "--json",
@@ -5341,7 +5341,7 @@ describe("cli: ask success", () => {
         expect(exact.stderr).toBe("");
         expect(JSON.parse(exact.stdout).output.trim()).toBe("exact resumed turn");
 
-        const listed = await runFx(["sessions", "--json"], {
+        const listed = await runLia(["sessions", "--json"], {
           cwd: workspaceRoot,
           env: { HOME: home, ...NO_GATEWAY_AUTH },
           timeoutMs: 60_000,
@@ -5363,7 +5363,7 @@ describe("cli: ask success", () => {
         });
         expect(existsSync(join(sessionsDir, "latest"))).toBe(false);
 
-        const latest = await runFx(
+        const latest = await runLia(
           [
             "ask",
             "--json",
@@ -5379,7 +5379,7 @@ describe("cli: ask success", () => {
         expect(JSON.parse(latest.stdout).session_id).toBe(sessionId);
         expect(JSON.parse(latest.stdout).output.trim()).toBe("latest resumed turn");
 
-        const repaired = await runFx(
+        const repaired = await runLia(
           [
             "ask",
             "--json",
@@ -5393,14 +5393,14 @@ describe("cli: ask success", () => {
         expect(repaired.code).toBe(0);
         expect(repaired.stderr).toBe("");
         expect(JSON.parse(repaired.stdout).output.trim()).toBe("continued target turn");
-        const createdNextDetail = await runFx(
+        const createdNextDetail = await runLia(
           ["session", "--id", createdNextId, "--json"],
           { cwd: workspaceRoot, env: { HOME: home }, timeoutMs: 60_000 },
         );
         expect(createdNextDetail.code).toBe(0);
         expect(createdNextDetail.stderr).toBe("");
         expect(JSON.parse(createdNextDetail.stdout).history_len).toBe(1);
-        const continuedNext = await runFx(
+        const continuedNext = await runLia(
           [
             "ask",
             "--json",
@@ -5414,14 +5414,14 @@ describe("cli: ask success", () => {
         expect(continuedNext.code).toBe(0);
         expect(continuedNext.stderr).toBe("");
         expect(JSON.parse(continuedNext.stdout).output.trim()).toBe("continued second turn");
-        const targetDetail = await runFx(
+        const targetDetail = await runLia(
           ["session", "--id", sessionId, "--json"],
           { cwd: workspaceRoot, env: { HOME: home }, timeoutMs: 60_000 },
         );
         expect(targetDetail.code).toBe(0);
         expect(targetDetail.stderr).toBe("");
         expect(JSON.parse(targetDetail.stdout).history_len).toBe(4);
-        const unrelatedDetail = await runFx(
+        const unrelatedDetail = await runLia(
           ["session", "--id", unrelatedSessionId, "--json"],
           { cwd: workspaceRoot, env: { HOME: home }, timeoutMs: 60_000 },
         );
@@ -5438,9 +5438,9 @@ describe("cli: ask success", () => {
   );
 
   test.skipIf(!HAS_API_KEY)(
-    "fx ask --json --no-save --auto returns valid JSON with output",
+    "lia ask --json --no-save --auto returns valid JSON with output",
     async () => {
-      const r = await runFx(
+      const r = await runLia(
         ["ask", "--json", "--no-save", "--auto", "Say exactly: hello world"],
         { timeoutMs: 60_000 },
       );
@@ -5460,9 +5460,9 @@ describe("cli: ask success", () => {
 
 describe("cli: error handling", () => {
   test(
-    "fx ask rejects unknown options before a model turn and -- preserves literal prompt text",
+    "lia ask rejects unknown options before a model turn and -- preserves literal prompt text",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-ask-options-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-ask-options-"));
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const gateway = startFakeGateway([
@@ -5475,22 +5475,22 @@ describe("cli: error handling", () => {
           HOME: realpathSync(home),
           AI_GATEWAY_API_KEY: "ask-options-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_AUTO_UPGRADE: "0",
+          LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+          LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+          LIA_MODEL: FAKE_GATEWAY_MODEL,
+          LIA_AUTO_UPGRADE: "0",
         };
 
-        const rejected = await runFx(["ask", "--definitely-unknown"], {
+        const rejected = await runLia(["ask", "--definitely-unknown"], {
           cwd: realpathSync(workspace),
           env,
           timeoutMs: TIMEOUT,
         });
         expect(rejected.code).toBe(2);
-        expect(rejected.stderr).toContain("usage: fx ask");
+        expect(rejected.stderr).toContain("usage: lia ask");
         expect(gateway.requests).toHaveLength(0);
 
-        const literal = await runFx(
+        const literal = await runLia(
           [
             "ask",
             "--json",
@@ -5522,9 +5522,9 @@ describe("cli: error handling", () => {
   );
 
   test(
-    "fx ask with no prompt exits 2",
+    "lia ask with no prompt exits 2",
     async () => {
-      const r = await runFx(["ask"]);
+      const r = await runLia(["ask"]);
       expect(r.code).toBe(2);
       expect(r.stderr).toContain("missing prompt");
     },
@@ -5532,20 +5532,20 @@ describe("cli: error handling", () => {
   );
 
   test(
-    "fx with a mistyped command exits 2",
+    "lia with a mistyped command exits 2",
     async () => {
       // A word that isn't close to a command is a first prompt instead.
-      const r = await runFx(["statsu"]);
+      const r = await runLia(["statsu"]);
       expect(r.code).toBe(2);
-      expect(r.stderr).toBe("fx: unknown command statsu (did you mean status?)\n");
+      expect(r.stderr).toBe("lia: unknown command statsu (did you mean status?)\n");
     },
     TIMEOUT,
   );
 
   test(
-    "fx ask explains no-save resume conflicts before a model turn",
+    "lia ask explains no-save resume conflicts before a model turn",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-e2e-ask-resume-no-save-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-e2e-ask-resume-no-save-"));
       const home = join(root, "home");
       const workspace = join(root, "workspace");
       const gateway = startFakeGateway([]);
@@ -5556,17 +5556,17 @@ describe("cli: error handling", () => {
           HOME: realpathSync(home),
           AI_GATEWAY_API_KEY: "ask-conflict-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_AUTO_UPGRADE: "0",
+          LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+          LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+          LIA_MODEL: FAKE_GATEWAY_MODEL,
+          LIA_AUTO_UPGRADE: "0",
         };
 
         for (const args of [
           ["ask", "--no-save", "--resume", "last", "hello"],
           ["ask", "--resume", "session.v3", "--no-save", "hello"],
         ]) {
-          const rejected = await runFx(args, {
+          const rejected = await runLia(args, {
             cwd: realpathSync(workspace),
             env,
             timeoutMs: TIMEOUT,
@@ -5574,10 +5574,10 @@ describe("cli: error handling", () => {
           expect(rejected.code).toBe(2);
           expect(rejected.stdout).toBe("");
           expect(rejected.stderr).toContain(
-            "fx ask: --no-save cannot be used with --resume",
+            "lia ask: --no-save cannot be used with --resume",
           );
           expect(rejected.stderr).toContain(
-            "usage: fx ask [--permission-mode <mode>|--ask|--auto|--full-access] [--provider <name>] [--model <id>] [--effort <level>] [--fast|--no-fast] [--ultrafast|--no-ultrafast] [--provider-order <a,b,...>] [--provider-strict|--no-provider-strict] [--image PATH] [--system TEXT] [--json] [--quiet] [--prompt-permissions] [--timeout <seconds>] [--config <key=value>] [--no-save]",
+            "usage: lia ask [--permission-mode <mode>|--ask|--auto|--full-access] [--provider <name>] [--model <id>] [--effort <level>] [--fast|--no-fast] [--ultrafast|--no-ultrafast] [--provider-order <a,b,...>] [--provider-strict|--no-provider-strict] [--image PATH] [--system TEXT] [--json] [--quiet] [--prompt-permissions] [--timeout <seconds>] [--config <key=value>] [--no-save]",
           );
         }
         expect(gateway.requests).toHaveLength(0);
@@ -5598,35 +5598,35 @@ describe("cli: workspace access", () => {
         ...NO_GATEWAY_AUTH,
       };
 
-      const help = await runFx(
+      const help = await runLia(
         ["--add-dir", "/tmp/shared", "ask", "--help"],
         { env: enabled },
       );
       expect(help.code).toBe(0);
-      expect(help.stdout.startsWith("fx ask\n\n")).toBe(true);
+      expect(help.stdout.startsWith("lia ask\n\n")).toBe(true);
       expect(help.stderr).toBe("");
 
-      const missing = await runFx(["--add-dir"], { env: enabled });
+      const missing = await runLia(["--add-dir"], { env: enabled });
       expect(missing.code).toBe(2);
-      expect(missing.stderr).toContain("fx: --add-dir needs a value\n");
+      expect(missing.stderr).toContain("lia: --add-dir needs a value\n");
       expect(missing.stderr).not.toContain("InvalidFlag");
 
       // A repeated flag is not an error: the launch gets past parsing and
       // stops only because this run has no terminal.
-      const duplicate = await runFx(
+      const duplicate = await runLia(
         ["--no-additional-dirs", "--no-additional-dirs"],
         { env: enabled },
       );
       expect(duplicate.code).toBe(1);
-      expect(duplicate.stderr).toBe("fx: this build has no interactive terminal UI; use fx ask or fx acp\n");
+      expect(duplicate.stderr).toBe("lia: this build has no interactive terminal UI; use lia ask or lia acp\n");
 
-      const badMode = await runFx(["--permission-mode", "never"], { env: enabled });
+      const badMode = await runLia(["--permission-mode", "never"], { env: enabled });
       expect(badMode.code).toBe(2);
-      expect(badMode.stderr).toContain("fx: --permission-mode accepts ask, auto, or full-access\n");
+      expect(badMode.stderr).toContain("lia: --permission-mode accepts ask, auto, or full-access\n");
 
-      const beforeCommand = await runFx(["--auto", "status"], { env: enabled });
+      const beforeCommand = await runLia(["--auto", "status"], { env: enabled });
       expect(beforeCommand.code).toBe(2);
-      expect(beforeCommand.stderr).toBe("fx: agent-run flags such as --permission-mode apply to a session and to fx ask, fx pr, fx issue, and fx acp\n");
+      expect(beforeCommand.stderr).toBe("lia: agent-run flags such as --permission-mode apply to a session and to lia ask, lia pr, lia issue, and lia acp\n");
     },
     TIMEOUT,
   );
@@ -5634,15 +5634,15 @@ describe("cli: workspace access", () => {
   test(
     "workspace commands persist per-primary roots and track availability",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-workspace-access-cli-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-workspace-access-cli-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
         const shared = join(root, "shared");
         const unknown = join(root, "unknown");
         const missing = join(root, "missing");
-        mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
-        chmodSync(join(home, ".fx"), 0o700);
+        mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
+        chmodSync(join(home, ".lia"), 0o700);
         mkdirSync(workspace);
         mkdirSync(shared);
         mkdirSync(unknown);
@@ -5654,7 +5654,7 @@ describe("cli: workspace access", () => {
           HOME: realpathSync(home),
         };
 
-        const added = await runFx(
+        const added = await runLia(
           ["workspace", "add", sharedRoot, "--json"],
           { cwd: workspaceRoot, env: baseEnv },
         );
@@ -5678,14 +5678,14 @@ describe("cli: workspace access", () => {
         ]);
 
         const stored = JSON.parse(
-          readFileSync(join(home, ".fx", "settings.json"), "utf8"),
+          readFileSync(join(home, ".lia", "settings.json"), "utf8"),
         );
         expect(stored.workspaces[workspaceRoot].additional_directories).toEqual([
           sharedRoot,
         ]);
 
         for (const path of [unknownRoot, missing]) {
-          const unknownRemoval = await runFx(
+          const unknownRemoval = await runLia(
             ["workspace", "remove", path, "--json"],
             { cwd: workspaceRoot, env: baseEnv },
           );
@@ -5697,7 +5697,7 @@ describe("cli: workspace access", () => {
           });
         }
 
-        const removed = await runFx(
+        const removed = await runLia(
           ["workspace", "remove", sharedRoot, "--json"],
           { cwd: workspaceRoot, env: baseEnv },
         );
@@ -5709,13 +5709,13 @@ describe("cli: workspace access", () => {
           additional_directories: [],
         });
 
-        const readded = await runFx(
+        const readded = await runLia(
           ["workspace", "add", sharedRoot, "--json"],
           { cwd: workspaceRoot, env: baseEnv },
         );
         expect(readded.code).toBe(0);
 
-        const active = await runFx(["workspace", "--json"], {
+        const active = await runLia(["workspace", "--json"], {
           cwd: workspaceRoot,
           env: {
             ...baseEnv,
@@ -5729,7 +5729,7 @@ describe("cli: workspace access", () => {
         });
 
         rmSync(sharedRoot, { recursive: true, force: true });
-        const unavailable = await runFx(["workspace", "list", "--json"], {
+        const unavailable = await runLia(["workspace", "list", "--json"], {
           cwd: workspaceRoot,
           env: {
             ...baseEnv,
@@ -5746,7 +5746,7 @@ describe("cli: workspace access", () => {
           },
         ]);
 
-        const unavailableRemoved = await runFx(
+        const unavailableRemoved = await runLia(
           ["workspace", "remove", `${sharedRoot}${sep}`, "--json"],
           { cwd: workspaceRoot, env: baseEnv },
         );
@@ -5757,20 +5757,20 @@ describe("cli: workspace access", () => {
           additional_directories: [],
         });
         const removedSettings = JSON.parse(
-          readFileSync(join(home, ".fx", "settings.json"), "utf8"),
+          readFileSync(join(home, ".lia", "settings.json"), "utf8"),
         );
         expect(
           removedSettings.workspaces?.[workspaceRoot]?.additional_directories,
         ).toBeUndefined();
 
         mkdirSync(sharedRoot);
-        const restored = await runFx(
+        const restored = await runLia(
           ["workspace", "add", sharedRoot, "--json"],
           { cwd: workspaceRoot, env: baseEnv },
         );
         expect(restored.code).toBe(0);
 
-        const cleared = await runFx(["workspace", "clear", "--json"], {
+        const cleared = await runLia(["workspace", "clear", "--json"], {
           cwd: workspaceRoot,
           env: baseEnv,
         });
@@ -5790,7 +5790,7 @@ describe("cli: workspace access", () => {
   test(
     "workspace commands mutate persisted aliases by workspace identity",
     async () => {
-      const root = mkdtempSync(join(tmpdir(), "fx-workspace-alias-cli-"));
+      const root = mkdtempSync(join(tmpdir(), "lia-workspace-alias-cli-"));
       try {
         const home = join(root, "home");
         const workspace = join(root, "workspace");
@@ -5799,8 +5799,8 @@ describe("cli: workspace access", () => {
         const missing = join(root, "missing");
         const realParent = join(root, "real-parent");
         const parentLink = join(root, "parent-link");
-        mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
-        chmodSync(join(home, ".fx"), 0o700);
+        mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
+        chmodSync(join(home, ".lia"), 0o700);
         mkdirSync(workspace);
         mkdirSync(shared);
         mkdirSync(realParent);
@@ -5808,7 +5808,7 @@ describe("cli: workspace access", () => {
         symlinkSync(realParent, parentLink, "dir");
         const workspaceRoot = realpathSync(workspace);
         const sharedRoot = realpathSync(shared);
-        const settingsPath = join(home, ".fx", "settings.json");
+        const settingsPath = join(home, ".lia", "settings.json");
         const baseEnv = {
           ...NO_GATEWAY_AUTH,
           HOME: realpathSync(home),
@@ -5829,7 +5829,7 @@ describe("cli: workspace access", () => {
           { mode: 0o600 },
         );
 
-        const unchanged = await runFx(
+        const unchanged = await runLia(
           ["workspace", "add", sharedRoot, "--json"],
           { cwd: workspaceRoot, env: baseEnv },
         );
@@ -5841,7 +5841,7 @@ describe("cli: workspace access", () => {
           runtime_changed: false,
         });
 
-        const removedAvailable = await runFx(
+        const removedAvailable = await runLia(
           ["workspace", "remove", sharedRoot, "--json"],
           { cwd: workspaceRoot, env: baseEnv },
         );
@@ -5870,7 +5870,7 @@ describe("cli: workspace access", () => {
           }) + "\n",
           { mode: 0o600 },
         );
-        const removedUnavailable = await runFx(
+        const removedUnavailable = await runLia(
           ["workspace", "remove", missing, "--json"],
           { cwd: workspaceRoot, env: baseEnv },
         );
@@ -5898,7 +5898,7 @@ describe("cli: workspace access", () => {
           }) + "\n",
           { mode: 0o600 },
         );
-        const removedLinkedPrefix = await runFx(
+        const removedLinkedPrefix = await runLia(
           ["workspace", "remove", linkedMissing, "--json"],
           { cwd: workspaceRoot, env: baseEnv },
         );
@@ -5922,21 +5922,21 @@ describe("cli: workspace access", () => {
 
 describe("cli: MCP profile", () => {
   test("status, doctor, and list start no MCP server, and show connects one", async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-cli-mcp-inspect-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-cli-mcp-inspect-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     const pidPath = join(root, "mcp.pid");
-    mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+    mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
     mkdirSync(workspace);
-    writeFileSync(join(home, ".fx", "settings.json"), "{}\n", { mode: 0o600 });
+    writeFileSync(join(home, ".lia", "settings.json"), "{}\n", { mode: 0o600 });
     writeFileSync(
-      join(home, ".fx", "mcp.json"),
+      join(home, ".lia", "mcp.json"),
       JSON.stringify({
         mcp: {
           fixture: {
             type: "local",
             command: [process.execPath, MODERN_MCP_FIXTURE],
-            environment: { FX_MCP_PID_PATH: pidPath },
+            environment: { LIA_MCP_PID_PATH: pidPath },
           },
         },
       }),
@@ -5944,7 +5944,7 @@ describe("cli: MCP profile", () => {
     );
     const env = { HOME: home, ...NO_GATEWAY_AUTH };
     try {
-      const status = await runFx(["status", "--json"], { cwd: workspace, env });
+      const status = await runLia(["status", "--json"], { cwd: workspace, env });
       expect(status.code).toBe(0);
       expect(JSON.parse(status.stdout.trim()).mcp).toMatchObject({
         connection_check: "not_checked",
@@ -5957,19 +5957,19 @@ describe("cli: MCP profile", () => {
       });
       expect(existsSync(pidPath)).toBe(false);
 
-      const doctor = await runFx(["doctor", "--json"], { cwd: workspace, env });
+      const doctor = await runLia(["doctor", "--json"], { cwd: workspace, env });
       expect(doctor.code).toBe(0);
       expect(JSON.parse(doctor.stdout.trim()).mcp.connection_check).toBe(
         "not_checked",
       );
       expect(existsSync(pidPath)).toBe(false);
 
-      const listed = await runFx(["mcp", "list"], { cwd: workspace, env });
+      const listed = await runLia(["mcp", "list"], { cwd: workspace, env });
       expect(listed.code).toBe(0);
-      expect(listed.stdout).toMatch(/fixture +~\/\.fx\/mcp\.json +stdio +not started/);
+      expect(listed.stdout).toMatch(/fixture +~\/\.lia\/mcp\.json +stdio +not started/);
       expect(existsSync(pidPath)).toBe(false);
 
-      const shown = await runFx(
+      const shown = await runLia(
         ["mcp", "show", "fixture"],
         { cwd: workspace, env, timeoutMs: TIMEOUT },
       );
@@ -5983,23 +5983,23 @@ describe("cli: MCP profile", () => {
   }, 30_000);
 
   test("add refuses a profile with both mcp and mcpServers and leaves it as it was", async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-cli-mcp-keys-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-cli-mcp-keys-")));
     const home = join(root, "home");
-    const profilePath = join(home, ".fx", "mcp.json");
-    mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+    const profilePath = join(home, ".lia", "mcp.json");
+    mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
     const both = JSON.stringify({
       mcp: { alpha: { command: "alpha-server" } },
       mcpServers: { beta: { command: "beta-server" } },
     });
     writeFileSync(profilePath, both, { mode: 0o600 });
     try {
-      const refused = await runFx(
+      const refused = await runLia(
         ["mcp", "add", "gamma", "--", "gamma-server"],
         { env: { HOME: home, ...NO_GATEWAY_AUTH } },
       );
       expect(refused.code).toBe(1);
       expect(refused.stderr).toBe(
-          "Couldn't add gamma to ~/.fx/mcp.json: the file has both \"mcp\" and \"mcpServers\"; merge them into one.\n",
+          "Couldn't add gamma to ~/.lia/mcp.json: the file has both \"mcp\" and \"mcpServers\"; merge them into one.\n",
       );
       expect(readFileSync(profilePath, "utf8")).toBe(both);
     } finally {
@@ -6007,27 +6007,27 @@ describe("cli: MCP profile", () => {
     }
   });
 
-  test.skipIf(platform() === "win32")("status, list, and add finish when ~/.fx/mcp.json is a fifo", async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-cli-mcp-fifo-")));
+  test.skipIf(platform() === "win32")("status, list, and add finish when ~/.lia/mcp.json is a fifo", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-cli-mcp-fifo-")));
     const home = join(root, "home");
-    const profilePath = join(home, ".fx", "mcp.json");
-    mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+    const profilePath = join(home, ".lia", "mcp.json");
+    mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
     // Opening a fifo for reading waits for a writer, and nothing writes here.
     expect(spawnSync("mkfifo", [profilePath]).status).toBe(0);
     const env = { HOME: home, ...NO_GATEWAY_AUTH };
     try {
-      const status = await runFx(["status", "--json"], { cwd: root, env });
+      const status = await runLia(["status", "--json"], { cwd: root, env });
       expect(status.code).toBe(0);
       expect(JSON.parse(status.stdout.trim()).mcp.inspection_error).toBe("DurablePathUnsafe");
 
-      const list = await runFx(["mcp", "list"], { cwd: root, env });
+      const list = await runLia(["mcp", "list"], { cwd: root, env });
       expect(list.code).toBe(1);
-      expect(list.stderr).toBe("fx mcp: ~/.fx/mcp.json isn't a plain file; replace it with one\n");
+      expect(list.stderr).toBe("lia mcp: ~/.lia/mcp.json isn't a plain file; replace it with one\n");
 
-      const add = await runFx(["mcp", "add", "probe", "--", "/bin/echo", "hi"], { cwd: root, env });
+      const add = await runLia(["mcp", "add", "probe", "--", "/bin/echo", "hi"], { cwd: root, env });
       expect(add.code).toBe(1);
       expect(add.stderr).toBe(
-        "Couldn't add probe to ~/.fx/mcp.json: it isn't a plain file; replace it with one.\n",
+        "Couldn't add probe to ~/.lia/mcp.json: it isn't a plain file; replace it with one.\n",
       );
       expect(lstatSync(profilePath).isFIFO()).toBe(true);
     } finally {
@@ -6035,60 +6035,60 @@ describe("cli: MCP profile", () => {
     }
   });
 
-  test.skipIf(platform() === "win32")("list, add, and ask say what's wrong with an ~/.fx/mcp.json fx can't read", async () => {
-    const linkLoop = "~/.fx/mcp.json is a link that loops or passes through too many links; replace it with a plain file";
-    const tooLarge = "~/.fx/mcp.json is over 1 MB, the most fx reads; make it smaller";
+  test.skipIf(platform() === "win32")("list, add, and ask say what's wrong with an ~/.lia/mcp.json lia can't read", async () => {
+    const linkLoop = "~/.lia/mcp.json is a link that loops or passes through too many links; replace it with a plain file";
+    const tooLarge = "~/.lia/mcp.json is over 1 MB, the most lia reads; make it smaller";
     const cases = [
       {
         label: "link loop",
         make: (path: string) => symlinkSync("mcp.json", path),
-        list: `fx mcp: ${linkLoop}\n`,
-        add: "Couldn't add probe to ~/.fx/mcp.json: it is a link that loops or passes through too many links; replace it with a plain file.\n",
-        ask: `fx ask: ${linkLoop}\n`,
+        list: `lia mcp: ${linkLoop}\n`,
+        add: "Couldn't add probe to ~/.lia/mcp.json: it is a link that loops or passes through too many links; replace it with a plain file.\n",
+        ask: `lia ask: ${linkLoop}\n`,
       },
       {
         label: "over 1 MB",
         make: (path: string) =>
           writeFileSync(path, JSON.stringify({ mcpServers: {}, pad: "x".repeat(1024 * 1024) }), { mode: 0o600 }),
-        list: `fx mcp: ${tooLarge}\n`,
-        add: "Couldn't add probe to ~/.fx/mcp.json: it is over 1 MB, the most fx reads; make it smaller.\n",
-        ask: `fx ask: ${tooLarge}\n`,
+        list: `lia mcp: ${tooLarge}\n`,
+        add: "Couldn't add probe to ~/.lia/mcp.json: it is over 1 MB, the most lia reads; make it smaller.\n",
+        ask: `lia ask: ${tooLarge}\n`,
       },
       {
         label: "fifo",
         // Opening a fifo for reading waits for a writer, and nothing writes here.
         make: (path: string) => expect(spawnSync("mkfifo", [path]).status).toBe(0),
-        ask: "fx ask: ~/.fx/mcp.json isn't a plain file; replace it with one\n",
+        ask: "lia ask: ~/.lia/mcp.json isn't a plain file; replace it with one\n",
       },
     ];
     for (const item of cases) {
-      const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-cli-mcp-unreadable-")));
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-cli-mcp-unreadable-")));
       const home = join(root, "home");
-      const profilePath = join(home, ".fx", "mcp.json");
-      mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+      const profilePath = join(home, ".lia", "mcp.json");
+      mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
       item.make(profilePath);
       const gateway = startFakeGateway([]);
       try {
         const env = { HOME: home, ...NO_GATEWAY_AUTH };
         if (item.list) {
-          const list = await runFx(["mcp", "list"], { cwd: root, env });
+          const list = await runLia(["mcp", "list"], { cwd: root, env });
           expect({ label: item.label, code: list.code, stderr: list.stderr }).toEqual({ label: item.label, code: 1, stderr: item.list });
         }
         if (item.add) {
-          const add = await runFx(["mcp", "add", "probe", "--", "/bin/echo", "hi"], { cwd: root, env });
+          const add = await runLia(["mcp", "add", "probe", "--", "/bin/echo", "hi"], { cwd: root, env });
           expect({ label: item.label, code: add.code, stderr: add.stderr }).toEqual({ label: item.label, code: 1, stderr: item.add });
         }
-        // fx ask stops in words before it sends any model request.
+        // lia ask stops in words before it sends any model request.
         const askEnv = {
           HOME: home,
           AI_GATEWAY_API_KEY: "mcp-unreadable-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_DISABLE_KEYCHAIN: "1",
-          FX_AUTO_UPGRADE: "0",
-          FX_MODEL: FAKE_GATEWAY_MODEL,
-          FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+          LIA_DISABLE_KEYCHAIN: "1",
+          LIA_AUTO_UPGRADE: "0",
+          LIA_MODEL: FAKE_GATEWAY_MODEL,
+          LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
         };
-        const ask = await runFx(["ask", "--no-save", "Do nothing."], { cwd: root, env: askEnv });
+        const ask = await runLia(["ask", "--no-save", "Do nothing."], { cwd: root, env: askEnv });
         expect({ label: item.label, code: ask.code, stderr: ask.stderr }).toEqual({ label: item.label, code: 1, stderr: item.ask });
         expect(gateway.requestCount()).toBe(0);
       } finally {
@@ -6099,22 +6099,22 @@ describe("cli: MCP profile", () => {
   }, 30_000);
 
   test("concurrent adds of different names keep both", async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-cli-mcp-race-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-cli-mcp-race-")));
     const home = join(root, "home");
     mkdirSync(home, { recursive: true });
     try {
       const [first, second] = await Promise.all([
-        runFx(["mcp", "add", "first", "--", "first-server"], {
+        runLia(["mcp", "add", "first", "--", "first-server"], {
           env: { HOME: home, ...NO_GATEWAY_AUTH },
         }),
-        runFx(["mcp", "add", "second", "--", "second-server"], {
+        runLia(["mcp", "add", "second", "--", "second-server"], {
           env: { HOME: home, ...NO_GATEWAY_AUTH },
         }),
       ]);
       expect(first.code).toBe(0);
       expect(second.code).toBe(0);
       const profile = JSON.parse(
-        readFileSync(join(home, ".fx", "mcp.json"), "utf8"),
+        readFileSync(join(home, ".lia", "mcp.json"), "utf8"),
       );
       expect(Object.keys(profile.mcpServers).sort()).toEqual(["first", "second"]);
     } finally {
@@ -6123,33 +6123,33 @@ describe("cli: MCP profile", () => {
   });
 
   test("add fails precisely without HOME and on a flag it doesn't have", async () => {
-    const missingHome = await runFx(["mcp", "add", "fixture", "--", "node"], {
+    const missingHome = await runLia(["mcp", "add", "fixture", "--", "node"], {
       env: { HOME: undefined, ...NO_GATEWAY_AUTH },
     });
     expect(missingHome.code).toBe(1);
-    expect(missingHome.stderr).toBe("fx mcp: HOME is not set to an absolute path\n");
+    expect(missingHome.stderr).toBe("lia mcp: HOME is not set to an absolute path\n");
 
-    // A relative HOME counts as unset: fx fails the same way and saves
+    // A relative HOME counts as unset: lia fails the same way and saves
     // nothing under the folder it runs in.
-    const cwd = mkdtempSync(join(tmpdir(), "fx-e2e-mcp-relative-home-"));
+    const cwd = mkdtempSync(join(tmpdir(), "lia-e2e-mcp-relative-home-"));
     try {
-      const relativeHome = await runFx(["mcp", "add", "fixture", "--", "node"], {
+      const relativeHome = await runLia(["mcp", "add", "fixture", "--", "node"], {
         cwd,
         env: { HOME: "relative/home", ...NO_GATEWAY_AUTH },
       });
       expect(relativeHome.code).toBe(1);
-      expect(relativeHome.stderr).toBe("fx mcp: HOME is not set to an absolute path\n");
+      expect(relativeHome.stderr).toBe("lia mcp: HOME is not set to an absolute path\n");
       expect(readdirSync(cwd)).toEqual([]);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
 
-    const flagged = await runFx(
+    const flagged = await runLia(
       ["mcp", "add", "--transport", "sse", "fixture", "https://example.test"],
       { env: { HOME: tmpdir(), ...NO_GATEWAY_AUTH } },
     );
     expect(flagged.code).toBe(2);
-    expect(flagged.stderr).toStartWith("fx mcp add: unknown flag --transport\nusage: fx mcp add");
+    expect(flagged.stderr).toStartWith("lia mcp add: unknown flag --transport\nusage: lia mcp add");
   });
 });
 
@@ -6161,27 +6161,27 @@ describe("cli: completion", () => {
   // The words on the command line, the last one under the cursor, and what
   // Tab offers there.
   const cases: [string[], string][] = [
-    [["fx", "con"], "config"],
-    [["fx", "config", ""], "list get set unset schema"],
-    [["fx", "config", "schema", "--p"], "--project"],
-    [["fx", "config", "get", "sound.t"], "sound.turn_end"],
-    [["fx", "config", "get", "status_line.c"], ""],
-    [["fx", "config", "get", "startup_s"], ""],
-    [["fx", "config", "get", "theme", ""], ""],
-    [["fx", "ask", "--permission-mode", ""], "ask auto full-access"],
-    [["fx", "--model", "gpt-5", "ask", "--permission-m"], "--permission-mode"],
-    [["fx", "mcp", ""], "list show add remove login logout approve reject call"],
-    [["fx", "mcp", "add", "--g"], "--global"],
-    [["fx", "usage", "--period", ""], "today 7d month"],
-    [["fx", "login", ""], "vercel"],
-    [["fx", "completion", ""], "bash zsh fish"],
+    [["lia", "con"], "config"],
+    [["lia", "config", ""], "list get set unset schema"],
+    [["lia", "config", "schema", "--p"], "--project"],
+    [["lia", "config", "get", "sound.t"], "sound.turn_end"],
+    [["lia", "config", "get", "status_line.c"], ""],
+    [["lia", "config", "get", "startup_s"], ""],
+    [["lia", "config", "get", "theme", ""], ""],
+    [["lia", "ask", "--permission-mode", ""], "ask auto full-access"],
+    [["lia", "--model", "gpt-5", "ask", "--permission-m"], "--permission-mode"],
+    [["lia", "mcp", ""], "list show add remove login logout approve reject call"],
+    [["lia", "mcp", "add", "--g"], "--global"],
+    [["lia", "usage", "--period", ""], "today 7d month"],
+    [["lia", "login", ""], "vercel"],
+    [["lia", "completion", ""], "bash zsh fish"],
   ];
 
   async function writeScript(shell: string, dir: string): Promise<string> {
-    const result = await runFx(["completion", shell], { env: { HOME: dir } });
+    const result = await runLia(["completion", shell], { env: { HOME: dir } });
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
-    const path = join(dir, `fx.${shell}`);
+    const path = join(dir, `lia.${shell}`);
     writeFileSync(path, result.stdout);
     return path;
   }
@@ -6190,26 +6190,26 @@ describe("cli: completion", () => {
     return words.map((word) => `'${word}'`).join(" ");
   }
 
-  test("fx completion takes one shell name", async () => {
-    const home = mkdtempSync(join(tmpdir(), "fx-completion-usage-"));
+  test("lia completion takes one shell name", async () => {
+    const home = mkdtempSync(join(tmpdir(), "lia-completion-usage-"));
     try {
-      const unknown = await runFx(["completion", "tcsh"], { env: { HOME: home } });
+      const unknown = await runLia(["completion", "tcsh"], { env: { HOME: home } });
       expect(unknown.code).toBe(2);
       expect(unknown.stdout).toBe("");
-      expect(unknown.stderr).toBe("fx completion: unknown shell tcsh; choose bash, zsh, or fish\nusage: fx completion bash|zsh|fish\n");
-      const none = await runFx(["completion"], { env: { HOME: home } });
+      expect(unknown.stderr).toBe("lia completion: unknown shell tcsh; choose bash, zsh, or fish\nusage: lia completion bash|zsh|fish\n");
+      const none = await runLia(["completion"], { env: { HOME: home } });
       expect(none.code).toBe(2);
-      expect(none.stderr).toBe("usage: fx completion bash|zsh|fish\n");
-      const help = await runFx(["completion", "--help"], { env: { HOME: home } });
+      expect(none.stderr).toBe("usage: lia completion bash|zsh|fish\n");
+      const help = await runLia(["completion", "--help"], { env: { HOME: home } });
       expect(help.code).toBe(0);
-      expect(help.stdout).toContain('Commands:\n  bash  Load it with: eval "$(fx completion bash)"\n');
+      expect(help.stdout).toContain('Commands:\n  bash  Load it with: eval "$(lia completion bash)"\n');
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
   }, TIMEOUT);
 
-  test("fx completion bash completes words, flags, values, and setting keys", async () => {
-    const home = realpathSync(mkdtempSync(join(tmpdir(), "fx-completion-bash-")));
+  test("lia completion bash completes words, flags, values, and setting keys", async () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "lia-completion-bash-")));
     try {
       const script = await writeScript("bash", home);
       const harness = join(home, "harness.bash");
@@ -6217,7 +6217,7 @@ describe("cli: completion", () => {
         // The way help says to load it. bash 3.2 loads nothing through
         // source <(...), so eval is the line that works everywhere.
         `eval "$(cat '${script}')"`,
-        'comp() { COMP_WORDS=("$@"); COMP_CWORD=$(( ${#COMP_WORDS[@]} - 1 )); COMPREPLY=(); _fx; echo "${COMPREPLY[*]}"; }',
+        'comp() { COMP_WORDS=("$@"); COMP_CWORD=$(( ${#COMP_WORDS[@]} - 1 )); COMPREPLY=(); _lia; echo "${COMPREPLY[*]}"; }',
         ...cases.map(([words]) => `comp ${quoted(words)}`),
         "",
       ].join("\n"));
@@ -6229,8 +6229,8 @@ describe("cli: completion", () => {
     }
   }, TIMEOUT);
 
-  test.skipIf(!shellAvailable("zsh"))("fx completion zsh offers the same candidates", async () => {
-    const home = realpathSync(mkdtempSync(join(tmpdir(), "fx-completion-zsh-")));
+  test.skipIf(!shellAvailable("zsh"))("lia completion zsh offers the same candidates", async () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "lia-completion-zsh-")));
     try {
       const script = await writeScript("zsh", home);
       const harness = join(home, "harness.zsh");
@@ -6238,11 +6238,11 @@ describe("cli: completion", () => {
       writeFileSync(harness, [
         "compdef() { :; }",
         `source '${script}'`,
-        '_fx_test_print() { local prefix=${words[CURRENT]}; local -a out; out=(${(M)@:#${prefix}*}); print -r -- "${out[*]}"; }',
-        '_describe() { local -a items; items=("${(@P)4}"); _fx_test_print "${(@)items%%:*}"; }',
-        'compadd() { if [[ $1 == -a ]]; then _fx_test_print "${(@P)2}"; else _fx_test_print "$@"; fi; }',
+        '_lia_test_print() { local prefix=${words[CURRENT]}; local -a out; out=(${(M)@:#${prefix}*}); print -r -- "${out[*]}"; }',
+        '_describe() { local -a items; items=("${(@P)4}"); _lia_test_print "${(@)items%%:*}"; }',
+        'compadd() { if [[ $1 == -a ]]; then _lia_test_print "${(@P)2}"; else _lia_test_print "$@"; fi; }',
         '_files() { print -r -- ""; }',
-        'comp() { words=("$@"); CURRENT=${#words}; _fx; }',
+        'comp() { words=("$@"); CURRENT=${#words}; _lia; }',
         ...cases.map(([words]) => `comp ${quoted(words)}`),
         "",
       ].join("\n"));
@@ -6254,14 +6254,14 @@ describe("cli: completion", () => {
     }
   }, TIMEOUT);
 
-  test.skipIf(!shellAvailable("fish"))("fx completion fish offers the same candidates", async () => {
-    const home = realpathSync(mkdtempSync(join(tmpdir(), "fx-completion-fish-")));
+  test.skipIf(!shellAvailable("fish"))("lia completion fish offers the same candidates", async () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "lia-completion-fish-")));
     try {
       const script = await writeScript("fish", home);
       for (const [words, want] of cases) {
         const line = words.join(" ");
         // As in the bash and zsh harnesses, file completion offers nothing,
-        // so only the words fx itself offers are compared.
+        // so only the words lia itself offers are compared.
         const stubFiles = "function __fish_complete_path; end";
         const run = spawnSync("fish", ["--no-config", "-c", `source '${script}'; ${stubFiles}; complete -C '${line}'`], {
           cwd: home,

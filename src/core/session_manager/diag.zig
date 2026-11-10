@@ -1,6 +1,6 @@
 //! Diagnostics (D14): every repair or drop the manager makes is reported
 //! once through one optional callback, like SQLite's log callback. The
-//! adapter forwards events to fx's `debug_trace`; the driver captures them.
+//! adapter forwards events to lia's `debug_trace`; the driver captures them.
 //! With no callback the cost is one null check.
 
 const std = @import("std");

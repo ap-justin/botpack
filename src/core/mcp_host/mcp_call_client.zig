@@ -1,5 +1,5 @@
-//! `fx mcp call TOOL [JSON | -]`: runs one of the session's MCP tools from
-//! a command that fx's shell tool runs, through the session's bridge
+//! `lia mcp call TOOL [JSON | -]`: runs one of the session's MCP tools from
+//! a command that lia's shell tool runs, through the session's bridge
 //! (`mcp_call_bridge.zig`). It prints just the tool's data on stdout, so
 //! the command can write it to a file or pipe it into `jq`, and only what
 //! the command prints reaches the model. When stdout is not a terminal, one
@@ -10,7 +10,7 @@
 //! call of the tool by the agent that ran the command. It works only while
 //! that shell call runs.
 //!
-//! `fx mcp call list SERVER`, `search QUERY`, and `help TOOL` print plain
+//! `lia mcp call list SERVER`, `search QUERY`, and `help TOOL` print plain
 //! text about the tools that agent may use, so a command can find a tool and
 //! learn its arguments the same way.
 const std = @import("std");
@@ -22,15 +22,15 @@ const wire = @import("mcp_call_wire.zig");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-/// What `fx mcp call` exits with.
+/// What `lia mcp call` exits with.
 pub const exit = struct {
     pub const ok: u8 = 0;
-    /// The call failed, or the connection to fx was lost.
+    /// The call failed, or the connection to lia was lost.
     pub const failed: u8 = 1;
-    /// A usage mistake, as for every `fx mcp` verb.
+    /// A usage mistake, as for every `lia mcp` verb.
     pub const usage: u8 = 2;
-    /// No running fx shell call to reach: outside fx, after the shell call
-    /// ended, or another fx version.
+    /// No running lia shell call to reach: outside lia, after the shell call
+    /// ended, or another lia version.
     pub const unavailable: u8 = 3;
     /// Too many calls are running; nothing ran.
     pub const busy: u8 = 4;
@@ -47,7 +47,7 @@ pub const Reply = struct {
 
 pub const CallError = error{ MalformedReply, UnsupportedReply, ConnectionLost, OutOfMemory };
 
-/// What `fx mcp call` was asked: a tool to run, or a question about tools.
+/// What `lia mcp call` was asked: a tool to run, or a question about tools.
 pub const Command = union(enum) {
     /// `arguments` is the JSON argument, `-` for stdin, or null for none.
     call: struct { tool: []const u8, arguments: ?[]const u8 },
@@ -100,20 +100,20 @@ fn readArguments(arena: Allocator, io: std.Io, err: *Writer, arguments: ?[]const
         var stdin = std.Io.File.stdin().reader(io, &stdin_buffer);
         break :blk stdin.interface.allocRemaining(arena, .limited(wire.max_request_bytes)) catch |e| switch (e) {
             error.StreamTooLong => {
-                try err.print("fx mcp call: the arguments on stdin are larger than {d} bytes.\n", .{wire.max_request_bytes});
+                try err.print("lia mcp call: the arguments on stdin are larger than {d} bytes.\n", .{wire.max_request_bytes});
                 return null;
             },
             else => return e,
         };
     };
     if (!isJsonObject(arena, arguments_json)) {
-        try err.writeAll("fx mcp call: the arguments must be one JSON object, such as '{\"team\":\"ENG\"}'.\n");
+        try err.writeAll("lia mcp call: the arguments must be one JSON object, such as '{\"team\":\"ENG\"}'.\n");
         return null;
     }
     return arguments_json;
 }
 
-/// Runs `fx mcp call` and returns the exit code.
+/// Runs `lia mcp call` and returns the exit code.
 pub fn run(arena: Allocator, io: std.Io, out: *Writer, err: *Writer, command: Command) !u8 {
     const operation: wire.Operation = switch (command) {
         .call => |value| .{ .call = .{
@@ -131,11 +131,11 @@ pub fn run(arena: Allocator, io: std.Io, out: *Writer, err: *Writer, command: Co
     const reply = call(arena, io, socket_path, token, operation) catch |e| switch (e) {
         error.OutOfMemory => return e,
         error.UnsupportedReply => {
-            try err.writeAll("fx mcp call: the running fx session is another fx version. Run the fx that started the session, or restart the session with this one.\n");
+            try err.writeAll("lia mcp call: the running lia session is another lia version. Run the lia that started the session, or restart the session with this one.\n");
             return exit.unavailable;
         },
         error.ConnectionLost, error.MalformedReply => {
-            try err.print("fx mcp call: the connection to fx was lost ({s}). The call may have run; check its effect before running it again.\n", .{@errorName(e)});
+            try err.print("lia mcp call: the connection to lia was lost ({s}). The call may have run; check its effect before running it again.\n", .{@errorName(e)});
             return exit.failed;
         },
         else => return unavailable(err),
@@ -145,27 +145,27 @@ pub fn run(arena: Allocator, io: std.Io, out: *Writer, err: *Writer, command: Co
             try out.writeAll(reply.bytes);
             // A lookup's text is already meant to be read.
             if (operation == .call and !stdoutIsTerminal(io)) {
-                try err.print("fx mcp call: {s}\n", .{try shapeSummary(arena, reply.bytes)});
+                try err.print("lia mcp call: {s}\n", .{try shapeSummary(arena, reply.bytes)});
             }
             return exit.ok;
         },
         .tool_error => {
-            try err.print("fx mcp call: {s} returned an error:\n", .{tool});
+            try err.print("lia mcp call: {s} returned an error:\n", .{tool});
             try writeLine(err, reply.bytes);
             return exit.tool_error;
         },
         .failed => {
-            try err.writeAll("fx mcp call: ");
+            try err.writeAll("lia mcp call: ");
             try writeLine(err, reply.bytes);
             return exit.failed;
         },
         .denied => {
-            try err.print("fx mcp call: {s} did not run. ", .{tool});
+            try err.print("lia mcp call: {s} did not run. ", .{tool});
             try writeLine(err, reply.bytes);
             return exit.denied;
         },
         .refused => {
-            try err.writeAll("fx mcp call: ");
+            try err.writeAll("lia mcp call: ");
             try writeLine(err, reply.bytes);
             return if (reply.header.reason == .busy) exit.busy else if (reply.header.reason == .malformed or reply.header.reason == .too_large) exit.usage else exit.unavailable;
         },
@@ -287,7 +287,7 @@ fn repeatedValues(items: []const std.json.Value, key: []const u8, out: *[max_hin
 }
 
 fn unavailable(err: *Writer) !u8 {
-    try err.writeAll("fx mcp call: no running fx shell call to reach. It works only in a command that fx's shell tool runs, while that call runs.\n");
+    try err.writeAll("lia mcp call: no running lia shell call to reach. It works only in a command that lia's shell tool runs, while that call runs.\n");
     return exit.unavailable;
 }
 
@@ -301,7 +301,7 @@ fn isJsonObject(arena: Allocator, text: []const u8) bool {
     return value == .object;
 }
 
-test "fx mcp call outside a shell call reports it is unavailable" {
+test "lia mcp call outside a shell call reports it is unavailable" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     var out: std.Io.Writer.Allocating = .init(arena_state.allocator());
@@ -309,7 +309,7 @@ test "fx mcp call outside a shell call reports it is unavailable" {
     if (io_mod.getenv(wire.socket_env) != null) return error.SkipZigTest;
     try std.testing.expectEqual(exit.unavailable, try run(arena_state.allocator(), std.testing.io, &out.writer, &err.writer, .{ .call = .{ .tool = "mcp_s_t", .arguments = null } }));
     try std.testing.expectEqual(@as(usize, 0), out.written().len);
-    try std.testing.expect(std.mem.find(u8, err.written(), "no running fx shell call") != null);
+    try std.testing.expect(std.mem.find(u8, err.written(), "no running lia shell call") != null);
     try std.testing.expectEqual(exit.usage, try run(arena_state.allocator(), std.testing.io, &out.writer, &err.writer, .{ .call = .{ .tool = "mcp_s_t", .arguments = "[1]" } }));
     // A lookup outside a shell call is unavailable too.
     try std.testing.expectEqual(exit.unavailable, try run(arena_state.allocator(), std.testing.io, &out.writer, &err.writer, .{ .list = "linear" }));

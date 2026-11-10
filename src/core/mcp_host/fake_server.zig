@@ -29,11 +29,11 @@ pub const Mode = enum {
     older_error_stuck,
     /// Only 2026-07-28: discovery lists it, requests must carry it, initialize fails.
     per_request,
-    /// Only 2024-11-05, which fx doesn't speak: discovery fails, initialize is answered with it.
+    /// Only 2024-11-05, which lia doesn't speak: discovery fails, initialize is answered with it.
     unsupported_initialize,
-    /// Only 2024-11-05, which fx doesn't speak: discovery fails, initialize is refused with an error listing it.
+    /// Only 2024-11-05, which lia doesn't speak: discovery fails, initialize is refused with an error listing it.
     unsupported_initialize_error,
-    /// A modern server that lists only a version fx doesn't speak.
+    /// A modern server that lists only a version lia doesn't speak.
     unsupported_discover,
     /// A 2026 server whose -32020 a bridge forwards, as when a proxy before
     /// it drops request headers: discovery gets -32020, initialize succeeds
@@ -167,7 +167,7 @@ const calls =
 pub const HttpMode = enum {
     /// A 2026 server behind a proxy that drops request headers: the server
     /// sees no `Mcp-Method` and answers `server/discover` with 400 and
-    /// -32020. fx's client does send the header; the fake treats it as
+    /// -32020. lia's client does send the header; the fake treats it as
     /// absent. It accepts `initialize` 2025-11-25, which needs no
     /// `Mcp-Method`, and serves one `echo` tool on that session.
     header_stripped,
@@ -180,7 +180,7 @@ pub const HttpMode = enum {
     /// a tools request is served when its `Mcp-Method` names its method and
     /// its `_meta` carries that version.
     per_request,
-    /// A 2026 server that lists only 2027-01-01, which fx doesn't speak.
+    /// A 2026 server that lists only 2027-01-01, which lia doesn't speak.
     unsupported_discover,
     /// A 2026 server that answers discovery with 400 and -32021.
     missing_capability,

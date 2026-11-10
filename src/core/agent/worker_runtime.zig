@@ -155,7 +155,7 @@ pub const QueuedPrompt = struct {
     /// Present only when an explicit host action resumes a durable paused
     /// model turn. The same ownership rules as the other queued fields apply.
     recovery_checkpoint: ?session_codec.RecoveryCheckpoint = null,
-    /// The request a previous fx process left unfinished, which this turn's
+    /// The request a previous lia process left unfinished, which this turn's
     /// first model request resumes.
     recovery_resume: ?types.RecoveryResume = null,
     /// True when this output surface already contains the checkpoint's
@@ -518,8 +518,8 @@ pub const WorkerEvent = union(enum) {
     begin_prompt: types.UserTurn,
     begin_prompt_with_skill_bindings: BeginPromptWithSkillBindings,
     begin_presented_prompt: u64,
-    /// A turn that resumes a request a previous fx process left unfinished.
-    /// Its prompt is fx's note to the model, so no user card is written.
+    /// A turn that resumes a request a previous lia process left unfinished.
+    /// Its prompt is lia's note to the model, so no user card is written.
     begin_resumed_prompt: u64,
     append_user_feedback: []u8,
     /// A subagent's report or message a boundary took into the running
@@ -1147,7 +1147,7 @@ pub const WorkerRuntime = struct {
     pub const PostWake = enum { posted, nudged, stopped };
 
     /// Takes the oldest queued prompt, for a host that runs turns itself
-    /// rather than on a worker thread, as `fx ask` does. Null when none
+    /// rather than on a worker thread, as `lia ask` does. Null when none
     /// waits. The caller owns it (`freeQueuedPrompt`) and gives the turn its
     /// own history.
     pub fn takeQueuedPrompt(self: *WorkerRuntime, alloc: std.mem.Allocator) ?QueuedPrompt {
@@ -7267,7 +7267,7 @@ test "typed lifecycle worker events duplicate and free every payload variant" {
         .{ .terminal = .{
             .id = .{ .turn_id = 1, .call_id = "final" },
             .outcome = .{ .kind = .completed, .summary = "Listed files" },
-            .command_artifact_handle = "fx-command-final.log",
+            .command_artifact_handle = "lia-command-final.log",
         } },
         .{ .turn_finished = .{ .turn_id = 1, .outcome = .completed } },
     };
@@ -7512,7 +7512,7 @@ test "dupeWorkerEvent owns a complete refreshed credential publication" {
     const alloc = std.testing.allocator;
     const source: WorkerEvent = .{ .credential_refreshed = .{
         .token = @constCast("fresh-token"),
-        .source = .fx_login,
+        .source = .lia_login,
         .team_id = @constCast("team_123"),
         .refresh_after_ms = 100,
     } };
@@ -8137,7 +8137,7 @@ test "question resume observer runs only for accepted answers before releasing t
 test "question batch source distinguishes route recovery from agent questions" {
     const alloc = std.testing.allocator;
     const options = [_]types.QuestionOption{.{ .label = "Try again later", .description = null }};
-    const entries = [_]types.QuestionBatchEntry{.{ .question = "Route failed. What should fx do?", .options = &options }};
+    const entries = [_]types.QuestionBatchEntry{.{ .question = "Route failed. What should lia do?", .options = &options }};
 
     var route_runtime = WorkerRuntime{};
     defer route_runtime.deinit(alloc);

@@ -205,7 +205,7 @@ const CaptureFailure = enum {
                 .{max_capture_bytes / (1024 * 1024)},
             ),
             .incomplete => "the login shell exited before reporting its state",
-            .out_of_memory => "fx ran out of memory",
+            .out_of_memory => "lia ran out of memory",
             .replay_failed => "the captured state could not be restored",
         };
     }
@@ -214,7 +214,7 @@ const CaptureFailure = enum {
 pub const CaptureRequest = struct {
     shell_path: []const u8,
     cwd: []const u8,
-    /// Environment for the capture shell; null inherits fx's environment.
+    /// Environment for the capture shell; null inherits lia's environment.
     environ: ?*const Environ.Map = null,
 };
 
@@ -390,7 +390,7 @@ pub const Owner = struct {
         entry.value_ptr.* = self.epoch;
     }
 
-    /// Epoch a shell command grant was made under. Grants fx never recorded
+    /// Epoch a shell command grant was made under. Grants lia never recorded
     /// count as made before the first refresh.
     pub fn shellGrantEpoch(self: *Owner, target: []const u8) u64 {
         const io = io_mod.getIo();
@@ -408,7 +408,7 @@ pub const Owner = struct {
         return (self.shell_grants.get(target) orelse 0) == self.epoch;
     }
 
-    /// Reports whether fx fell back to full startup after a failed capture,
+    /// Reports whether lia fell back to full startup after a failed capture,
     /// so it cannot tell which names the startup files redefine.
     pub fn startupNamesUnknown(self: *Owner) bool {
         const io = io_mod.getIo();
@@ -773,8 +773,8 @@ fn captureWithShellChecked(request: CaptureRequest) !CaptureOutcome {
     const end_marker = try markerText(scratch, &nonce, "END", "\x00", "\x00");
 
     // The capture runs an interactive login shell. Without its own session
-    // it would share fx's controlling terminal, stop on job control, and its
-    // startup files could write over the fx interface.
+    // it would share lia's controlling terminal, stop on job control, and its
+    // startup files could write over the lia interface.
     var child = command_runner.spawnDetachedSession(
         scratch,
         invocation.argv(),
@@ -785,7 +785,7 @@ fn captureWithShellChecked(request: CaptureRequest) !CaptureOutcome {
         return .{ .failed = .spawn_failed };
     };
     const supervisor_pid: std.posix.pid_t = child.id orelse return .{ .failed = .spawn_failed };
-    // The supervisor, not fx, stops the shell and anything its startup files
+    // The supervisor, not lia, stops the shell and anything its startup files
     // left running, then exits on its own.
     defer if (command_runner.finishDetachedSession(&child)) |term| {
         traceSupervisorExit(supervisor_pid, term);
@@ -911,7 +911,7 @@ fn testPayload(alloc: Allocator, nonce: []const u8, chatter: []const u8) ![]u8 {
         "FXSNAP:",
         nonce,
         ":ENV\x00",
-        "PATH=/opt/fx-marker/bin:/usr/bin\x00",
+        "PATH=/opt/lia-marker/bin:/usr/bin\x00",
         "PWD=/capture/cwd\x00",
         "SHLVL=2\x00",
         "MULTI=line one\nline two\x00",
@@ -937,13 +937,13 @@ test "snapshot payload parsing ignores startup output and shell-owned variables"
     const payload = try testPayload(generation.arena.allocator(), nonce, "welcome from .zshrc\nFXSNAP:other:ENV\x00");
     try parsePayload(generation, payload, nonce);
 
-    try testing.expectEqualStrings("/opt/fx-marker/bin:/usr/bin", generation.environ.get("PATH").?);
+    try testing.expectEqualStrings("/opt/lia-marker/bin:/usr/bin", generation.environ.get("PATH").?);
     try testing.expectEqualStrings("line one\nline two", generation.environ.get("MULTI").?);
     try testing.expect(generation.environ.get("PWD") == null);
     try testing.expect(generation.environ.get("SHLVL") == null);
     try testing.expectEqualStrings("/home/user/.config/zsh", generation.zdotdir.?);
     try testing.expect(generation.defines("ll"));
-    try testing.expect(generation.defines("fx_function"));
+    try testing.expect(generation.defines("lia_function"));
     try testing.expect(!generation.defines("ls"));
     try testing.expectEqualStrings(
         "alias ll='ls -l'\nfx_function () {\n\tprint ok\n}\n",
@@ -1054,7 +1054,7 @@ test "snapshot owner resets remembered shell grants on refresh" {
     var owner: Owner = .{ .capture_fn = FakeCapture.capture };
     defer owner.deinit();
 
-    // Grants fx never recorded count as made before the first refresh.
+    // Grants lia never recorded count as made before the first refresh.
     try testing.expect(owner.shellGrantCurrent("npm test"));
     owner.recordShellGrant("npm test");
     try testing.expectEqual(@as(u64, 0), owner.shellGrantEpoch("npm test"));
@@ -1229,12 +1229,12 @@ fn expectRealCapture(shell_path: []const u8, file_name: []const u8, contents: []
         },
     };
     defer generation.destroy();
-    try testing.expectEqualStrings("captured-from-startup", generation.environ.get("FX_TEST_SNAPSHOT_MARKER").?);
-    try testing.expect(std.mem.startsWith(u8, generation.environ.get("PATH").?, "/opt/fx-snapshot-marker/bin:"));
+    try testing.expectEqualStrings("captured-from-startup", generation.environ.get("LIA_TEST_SNAPSHOT_MARKER").?);
+    try testing.expect(std.mem.startsWith(u8, generation.environ.get("PATH").?, "/opt/lia-snapshot-marker/bin:"));
     try testing.expect(generation.environ.get("PWD") == null);
     try testing.expect(generation.defines("fxll"));
-    try testing.expect(generation.defines("fx_snapshot_function"));
-    try testing.expect(std.mem.find(u8, generation.replay, "fx_snapshot_function") != null);
+    try testing.expect(generation.defines("lia_snapshot_function"));
+    try testing.expect(std.mem.find(u8, generation.replay, "lia_snapshot_function") != null);
     try testing.expect(std.mem.find(u8, generation.replay, "fxll") != null);
     try testing.expect(std.mem.find(u8, generation.replay, "startup chatter") == null);
 }
@@ -1244,11 +1244,11 @@ test "snapshot capture reads a real zsh login shell" {
         "/bin/zsh",
         ".zshrc",
         "print -r -- 'startup chatter'\n" ++
-            "export FX_TEST_SNAPSHOT_MARKER=captured-from-startup\n" ++
-            "export PATH=\"/opt/fx-snapshot-marker/bin:$PATH\"\n" ++
+            "export LIA_TEST_SNAPSHOT_MARKER=captured-from-startup\n" ++
+            "export PATH=\"/opt/lia-snapshot-marker/bin:$PATH\"\n" ++
             "alias fxll='print -r -- alias-ok'\n" ++
-            "fx_snapshot_function() { print -r -- function-ok; }\n" ++
-            "_fx_completion_helper() { :; }\n",
+            "lia_snapshot_function() { print -r -- function-ok; }\n" ++
+            "_lia_completion_helper() { :; }\n",
     );
 }
 
@@ -1257,9 +1257,9 @@ test "snapshot capture reads a real bash login shell" {
         "/bin/bash",
         ".bashrc",
         "echo 'startup chatter'\n" ++
-            "export FX_TEST_SNAPSHOT_MARKER=captured-from-startup\n" ++
-            "export PATH=\"/opt/fx-snapshot-marker/bin:$PATH\"\n" ++
+            "export LIA_TEST_SNAPSHOT_MARKER=captured-from-startup\n" ++
+            "export PATH=\"/opt/lia-snapshot-marker/bin:$PATH\"\n" ++
             "alias fxll='echo alias-ok'\n" ++
-            "fx_snapshot_function() { echo function-ok; }\n",
+            "lia_snapshot_function() { echo function-ok; }\n",
     );
 }

@@ -195,7 +195,7 @@ pub fn run(
             admission.effort.label(),
         },
     );
-    if (!routed_config.tool_context.provider_capabilities.fx_search) {
+    if (!routed_config.tool_context.provider_capabilities.lia_search) {
         routed_config.tool_context.web_search_backend = null;
         routed_config.tool_context.web_search_runtime_ready = false;
     }

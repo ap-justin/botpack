@@ -67,7 +67,7 @@ function scan(text, re, kind, skip,    found, name) {
 /^[+-]/ {
   sign = substr($0, 1, 1)
   line = substr($0, 2)
-  scan(line, "\"FX_[A-Z0-9_]+", "env", 1)
+  scan(line, "\"LIA_[A-Z0-9_]+", "env", 1)
   scan(line, "\"--[a-z0-9][a-z0-9-]*", "flag", 1)
   scan(line, "\\.token = \"[a-z][a-z0-9-]*", "command", 10)
   scan(line, "\\.command = \"/[a-z][a-z0-9-]*", "slash", 12)

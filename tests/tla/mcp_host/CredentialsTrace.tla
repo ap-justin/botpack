@@ -1,7 +1,7 @@
 ---- MODULE CredentialsTrace ----
 \* Trace wrapper for Credentials.tla. trace.ts generates TraceObs from real
-\* `fx mcp` runs against a scratch HOME (tests/tla/drivers/mcp_host/):
-\*   run {cmd, server}  a command: "get" (fx mcp list, show, fx ask: every
+\* `lia mcp` runs against a scratch HOME (tests/tla/drivers/mcp_host/):
+\*   run {cmd, server}  a command: "get" (lia mcp list, show, lia ask: every
 \*                      HTTP server's credential is read), "logout", "put"
 \*                      (a sign-in), or an environment fault the harness made:
 \*                      "unreadable" (it rewrote the document as a newer

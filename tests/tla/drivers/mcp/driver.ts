@@ -3,7 +3,7 @@
 // Builds the binaries the selected scenarios need, runs each scenario with an
 // isolated HOME and MCPV2_TRACE, checks every expected trace through the
 // bridge, and keeps all evidence under <out>/<unit>/<case>/, where <out> is a
-// fresh folder under FX_TLA_OUT or the system temp folder.
+// fresh folder under LIA_TLA_OUT or the system temp folder.
 //
 // Usage: bun tests/tla/drivers/mcp/driver.ts [--unit S05] [--case name] [--repeat N] [--list]
 //

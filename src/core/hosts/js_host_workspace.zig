@@ -12,7 +12,7 @@ pub const max_command_bytes: usize = 64 * 1024;
 const max_output_bytes: usize = 64 * 1024;
 pub const min_timeout_ms: u32 = 1;
 pub const max_timeout_ms: u32 = 30_000;
-/// Largest instruction file prefix one host read copies into fx. Matches the
+/// Largest instruction file prefix one host read copies into lia. Matches the
 /// SDK's `workspaceInstructionFileLimit`.
 const max_instruction_file_bytes: usize = 1024 * 1024;
 const max_instruction_path_bytes: usize = 4 * 1024;

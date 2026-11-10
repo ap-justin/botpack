@@ -3,7 +3,7 @@
 \* client sends for its subscriptions, what it hands the host, and when it
 \* listens again. Rules: SUBS-01..SUBS-05.
 \*
-\* Each subscription in Subs is one thing the host listens for (fx has one:
+\* Each subscription in Subs is one thing the host listens for (lia has one:
 \* tool list changes), asking for its own filter, Ask(s). Every listen is a
 \* new request with a fresh id from
 \* 1..MaxListens. The server may send anything for any id ever used: an

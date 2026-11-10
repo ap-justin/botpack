@@ -440,7 +440,7 @@ pub fn queryContainsCompleteIdentity(query: []const u8, identity: []const u8) bo
 pub const AuthenticationRequired = union(enum) {
     /// What the user runs to sign in.
     oauth: []const u8,
-    /// The variable to set before starting fx.
+    /// The variable to set before starting lia.
     bearer_environment: []const u8,
 };
 
@@ -460,7 +460,7 @@ pub fn writeAuthenticationRequired(alloc: Allocator, server_name: []const u8, re
         .bearer_environment => |variable| {
             try out.writer.writeAll(",\"interactive\":false,\"environment\":");
             try writeEncodedJsonScalar(alloc, &out.writer, variable);
-            try out.writer.writeAll(",\"message\":\"Set this environment variable before starting fx.\"");
+            try out.writer.writeAll(",\"message\":\"Set this environment variable before starting lia.\"");
         },
     }
     try out.writer.writeAll("}}");

@@ -1,12 +1,12 @@
-"""Linux only: fx's Zig unit tests, run on code that went through the PGSO transforms.
+"""Linux only: lia's Zig unit tests, run on code that went through the PGSO transforms.
 
-The fx candidate's only behavior check is the E2E corpus. This step builds the
+The lia candidate's only behavior check is the E2E corpus. This step builds the
 unit test executable (`zig build install-test`) through the candidate's IR
 passes, outliners, and code generation, without a profile, and runs it.
 Every function is marked `minsize` first, so the size-only paths, the AArch64
 homogeneous prologue and epilogue, and both outliners reach as much code as
 they can. The executable is relinked with Zig's own link of the control test
-executable, the way scripts/pgso/linux.py relinks the fx candidate.
+executable, the way scripts/pgso/linux.py relinks the lia candidate.
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ from scripts.pgso.toolchain import Toolchain
 SELECTOR = "unit_tests"
 TARGETS = (linux.ARM64.TARGET, linux.X86_64.TARGET)
 
-# The fx candidate's profile-use passes without the profile, after every
+# The lia candidate's profile-use passes without the profile, after every
 # function is marked `minsize`.
 OPTIMIZE_FLAGS = (
     "-force-attribute=minsize",
@@ -72,13 +72,13 @@ def optimize_argv(toolchain: Toolchain, paths: PipelinePaths) -> tuple[str, ...]
 
 
 def object_argv(toolchain: Toolchain, paths: PipelinePaths) -> tuple[str, ...]:
-    """llc as for the fx candidate, with its code generation and platform flags.
+    """llc as for the lia candidate, with its code generation and platform flags.
 
     The tests are built position independent (see build.zig's `install-test`).
     llc ignores the bitcode's PIE level, and on x86_64 the default static
     model emits absolute relocations that the PIE link rejects.
     """
-    argv = candidate_object_argv(toolchain, dataclasses.replace(paths, selector="fx"))
+    argv = candidate_object_argv(toolchain, dataclasses.replace(paths, selector="lia"))
     return (*argv[:-3], "-relocation-model=pic", *argv[-3:])
 
 

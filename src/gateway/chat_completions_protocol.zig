@@ -86,7 +86,7 @@ fn contains_name(names: []const []const u8, name: []const u8) bool {
 
 fn validate_name(name: []const u8) Error!void {
     if (name.len == 0 or name.len > max_name_bytes) return error.InvalidToolName;
-    // fx advertises dotted built-in names as well as MCP names. Keep those
+    // lia advertises dotted built-in names as well as MCP names. Keep those
     // literal identities; do not invent aliases that core cannot resolve.
     for (name) |byte| if (!std.ascii.isAlphanumeric(byte) and byte != '_' and byte != '-' and byte != '.') return error.InvalidToolName;
 }
@@ -284,7 +284,7 @@ fn validate_history(alloc: Allocator, messages: []const types.ChatMessage) Error
         if (pending.count() != 0) return error.InvalidToolHistory;
         if (message.tool_calls.len > max_selected_tools) return error.TooManyTools;
         for (message.tool_calls) |call| {
-            if (call.provenance != .fx_local or call.provider_result != null) return error.UnsupportedToolProvenance;
+            if (call.provenance != .lia_local or call.provider_result != null) return error.UnsupportedToolProvenance;
             if (call.id.len == 0 or call.final_identity != .valid) return error.InvalidToolCallId;
             try validate_name(call.name);
             if (call.arguments_json.len > max_history_arguments_bytes) return error.ArgumentsTooLarge;
@@ -683,7 +683,7 @@ pub const Reducer = struct {
         try check_json_depth(data);
         var parsed = std.json.parseFromSlice(std.json.Value, self.alloc, data, .{ .duplicate_field_behavior = .@"error", .parse_numbers = false }) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
-            // Valid JSON that fx refuses ends the turn. Text that is not JSON
+            // Valid JSON that lia refuses ends the turn. Text that is not JSON
             // at all was damaged on the way, so the request is resent.
             error.DuplicateField => return error.InvalidChunk,
             else => return error.MalformedChatCompletionsChunk,
@@ -1325,7 +1325,7 @@ test "chat completions replay preserves sequence protected IDs affinity and cano
         const stripped = try build_request(alloc, request, .{ .provider = &other });
         defer alloc.free(stripped);
         try std.testing.expect(std.mem.find(u8, stripped, "reasoning") == null);
-        try std.testing.expect(std.mem.find(u8, stripped, "fx_") != null);
+        try std.testing.expect(std.mem.find(u8, stripped, "lia_") != null);
     }
     request.model = "another-model";
     const stripped = try build_request(alloc, request, .{ .provider = &provider });
@@ -1819,7 +1819,7 @@ test "chat completions history correlation preserves canonical IDs and JSON stri
     const messages = parsed.value.object.get("messages").?.array.items;
     const wire_call = messages[2].object.get("tool_calls").?.array.items[0].object;
     const wire_id = wire_call.get("id").?.string;
-    try std.testing.expect(std.mem.startsWith(u8, wire_id, "fx_"));
+    try std.testing.expect(std.mem.startsWith(u8, wire_id, "lia_"));
     try std.testing.expectEqualStrings(wire_id, messages[3].object.get("tool_call_id").?.string);
     try std.testing.expectEqualStrings(call.arguments_json, wire_call.get("function").?.object.get("arguments").?.string);
     try std.testing.expectEqualStrings("functions/read:0", call.id);
@@ -2043,7 +2043,7 @@ test "chat completions rejects unmatched native malformed and duplicate history 
     call.provenance = .provider_executed;
     messages[0].tool_calls = &.{call};
     try std.testing.expectError(error.UnsupportedToolProvenance, build_request(alloc, request, .{}));
-    call.provenance = .fx_local;
+    call.provenance = .lia_local;
     call.arguments_json = "[]";
     messages[0].tool_calls = &.{call};
     try std.testing.expectError(error.InvalidToolArguments, build_request(alloc, request, .{}));
@@ -2140,7 +2140,7 @@ test "chat completions owns fragmented interleaved tools and results independent
     try std.testing.expectEqualStrings("read_file", completion.tool_calls[0].name);
     try std.testing.expectEqualStrings("{\"path\":\"a\"}", completion.tool_calls[0].arguments_json);
     try std.testing.expectEqualStrings("{\"request\":{\"command\":\"pwd\"}}", completion.tool_calls[1].arguments_json);
-    try std.testing.expectEqual(types.ToolExecutionProvenance.fx_local, completion.tool_calls[1].provenance);
+    try std.testing.expectEqual(types.ToolExecutionProvenance.lia_local, completion.tool_calls[1].provenance);
 }
 
 test "chat completions returns unadvertised names and invalid arguments as sent" {

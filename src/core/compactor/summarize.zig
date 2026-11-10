@@ -1,4 +1,4 @@
-//! The summary step of fx-compactor: turns to compact in, compacted
+//! The summary step of lia-compactor: turns to compact in, compacted
 //! conversation out.
 //!
 //! In: the raw turns to compact (user messages, assistant messages, tool calls
@@ -46,7 +46,7 @@ pub const ToolResult = struct {
     call_id: []const u8,
     name: []const u8,
     output: []const u8,
-    /// The handle of the tool's whole output when fx saved it separately and
+    /// The handle of the tool's whole output when lia saved it separately and
     /// `output` does not name it, as when the output was clipped.
     saved_output: []const u8 = "",
     /// The tool reported a failure.
@@ -65,7 +65,7 @@ pub const Item = union(enum) {
     /// A message the user added while the turn ran.
     user: []const u8,
     assistant: []const u8,
-    /// Text fx itself added, such as permission feedback. Never a user
+    /// Text lia itself added, such as permission feedback. Never a user
     /// message.
     note: []const u8,
     tool_call: ToolCall,
@@ -806,7 +806,7 @@ fn prepare(arena: Allocator, turn: Turn, continued: ?checkpoint.OpenTurn, is_ope
         .assistant => |message| if (message.len > 0) {
             try text.print(arena, "{s}:\n{s}\n\n", .{ if (index == final_index) "Assistant, final reply" else "Assistant", message });
         },
-        .note => |message| try text.print(arena, "From fx, not the user:\n{s}\n\n", .{message}),
+        .note => |message| try text.print(arena, "From lia, not the user:\n{s}\n\n", .{message}),
         .tool_call => |call| {
             const index_line = try indexLine(arena, call.arguments);
             try text.print(arena, "[T{d} {s}{s}{s}]\n\n", .{ number, call.name, if (index_line.len > 0) ": " else "", index_line });
@@ -1270,7 +1270,7 @@ fn renderTranscript(alloc: Allocator, plan: Plan, clip: usize, earlier_clip: usi
             switch (item) {
                 .user => |added| try text.print(alloc, "[User, added while the assistant worked]\n{s}\n\n", .{try clipped(alloc, added, clip, turn_id)}),
                 .assistant => |assistant| if (assistant.len > 0) try text.print(alloc, "[Assistant]\n{s}\n\n", .{try clipped(alloc, assistant, clip, turn_id)}),
-                .note => |note| try text.print(alloc, "[From fx, not the user]\n{s}\n\n", .{try clipped(alloc, note, clip, turn_id)}),
+                .note => |note| try text.print(alloc, "[From lia, not the user]\n{s}\n\n", .{try clipped(alloc, note, clip, turn_id)}),
                 .tool_call => |call| try text.print(alloc, "[Tool call T{d}: {s}]\n{s}\n\n", .{ number, call.name, try clipped(alloc, call.arguments, clip, tool_id) }),
                 .tool_result => |result| {
                     try text.print(alloc, "[Tool result T{d}: {s}]\n{s}\n", .{ number, result.name, try clipped(alloc, result.output, clip, tool_id) });
@@ -1505,7 +1505,7 @@ test "after the conversation the model reads only the request, with every turn f
     try testing.expect(std.mem.find(u8, seen, "missing semicolon") == null);
     try testing.expect(std.mem.find(u8, seen, "Answer with text only and call no tools.") != null);
     // Read as the user's next message, the request could end up in the notes.
-    try testing.expect(std.mem.find(u8, seen, "This request comes from fx, not from the user") != null);
+    try testing.expect(std.mem.find(u8, seen, "This request comes from lia, not from the user") != null);
     // Turn 2 has nothing in between but is listed for its number.
     try testing.expect(std.mem.find(u8, seen, "each followed by its notes:\n\n" ++
         "Turn 1 (T1), which begins \u{201c}Fix the build. It fails on main.\u{201d}\n  T1 shell: zig build\n" ++
@@ -1662,7 +1662,7 @@ test "the skills and MCP tools used are listed from the tool calls" {
     var store = MemoryStore{ .alloc = testing.allocator };
     defer store.deinit();
     const turns = [_]Turn{.{ .user = "check the issue", .items = &.{
-        .{ .tool_call = .{ .id = "a", .name = "skill", .arguments = "{\"location\":\"skill:ab:4/fx-conventions\"}" } },
+        .{ .tool_call = .{ .id = "a", .name = "skill", .arguments = "{\"location\":\"skill:ab:4/lia-conventions\"}" } },
         .{ .tool_result = .{ .call_id = "a", .name = "skill", .output = "Conventions." } },
         .{ .tool_call = .{ .id = "b", .name = "mcp_linear_get_issue", .arguments = "{\"id\":\"FX-1\"}" } },
         .{ .tool_result = .{ .call_id = "b", .name = "mcp_linear_get_issue", .output = "FX-1: crash" } },
@@ -1671,7 +1671,7 @@ test "the skills and MCP tools used are listed from the tool calls" {
     var result = try compact(testing.allocator, .{ .model = "m", .turns = &turns }, model.model(), store.store());
     defer result.deinit();
     try testing.expectEqual(@as(usize, 2), result.compacted.used.len);
-    try testing.expect(std.mem.find(u8, result.text, "Skills and MCP tools used:\n- skill skill:ab:4/fx-conventions: 1 call, T1\n- MCP tool mcp_linear_get_issue: 1 call, T2\n") != null);
+    try testing.expect(std.mem.find(u8, result.text, "Skills and MCP tools used:\n- skill skill:ab:4/lia-conventions: 1 call, T1\n- MCP tool mcp_linear_get_issue: 1 call, T2\n") != null);
 }
 
 test "each turn and each tool call is saved word for word under its ID" {

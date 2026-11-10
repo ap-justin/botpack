@@ -293,7 +293,7 @@ def main(argv=None):
     run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
     # By default a new private folder (mkdtemp), so another user cannot plant
     # a file or link where a log will be written.
-    evidence = Path(args.evidence_dir or tempfile.mkdtemp(prefix='fx-tla-mcp-')).resolve()
+    evidence = Path(args.evidence_dir or tempfile.mkdtemp(prefix='lia-tla-mcp-')).resolve()
     reports = {}
     for unit in sorted({e['unit'] for e, _, _, _ in runs}):
         reports[unit] = evidence / unit / 'tlc' / run_id

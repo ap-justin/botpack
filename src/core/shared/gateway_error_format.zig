@@ -250,7 +250,7 @@ fn stringField(object: std.json.ObjectMap, key: []const u8) ?[]const u8 {
 }
 
 /// A provider's error body can nest `path` and `param` without end. Past this
-/// many levels fx shows no path, so the walk cannot run out of stack.
+/// many levels lia shows no path, so the walk cannot run out of stack.
 const max_param_path_depth = 16;
 
 fn formatParamPath(alloc: Allocator, value: std.json.Value) !?[]u8 {

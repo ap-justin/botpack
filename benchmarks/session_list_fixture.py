@@ -12,9 +12,9 @@ def write_private_json(path: Path, value: object) -> None:
 
 
 def generate(home: Path, workspace: Path, count: int, log_size: int, deny_event_read: bool) -> None:
-    sessions_root = home / ".fx" / "sessions"
+    sessions_root = home / ".lia" / "sessions"
     sessions_root.mkdir(parents=True, mode=0o700, exist_ok=True)
-    (home / ".fx").chmod(0o700)
+    (home / ".lia").chmod(0o700)
     sessions_root.chmod(0o700)
 
     for index in range(count):
@@ -76,7 +76,7 @@ def generate(home: Path, workspace: Path, count: int, log_size: int, deny_event_
                 "total_output_tokens": 0,
                 "last_event_seq": 1,
                 "event_log_bytes": log_size,
-                # fx decides staleness by log size and reads no stat identity.
+                # lia decides staleness by log size and reads no stat identity.
                 "event_log_stat_fingerprint": "00" * 32,
                 "generation_base_seq": 1,
                 "generation_base_bytes": log_size,

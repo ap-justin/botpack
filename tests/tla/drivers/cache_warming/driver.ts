@@ -1,4 +1,4 @@
-// Walks fx's cache-warming planner (src/core/agent/runtime/cache_warming.zig)
+// Walks lia's cache-warming planner (src/core/agent/runtime/cache_warming.zig)
 // along its model, tests/tla/cache_warming/CacheWarming.tla.
 //
 // TLC writes the model's state graph. Most of its variables describe the

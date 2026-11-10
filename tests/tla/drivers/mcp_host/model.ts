@@ -1,4 +1,4 @@
-// Model gate for the fx-layer MCP models: each model's smoke config
+// Model gate for the lia-layer MCP models: each model's smoke config
 // (safety and liveness), its stress config, every planted bug, the stated
 // properties the code is expected to break (findings), and repair witnesses.
 //
