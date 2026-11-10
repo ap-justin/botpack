@@ -85,7 +85,7 @@ When reviewing a diff, report shape findings alongside bug findings. A change ca
 Ask a maintainer before:
 
 - adding a new top-level command, a new stable env var, or a new project-safe setting;
-- renaming or removing a stable control: `lia ask --json` fields, ACP behavior, or env vars documented in the user manual;
+- renaming or removing a stable control: `lia ask --json` fields, ACP behavior, or stable env vars;
 - making any exception to a rule above.
 
 Ask before inventing a rule for something these rules don't cover: keyboard shortcuts, prompt shortcuts (`@`, `$`, `!`), verbosity levels (`--quiet`, `--verbose`), `--dry-run`, Ctrl+C and signals, and file-write safety.
@@ -104,10 +104,10 @@ Ask before inventing a rule for something these rules don't cover: keyboard shor
 - Every `LIA_*` name in `src/` must be registered, with a job and a stability, in `scripts/cli_shape_registry.json`, or CI fails. Known violations are listed there as exceptions, each with the change that removes it. A new exception needs a maintainer's approval; never add one to make a new control pass.
 - Full access is saved and printed as `full-access`, and `yolo` is read until lia 0.0.18, with `lia doctor` pointing it out. Only ACP's mode `_meta` and the lia-managed `yolo_acknowledged` key keep the old word.
 - Build a deprecation warning from `command_specs.deprecated_until`, as the replaced-command warning in `src/core/slash_commands/command_specs.zig` does with `"lia {s} " ++ deprecated_until ++ "; use {s}\n"`. Tests pin the full text, and writing the release by hand breaks when it moves.
-- A warning first ships in the first release tagged after it merges, which can be later than planned: check with `git tag --contains <merge commit>`. The current set was first meant to drop in 0.0.17 but merged after v0.0.16 was cut, so 0.0.17 was its first warning release and its version bump failed the shape check until the removal moved to 0.0.18. For the same reason, merge the change that removes old spellings only after the last release that warns about them is tagged.
+- A warning first ships in the first release tagged after it merges, which can be later than planned: check with `git tag --contains <merge commit>`. A version bump that reaches `old_spelling_removal` before a warning has shipped fails the shape check, so merge the change that removes old spellings only after the last release that warns about them is tagged.
 - Adding or removing a slash command changes the `/help` catalog count, which tests write as literals: `Commands <n>` in unit and E2E tests, `waitForHelpMenu(session, <n>)` in the E2E tests, and the `helpCatalogCount` assertion in `src/core/slash_commands/command_specs.zig`. Search `src` and `tests` for the old count and update every one; a missed one fails a unit test or a TUI test.
 - Remove a slash command that only prints a placeholder rather than hiding it, since a hidden command must be internal or deprecated. Add its name to the router's `parse rejects removed slash commands` test in `src/core/slash_commands/command_router.zig`, which uses the built-in registry, so the name can't come back by accident.
-- An `LIA_*` override listed in `src/core/config/env_settings.zig` shows in `lia config list`, so the user manual documents it, and the shape check fails unless `scripts/cli_shape_registry.json` marks it `stable`.
+- An `LIA_*` override listed in `src/core/config/env_settings.zig` shows in `lia config list`, and the shape check fails unless `scripts/cli_shape_registry.json` marks it `stable`.
 - `lia login vercel --api-key` pastes an AI Gateway API key. `lia setup` and `/setup` still work until lia 0.0.18 but warn: `lia setup` points to `lia login vercel --api-key`, and `/setup`, an alias of `/provider`, points to `/login` and `/provider`. Neither appears in help. Don't give "setup" a new meaning.
 - Resume has one kept spelling, `lia ask --resume <last|id>`; never add another form such as `--resume-latest`.
 - Every test hook starts with `LIA_TEST_`; CI rejects a test hook with any other prefix.

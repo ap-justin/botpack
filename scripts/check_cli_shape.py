@@ -286,7 +286,7 @@ class Checker:
 
     def check_documented_overrides(self) -> None:
         """lia config list shows the variables env_settings.collect reads as the
-        documented LIA_* setting overrides, and every variable the user manual documents is
+        documented LIA_* setting overrides, and every variable `--help` documents is
         stable. An unregistered name is check_env's to report."""
         registered = self.registry.get("env", {})
         overrides: dict[str, Line] = {}
@@ -299,7 +299,7 @@ class Checker:
                 self.report(
                     line,
                     "env",
-                    f"{name} is an override lia config list reports, so the user manual documents it; "
+                    f"{name} is an override lia config list reports, so it is documented; "
                     f"its stability is {stability!r}, and documented variables are stable",
                 )
 
