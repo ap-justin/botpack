@@ -117,6 +117,14 @@ const turn_failed_message = "The turn stopped before it finished";
 pub const TerminalOutcome = union(enum) {
     stop_reason: acp_types.StopReason,
     rpc_error: jsonrpc.RpcError,
+    /// ACP's `AUTH_REQUIRED`: the credential is missing or the provider
+    /// rejected it, so the client offers the sign-in methods again.
+    auth_required: AuthRequired,
+};
+
+pub const AuthRequired = struct {
+    message: []const u8,
+    offer: acp_types.AuthOffer,
 };
 
 fn promptInputFailure(err: anyerror) anyerror!TerminalOutcome {
@@ -254,6 +262,11 @@ const AcpContext = struct {
     /// status, because the turn then throws the same `error.ModelError` as
     /// any other provider failure.
     content_filtered: bool = false,
+    /// The recorded failure notice is the provider rejecting the credential
+    /// (HTTP 401 after the refresh-and-replay attempt), so a failed turn
+    /// answers `AUTH_REQUIRED`. A 403 is not one: signing in again does not
+    /// lift a team restriction.
+    credential_rejected: bool = false,
     auto_classifier: permission_auto_classifier.Classifier =
         permission_auto_classifier.Classifier.disabled(),
     /// Mode and permission policy captured at prompt dispatch so mid-turn
@@ -281,25 +294,37 @@ const AcpContext = struct {
         self.stop_reason = .end_turn;
         self.turn_failed = false;
         self.content_filtered = false;
+        self.credential_rejected = false;
         session.clearFailureMessage();
+    }
+
+    fn noteFailureNotice(self: *AcpContext, notice: []const u8) !void {
+        return self.recordFailureNotice(notice, false);
+    }
+
+    fn noteCredentialRejectedNotice(self: *AcpContext, notice: []const u8) !void {
+        return self.recordFailureNotice(notice, true);
     }
 
     /// Keeps `notice` as the message the prompt answers with if its turn
     /// fails, without the ANSI escapes the client never receives. Only the
     /// user's turn answers with it; a subagent's turn has no prompt.
-    fn noteFailureNotice(self: *AcpContext, notice: []const u8) !void {
+    fn recordFailureNotice(self: *AcpContext, notice: []const u8, credential_rejected: bool) !void {
         if (self.current_prompt_input == null) return;
         const session = if (self.state.active_session) |*active| active else return;
         const plain = try stripAnsiAlloc(self.alloc, notice);
         defer if (plain.ptr != notice.ptr) self.alloc.free(plain);
         const trimmed = std.mem.trim(u8, plain, &std.ascii.whitespace);
-        if (trimmed.len > 0) session.setFailureMessage(trimmed);
+        if (trimmed.len == 0) return;
+        session.setFailureMessage(trimmed);
+        self.credential_rejected = credential_rejected;
     }
 
     /// A new model reply starts, so the notices before it no longer say why
     /// the turn might fail.
     fn forgetFailureNotice(self: *AcpContext) void {
         if (self.current_prompt_input == null) return;
+        self.credential_rejected = false;
         if (self.state.active_session) |*session| session.clearFailureMessage();
     }
 
@@ -308,6 +333,10 @@ const AcpContext = struct {
     fn turnOutcome(self: *const AcpContext, session: *const server.ActiveSessionState) TerminalOutcome {
         if (!self.turn_failed) return .{ .stop_reason = self.stop_reason };
         const message = session.failureMessage();
+        if (self.credential_rejected and message.len > 0) return .{ .auth_required = .{
+            .message = message,
+            .offer = server.authOffer(self.state),
+        } };
         return .{ .rpc_error = .{
             .code = ErrorCode.internal_error,
             .message = if (message.len > 0) message else turn_failed_message,
@@ -939,9 +968,9 @@ pub fn handlePrompt(
         .rpc_error = no_active_session_rpc_error,
     };
     if (!try server.selectCredentialForProvider(state, session.provider)) {
-        return .{ .rpc_error = .{
-            .code = ErrorCode.invalid_request,
+        return .{ .auth_required = .{
             .message = credentials.missing_credential_message,
+            .offer = server.authOffer(state),
         } };
     }
     if (!ultrafastPromptAllowed(state, session)) {
@@ -3461,7 +3490,7 @@ fn pushHttpError(raw_ctx: *anyopaque, status: std.http.Status, detail: []const u
         null;
     defer if (owned_message) |message| ctx.alloc.free(message);
     const msg = owned_message orelse formatHttpError(&buf, status, detail);
-    try ctx.noteFailureNotice(msg);
+    if (auth_failure != null) try ctx.noteCredentialRejectedNotice(msg) else try ctx.noteFailureNotice(msg);
     ctx.sendAgentText(ctx.operationalMessageId(), msg) catch {};
 }
 
@@ -5570,6 +5599,77 @@ test "a failed prompt answers its own failure, not an earlier prompt's HTTP erro
     try std.testing.expect(second_outcome == .rpc_error);
     try std.testing.expectEqual(ErrorCode.internal_error, second_outcome.rpc_error.code);
     try std.testing.expectEqualStrings(turn_failed_message, second_outcome.rpc_error.message);
+}
+
+test "a rejected credential answers AUTH_REQUIRED and a forbidden one a generic error" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-auth-failure.jsonl", .{});
+    defer capture.close(io_mod.getIo());
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+    state.writer = .{ .stdout = capture };
+    const session = &state.active_session.?;
+    var prompt_input = ParsedPromptInput{ .text = &.{} };
+
+    const cases = [_]struct {
+        user_turn: bool = true,
+        status: std.http.Status,
+        // Null: the prompt answers a generic error.
+        auth_message: ?[]const u8,
+    }{
+        .{ .status = .unauthorized, .auth_message = "fx login authentication failed · HTTP 401" },
+        .{ .status = .forbidden, .auth_message = null },
+        .{ .user_turn = false, .status = .unauthorized, .auth_message = null },
+    };
+    for (cases) |case| {
+        var ctx = AcpContext{
+            .alloc = alloc,
+            .state = &state,
+            .session_id = "session_1",
+            .current_prompt_input = if (case.user_turn) &prompt_input else null,
+        };
+        const deps = agentRuntimeDeps(&ctx);
+        ctx.resetTurnOutcome(session);
+        try deps.push_http_error(deps.ctx, case.status, "provider body secret", .fx_login);
+        try deps.finalize_turn(deps.ctx, 1, .failed, null);
+
+        const outcome = ctx.turnOutcome(session);
+        if (case.auth_message) |expected| {
+            try std.testing.expect(outcome == .auth_required);
+            try std.testing.expectEqualStrings(expected, outcome.auth_required.message);
+            try std.testing.expectEqual(server.authOffer(&state), outcome.auth_required.offer);
+        } else {
+            try std.testing.expect(outcome == .rpc_error);
+            try std.testing.expectEqual(ErrorCode.internal_error, outcome.rpc_error.code);
+        }
+    }
+}
+
+test "a notice after a rejected credential decides the answer" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-auth-later-notice.jsonl", .{});
+    defer capture.close(io_mod.getIo());
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+    state.writer = .{ .stdout = capture };
+    const session = &state.active_session.?;
+    var prompt_input = ParsedPromptInput{ .text = &.{} };
+
+    var ctx = AcpContext{ .alloc = alloc, .state = &state, .session_id = "session_1", .current_prompt_input = &prompt_input };
+    const deps = agentRuntimeDeps(&ctx);
+    ctx.resetTurnOutcome(session);
+    try deps.push_http_error(deps.ctx, .unauthorized, "", .fx_login);
+    try deps.push_http_error(deps.ctx, .bad_gateway, "upstream down", .fx_login);
+    try deps.finalize_turn(deps.ctx, 1, .failed, null);
+
+    const outcome = ctx.turnOutcome(session);
+    try std.testing.expect(outcome == .rpc_error);
+    try std.testing.expectEqual(ErrorCode.internal_error, outcome.rpc_error.code);
+    try std.testing.expectEqualStrings("HTTP 502: upstream down", outcome.rpc_error.message);
 }
 
 test "a failed or paused turn answers the notice that ended it" {

@@ -1613,7 +1613,7 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
 
 /// The auth methods this connection is offered, in `initialize` and in
 /// `AUTH_REQUIRED` alike.
-fn authOffer(state: *const ServerState) acp_types.AuthOffer {
+pub fn authOffer(state: *const ServerState) acp_types.AuthOffer {
     return .{
         .login = .forProvider(state.provider),
         .client_terminal_auth = state.client_terminal_auth,
@@ -1623,12 +1623,20 @@ fn authOffer(state: *const ServerState) acp_types.AuthOffer {
 /// Answers with `AUTH_REQUIRED` and the auth methods the client can offer.
 fn writeAuthRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId) !void {
     const offer = authOffer(state);
+    return state.writer.send(alloc, try buildAuthRequired(alloc, id, .{
+        .message = offer.login.instruction(),
+        .offer = offer,
+    }));
+}
+
+/// An `AUTH_REQUIRED` error frame whose `data` lists the auth methods offered.
+fn buildAuthRequired(alloc: Allocator, id: ?jsonrpc.RequestId, auth: prompt_handler.AuthRequired) !jsonrpc.Writer.Built {
     var data: std.Io.Writer.Allocating = .init(alloc);
     defer data.deinit();
-    try acp_types.writeAuthRequiredData(&data.writer, offer);
-    return state.writer.writeError(alloc, id, .{
+    try acp_types.writeAuthRequiredData(&data.writer, auth.offer);
+    return jsonrpc.Writer.buildError(alloc, id, .{
         .code = ErrorCode.auth_required,
-        .message = offer.login.instruction(),
+        .message = auth.message,
         .data_json = data.written(),
     });
 }
@@ -2754,6 +2762,7 @@ fn buildPromptAnswer(
             return jsonrpc.Writer.buildResponse(alloc, id, response.writer.buffered());
         },
         .rpc_error => |rpc_error| return jsonrpc.Writer.buildError(alloc, id, rpc_error),
+        .auth_required => |auth| return buildAuthRequired(alloc, id, auth),
     }
 }
 
@@ -2794,6 +2803,7 @@ fn writeSteeringOutcome(
             try active.state.writer.writeResponse(active.alloc, id, response.written());
         },
         .rpc_error => |rpc_error| try active.state.writer.writeError(active.alloc, id, rpc_error),
+        .auth_required => |auth| try active.state.writer.send(active.alloc, try buildAuthRequired(active.alloc, id, auth)),
     }
 }
 
@@ -5288,4 +5298,26 @@ test "a prompt whose response fails while being written gets no second frame" {
 
     answerPrompt(&writer, alloc, .{ .integer = 7 }, .{ .stop_reason = .end_turn }, .{});
     try std.testing.expectEqual(@as(usize, 0), capture.frames.items.len);
+}
+
+test "a prompt that needs sign-in answers one AUTH_REQUIRED frame with its notice and auth methods" {
+    const alloc = std.testing.allocator;
+    var capture = AnswerCapture{ .alloc = alloc };
+    defer capture.deinit();
+    var writer = jsonrpc.Writer.initCallback(&capture, AnswerCapture.write);
+
+    answerPrompt(&writer, alloc, .{ .integer = 7 }, .{ .auth_required = .{
+        .message = "fx login authentication failed · HTTP 401",
+        .offer = .{ .client_terminal_auth = true },
+    } }, .{});
+    try std.testing.expectEqual(@as(usize, 1), capture.frames.items.len);
+    const parsed = try std.json.parseFromSlice(std.json.Value, alloc, capture.frames.items[0], .{});
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(i64, 7), parsed.value.object.get("id").?.integer);
+    const err = parsed.value.object.get("error").?.object;
+    try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), err.get("code").?.integer);
+    try std.testing.expectEqualStrings("fx login authentication failed · HTTP 401", err.get("message").?.string);
+    const methods = err.get("data").?.object.get("authMethods").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), methods.len);
+    try std.testing.expectEqualStrings(acp_types.agent_auth_method_id, methods[0].object.get("id").?.string);
 }

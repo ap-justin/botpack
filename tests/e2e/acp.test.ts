@@ -7980,10 +7980,11 @@ describe("acp: model-independent", () => {
         }
 
         expect(response.result).toBeUndefined();
-        expect(response.error).toEqual({
-          code: -32603,
-          message: "AI_GATEWAY_API_KEY authentication failed · HTTP 401",
-        });
+        expect(response.error.code).toBe(-32000);
+        expect(response.error.message).toBe(
+          "AI_GATEWAY_API_KEY authentication failed · HTTP 401",
+        );
+        expect(response.error.data.authMethods.length).toBeGreaterThan(0);
         const authUpdate = messages.find((message) =>
           message.method === "session/update" &&
           message.params?.update?.sessionUpdate === "agent_message_chunk"
