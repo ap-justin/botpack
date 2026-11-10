@@ -15,6 +15,7 @@ const diagnostics = @import("../workspace/diagnostics.zig");
 const image_attachments = @import("../images/image_attachments.zig");
 const io_mod = @import("../shared/io.zig");
 const tool_contracts = @import("../agent/runtime/tool_contracts.zig");
+const tool_names = @import("../mcp/tool_names.zig");
 const result_commit = @import("result_commit.zig");
 const vision_executor = @import("../agent/runtime/vision_executor.zig");
 const change_tracker = @import("../workspace/change_tracker.zig");
@@ -218,6 +219,7 @@ pub const Context = struct {
     mcp_search_tools: ?tool_mcp_runtime.SearchToolsFn = null,
     mcp_tool_schema: ?tool_mcp_runtime.ToolSchemaFn = null,
     mcp_snapshot_tool: ?tool_mcp_runtime.SnapshotToolFn = null,
+    mcp_resolve_qualified: ?tool_mcp_runtime.ResolveQualifiedFn = null,
     expected_mcp_runtime_generation: ?u64 = null,
     expected_mcp_binding: ?types.McpToolBinding = null,
     mcp_review_schema_json: ?[]const u8 = null,
@@ -1392,13 +1394,25 @@ pub fn snapshotMcpDefinition(ctx: Context, arena: Allocator, name: []const u8, k
 pub fn resolveUnselectedMcpTool(ctx: Context, arena: Allocator, name: []const u8) !?tool_mcp_runtime.SelectedTool {
     return switch (try lookupUnselectedMcpTool(ctx, arena, name)) {
         .resolved => |tool| tool,
-        .missing, .server_unavailable => null,
+        .missing, .server_unavailable, .ambiguous => null,
     };
 }
 
 /// `resolveUnselectedMcpTool`, saying why a name did not resolve: a server
 /// that yielded no tool list is named, so a caller can skip its other names.
 pub fn lookupUnselectedMcpTool(ctx: Context, arena: Allocator, name: []const u8) !tool_mcp_runtime.UnselectedLookup {
+    const exact = try lookupExactMcpTool(ctx, arena, name);
+    if (exact != .missing or !tool_names.looksQualified(name)) return exact;
+    const runtime_context = ctx.mcp_ctx orelse return exact;
+    const resolve = ctx.mcp_resolve_qualified orelse return exact;
+    return switch (try resolve(runtime_context, arena, name, ctx.permission_rules, ctx.mcp_access, runtimeCancelFlag(ctx))) {
+        .none => exact,
+        .many => |candidates| .{ .ambiguous = candidates },
+        .one => |resolved| try lookupExactMcpTool(ctx, arena, resolved),
+    };
+}
+
+fn lookupExactMcpTool(ctx: Context, arena: Allocator, name: []const u8) !tool_mcp_runtime.UnselectedLookup {
     const runtime_context = ctx.mcp_ctx orelse return .missing;
     const schema_fn = ctx.mcp_tool_schema orelse return .missing;
     const projection = (schema_fn(

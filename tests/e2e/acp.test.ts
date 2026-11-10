@@ -204,6 +204,11 @@ function fakeGatewayEnv(
   };
 }
 
+// The text of a session update: a message's content, or a notice's title.
+function updateText(update: any): string {
+  return update?.sessionUpdate === "notice" ? String(update.title ?? "") : acpContentText(update?.content);
+}
+
 function acpContentText(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) return content.map(acpContentText).join("");
@@ -785,6 +790,90 @@ test("configured provider ACP runs a direct call to a supplied MCP tool that is 
   }
 }, 45000);
 
+// A model that reads its client's tool list as `<server>.<tool>` calls the tool
+// by that name; fx runs the MCP tool it names, as a call by its own name would.
+async function runQualifiedMcpCall(
+  callName: string,
+  servers: Array<{ name: string; fixture: ReturnType<typeof startModernMcpHttpFixture> }>,
+  options: { mode?: "auto" | "ask" } = {},
+) {
+  const isReview = (body: any) => body.tools?.some((tool: any) => tool.function?.name === "permission_decision");
+  const fixture = createConfiguredProviderFixture(body => {
+    if (isReview(body)) return configuredToolCompletion(body.model, "permission_decision", { decision: "clear", rationale: "fixture review" });
+    if (body.messages.some((message: any) => message.role === "tool")) return configuredCompletion(body.model, "qualified call complete");
+    return configuredToolCompletion(body.model, callName, { text: "qualified" }, "qualified_call");
+  });
+  const client = await AcpClient.create({ cwd: fixture.workspace, env: fixture.env });
+  try {
+    await client.request("initialize", { protocolVersion: 1 }, 1);
+    const created = await client.request("session/new", {
+      cwd: fixture.workspace,
+      mcpServers: servers.map(server => ({ ...acpHttpServer(server.fixture, "acp"), name: server.name, _meta: { fx: { alwaysLoaded: false } } })),
+    }, 2) as any;
+    if (created.error) throw new Error(JSON.stringify(created));
+    await client.readLine();
+    if (options.mode === "auto") await client.request("session/set_mode", { modeId: "auto" }, 3);
+    const prompt = await runPrompt(client, "Call the echo tool by its qualified name.", TIMEOUT);
+    if (prompt.promptResult.error) throw new Error(JSON.stringify(prompt.promptResult.error));
+    expect(prompt.promptResult.result.stopReason).toBe("end_turn");
+    const agentRequests = fixture.requests.filter(request => !isReview(request.body));
+    const toolMessage = agentRequests.at(-1)!.body.messages.find((message: any) => message.role === "tool" && message.tool_call_id === "qualified_call");
+    const replayedCall = agentRequests.at(-1)!.body.messages
+      .flatMap((message: any) => message.tool_calls ?? [])
+      .find((call: any) => call.id === "qualified_call");
+    return {
+      toolText: toolMessage?.content as string,
+      replayedName: replayedCall?.function?.name as string,
+      permissionRequests: prompt.messages.filter((message: any) => message.method === "session/request_permission"),
+      toolCalls: servers.flatMap(server => server.fixture.requests.filter(entry => entry.message.method === "tools/call")),
+      stderr: client.stderr,
+    };
+  } finally {
+    await client.close();
+    fixture.close();
+    for (const server of servers) server.fixture.stop();
+  }
+}
+
+test("ACP runs a deferred MCP tool called as server.tool and records its exposed name", async () => {
+  const run = await runQualifiedMcpCall("fixture.echo", [{ name: "fixture", fixture: startModernMcpHttpFixture("json") }], { mode: "auto" });
+  expect(run.toolText).toContain(`${MODERN_HTTP_TOOL_RESULT}:qualified`);
+  expect(run.toolCalls).toHaveLength(1);
+  expect(run.replayedName).toBe(MCP_TOOL_NAME);
+  expect(run.stderr).toBe("");
+}, 45000);
+
+test("ACP refuses a server-qualified MCP name that fits two tools and lists both", async () => {
+  const run = await runQualifiedMcpCall("my_server.echo", [
+    { name: "my server", fixture: startModernMcpHttpFixture("json") },
+    { name: "my_server", fixture: startModernMcpHttpFixture("json") },
+  ], { mode: "auto" });
+  expect(run.toolCalls).toHaveLength(0);
+  expect(run.toolText).toMatch(/mcp_my_server_echo(?!_2)/);
+  expect(run.toolText).toContain("mcp_my_server_echo_2");
+  expect(run.toolText).toContain("capability_search");
+  expect(run.stderr).toBe("");
+}, 45000);
+
+test("ACP applies the permission check to the tool a server-qualified name resolves to", async () => {
+  const run = await runQualifiedMcpCall("fixture.echo", [{ name: "fixture", fixture: startModernMcpHttpFixture("json") }]);
+  expect(run.permissionRequests.length).toBeGreaterThan(0);
+  expect(JSON.stringify(run.permissionRequests)).toContain("echo");
+  expect(run.replayedName).toBe(MCP_TOOL_NAME);
+  expect(run.toolCalls).toHaveLength(0);
+  expect(run.toolText).not.toContain(MODERN_HTTP_TOOL_RESULT);
+  expect(run.stderr).toBe("");
+}, 45000);
+
+test("ACP answers an unknown server-qualified MCP name with the name format and capability_search", async () => {
+  const run = await runQualifiedMcpCall("fixture.missing", [{ name: "fixture", fixture: startModernMcpHttpFixture("json") }], { mode: "auto" });
+  expect(run.toolCalls).toHaveLength(0);
+  expect(run.toolText).toContain("Unsupported tool: fixture.missing");
+  expect(run.toolText).toContain("mcp_<server>_<tool>");
+  expect(run.toolText).toContain("capability_search");
+  expect(run.stderr).toBe("");
+}, 45000);
+
 // A provider search name is finished by its terminal lifecycle event, so it
 // must not get a second final update from the rejection hook.
 for (const [name, finalText] of [
@@ -1159,8 +1248,10 @@ function expectSavedOriginal(home: string, sessionId: string, body: string, orig
   expect(saved).not.toContain(original.toString("base64"));
 }
 
-async function startAutoSession(client: AcpClient, hooks = false) {
-  await client.request("initialize", { protocolVersion: 1 }, 1);
+// With `notices`, the client shows ACP v1 Session Notices, so context notices
+// reach it as `notice` updates; without, they are not sent to it at all.
+async function startAutoSession(client: AcpClient, hooks = false, notices = false) {
+  await client.request("initialize", { protocolVersion: 1, ...(notices ? { clientCapabilities: { session: { notices: {} } } } : {}) }, 1);
   const created = await client.request("session/new", { mcpServers: [], ...(hooks ? { _meta: { fx: { hooks: { captureContent: true } } } } : {}) }, 2) as any;
   await client.readLine(); // consume session/update notification
   await client.request("session/set_mode", { modeId: "auto" }, 3);
@@ -2898,19 +2989,19 @@ describe("acp: model-independent", () => {
           cwd: root.workspace,
           env: fakeGatewayEnv(root, gateway),
         });
-        await startAutoSession(client);
+        await startAutoSession(client, false, true);
 
         const first = await runPrompt(client, "check bounded project rules", TIMEOUT);
         const firstNotices = first.messages.filter((message: any) =>
           message.method === "session/update" &&
-          message.params?.update?.sessionUpdate === "agent_message_chunk" &&
-          message.params.update.content?.text?.includes("project instruction file")
+          message.params?.update?.sessionUpdate === "notice" &&
+          message.params.update.title?.includes("project instruction file")
         );
         expect(firstNotices).toHaveLength(1);
-        expect(firstNotices[0].params.update.content.text).toContain(
+        expect(firstNotices[0].params.update.title).toContain(
           "effective=24 bytes",
         );
-        expect(firstNotices[0].params.update.content.text).toContain(
+        expect(firstNotices[0].params.update.title).toContain(
           "source=workspace settings",
         );
         expect(JSON.stringify(first)).toContain("ACP_CONTEXT_LIMIT_FIRST");
@@ -2918,8 +3009,8 @@ describe("acp: model-independent", () => {
         const second = await runPrompt(client, "check the same bounded rules again", TIMEOUT);
         const secondNotices = second.messages.filter((message: any) =>
           message.method === "session/update" &&
-          message.params?.update?.sessionUpdate === "agent_message_chunk" &&
-          message.params.update.content?.text?.includes("project instruction file")
+          message.params?.update?.sessionUpdate === "notice" &&
+          message.params.update.title?.includes("project instruction file")
         );
         expect(secondNotices).toHaveLength(0);
         expect(JSON.stringify(second)).toContain("ACP_CONTEXT_LIMIT_SECOND");
@@ -2967,7 +3058,7 @@ describe("acp: model-independent", () => {
             args: testCase.args,
             env: fakeGatewayEnv(root, gateway),
           });
-          await startAutoSession(client);
+          await startAutoSession(client, false, true);
           const result = await runPromptBlocks(client, [
             { type: "text", text: "Inspect the remote resource metadata." },
             { type: "resource", resource: { uri: remoteUri } },
@@ -2989,7 +3080,7 @@ describe("acp: model-independent", () => {
 
           const notices = result.messages
             .filter((message: any) => message.method === "session/update")
-            .map((message: any) => acpContentText(message.params?.update?.content))
+            .map((message: any) => updateText(message.params?.update))
             .join("\n");
           expect(notices).toContain("action=omitted");
           expect(notices).toContain("reason=unsafe target");
@@ -3017,7 +3108,7 @@ describe("acp: model-independent", () => {
           cwd: root.workspace,
           env: fakeGatewayEnv(root, gateway),
         });
-        await startAutoSession(client);
+        await startAutoSession(client, false, true);
         const result = await runPromptBlocks(client, [
           { type: "text", text: "Inspect the deeply scoped target." },
           { type: "resource", resource: { uri: pathToFileURL(target).href } },
@@ -3032,7 +3123,7 @@ describe("acp: model-independent", () => {
         expect(prompt).toContain('reason="selection cap"');
         const notices = result.messages
           .filter((message: any) => message.method === "session/update")
-          .map((message: any) => acpContentText(message.params?.update?.content))
+          .map((message: any) => updateText(message.params?.update))
           .join("\n");
         expect(notices).toContain("reason=oversized rule file");
         expect(notices).toContain("reason=selection cap");
@@ -3074,7 +3165,7 @@ describe("acp: model-independent", () => {
             args: testCase.args,
             env: fakeGatewayEnv(root, gateway),
           });
-          await startAutoSession(client);
+          await startAutoSession(client, false, true);
           const result = await runPromptBlocks(client, [
             { type: "text", text: "Inspect the remote resource metadata." },
             ...resources,
@@ -3095,7 +3186,7 @@ describe("acp: model-independent", () => {
 
           const notices = result.messages
             .filter((message: any) => message.method === "session/update")
-            .map((message: any) => acpContentText(message.params?.update?.content))
+            .map((message: any) => updateText(message.params?.update))
             .join("\n");
           expect(notices.length).toBeLessThan(64 * 1024);
           expect(notices).toContain("96 additional records");
@@ -3307,7 +3398,7 @@ describe("acp: model-independent", () => {
   );
 
   test(
-    "an editor that sets session.notices to false gets context notices as agent messages",
+    "an editor that sets session.notices to false gets no context notice in the agent message",
     async () => {
       // ACP v1 advertises notices only with an object, `{}`.
       const root = createIsolatedRoot("fx-acp-notices-false-");
@@ -3340,7 +3431,8 @@ describe("acp: model-independent", () => {
         const updates = prompt.messages.map((message) => message.params?.update).filter(Boolean);
         expect(updates.filter((update) => update.sessionUpdate === "notice")).toEqual([]);
         const texts = updates.filter((update) => update.sessionUpdate === "agent_message_chunk").map((update) => update.content?.text ?? "");
-        expect(texts.join("")).toContain("[context] MCP description for");
+        expect(texts.join("")).not.toContain("[context]");
+        expect(texts.join("")).toBe("ACP notices complete");
         expect(client.stderr).toBe("");
       } finally {
         await client?.close();
@@ -3351,6 +3443,70 @@ describe("acp: model-independent", () => {
     },
     LIVE_TIMEOUT,
   );
+
+  // Two always-loaded servers whose instructions are cut, and a budget with
+  // room for one tool: the model hears of both limits, and of the cut once per
+  // server however many of its tools a search loads.
+  for (const withNotices of [false, true]) {
+    test(
+      `context notices stay out of the agent message ${withNotices ? "and arrive as notices" : "for an editor without notices"}`,
+      async () => {
+        const root = createIsolatedRoot("fx-acp-budget-notice-");
+        const httpFixtures = [startModernMcpHttpFixture("json"), startModernMcpHttpFixture("json")];
+        const gateway = startFakeGateway([
+          fakeGatewayToolCall("search_budget", "capability_search", { kind: "mcp", server: "alpha", query: "echo", limit: 5 }),
+          finalText("budget reply"),
+        ]);
+        try {
+          client = await AcpClient.create({
+            cwd: root.workspace,
+            env: { ...fakeGatewayEnv(root, gateway) },
+            args: ["--context-limit", "mcp_selected_schema_bytes=700", "--context-limit", "mcp_server_instructions_bytes=8", "acp"],
+          });
+          await client.request("initialize", { protocolVersion: 1, clientCapabilities: { session: { notices: withNotices ? {} : false } } }, 1);
+          const created = await client.request(
+            "session/new",
+            {
+              cwd: root.workspace,
+              mcpServers: [
+                { type: "http", name: "alpha", url: httpFixtures[0]!.url, headers: [] },
+                { type: "http", name: "beta", url: httpFixtures[1]!.url, headers: [] },
+              ],
+            },
+            2,
+          ) as any;
+          expect(created.error).toBeUndefined();
+          await client.readLine();
+          await client.request("session/set_mode", { modeId: "auto" }, 3);
+          const prompt = await runPrompt(client, "Find the echo tool.", TIMEOUT);
+          expect(prompt.promptResult.result.stopReason).toBe("end_turn");
+          const body = JSON.stringify(gateway.requests[0]!.body);
+          // The budget left one of the two tools out.
+          expect(["mcp_alpha_echo", "mcp_beta_echo"].filter((name) => body.includes(name))).toHaveLength(1);
+          const updates = prompt.messages.map((message) => message.params?.update).filter(Boolean);
+          const texts = updates.filter((update) => update.sessionUpdate === "agent_message_chunk").map((update) => update.content?.text ?? "");
+          expect(texts.join("")).toBe("budget reply");
+          const notices = updates.filter((update) => update.sessionUpdate === "notice").map((update) => update.title as string);
+          if (!withNotices) {
+            expect(notices).toEqual([]);
+          } else {
+            expect(notices.some((title) => title.includes("exceeded the mcp_selected_schema_bytes budget"))).toBe(true);
+            // Named for the server, once.
+            expect(notices.filter((title) => title.includes("instructions truncated"))).toEqual([
+              expect.stringContaining('MCP server "alpha"'),
+            ]);
+          }
+          expect(client.stderr).toBe("");
+        } finally {
+          await client?.close();
+          gateway.stop();
+          for (const fixture of httpFixtures) fixture.stop();
+          rmSync(root.root, { recursive: true, force: true });
+        }
+      },
+      LIVE_TIMEOUT,
+    );
+  }
 
   test(
     "ACP loads a supplied server's tools every turn, unless it opts out",
@@ -9034,7 +9190,7 @@ describe("acp: model-independent", () => {
           args: ["--context-limit", "skill_catalog_bytes=1024", "acp"],
           env: fakeGatewayEnv(root, gateway),
         });
-        await startAutoSession(client);
+        await startAutoSession(client, false, true);
         const prompts = [
           "Design a system architecture with bounded retries and recovery.",
           "Design a system architecture with bounded retries and recovery.\n" +
@@ -9155,7 +9311,7 @@ describe("acp: model-independent", () => {
             FX_TRACE_SCOPES: "skill,skills,acp,config",
           },
         });
-        await startAutoSession(client);
+        await startAutoSession(client, false, true);
         const result = await runPrompt(
           client,
           "Run the ACP skill discovery diagnostic probe.",
@@ -9192,17 +9348,17 @@ describe("acp: model-independent", () => {
 
         const diagnosticNotices = result.messages.filter((message: any) =>
           message.method === "session/update" &&
-          message.params?.update?.sessionUpdate === "agent_message_chunk" &&
-          message.params.update.content?.text?.includes("skill discovery warning:")
+          message.params?.update?.sessionUpdate === "notice" &&
+          message.params.update.title?.includes("skill discovery warning:")
         );
         expect(diagnosticNotices).toHaveLength(1);
-        expect(diagnosticNotices[0].params.update.content.text).toContain(
+        expect(diagnosticNotices[0].params.update.title).toContain(
           malformedDirectory,
         );
-        expect(diagnosticNotices[0].params.update.content.text).toContain(
+        expect(diagnosticNotices[0].params.update.title).toContain(
           "metadata is invalid (duplicate_recognized_key)",
         );
-        expect(diagnosticNotices[0].params.update.content.text).not.toContain(
+        expect(diagnosticNotices[0].params.update.title).not.toContain(
           malformedBody,
         );
 
