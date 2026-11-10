@@ -3445,8 +3445,8 @@ describe("acp: model-independent", () => {
   );
 
   // Two always-loaded servers whose instructions are cut, and a budget with
-  // room for one tool: the model hears of both limits, and of the cut once per
-  // server however many of its tools a search loads.
+  // room for one tool: the model hears of both limits, and of alpha's cut once,
+  // named for the server.
   for (const withNotices of [false, true]) {
     test(
       `context notices stay out of the agent message ${withNotices ? "and arrive as notices" : "for an editor without notices"}`,

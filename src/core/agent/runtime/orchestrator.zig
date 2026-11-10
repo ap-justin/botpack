@@ -2585,8 +2585,9 @@ const UnselectedMcpCalls = struct {
 /// those calls reach normal validation and MCP permission instead of failing
 /// as unselected. A server-qualified name (`server.tool`) is rewritten to the
 /// tool's exposed name first, so permissions, the transcript, and the call
-/// itself use the one name. A server-qualified name that fits no tool, or
-/// more than one, is answered with the name format or the candidates. Other
+/// itself use the one name. A name written as an MCP reference (a `.` or `/`
+/// in it, or an `mcp_` prefix) that fits no tool, or more than one, is
+/// answered with the name format or the candidates. Other
 /// names that do not resolve, including lookups that fail or are cancelled,
 /// keep the unsupported-tool path, where the turn's normal cancellation
 /// handling still applies.

@@ -27,7 +27,7 @@ pub const AlwaysLoaded = struct {
     selected: std.ArrayList(tool_mcp_runtime.SelectedTool) = .empty,
     remaining: usize,
     omitted: usize = 0,
-    /// The server whose instructions the last-added tool carries. Tools are
+    /// The server of the last tool that carried instructions. Tools are
     /// added a server at a time, and only a server's first tool carries its
     /// instructions, so they are in the model's context once.
     instructed: ?[]const u8 = null,
