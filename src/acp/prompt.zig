@@ -3472,7 +3472,8 @@ fn pushContextNotice(raw_ctx: *anyopaque, text: []const u8) !void {
 
 fn pushDiffBlock(raw_ctx: *anyopaque, payload: agent_runtime.DiffEntryPayload) !void {
     defer diff_mod.freeDiffEntryPayload(std.heap.c_allocator, payload);
-    // A diff is shown as operational text but is no notice a failure answers with.
+    // Sent as operational text without `noteFailureNotice`: a diff never
+    // becomes the message a failed prompt answers with.
     const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
     if (payload.preview.len == 0) return;
     ctx.sendAgentText(ctx.operationalMessageId(), payload.preview) catch {};
