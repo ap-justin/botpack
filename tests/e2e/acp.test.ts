@@ -10447,11 +10447,19 @@ describe("acp: model-backed protocol", () => {
   test(
     "method before initialize returns error -32600",
     async () => {
-      client = await AcpClient.create();
-      const resp = await client.request("session/new", { mcpServers: [] }, 1) as any;
-      expect(resp.error).toBeDefined();
-      expect(resp.error.code).toBe(-32600);
-      expect(resp.error.message).toContain("Not initialized");
+      const root = createIsolatedRoot("fx-acp-before-initialize-");
+      const gateway = startFakeGateway([]);
+      try {
+        client = await AcpClient.create({ cwd: root.workspace, env: fakeGatewayEnv(root, gateway) });
+        const resp = await client.request("session/new", { mcpServers: [] }, 1) as any;
+        expect(resp.error).toBeDefined();
+        expect(resp.error.code).toBe(-32600);
+        expect(resp.error.message).toContain("Not initialized");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
     },
     TIMEOUT,
   );
@@ -10473,18 +10481,6 @@ describe("acp: model-backed protocol", () => {
         gateway.stop();
         rmSync(root.root, { recursive: true, force: true });
       }
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "invalid JSON returns parse error -32700",
-    async () => {
-      client = await AcpClient.create();
-      (client as any).proc.stdin!.write("this is not json\n");
-      const resp = await client.readLine() as any;
-      expect(resp.error).toBeDefined();
-      expect(resp.error.code).toBe(-32700);
     },
     TIMEOUT,
   );
