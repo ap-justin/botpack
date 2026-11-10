@@ -1009,6 +1009,7 @@ test("ACP finishes a provider search the turn ended before it finished", async (
       .map((message: any) => message.params.update);
     expect(search.map((update: any) => update.status)).toEqual(["pending", "failed"]);
     expect(acpContentText(search[1].content)).toBe("Tool state preserved for recovery");
+    await expectOneFrameFor(client, 3, 4);
     expect(client.stderr).toBe("");
   } finally {
     await client?.close();
@@ -1188,6 +1189,26 @@ async function readResponse(
     }
   }
   throw new Error(`timed out waiting for ACP response id=${id}`);
+}
+
+// A prompt gets one answer frame. `readResponse` returns at the first frame
+// with the id, so a second frame behind it is only visible in `rawLines`. A
+// later request's answer shows the server is still reading, and the short
+// settle covers a late frame written after it.
+async function expectOneFrameFor(
+  client: AcpClient,
+  id: number,
+  fenceId: number,
+  settleMs = 300,
+): Promise<void> {
+  client.send({ jsonrpc: "2.0", id: fenceId, method: "session/list", params: {} });
+  const fence = await readResponse(client, fenceId);
+  expect(fence.error).toBeUndefined();
+  await Bun.sleep(settleMs);
+  const frames = client.rawLines
+    .map(line => JSON.parse(line))
+    .filter((message: any) => message.id === id && (message.result !== undefined || message.error !== undefined));
+  expect(frames).toHaveLength(1);
 }
 
 function deferred<T>() {
@@ -7938,6 +7959,7 @@ describe("acp: model-independent", () => {
         const listed = await readResponse(client, 95);
         expect(listed.error).toBeUndefined();
         expect(Array.isArray(listed.result.sessions)).toBe(true);
+        await expectOneFrameFor(client, 94, 96);
         expect(client.stderr).toBe("");
       } finally {
         releasePromptBoundary(boundary);
@@ -7997,6 +8019,7 @@ describe("acp: model-independent", () => {
         expect(serialized).not.toContain(providerDetail);
         expect(serialized).not.toContain("\u001b");
         expect(gateway.requests).toHaveLength(1);
+        await expectOneFrameFor(client, 96, 97);
         expect(client.stderr).toBe("");
       } finally {
         await client?.close();
