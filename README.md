@@ -14,7 +14,7 @@ The command is still `fx`, and settings still live in `~/.fx`; both will be rena
 
 ## Install
 
-lia ships Linux builds for x86_64 and arm64 on [GitHub Releases](https://github.com/ap-justin/lia/releases), each with a SHA-256 file. Until the first release is out, build it from source (see [Contributing](#contributing)).
+lia ships Linux builds for x86_64 and arm64 on [GitHub Releases](https://github.com/ap-justin/lia/releases), each with a SHA-256 checksum file. Until the first release is out, build it from source (see [Contributing](#contributing)).
 
 ## Quick start
 
@@ -35,7 +35,7 @@ Then run it the way you need:
 
 If something doesn't work, run `fx doctor` to check your setup, or `fx status --json` to see the configuration a run uses.
 
-Skills, MCP servers and your project's `AGENTS.md` work as they do in fx. fx's manual at [fx.sh/docs](https://fx.sh/docs) covers them; where lia differs, this README wins.
+Skills, MCP servers, and your project's `AGENTS.md` work as they do in fx. fx's manual at [fx.sh/docs](https://fx.sh/docs) covers them; where lia differs, this README wins.
 
 ## Contributing
 
@@ -74,4 +74,4 @@ Report problems in [lia's issues](https://github.com/ap-justin/lia/issues). A pr
 
 ## License
 
-[Apache-2.0](LICENSE), as fx. lia keeps fx's license and notices; third-party licenses and attributions are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[Apache-2.0](LICENSE), like fx. lia keeps fx's license and notices; third-party licenses and attributions are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
