@@ -997,11 +997,13 @@ fn authorizeBridgeCall(
     const resolved = (try resolveUnselectedMcpTool(ctx, arena, tool)) orelse {
         return .{ .deny = try arena.print("No MCP tool named {s} is available to this agent. Find tool names with capability_search.", .{tool}) };
     };
-    const call: ToolCall = .{ .id = request_id, .name = tool, .arguments_json = arguments_json };
+    // A qualified spelling (`server.tool`) resolves to the exposed name, and
+    // rules, grants, and the call itself all go by that name.
+    const call: ToolCall = .{ .id = request_id, .name = resolved.name, .arguments_json = arguments_json };
     var check = ctx;
     const names = try arena.alloc([]const u8, ctx.advertised_dynamic_tool_names.len + 1);
     @memcpy(names[0..ctx.advertised_dynamic_tool_names.len], ctx.advertised_dynamic_tool_names);
-    names[names.len - 1] = tool;
+    names[names.len - 1] = resolved.name;
     check.advertised_dynamic_tool_names = names;
     check.mcp_review_schema_json = try bridgeReviewSchema(arena, resolved);
     check.expected_mcp_binding = resolved.mcp_binding;
@@ -1016,10 +1018,10 @@ fn authorizeBridgeCall(
     };
     const outcome = try tool_admission.requestPermissionOutcome(check.admissionInput(), arena, call, ctx.permission_mode, ctx.session_grants);
     if (!outcome.decision.isDenied() and outcome.tool_failure == null) {
-        return .{ .allow = .{ .binding = resolved.mcp_binding } };
+        return .{ .allow = .{ .binding = resolved.mcp_binding, .tool = resolved.name } };
     }
     return .{ .deny = outcome.tool_failure orelse outcome.feedback orelse
-        try arena.print("Permission to run {s} was not granted ({s}).", .{ tool, @tagName(outcome.decision) }) };
+        try arena.print("Permission to run {s} was not granted ({s}).", .{ resolved.name, @tagName(outcome.decision) }) };
 }
 
 /// The review schema a selected MCP tool would carry: its name,
@@ -1045,8 +1047,9 @@ fn runBridgeCall(
     cancel: *std.atomic.Value(bool),
 ) anyerror!mcp_call_capability.CallOutcome {
     const state: *McpCallBridgeState = @ptrCast(@alignCast(raw));
-    const row = BridgeCallRow.start(state.runtime, arena, request_id, tool, arguments_json);
-    const outcome = callBridgeTool(state.runtime, arena, request_id, tool, arguments_json, allowed, cancel) catch |err| {
+    const name = allowed.tool orelse tool;
+    const row = BridgeCallRow.start(state.runtime, arena, request_id, name, arguments_json);
+    const outcome = callBridgeTool(state.runtime, arena, request_id, name, arguments_json, allowed, cancel) catch |err| {
         if (row) |value| value.finish(arena, if (cancel.load(.acquire)) .cancelled else .failed);
         return err;
     };
@@ -1290,6 +1293,56 @@ test "bridge result data unwraps a structured result that is only one result str
     ));
 }
 
+test "a bridge call of a server-qualified spelling is checked and called under the exposed name" {
+    const Server = struct {
+        calls: usize = 0,
+
+        fn resolve(_: *anyopaque, _: Allocator, name: []const u8, _: types.PermissionRuleSet, _: tool_mcp_runtime.Access, _: ?*std.atomic.Value(bool)) anyerror!tool_mcp_runtime.QualifiedLookup {
+            return if (std.mem.eql(u8, name, "fs.read")) .{ .one = "mcp_fs_read" } else .none;
+        }
+
+        fn call(raw: *anyopaque, arena: Allocator, name: []const u8, _: []const u8, _: usize, _: tool_mcp_runtime.CallOptions) anyerror!?tool_mcp_runtime.CallResult {
+            const self: *@This() = @ptrCast(@alignCast(raw));
+            if (!std.mem.eql(u8, name, "mcp_fs_read")) return null;
+            self.calls += 1;
+            return .{ .model_output = try arena.dupe(u8, "mcp ok") };
+        }
+    };
+    var server: Server = .{};
+    // Ask mode with no prompter: only this rule on the exposed name can allow
+    // the call.
+    var rules = [_]types.PermissionRule{
+        .{ .permission = @constCast("mcp_fs_read"), .pattern = @constCast("mcp_fs_read"), .action = .allow },
+    };
+    var rt = TestRuntime{
+        .mcp_ctx = @ptrCast(&server),
+        .mcp_has_tool = McpFixture.hasTrue,
+        .mcp_tool_schema = McpFixture.schema,
+        .mcp_call_tool = Server.call,
+        .permission_rules = .{ .rules = &rules },
+        .interactive = false,
+    };
+    defer rt.deinit(std.testing.allocator);
+    var bridge: McpCallBridgeState = .{ .runtime = rt.context() };
+    bridge.runtime.mcp_resolve_qualified = Server.resolve;
+    const capability = bridge.capability();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const allowed = switch (try capability.authorize(arena, "fx-mcp-call-1", "fs.read", "{}")) {
+        .allow => |value| value,
+        .deny => return error.TestExpectedAuthorization,
+    };
+    try std.testing.expectEqualStrings("mcp_fs_read", allowed.tool orelse "");
+    var cancel: std.atomic.Value(bool) = .init(false);
+    const outcome = try capability.call(arena, "fx-mcp-call-1", "fs.read", "{}", allowed, &cancel);
+    try std.testing.expectEqual(mcp_call_capability.CallStatus.ok, outcome.status);
+    try std.testing.expectEqualStrings("mcp ok", outcome.bytes);
+    try std.testing.expectEqual(@as(usize, 1), server.calls);
+}
+
 const RunCommandBackendState = struct {
     runtime: Context,
     completion: ?ToolExecutionResult = null,
@@ -1388,9 +1441,11 @@ pub fn snapshotMcpDefinition(ctx: Context, arena: Allocator, name: []const u8, k
     return snapshot(runtime, arena, name, known, ctx.permission_rules, ctx.context_limits, ctx.mcp_access);
 }
 
-/// Resolves the exact exposed name of a live MCP tool the model called
-/// without selecting it. Returns null for unknown, denied, inaccessible, or
-/// oversized definitions. The result is allocated in `arena`.
+/// Resolves a live MCP tool the model called without selecting it, by its
+/// exposed name or a server-qualified spelling (`server.tool`); the result's
+/// `name` is always the exposed name, which may differ from `name`. Returns
+/// null for unknown, ambiguous, denied, inaccessible, or oversized
+/// definitions. The result is allocated in `arena`.
 pub fn resolveUnselectedMcpTool(ctx: Context, arena: Allocator, name: []const u8) !?tool_mcp_runtime.SelectedTool {
     return switch (try lookupUnselectedMcpTool(ctx, arena, name)) {
         .resolved => |tool| tool,
