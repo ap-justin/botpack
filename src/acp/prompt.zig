@@ -250,6 +250,10 @@ const AcpContext = struct {
     /// The turn ended as an error, not at a stop reason; its prompt answers
     /// with a JSON-RPC error carrying the session's failure message.
     turn_failed: bool = false,
+    /// The provider's content filter ended the turn. Set from its terminal
+    /// status, because the turn then throws the same `error.ModelError` as
+    /// any other provider failure.
+    content_filtered: bool = false,
     auto_classifier: permission_auto_classifier.Classifier =
         permission_auto_classifier.Classifier.disabled(),
     /// Mode and permission policy captured at prompt dispatch so mid-turn
@@ -276,6 +280,7 @@ const AcpContext = struct {
     fn resetTurnOutcome(self: *AcpContext, session: *server.ActiveSessionState) void {
         self.stop_reason = .end_turn;
         self.turn_failed = false;
+        self.content_filtered = false;
         session.clearFailureMessage();
     }
 
@@ -305,6 +310,16 @@ const AcpContext = struct {
             .code = ErrorCode.internal_error,
             .message = if (message.len > 0) message else turn_failed_message,
         } };
+    }
+
+    /// The prompt's answer from a turn that ended by throwing `err`. Content
+    /// the provider blocked or the model refused is ACP v1's `refusal`, a
+    /// result rather than an error.
+    fn thrownTurnOutcome(self: *const AcpContext, err: anyerror) anyerror!TerminalOutcome {
+        if (self.content_filtered or err == error.ContentFiltered or err == error.ModelRefused) {
+            return .{ .stop_reason = .content_filter };
+        }
+        return promptExecutionFailure(err);
     }
 
     fn sendUpdate(self: *AcpContext, update_json: []const u8) !void {
@@ -1223,7 +1238,7 @@ pub fn handlePrompt(
             endJournalTurn(alloc, state.alloc, session) catch |end_err| {
                 debug_trace.logf("session", "event=libfx_journal_turn_end_failed err={s} turn_err={s}", .{ @errorName(end_err), @errorName(err) });
             };
-            return promptExecutionFailure(err);
+            return ctx.thrownTurnOutcome(err);
         }
     };
     try endJournalTurn(alloc, state.alloc, session);
@@ -3064,7 +3079,7 @@ fn runReportTurns(
                 return null;
             }
             if (err == error.Cancelled and session.cancel_flag.load(.seq_cst)) return null;
-            return try promptExecutionFailure(err);
+            return try ctx.thrownTurnOutcome(err);
         };
         try endJournalTurn(alloc, state.alloc, session);
     }
@@ -3330,6 +3345,7 @@ fn pushRouteRecoveryStatus(
         var label_buf: [types.RouteRecoveryStatus.label_max_bytes]u8 = undefined;
         ctx.noteFailureNotice(status.label(&label_buf));
     }
+    if (status.kind == .content_filter) ctx.content_filtered = true;
     try ctx.sendModelRecoveryStatus(status);
 }
 
@@ -5409,6 +5425,46 @@ test "ACP finalization maps failed turns and provider length" {
 
         try std.testing.expectEqual(case.expected, ctx.stop_reason);
         try std.testing.expectEqual(case.failed, ctx.turn_failed);
+    }
+}
+
+test "a content-filtered turn answers refusal and another model error still throws" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-content-filter.jsonl", .{});
+    defer capture.close(io_mod.getIo());
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+    state.writer = .{ .stdout = capture };
+    const session = &state.active_session.?;
+    var prompt_input = ParsedPromptInput{ .text = &.{} };
+
+    const cases = [_]struct {
+        status: ?types.RouteRecoveryStatus.Kind,
+        thrown: anyerror,
+        refusal: bool,
+    }{
+        .{ .status = .content_filter, .thrown = error.ModelError, .refusal = true },
+        .{ .status = null, .thrown = error.ContentFiltered, .refusal = true },
+        .{ .status = null, .thrown = error.ModelRefused, .refusal = true },
+        .{ .status = .terminal_provider_error, .thrown = error.ModelError, .refusal = false },
+        .{ .status = null, .thrown = error.ModelError, .refusal = false },
+    };
+    for (cases) |case| {
+        var ctx = AcpContext{ .alloc = alloc, .state = &state, .session_id = "session_1", .current_prompt_input = &prompt_input };
+        const deps = agentRuntimeDeps(&ctx);
+        ctx.resetTurnOutcome(session);
+        if (case.status) |kind| try deps.push_route_recovery_status(deps.ctx, .{ .kind = kind });
+        try deps.finalize_turn(deps.ctx, 1, .failed, null);
+
+        if (case.refusal) {
+            const outcome = try ctx.thrownTurnOutcome(case.thrown);
+            try std.testing.expect(outcome == .stop_reason);
+            try std.testing.expectEqual(acp_types.StopReason.content_filter, outcome.stop_reason);
+        } else {
+            try std.testing.expectError(case.thrown, ctx.thrownTurnOutcome(case.thrown));
+        }
     }
 }
 

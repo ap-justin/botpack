@@ -7897,7 +7897,7 @@ describe("acp: model-independent", () => {
   );
 
   test(
-    "non-retryable prompt failure preserves -32603 and leaves the server usable",
+    "content-filtered prompt answers refusal and leaves the server usable",
     async () => {
       const root = createIsolatedRoot("fx-acp-terminal-failure-");
       const boundary = createPromptTerminalBoundary(root.root);
@@ -7921,10 +7921,9 @@ describe("acp: model-independent", () => {
         sendPrompt(client, 94, "Return the incomplete fixture.");
 
         const failed = await readResponse(client, 94);
-        expect(failed.error).toEqual({
-          code: -32603,
-          message: "ModelError",
-        });
+        expect(failed.error).toBeUndefined();
+        expect(failed.result.stopReason).toBe("refusal");
+        expect(failed.result._meta.fx.stopReason).toBe("content_filter");
         await waitForPath(boundary.terminalReady);
 
         client.send({

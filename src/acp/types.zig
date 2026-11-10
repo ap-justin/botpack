@@ -67,6 +67,8 @@ pub const StopReason = enum {
     max_output_tokens,
     max_model_turns,
     refused,
+    /// The provider's content filter blocked the reply, or the model refused it.
+    content_filter,
     cancelled,
     /// The host gave the turn a time to stop at, and it stopped before its
     /// next model request with the turn kept open for a later resume.
@@ -78,7 +80,7 @@ pub const StopReason = enum {
             .end_turn => "end_turn",
             .max_output_tokens => "max_tokens",
             .max_model_turns => "max_turn_requests",
-            .refused => "refusal",
+            .refused, .content_filter => "refusal",
             .cancelled => "cancelled",
             .yielded => "max_turn_requests",
         };
@@ -92,6 +94,7 @@ pub const StopReason = enum {
             .max_output_tokens => "max_output_tokens",
             .max_model_turns => "max_model_turns",
             .refused => "refused",
+            .content_filter => "content_filter",
             .cancelled => "cancelled",
             .yielded => "yielded",
         };
@@ -600,6 +603,7 @@ test "StopReason maps every reason to an ACP v1 value" {
         .{ .reason = .max_output_tokens, .v1 = "max_tokens", .fx = "max_output_tokens" },
         .{ .reason = .max_model_turns, .v1 = "max_turn_requests", .fx = "max_model_turns" },
         .{ .reason = .refused, .v1 = "refusal", .fx = "refused" },
+        .{ .reason = .content_filter, .v1 = "refusal", .fx = "content_filter" },
         .{ .reason = .yielded, .v1 = "max_turn_requests", .fx = "yielded" },
     };
     const alloc = std.testing.allocator;
