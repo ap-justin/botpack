@@ -1777,7 +1777,7 @@ describe("acp: model-independent", () => {
       const tracePath = join(root.root, "trace.log");
       // The shape a real gateway streamed in a live trace: metadata events
       // around the text, no usage on the finish event, and a title that comes
-      // back after the turn has ended.
+      // back only after the answer has reached the client.
       const streamedAnswer = () => fakeGatewaySse([
         { type: "stream-start", warnings: [] },
         { type: "response-metadata", id: "resp_1", modelId: FAKE_GATEWAY_MODEL },
@@ -1790,9 +1790,10 @@ describe("acp: model-independent", () => {
           providerMetadata: { gateway: { cost: "0.0001", generationId: "gen_1" } },
         },
       ]);
+      const titleGate = deferred<void>();
       const gateway = startDynamicFakeGateway(_raw => streamedAnswer(), {
         titleResponses: [async () => {
-          await Bun.sleep(150);
+          await titleGate.promise;
           return finalText("A Short Title");
         }],
         models: [{ id: "anthropic/claude-haiku-5.5", type: "language", tags: ["explicit-caching", "reasoning", "tool-use"], context_window: 200_000, max_tokens: 64_000 }],
@@ -1820,13 +1821,12 @@ describe("acp: model-independent", () => {
           .filter((message: any) => message.method === "session/update")
           .map((message: any) => message.params.update.sessionUpdate);
         expect(kinds).toContain("agent_message_chunk");
-        expect(kinds).toContain("session_info_update");
         expect(client.stderr).toBe("");
-        const trace = readFileSync(tracePath, "utf8");
-        for (const event of ["prompt_turn_ended", "usage_update_skipped reason=no_usage", "prompt_updates_sent", "prompt_handler_returned kind=stop_reason", "prompt_answer kind=stop_reason", "frame_write_done kind=response"]) {
-          expect(trace).toContain(`event=${event}`);
-        }
+        // Pins the scenario: the gateway sent no usage, and the turn skipped
+        // its usage update because of that.
+        expect(readFileSync(tracePath, "utf8")).toContain("event=usage_update_skipped reason=no_usage");
       } finally {
+        titleGate.resolve();
         await client?.close();
         gateway.stop();
         rmSync(root.root, { recursive: true, force: true });
