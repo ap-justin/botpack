@@ -2572,11 +2572,7 @@ fn prepareAvailabilityTerminal(
     };
 }
 
-/// Advertises live MCP tools the model called without loading them first, so
-/// those calls reach normal validation and MCP permission instead of failing
-/// as unselected. Names that do not resolve, including lookups that fail or
-/// are cancelled, keep the unsupported-tool path, where the turn's normal
-/// cancellation handling still applies.
+/// What `advertiseUnselectedMcpCalls` hands back for a step's calls.
 const UnselectedMcpCalls = struct {
     /// The step's calls, a server-qualified name rewritten to the tool's
     /// exposed name.
@@ -2585,10 +2581,15 @@ const UnselectedMcpCalls = struct {
     unresolved: []const ?[]u8,
 };
 
-/// Loads, for each call to an MCP tool the model did not select, the tool's
-/// definition so the call can run, and rewrites a server-qualified name
-/// (`server.tool`) to the tool's exposed name first, so permissions, the
-/// transcript, and the call itself use the one name.
+/// Advertises live MCP tools the model called without loading them first, so
+/// those calls reach normal validation and MCP permission instead of failing
+/// as unselected. A server-qualified name (`server.tool`) is rewritten to the
+/// tool's exposed name first, so permissions, the transcript, and the call
+/// itself use the one name. A server-qualified name that fits no tool, or
+/// more than one, is answered with the name format or the candidates. Other
+/// names that do not resolve, including lookups that fail or are cancelled,
+/// keep the unsupported-tool path, where the turn's normal cancellation
+/// handling still applies.
 fn advertiseUnselectedMcpCalls(
     deps: *const AgentRuntimeDeps,
     arena: Allocator,
