@@ -1038,8 +1038,9 @@ pub fn runWithTransport(
         if (line_result == null) break;
         const line = switch (line_result.?) {
             .overflow => {
+                // Not -32000: that is AUTH_REQUIRED, which starts a sign-in.
                 state.writer.writeError(alloc, null, .{
-                    .code = ErrorCode.request_frame_too_large,
+                    .code = ErrorCode.invalid_request,
                     .message = "Request frame too large",
                 }) catch break;
                 continue;

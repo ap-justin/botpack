@@ -47,7 +47,6 @@ fn writeOneLine(w: *std.Io.Writer, json: []const u8) !void {
 }
 
 pub const ErrorCode = struct {
-    pub const request_frame_too_large: i64 = -32000;
     /// ACP `AUTH_REQUIRED`: the agent needs the client to authenticate first.
     pub const auth_required: i64 = -32000;
     pub const parse_error: i64 = -32700;
