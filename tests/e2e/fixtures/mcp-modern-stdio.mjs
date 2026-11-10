@@ -1,34 +1,34 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const protocolVersion = "2026-07-28";
-const wireLogPath = process.env.FX_MCP_WIRE_LOG;
-const pidPath = process.env.FX_MCP_PID_PATH;
-// FX_MCP_RESULT_PAD_BYTES puts that many bytes before the result text, for
+const wireLogPath = process.env.LIA_MCP_WIRE_LOG;
+const pidPath = process.env.LIA_MCP_PID_PATH;
+// LIA_MCP_RESULT_PAD_BYTES puts that many bytes before the result text, for
 // results too large to pass through the environment.
-const resultText = "p".repeat(Number(process.env.FX_MCP_RESULT_PAD_BYTES ?? "0")) +
-  (process.env.FX_MCP_RESULT_TEXT ?? "MODERN_MCP_TOOL_RESULT");
-const mode = process.env.FX_MCP_MODE ?? "normal";
-const imagePath = process.env.FX_MCP_IMAGE_PATH;
-const crashMarkerPath = process.env.FX_MCP_CRASH_MARKER;
+const resultText = "p".repeat(Number(process.env.LIA_MCP_RESULT_PAD_BYTES ?? "0")) +
+  (process.env.LIA_MCP_RESULT_TEXT ?? "MODERN_MCP_TOOL_RESULT");
+const mode = process.env.LIA_MCP_MODE ?? "normal";
+const imagePath = process.env.LIA_MCP_IMAGE_PATH;
+const crashMarkerPath = process.env.LIA_MCP_CRASH_MARKER;
 const recoveryFailureMarkerPath = crashMarkerPath
   ? `${crashMarkerPath}.recovery-failed`
   : undefined;
-const recoveryReadyPath = process.env.FX_MCP_RECOVERY_READY_PATH;
-const recoveryReleasePath = process.env.FX_MCP_RECOVERY_RELEASE_PATH;
-const initialToolName = process.env.FX_MCP_INITIAL_TOOL_NAME ?? "echo";
-const recoveredToolName = process.env.FX_MCP_RECOVERED_TOOL_NAME ?? initialToolName;
-const expectedElicitation = process.env.FX_MCP_EXPECT_ELICITATION ?? "none";
-const environmentCapturePath = process.env.FX_MCP_ENV_CAPTURE;
-const resourcesSubscribe = process.env.FX_MCP_RESOURCES_SUBSCRIBE !== "0";
-const resourceTtlMs = process.env.FX_MCP_RESOURCE_TTL_MS === undefined
+const recoveryReadyPath = process.env.LIA_MCP_RECOVERY_READY_PATH;
+const recoveryReleasePath = process.env.LIA_MCP_RECOVERY_RELEASE_PATH;
+const initialToolName = process.env.LIA_MCP_INITIAL_TOOL_NAME ?? "echo";
+const recoveredToolName = process.env.LIA_MCP_RECOVERED_TOOL_NAME ?? initialToolName;
+const expectedElicitation = process.env.LIA_MCP_EXPECT_ELICITATION ?? "none";
+const environmentCapturePath = process.env.LIA_MCP_ENV_CAPTURE;
+const resourcesSubscribe = process.env.LIA_MCP_RESOURCES_SUBSCRIBE !== "0";
+const resourceTtlMs = process.env.LIA_MCP_RESOURCE_TTL_MS === undefined
   ? null
-  : Number(process.env.FX_MCP_RESOURCE_TTL_MS);
+  : Number(process.env.LIA_MCP_RESOURCE_TTL_MS);
 const catalogDelayMs = Math.max(
   0,
-  Number(process.env.FX_MCP_CATALOG_DELAY_MS ?? "0") || 0,
+  Number(process.env.LIA_MCP_CATALOG_DELAY_MS ?? "0") || 0,
 );
-const compactField = process.env.FX_MCP_COMPACT_FIELD ? JSON.parse(process.env.FX_MCP_COMPACT_FIELD) : null;
-const elicitationUrl = process.env.FX_MCP_ELICITATION_URL ?? "https://example.test/connect";
+const compactField = process.env.LIA_MCP_COMPACT_FIELD ? JSON.parse(process.env.LIA_MCP_COMPACT_FIELD) : null;
+const elicitationUrl = process.env.LIA_MCP_ELICITATION_URL ?? "https://example.test/connect";
 const collidingChoices = [
   { const: "Skip", title: "Skip" },
   { const: "Use default", title: "Use default" },
@@ -46,23 +46,23 @@ let buffer = Buffer.alloc(0);
 
 if (pidPath) writeFileSync(pidPath, String(process.pid));
 // Some servers keep running after their input closes, or ignore SIGTERM.
-if (process.env.FX_MCP_IGNORE_EOF === "1") setInterval(() => {}, 1 << 30);
-if (process.env.FX_MCP_IGNORE_TERM === "1") process.on("SIGTERM", () => {});
-const eofPath = process.env.FX_MCP_EOF_PATH;
+if (process.env.LIA_MCP_IGNORE_EOF === "1") setInterval(() => {}, 1 << 30);
+if (process.env.LIA_MCP_IGNORE_TERM === "1") process.on("SIGTERM", () => {});
+const eofPath = process.env.LIA_MCP_EOF_PATH;
 // A server slow to start: its first answer comes this late.
-const discoverDelayMs = Number(process.env.FX_MCP_DISCOVER_DELAY_MS ?? "0") || 0;
+const discoverDelayMs = Number(process.env.LIA_MCP_DISCOVER_DELAY_MS ?? "0") || 0;
 if (eofPath) process.stdin.on("end", () => appendFileSync(eofPath, `${process.pid}\n`));
 if (environmentCapturePath) {
   writeFileSync(environmentCapturePath, JSON.stringify({
-    configured: process.env.FX_MCP_ENV_SENTINEL,
-    inherited: process.env.FX_MCP_INHERITED_SENTINEL,
+    configured: process.env.LIA_MCP_ENV_SENTINEL,
+    inherited: process.env.LIA_MCP_INHERITED_SENTINEL,
     path: process.env.PATH,
     home: process.env.HOME,
     httpsProxy: process.env.HTTPS_PROXY,
   }));
 }
-if (process.env.FX_MCP_ENV_NAMES_CAPTURE) {
-  writeFileSync(process.env.FX_MCP_ENV_NAMES_CAPTURE, JSON.stringify(Object.keys(process.env).sort()));
+if (process.env.LIA_MCP_ENV_NAMES_CAPTURE) {
+  writeFileSync(process.env.LIA_MCP_ENV_NAMES_CAPTURE, JSON.stringify(Object.keys(process.env).sort()));
 }
 if (stallRecovery) setInterval(() => {}, 1000);
 
@@ -109,7 +109,7 @@ function hasModernMetadata(message) {
     ? capabilities === declared
     : capabilities === "{}" || capabilities === declared;
   return meta?.["io.modelcontextprotocol/protocolVersion"] === protocolVersion &&
-    meta?.["io.modelcontextprotocol/clientInfo"]?.name === "fx" &&
+    meta?.["io.modelcontextprotocol/clientInfo"]?.name === "lia" &&
     typeof meta?.["io.modelcontextprotocol/clientInfo"]?.version === "string" &&
     capabilitiesMatch;
 }
@@ -189,7 +189,7 @@ function handle(message) {
   }
 
   if (message.method === "server/discover") {
-    // Answer with output fx must reject; the process itself stays up.
+    // Answer with output lia must reject; the process itself stays up.
     if (mode === "startup_garbage") {
       process.stdout.write("Server started on stdio\n");
       return;
@@ -388,7 +388,7 @@ function handle(message) {
     return;
   }
   if (message.method === "resources/read") {
-    if (process.env.FX_MCP_FEATURE_IMAGES === "1") {
+    if (process.env.LIA_MCP_FEATURE_IMAGES === "1") {
       send({ jsonrpc: "2.0", id: message.id, result: { resultType: "complete", contents: [{ uri: message.params.uri, mimeType: "image/png", blob: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP0cAAAAASUVORK5CYII=" }] } });
       return;
     }
@@ -398,7 +398,7 @@ function handle(message) {
         id: message.id,
         error: {
           code: -32602,
-          message: process.env.FX_MCP_PROTOCOL_ERROR_MESSAGE ??
+          message: process.env.LIA_MCP_PROTOCOL_ERROR_MESSAGE ??
             "Resource request rejected by fixture",
           data: { method: message.method, retryable: false },
         },
@@ -497,7 +497,7 @@ function handle(message) {
     return;
   }
   if (message.method === "prompts/get") {
-    if (process.env.FX_MCP_FEATURE_IMAGES === "1") {
+    if (process.env.LIA_MCP_FEATURE_IMAGES === "1") {
       send({ jsonrpc: "2.0", id: message.id, result: { resultType: "complete", messages: [{ role: "user", content: { type: "image", mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP0cAAAAASUVORK5CYII=" } }] } });
       return;
     }
@@ -507,7 +507,7 @@ function handle(message) {
         id: message.id,
         error: {
           code: -32603,
-          message: process.env.FX_MCP_PROTOCOL_ERROR_MESSAGE ??
+          message: process.env.LIA_MCP_PROTOCOL_ERROR_MESSAGE ??
             "Prompt request rejected by fixture",
           data: { method: message.method, retryable: false },
         },
