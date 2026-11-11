@@ -1724,7 +1724,7 @@ pub fn authOffer(state: *const ServerState) acp_types.AuthOffer {
 }
 
 /// Answers with `AUTH_REQUIRED` and the auth methods the client can offer.
-fn writeAuthRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId) !void {
+pub fn writeAuthRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId) !void {
     const offer = authOffer(state);
     return state.writer.send(alloc, try buildAuthRequired(alloc, id, .{
         .message = offer.login.instruction(),

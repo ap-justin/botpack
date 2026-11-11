@@ -910,13 +910,13 @@ fn handleRestoreSession(
         durable.preferences.model;
     var staged_credential = server.prepareCredentialForProvider(state, effective_provider) catch |err| {
         if (err != error.ProviderCredentialUnavailable) return err;
-        return state.writer.writeError(alloc, msg.id, .{
+        // The sign-in methods on offer are Vercel's, which cannot supply a
+        // configured provider's key.
+        if (effective_provider == .configured) return state.writer.writeError(alloc, msg.id, .{
             .code = ErrorCode.invalid_request,
-            .message = if (effective_provider == .configured)
-                "Configured provider authentication is unavailable"
-            else
-                credentials.missing_credential_message,
+            .message = "Configured provider authentication is unavailable",
         });
+        return server.writeAuthRequired(state, alloc, msg.id);
     };
     defer if (staged_credential) |*credential| credential.deinit(alloc);
     const model_copy = try alloc.dupe(u8, effective_model);
@@ -3287,6 +3287,75 @@ test "ACP new and loaded sessions provide a writable subagent host" {
     defer alloc.free(captured);
     try std.testing.expect(std.mem.find(u8, captured, "\"id\":1") != null);
     try std.testing.expect(std.mem.find(u8, captured, "\"id\":2") != null);
+}
+
+test "loading a session after its stored key was removed answers AUTH_REQUIRED with the auth methods" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var arena_state = std.heap.ArenaAllocator.init(alloc);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
+
+    const home_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
+    defer alloc.free(home_path);
+    const workspace_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
+    defer alloc.free(workspace_path);
+    const test_home = try AcpSessionTestHome.install(alloc, home_path);
+    defer test_home.deinit();
+    try test_home.map.put("FX_DISABLE_KEYCHAIN", "1");
+
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-output.jsonl", .{ .read = true });
+    defer capture.close(io_mod.getIo());
+    {
+        var state = try initAcpSessionTestState(arena, workspace_path, capture);
+        defer state.deinit();
+        state.sessions_v2 = try session_adapter.Store.open(arena, home_path);
+
+        var new_msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "session/new", .params_raw = "{\"mcpServers\":[]}" };
+        try handleNewSession(&state, arena, &new_msg);
+        const session_id = try alloc.dupe(u8, state.active_session.?.session_id);
+        defer alloc.free(session_id);
+        try server.releaseActiveSession(&state);
+
+        // The cached key is a stored key, and the store `acpSessionTestConfig`
+        // sets reports none: the sign-out happened after session/new.
+        state.credential_source = .stored_key;
+
+        var load_params: std.Io.Writer.Allocating = .init(arena);
+        defer load_params.deinit();
+        try load_params.writer.writeAll("{\"sessionId\":");
+        try writeJsonStr(session_id, &load_params.writer);
+        try load_params.writer.writeAll(",\"mcpServers\":[]}");
+        var load_msg = jsonrpc.Message{ .id = .{ .integer = 2 }, .method = "session/load", .params_raw = load_params.writer.buffered() };
+        try handleLoadSession(&state, arena, &load_msg);
+        try std.testing.expect(state.active_session == null);
+
+        try capture.sync(io_mod.getIo());
+    }
+    var captured_file = try tmp.dir.openFile(io_mod.getIo(), "acp-output.jsonl", .{});
+    defer captured_file.close(io_mod.getIo());
+    const captured = try io_mod.readFileToEnd(alloc, &captured_file, 1024 * 1024);
+    defer alloc.free(captured);
+
+    var load_answers: usize = 0;
+    var lines = std.mem.splitScalar(u8, captured, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        const frame = try std.json.parseFromSlice(std.json.Value, alloc, line, .{});
+        defer frame.deinit();
+        const id = frame.value.object.get("id") orelse continue;
+        if (id != .integer or id.integer != 2) continue;
+        load_answers += 1;
+        const err = frame.value.object.get("error").?.object;
+        try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), err.get("code").?.integer);
+        try std.testing.expectEqualStrings(credentials.missing_credential_message, err.get("message").?.string);
+        const methods = err.get("data").?.object.get("authMethods").?.array.items;
+        try std.testing.expectEqualStrings(acp_types.agent_auth_method_id, methods[0].object.get("id").?.string);
+    }
+    try std.testing.expectEqual(@as(usize, 1), load_answers);
 }
 
 test "libfx/new uses a valid host session id and generates one when none is named" {
