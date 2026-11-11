@@ -663,17 +663,68 @@ test("ACP restores a configured-provider session under a Gateway default with no
   fixture.settings.provider = "gateway";
   fixture.save();
   const env = { ...fixture.env, AI_GATEWAY_API_KEY: undefined, VERCEL_OIDC_TOKEN: undefined, FX_DISABLE_KEYCHAIN: "1" };
-  for (const method of ["session/load", "session/resume"]) {
-    const client = await AcpClient.create({ cwd: fixture.workspace, env });
+  try {
+    for (const method of ["session/load", "session/resume"]) {
+      const client = await AcpClient.create({ cwd: fixture.workspace, env });
+      try {
+        const initialized = await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} }) as any;
+        expect(initialized.error).toBeUndefined();
+        const restored = await client.request(method, { sessionId, cwd: fixture.workspace, mcpServers: [] }) as any;
+        if (restored.error) throw new Error(`${method}: ${JSON.stringify(restored)}`);
+        expect(restored.result.configOptions.find((option: any) => option.id === "provider").currentValue).toBe("remote");
+
+        // The restored session is usable with its own provider's key.
+        const before = fixture.requests.length;
+        const prompted = await client.request("session/prompt", { prompt: [{ type: "text", text: `after ${method}` }] }) as any;
+        if (prompted.error) throw new Error(`${method} prompt: ${JSON.stringify(prompted)}`);
+        const sent = fixture.requests.slice(before);
+        expect(sent.length).toBeGreaterThan(0);
+        for (const request of sent) {
+          expect(request.path).toBe("/v1/chat/completions");
+          expect(request.authorization).toBe("Bearer own-provider-token");
+        }
+      } finally { await client.close(); }
+    }
+    expect(fixture.requests.some(request => request.path.startsWith("/unexpected-gateway"))).toBe(false);
+  } finally { fixture.close(); }
+}, 60000);
+
+test("ACP load and resume of a configured-provider session without its key answer a plain error, not AUTH_REQUIRED", async () => {
+  const fixture = createConfiguredProviderFixture();
+  fixture.settings.provider = "remote";
+  fixture.save();
+  let sessionId = "";
+  try {
+    const first = await AcpClient.create({ cwd: fixture.workspace, env: fixture.env });
     try {
-      const initialized = await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} }) as any;
-      expect(initialized.error).toBeUndefined();
-      const restored = await client.request(method, { sessionId, cwd: fixture.workspace, mcpServers: [] }) as any;
-      if (restored.error) throw new Error(`${method}: ${JSON.stringify(restored)}`);
-      expect(restored.result.configOptions.find((option: any) => option.id === "provider").currentValue).toBe("remote");
-    } finally { await client.close(); }
-  }
-  fixture.close();
+      await first.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      const created = await first.request("session/new", { cwd: fixture.workspace, mcpServers: [] }) as any;
+      if (created.error) throw new Error(JSON.stringify(created));
+      sessionId = created.result.sessionId;
+      const prompted = await first.request("session/prompt", { prompt: [{ type: "text", text: "save this" }] }) as any;
+      if (prompted.error) throw new Error(JSON.stringify(prompted));
+    } finally { await first.close(); }
+
+    // The default is the key-less local provider, so the process starts signed
+    // in; only the saved session's own provider has lost its key.
+    fixture.settings.provider = "local";
+    fixture.save();
+    const env = { ...fixture.env, FX_TEST_PROVIDER_TOKEN: undefined };
+    const requestsBefore = fixture.requests.length;
+    for (const method of ["session/load", "session/resume"]) {
+      const client = await AcpClient.create({ cwd: fixture.workspace, env });
+      try {
+        const initialized = await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} }) as any;
+        expect(initialized.error).toBeUndefined();
+        const rejected = await client.request(method, { sessionId, cwd: fixture.workspace, mcpServers: [] }) as any;
+        expect(rejected.result).toBeUndefined();
+        expect(rejected.error.code).toBe(-32600);
+        expect(rejected.error.message).toBe("Configured provider authentication is unavailable");
+        expect(rejected.error.data?.authMethods).toBeUndefined();
+      } finally { await client.close(); }
+    }
+    expect(fixture.requests).toHaveLength(requestsBefore);
+  } finally { fixture.close(); }
 }, 60000);
 
 test.each(["empty", "unrelated"])("configured provider ACP preserves explicit models with %s metadata", async metadata => {
@@ -8152,17 +8203,30 @@ describe("acp: model-independent", () => {
             FX_DISABLE_KEYCHAIN: "1",
           },
         });
-        const savedId = await startAutoSession(client);
+        const initialized = await client.request(
+          "initialize",
+          { protocolVersion: 1, clientCapabilities: { auth: { terminal: true } } },
+          1,
+        ) as any;
+        const methods = initialized.result.authMethods;
+        expect(methods).toHaveLength(2);
+        const created = await client.request("session/new", { mcpServers: [] }, 2) as any;
+        await client.readLine(); // consume session/update notification
+        await client.request("session/set_mode", { modeId: "auto" }, 3);
+        const savedId = created.result.sessionId as string;
         await runPrompt(client, "Save this session.", 8_000);
         // A second session leaves the first inactive, so resuming it prepares a credential.
         const other = await client.request("session/new", { mcpServers: [] }, 20) as any;
         expect(other.error).toBeUndefined();
         rmSync(join(root.home, ".fx", "auth.json"));
+        const requestsBefore = gateway.requests.length;
+        expect(requestsBefore).toBeGreaterThan(0);
 
         const resumed = await client.request("session/resume", { sessionId: savedId, mcpServers: [] }, 21) as any;
         expect(resumed.result).toBeUndefined();
         expect(resumed.error.code).toBe(-32000);
-        expect(resumed.error.data.authMethods.length).toBeGreaterThan(0);
+        expect(resumed.error.data.authMethods).toEqual(methods);
+        expect(gateway.requests).toHaveLength(requestsBefore);
         expect(client.stderr).toBe("");
       } finally {
         await client?.close();
@@ -8172,6 +8236,54 @@ describe("acp: model-independent", () => {
     },
     TIMEOUT,
   );
+
+  for (const method of ["session/load", "session/resume"]) {
+    test(
+      `${method} of a saved Gateway session restarted with no credential answers AUTH_REQUIRED`,
+      async () => {
+        const root = createIsolatedRoot("fx-acp-restart-signed-out-");
+        const gateway = startDynamicFakeGateway(_raw => finalText("saved answer"));
+        const signedOutEnv = {
+          ...fakeGatewayEnv(root, gateway),
+          AI_GATEWAY_API_KEY: undefined,
+          VERCEL_OIDC_TOKEN: undefined,
+          FX_DISABLE_KEYCHAIN: "1",
+        };
+        let restarted: AcpClient | undefined;
+        try {
+          writeSeededFxAuth(root.home, "team_123");
+          client = await AcpClient.create({ cwd: root.workspace, env: signedOutEnv });
+          const savedId = await startAutoSession(client);
+          await runPrompt(client, "Save this session.", 8_000);
+          await client.close();
+          const requestsBefore = gateway.requests.length;
+          expect(requestsBefore).toBeGreaterThan(0);
+
+          rmSync(join(root.home, ".fx", "auth.json"));
+          restarted = await AcpClient.create({ cwd: root.workspace, env: signedOutEnv });
+          const initialized = await restarted.request(
+            "initialize",
+            { protocolVersion: 1, clientCapabilities: { auth: { terminal: true } } },
+            1,
+          ) as any;
+          const methods = initialized.result.authMethods;
+          expect(methods).toHaveLength(2);
+
+          const rejected = await restarted.request(method, { sessionId: savedId, cwd: root.workspace, mcpServers: [] }, 2) as any;
+          expect(rejected.result).toBeUndefined();
+          expect(rejected.error.code).toBe(-32000);
+          expect(rejected.error.data.authMethods).toEqual(methods);
+          expect(gateway.requests).toHaveLength(requestsBefore);
+        } finally {
+          await restarted?.close();
+          await client?.close();
+          gateway.stop();
+          rmSync(root.root, { recursive: true, force: true });
+        }
+      },
+      TIMEOUT,
+    );
+  }
 
   test(
     "running prompt rejects non-cancel requests",
