@@ -1640,6 +1640,14 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
 
     if (method == .authenticate) return handleAuthenticate(state, alloc, msg);
 
+    if (method == .session_prompt and state.active_prompt != null) {
+        return handleSteeringPrompt(state, alloc, msg);
+    }
+
+    if (method.waitsForActivePrompt() and state.active_prompt != null) {
+        return writePromptInProgress(state, alloc, msg.id);
+    }
+
     if (state.auth_pending and method == .session_new) {
         if (!try refreshPendingAuth(state)) return writeAuthRequired(state, alloc, msg.id);
     }
@@ -1647,14 +1655,6 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
     // so while sign-in is pending it runs these checks once it knows which.
     if (method == .session_new or ((method == .session_load or method == .session_resume) and !state.auth_pending)) {
         if (!try validateHeldStartupOverrides(state, alloc, msg)) return;
-    }
-
-    if (method == .session_prompt and state.active_prompt != null) {
-        return handleSteeringPrompt(state, alloc, msg);
-    }
-
-    if (method.waitsForActivePrompt() and state.active_prompt != null) {
-        return writePromptInProgress(state, alloc, msg.id);
     }
 
     if (comptime host_target.is_wasm) {
@@ -1761,6 +1761,18 @@ fn buildAuthRequired(alloc: Allocator, id: ?jsonrpc.RequestId, auth: prompt_hand
 /// state when one is now available. Returns false while there is none.
 pub fn refreshPendingAuth(state: *ServerState) !bool {
     if (!state.auth_pending) return true;
+    reapActivePrompt(state, false);
+    if (state.active_prompt != null) {
+        // A running turn, on a session whose own provider is signed in, borrows
+        // the credential slots that adopting would replace. The sign-in is
+        // confirmed now and adopted by the first request after that turn ends.
+        var staged = prepareCredentialForProvider(state, state.provider) catch |err| {
+            if (err == error.ProviderCredentialUnavailable) return false;
+            return err;
+        };
+        if (staged) |*credential| credential.deinit(state.alloc);
+        return true;
+    }
     if (!try selectCredentialForProvider(state, state.provider)) return false;
     state.auth_pending = false;
     return true;
@@ -4807,6 +4819,79 @@ test "ACP authenticate accepts the agent and terminal method ids" {
     var unknown = jsonrpc.Message{ .id = .{ .integer = 2 }, .method = "authenticate", .params_raw = "{\"methodId\":\"fx-login-codex\"}" };
     try handleAuthenticate(&state, alloc, &unknown);
     try std.testing.expect(std.mem.find(u8, capture.bytes(), "\"code\":-32602") != null);
+}
+
+/// Holds `state.active_prompt` as a running turn does until it is reaped. The
+/// worker returns at once, so a reap never waits on it.
+fn startIdlePromptForTest(state: *ServerState) !void {
+    const active = try state.alloc.create(ActivePrompt);
+    errdefer state.alloc.destroy(active);
+    active.* = .{
+        .state = state,
+        .alloc = state.alloc,
+        .msg = try cloneMessage(state.alloc, &.{ .method = "session/prompt" }),
+        .mode = "",
+        .permission_mode = .ask,
+    };
+    errdefer jsonrpc.freeMessage(state.alloc, &active.msg);
+    active.thread = try std.Thread.spawn(.{}, struct {
+        fn run() void {}
+    }.run, .{});
+    state.active_prompt = active;
+}
+
+/// A configured-provider turn runs while the Gateway default awaits sign-in;
+/// the process credential slots hold the configured key that turn borrows.
+fn pendingGatewayStateForTest(alloc: Allocator, capture: *LastFrame) !ServerState {
+    var state = ServerState{
+        .alloc = alloc,
+        .cfg = undefined,
+        .writer = jsonrpc.Writer.initCallback(capture, LastFrame.write),
+        .provider = .gateway,
+        .auth_pending = true,
+        .credential_source = .configured,
+        .api_key = try alloc.dupe(u8, "configured-key"),
+    };
+    state.cfg.auth_mode = .local;
+    state.cfg.credential_override = "gateway-token";
+    return state;
+}
+
+test "a sign-in found while a turn runs is confirmed, then adopted once that turn is reaped" {
+    const alloc = std.testing.allocator;
+    var capture = LastFrame{};
+    var state = try pendingGatewayStateForTest(alloc, &capture);
+    defer secret.zeroAndFree(alloc, state.api_key);
+    try startIdlePromptForTest(&state);
+    const borrowed = state.api_key;
+
+    try std.testing.expect(try refreshPendingAuth(&state));
+    try std.testing.expect(state.active_prompt != null);
+    try std.testing.expectEqual(borrowed.ptr, state.api_key.ptr);
+    try std.testing.expect(state.auth_pending);
+
+    reapActivePrompt(&state, true);
+    try std.testing.expect(try refreshPendingAuth(&state));
+    try std.testing.expectEqualStrings("gateway-token", state.api_key);
+    try std.testing.expect(!state.auth_pending);
+}
+
+test "authenticate during a turn confirms the sign-in and leaves the turn's credential in place" {
+    const alloc = std.testing.allocator;
+    var capture = LastFrame{};
+    var state = try pendingGatewayStateForTest(alloc, &capture);
+    defer secret.zeroAndFree(alloc, state.api_key);
+    try startIdlePromptForTest(&state);
+    defer reapActivePrompt(&state, true);
+    const borrowed = state.api_key;
+
+    var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "authenticate", .params_raw = "{\"methodId\":\"fx-login\"}" };
+    try handleAuthenticate(&state, alloc, &msg);
+    try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n", capture.bytes());
+    try std.testing.expect(state.active_prompt != null);
+    try std.testing.expectEqual(borrowed.ptr, state.api_key.ptr);
+    // The next request that can reap the turn adopts the sign-in.
+    try std.testing.expect(state.auth_pending);
 }
 
 test "ACP AUTH_REQUIRED carries the initialize auth methods for the provider" {
