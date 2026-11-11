@@ -2716,7 +2716,7 @@ test "execution replay titles reads with the call whose saved output they read" 
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const replay = "lia-command-replay-0123.bin";
+    const replay = "fx-command-replay-0123.bin";
     var run_calls = [_]types.ToolCall{
         .{ .id = "run", .name = "shell", .arguments_json = "{\"action\":\"run\",\"command\":\"zig build test\"}" },
     };
@@ -2776,7 +2776,7 @@ test "ACP load titles a read with the call from an earlier turn" {
     var state = try initAcpSessionTestState(arena, workspace, capture);
     defer state.deinit();
 
-    const replay = "lia-command-replay-0123.bin";
+    const replay = "fx-command-replay-0123.bin";
     var run_calls = [_]types.ToolCall{
         .{ .id = "run", .name = "shell", .arguments_json = "{\"action\":\"run\",\"command\":\"zig build test\"}" },
     };

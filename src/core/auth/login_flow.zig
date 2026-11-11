@@ -109,7 +109,7 @@ pub const TeamSelection = struct {
         errdefer alloc.free(team_slug);
         return .{
             .token = token,
-            .source = .lia_login,
+            .source = .fx_login,
             .team_id = team_id,
             .team_slug = team_slug,
         };
@@ -690,7 +690,7 @@ fn prepareLogin(
     alloc: Allocator,
     transport: oauth_transport.Provider,
 ) !PreparedLogin {
-    try credentials.requireSignInStorage(.lia_login);
+    try credentials.requireSignInStorage(.fx_login);
     var client_id = oauth_session.configuredClientId() orelse return LoginError.ClientIdMissing;
     const issuer_url = try oauth_session.configuredIssuerUrl();
 
@@ -1688,7 +1688,7 @@ test "team selection stages an owned validation credential before commit" {
     var candidate = try selection.validationCredential(alloc, 0);
     defer candidate.deinit(alloc);
 
-    try std.testing.expectEqual(credentials.Source.lia_login, candidate.source);
+    try std.testing.expectEqual(credentials.Source.fx_login, candidate.source);
     try std.testing.expectEqualStrings("access-token", candidate.token);
     try std.testing.expectEqualStrings("team_new", candidate.team_id.?);
     try std.testing.expectEqualStrings("new-team", candidate.team_slug.?);

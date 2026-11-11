@@ -4,7 +4,7 @@
 \* location; runtime.zig restoreCredentials, tryRefresh and saveCredential).
 \*
 \* Two documents can hold the login:
-\*   v2  `credentials-v2.json`, Keychain item LIA_MCP_OAUTH_CREDENTIALS_V2. An
+\*   v2  `credentials-v2.json`, Keychain item FX_MCP_OAUTH_CREDENTIALS_V2. An
 \*       older build reads and writes it. Builds from before version 2 of the
 \*       document read only version 1: a version-2 document reads as empty,
 \*       so their next write replaces it with version 1 and their own login.

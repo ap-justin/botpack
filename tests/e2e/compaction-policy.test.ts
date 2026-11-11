@@ -7,7 +7,7 @@ import { compactionRecordPath, logLines, sessionDir } from "./saved-sessions";
 process.env.LIA_E2E_DISABLE_DOTENV = "1";
 const { fakeGatewayFinalText, startDynamicFakeGateway } = await import("./fake-gateway");
 const binary = resolve(import.meta.dir, "../../zig-out/bin/lia");
-const checkpointMarker = "lia-compactor-v1\n";
+const checkpointMarker = "fx-compactor-v1\n";
 
 for (const userHeavy of [false, true]) test(`automatic compaction ${userHeavy ? "clips a user message too large for the room, whole in its saved turn" : "keeps user messages exact and clips only a reply too large for the room"}`, async () => {
   const root = mkdtempSync(join(tmpdir(), "lia-policy-")), home = join(root, "home"), cwd = join(root, "workspace");

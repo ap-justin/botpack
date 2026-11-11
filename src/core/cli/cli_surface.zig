@@ -1361,7 +1361,7 @@ fn runNonInteractiveWithDeps(
                 deps,
                 login_provider,
                 .provider_login,
-                if (login_provider == .gateway) .lia_login else null,
+                if (login_provider == .gateway) .fx_login else null,
             )) return .handled_failure;
             try writeStdout(deps, switch (login_provider) {
                 .gateway => "Signed in to Vercel.\nAI Gateway access may still require billing or API setup for the selected account.\n",
@@ -1453,7 +1453,7 @@ fn runNonInteractiveWithDeps(
                 deps,
                 .gateway,
                 .provider_login,
-                .lia_login,
+                .fx_login,
             )) return .handled_failure;
             return .handled_success;
         },

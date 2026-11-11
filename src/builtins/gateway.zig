@@ -2543,7 +2543,7 @@ pub fn modelCatalogTeamPath(
     path: []const u8,
     access: credentials.CatalogAccess,
 ) Allocator.Error!?[]u8 {
-    if (access.credentialSource() != .lia_login) return null;
+    if (access.credentialSource() != .fx_login) return null;
     const team = access.teamContext() orelse return null;
     if (!shared_types.validGatewayTeam(team)) return null;
     return try alloc.print("{s}?teamId={s}", .{ path, team });
@@ -2552,7 +2552,7 @@ pub fn modelCatalogTeamPath(
 /// Returns the `x-vercel-ai-gateway-team` value for a catalog request, borrowed
 /// from `access`, or null for a lia login, whose team travels in the query.
 pub fn modelCatalogHeaderTeam(access: credentials.CatalogAccess) ?[]const u8 {
-    if (access.credentialSource() == .lia_login) return null;
+    if (access.credentialSource() == .fx_login) return null;
     return access.teamContext();
 }
 
@@ -2563,9 +2563,9 @@ test "model catalog names a lia login team in the query and other teams in the h
         path: ?[]const u8,
         header: ?[]const u8,
     }{
-        .{ .access = credentials.catalogAccessForCredential(.lia_login, "login-token", "team_123"), .path = models_path ++ "?teamId=team_123", .header = null },
-        .{ .access = credentials.catalogAccessForCredential(.lia_login, "login-token", "team a/../b"), .path = null, .header = null },
-        .{ .access = credentials.catalogAccessForCredential(.lia_login, "login-token", null), .path = null, .header = null },
+        .{ .access = credentials.catalogAccessForCredential(.fx_login, "login-token", "team_123"), .path = models_path ++ "?teamId=team_123", .header = null },
+        .{ .access = credentials.catalogAccessForCredential(.fx_login, "login-token", "team a/../b"), .path = null, .header = null },
+        .{ .access = credentials.catalogAccessForCredential(.fx_login, "login-token", null), .path = null, .header = null },
         .{ .access = credentials.catalogAccessForCredential(.ai_gateway_api_key, "api-key", "team_123"), .path = null, .header = "team_123" },
         .{ .access = credentials.catalogAccessForCredential(.ai_gateway_api_key, "api-key", null), .path = null, .header = null },
     };

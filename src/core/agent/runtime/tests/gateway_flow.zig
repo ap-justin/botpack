@@ -5941,7 +5941,7 @@ test "processQueuedPrompt preserves a confirmed provider tool result across reco
     var fixture = PromptFixture{};
     const config = fixture.config();
     var initial_job = fixture.job();
-    initial_job.credential_source = .lia_login;
+    initial_job.credential_source = .fx_login;
     initial_job.account_id = @constCast("acct_1");
 
     try runFakePrompt(&gateway, &hooks, config, initial_job);
@@ -5987,7 +5987,7 @@ test "processQueuedPrompt preserves a confirmed provider tool result across reco
     var restored_hooks = FakeAgentRuntimeDeps.init(alloc);
     defer restored_hooks.deinit();
     var restored_job = fixture.job();
-    restored_job.credential_source = .lia_login;
+    restored_job.credential_source = .fx_login;
     restored_job.account_id = @constCast("acct_1");
     restored_job.recovery_checkpoint = restored_checkpoint;
 
@@ -7337,9 +7337,9 @@ test "processQueuedPrompt preserves the fallback route until selection changes a
         .authority = .{
             .provider = .gateway,
             .model = @constCast("zai/glm-5.2"),
-            .credential_source = .lia_login,
+            .credential_source = .fx_login,
             .credential_identity = @import("../../../auth/credential_authority.zig").derive(
-                .lia_login,
+                .fx_login,
                 "acct_1",
             ),
         },
@@ -7360,7 +7360,7 @@ test "processQueuedPrompt preserves the fallback route until selection changes a
         config.fast_mode = true;
         var job = fixture.job();
         job.model = @constCast("zai/glm-5.2");
-        job.credential_source = .lia_login;
+        job.credential_source = .fx_login;
         job.account_id = @constCast("acct_1");
         job.recovery_checkpoint = checkpoint;
 
@@ -7388,7 +7388,7 @@ test "processQueuedPrompt preserves the fallback route until selection changes a
         config.fast_mode = false;
         var job = fixture.job();
         job.model = @constCast("zai/glm-5.2");
-        job.credential_source = .lia_login;
+        job.credential_source = .fx_login;
         job.account_id = @constCast("acct_1");
         job.recovery_checkpoint = checkpoint;
 
@@ -7459,7 +7459,7 @@ test "processQueuedPrompt counts only failed provider attempts across tool follo
     hooks.cancel_on_auto_retry_status = config.cancel_flag;
     hooks.cancel_on_auto_retry_attempt = 2;
     var initial_job = fixture.job();
-    initial_job.credential_source = .lia_login;
+    initial_job.credential_source = .fx_login;
     initial_job.account_id = @constCast("acct_1");
 
     try runFakePrompt(&gateway, &hooks, config, initial_job);
@@ -7489,7 +7489,7 @@ test "processQueuedPrompt counts only failed provider attempts across tool follo
     continued_hooks.enable_recovery_checkpoint = true;
     defer continued_hooks.deinit();
     var continued_job = fixture.job();
-    continued_job.credential_source = .lia_login;
+    continued_job.credential_source = .fx_login;
     continued_job.account_id = @constCast("acct_1");
     continued_job.recovery_checkpoint = continued_checkpoint;
     const continued_config = fixture.config();
@@ -7519,7 +7519,7 @@ test "processQueuedPrompt explicit checkpoint continuation starts a fresh attemp
     // Esc while the request waits to retry ends the turn.
     first_hooks.cancel_on_auto_retry_status = first_config.cancel_flag;
     var first_job = fixture.job();
-    first_job.credential_source = .lia_login;
+    first_job.credential_source = .fx_login;
     first_job.account_id = @constCast("acct_1");
 
     try runFakePrompt(&first_gateway, &first_hooks, first_config, first_job);
@@ -7540,7 +7540,7 @@ test "processQueuedPrompt explicit checkpoint continuation starts a fresh attemp
     second_hooks.enable_recovery_checkpoint = true;
     defer second_hooks.deinit();
     var continued_job = fixture.job();
-    continued_job.credential_source = .lia_login;
+    continued_job.credential_source = .fx_login;
     continued_job.account_id = @constCast("acct_1");
     continued_job.recovery_checkpoint = checkpoint;
     const continued_config = fixture.config();
@@ -7589,7 +7589,7 @@ test "processQueuedPrompt resumed reply retries a size rejection with fewer imag
     const first_config = fixture.config();
     first_hooks.cancel_on_auto_retry_status = first_config.cancel_flag;
     var first_job = fixture.job();
-    first_job.credential_source = .lia_login;
+    first_job.credential_source = .fx_login;
     first_job.account_id = @constCast("acct_1");
     first_job.prompt = @constCast("Describe the attached image.");
     first_job.images = &images;
@@ -7617,7 +7617,7 @@ test "processQueuedPrompt resumed reply retries a size rejection with fewer imag
     second_hooks.default_model_capabilities = native_images;
     defer second_hooks.deinit();
     var continued_job = fixture.job();
-    continued_job.credential_source = .lia_login;
+    continued_job.credential_source = .fx_login;
     continued_job.account_id = @constCast("acct_1");
     continued_job.prompt = checkpoint.user.text;
     continued_job.images = checkpoint.user.images;
@@ -8526,7 +8526,7 @@ test "processQueuedPrompt waits for a sign-in after an expired login and resends
     var config = fixture.config();
     config.recovery_continue_flag = &continue_flag;
     var job = fixture.job();
-    job.credential_source = .lia_login;
+    job.credential_source = .fx_login;
 
     try runFakePrompt(&gateway, &hooks, config, job);
 
@@ -9102,7 +9102,7 @@ test "processQueuedPrompt refreshes lia login credential before gateway request"
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .lia_login;
+    job.credential_source = .fx_login;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -9128,7 +9128,7 @@ test "processQueuedPrompt refreshes and retries once after lia login 401" {
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .lia_login;
+    job.credential_source = .fx_login;
 
     const config = fixture.config();
     try runFakePrompt(&gateway, &hooks, config, job);
@@ -9162,7 +9162,7 @@ test "forced auth refresh reaches later permission and tool consumers in the sam
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .lia_login;
+    job.credential_source = .fx_login;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -9190,7 +9190,7 @@ test "processQueuedPrompt does not retry a second lia login 401" {
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .lia_login;
+    job.credential_source = .fx_login;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -9256,7 +9256,7 @@ test "processQueuedPrompt keeps the selected lia login credential when forced re
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .lia_login;
+    job.credential_source = .fx_login;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -9265,7 +9265,7 @@ test "processQueuedPrompt keeps the selected lia login credential when forced re
     try std.testing.expectEqual(@as(usize, 2), hooks.credential_refresh_modes.items.len);
     try std.testing.expectEqual(runtime_deps.CredentialRefreshMode.force, hooks.credential_refresh_modes.items[1]);
     try std.testing.expectEqual(std.http.Status.unauthorized, hooks.http_status.?);
-    try std.testing.expectEqual(types.CredentialSource.lia_login, hooks.http_credential_source.?);
+    try std.testing.expectEqual(types.CredentialSource.fx_login, hooks.http_credential_source.?);
     try std.testing.expectEqual(types.TurnPresentationOutcome.failed, hooks.finalized_outcome.?);
 }
 
@@ -9285,7 +9285,7 @@ test "processQueuedPrompt reports the selected login after refresh failure witho
     defer hooks.deinit();
     var fixture = PromptFixture{};
     var job = fixture.job();
-    job.credential_source = .lia_login;
+    job.credential_source = .fx_login;
 
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
 
@@ -9295,7 +9295,7 @@ test "processQueuedPrompt reports the selected login after refresh failure witho
     try std.testing.expectEqual(runtime_deps.CredentialRefreshMode.if_needed, hooks.credential_refresh_modes.items[0]);
     try std.testing.expectEqual(runtime_deps.CredentialRefreshMode.force, hooks.credential_refresh_modes.items[1]);
     try std.testing.expectEqual(std.http.Status.unauthorized, hooks.http_status.?);
-    try std.testing.expectEqual(types.CredentialSource.lia_login, hooks.http_credential_source.?);
+    try std.testing.expectEqual(types.CredentialSource.fx_login, hooks.http_credential_source.?);
     try std.testing.expectEqual(types.TurnPresentationOutcome.failed, hooks.finalized_outcome.?);
 }
 

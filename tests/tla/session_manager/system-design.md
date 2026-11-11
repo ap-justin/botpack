@@ -983,7 +983,7 @@ Settled while moving off the side folder (2026-10-01):
   v2 already keeps it). Each handle keeps its store's
   prefix and extension, and its name is the body's full 64-hex hash: a
   tool result is `result-`, the hash and `.txt`, and a command's output is
-  `lia-command-replay-`, the hash and `.bin`, so no name
+  `fx-command-replay-`, the hash and `.bin`, so no name
   index exists and `read_tool_result` still tells text, images and command
   output apart. All of a session's blobs are found by hash alone, so each
   store reads only handles with its own prefix and reports any other as not
@@ -1566,7 +1566,7 @@ only by quitting):
   the full `lia --resume` command; or keep counting turns and show a fork
   before its first prompt as unsaved, though resume opens it.
 - **D91 Decision (amends D44):** a command's output handle is
-  `lia-command-replay-`, a random 12-hex id for the run, `-`, the body's
+  `fx-command-replay-`, a random 12-hex id for the run, `-`, the body's
   full hash and `.bin`. Readers take the hash after the handle's last `-`,
   as they do for every v2 handle, so no name index exists, a handle from
   before this decision still resolves, and two runs with the same output

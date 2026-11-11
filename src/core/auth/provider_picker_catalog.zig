@@ -135,7 +135,7 @@ pub fn providerMethods(id: model_provider.ProviderId) []const Method {
 /// method covers every gateway key origin, not just the environment variable.
 pub fn methodMatchesSource(method: Method, source: types.CredentialSource) bool {
     return switch (method) {
-        .oauth => source == .lia_login or source == .vercel_oidc_token,
+        .oauth => source == .fx_login or source == .vercel_oidc_token,
         .api_key => source == .ai_gateway_api_key or source == .stored_key,
     };
 }
@@ -162,10 +162,10 @@ test "method slugs round trip and stay single tokens" {
 }
 
 test "method ownership of credential sources is disjoint" {
-    try std.testing.expect(methodMatchesSource(.oauth, .lia_login));
+    try std.testing.expect(methodMatchesSource(.oauth, .fx_login));
     try std.testing.expect(methodMatchesSource(.api_key, .stored_key));
     try std.testing.expect(!methodMatchesSource(.oauth, .stored_key));
-    try std.testing.expect(!methodMatchesSource(.api_key, .lia_login));
+    try std.testing.expect(!methodMatchesSource(.api_key, .fx_login));
 }
 
 test "key field shows a placeholder when empty and one bullet per byte" {

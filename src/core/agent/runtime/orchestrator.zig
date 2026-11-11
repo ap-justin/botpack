@@ -4659,7 +4659,7 @@ fn needsUserFailureKind(
 fn signInRepairs(credential_source: ?types.CredentialSource) bool {
     const source = credential_source orelse return false;
     return switch (source) {
-        .lia_login => true,
+        .fx_login => true,
         .vercel_oidc_token, .ai_gateway_api_key, .stored_key, .host_managed, .configured => false,
     };
 }
@@ -6128,7 +6128,7 @@ fn appendAuthorizedVisionAttemptIds(
 ) !bool {
     if (!std.mem.eql(u8, call.name, "vision") or
         call.argument_integrity != .valid or
-        call.provenance != .lia_local)
+        call.provenance != .fx_local)
     {
         return false;
     }
@@ -9194,7 +9194,7 @@ fn processQueuedPromptLoop(
                 },
                 .reject_malformed_identity => |failure| {
                     try stream_ctx.provisional_statuses.finishRejectedCompletions(deps, arena, turn_id, completion.tool_calls, advertised_dynamic_tool_names);
-                    debug_trace.eventf("agent", "authoritative_tool_admission_rejected", step_ctx, "failure={s} provenance=lia_local", .{@tagName(failure)});
+                    debug_trace.eventf("agent", "authoritative_tool_admission_rejected", step_ctx, "failure={s} provenance=fx_local", .{@tagName(failure)});
                     finish_trace.finish("malformed_tool_identity");
                     return error.MalformedAuthoritativeToolIdentity;
                 },
@@ -10532,7 +10532,7 @@ fn processQueuedPromptLoop(
                             "tool",
                             "argument_integrity_rejected",
                             step_ctx,
-                            "call_id={s} name={s} failure={s} provenance=lia_local",
+                            "call_id={s} name={s} failure={s} provenance=fx_local",
                             .{ tool_call.id, tool_call.name, @tagName(tool_call.argument_integrity) },
                         );
                     } else if (blocked.kind == .route_unavailable) {
@@ -12599,7 +12599,7 @@ test "malformed duplicate unauthorized and path Vision calls settle no image ids
         .name = "vision",
         .arguments_json = "{\"image_ids\":[1]",
         .argument_integrity = .malformed_json,
-        .provenance = .lia_local,
+        .provenance = .fx_local,
     };
     try std.testing.expect(!try appendAuthorizedVisionAttemptIds(
         std.testing.allocator,
@@ -12612,7 +12612,7 @@ test "malformed duplicate unauthorized and path Vision calls settle no image ids
         .id = "vision-duplicate",
         .name = "vision",
         .arguments_json = "{\"image_ids\":[1,1],\"focus\":\"inspect\"}",
-        .provenance = .lia_local,
+        .provenance = .fx_local,
     };
     try std.testing.expect(!try appendAuthorizedVisionAttemptIds(
         std.testing.allocator,
@@ -12625,7 +12625,7 @@ test "malformed duplicate unauthorized and path Vision calls settle no image ids
         .id = "vision-unauthorized",
         .name = "vision",
         .arguments_json = "{\"image_ids\":[2],\"focus\":\"inspect\"}",
-        .provenance = .lia_local,
+        .provenance = .fx_local,
     };
     try std.testing.expect(!try appendAuthorizedVisionAttemptIds(
         std.testing.allocator,
@@ -12638,7 +12638,7 @@ test "malformed duplicate unauthorized and path Vision calls settle no image ids
         .id = "vision-path",
         .name = "vision",
         .arguments_json = "{\"paths\":[\"photo.png\"],\"focus\":\"inspect\"}",
-        .provenance = .lia_local,
+        .provenance = .fx_local,
     };
     try std.testing.expect(!try appendAuthorizedVisionAttemptIds(
         std.testing.allocator,

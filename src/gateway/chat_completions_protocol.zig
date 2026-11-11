@@ -285,7 +285,7 @@ fn validate_history(alloc: Allocator, messages: []const types.ChatMessage) Error
         if (pending.count() != 0) return error.InvalidToolHistory;
         if (message.tool_calls.len > max_selected_tools) return error.TooManyTools;
         for (message.tool_calls) |call| {
-            if (call.provenance != .lia_local or call.provider_result != null) return error.UnsupportedToolProvenance;
+            if (call.provenance != .fx_local or call.provider_result != null) return error.UnsupportedToolProvenance;
             if (call.id.len == 0 or call.final_identity != .valid) return error.InvalidToolCallId;
             try validate_name(call.name);
             if (call.arguments_json.len > max_history_arguments_bytes) return error.ArgumentsTooLarge;
@@ -2044,7 +2044,7 @@ test "chat completions rejects unmatched native malformed and duplicate history 
     call.provenance = .provider_executed;
     messages[0].tool_calls = &.{call};
     try std.testing.expectError(error.UnsupportedToolProvenance, build_request(alloc, request, .{}));
-    call.provenance = .lia_local;
+    call.provenance = .fx_local;
     call.arguments_json = "[]";
     messages[0].tool_calls = &.{call};
     try std.testing.expectError(error.InvalidToolArguments, build_request(alloc, request, .{}));
@@ -2141,7 +2141,7 @@ test "chat completions owns fragmented interleaved tools and results independent
     try std.testing.expectEqualStrings("read_file", completion.tool_calls[0].name);
     try std.testing.expectEqualStrings("{\"path\":\"a\"}", completion.tool_calls[0].arguments_json);
     try std.testing.expectEqualStrings("{\"request\":{\"command\":\"pwd\"}}", completion.tool_calls[1].arguments_json);
-    try std.testing.expectEqual(types.ToolExecutionProvenance.lia_local, completion.tool_calls[1].provenance);
+    try std.testing.expectEqual(types.ToolExecutionProvenance.fx_local, completion.tool_calls[1].provenance);
 }
 
 test "chat completions returns unadvertised names and invalid arguments as sent" {

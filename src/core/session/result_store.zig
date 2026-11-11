@@ -898,7 +898,7 @@ test "a v2 session stores results and images as blobs named by their hash (D44)"
 
     // Every store's blobs share the session: the same blob under a command
     // replay's handle is not a result, so the caller asks that store.
-    const foreign = try std.mem.concat(alloc, u8, &.{ "lia-command-replay-", artifact_digest.blobHash(handle).?, ".bin" });
+    const foreign = try std.mem.concat(alloc, u8, &.{ "fx-command-replay-", artifact_digest.blobHash(handle).?, ".bin" });
     defer alloc.free(foreign);
     try std.testing.expectError(error.ResultHandleNotFound, readByRangeManaged(alloc, &capability, foreign, 1, 4));
     try std.testing.expectError(error.ResultHandleNotFound, searchByQueryManaged(alloc, &capability, foreign, "xxx"));

@@ -6820,7 +6820,7 @@ test "a tool result backed only by its command replay streams as it commits" {
         .output = @constCast("REPLAY_ONLY_OUTPUT"),
         .output_bytes = 18,
         .stored_output_bytes = 18,
-        .command_output_replay = .{ .available = .{ .handle = "lia-command-replay-0-0.bin", .framed_bytes = 27 } },
+        .command_output_replay = .{ .available = .{ .handle = "fx-command-replay-0-0.bin", .framed_bytes = 27 } },
     }};
     var steps = [_]types.ToolExecutionStep{.{ .tool_calls = &calls, .tool_results = &results }};
     const execution: types.ExecutionMemory = .{ .tool_steps = &steps };
@@ -7991,7 +7991,7 @@ test "a resume makes a hand-made ~/.lia private instead of refusing the session"
 /// kind the move carries, the client's settings, and terminal state.
 const OldSideFolder = struct {
     const result_handle = "result-shell-0011223344556677-8899aabbccddeeff.txt";
-    const replay_handle = "lia-command-replay-00000000000000000000000000000000-0123456789abcdef.bin";
+    const replay_handle = "fx-command-replay-00000000000000000000000000000000-0123456789abcdef.bin";
     const image_name = "image-1.png";
     const png = [_]u8{ 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 13, 'I', 'H', 'D', 'R', 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89 };
 

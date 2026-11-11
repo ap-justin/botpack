@@ -108,7 +108,8 @@ test "context notice body drops legacy markers from every line" {
 pub const CredentialSource = enum {
     vercel_oidc_token,
     ai_gateway_api_key,
-    lia_login,
+    /// Stored data: saved settings and checkpoints depend on the fx name.
+    fx_login,
     stored_key,
     host_managed,
     configured,
@@ -858,7 +859,8 @@ pub const FinalToolIdentity = enum {
 };
 
 pub const ToolExecutionProvenance = enum {
-    lia_local,
+    /// Stored data: saved sessions and the libfx hook payload depend on the fx name.
+    fx_local,
     provider_executed,
 };
 
@@ -984,7 +986,7 @@ pub const ToolCall = struct {
     provisional_id: ?[]const u8 = null,
     provider_result: ?[]const u8 = null,
     final_identity: FinalToolIdentity = .valid,
-    provenance: ToolExecutionProvenance = .lia_local,
+    provenance: ToolExecutionProvenance = .fx_local,
     /// Borrowed only for this action. Copies and durable/provider encodings omit it.
     resolved_skill: ?*const skill_contract.PreparedSkill = null,
     /// What this action works on, resolved from earlier results, such as the
@@ -2297,7 +2299,7 @@ test "authoritative tool admission rejects unstorable names" {
         .{ .value = &oversized, .reason = .too_long },
         .{ .value = "\xff", .reason = .invalid_utf8 },
     };
-    for ([_]ToolExecutionProvenance{ .lia_local, .provider_executed }) |provenance| {
+    for ([_]ToolExecutionProvenance{ .fx_local, .provider_executed }) |provenance| {
         for (cases) |case| {
             const calls = [_]ToolCall{.{ .id = "call", .name = case.value, .arguments_json = "{}", .provenance = provenance, .provider_result = "result" }};
             try std.testing.expectEqualDeep(
@@ -2337,7 +2339,7 @@ test "authoritative tool admission preserves bounded canonical identity formats"
     const boundary: [256]u8 = @splat('i');
     const unicode_boundary = text_utils.repeat("é", 128);
     for ([_][]const u8{ &boundary, unicode_boundary, "functions.read_file:0", "unknown/tool" }) |identity| {
-        for ([_]ToolExecutionProvenance{ .lia_local, .provider_executed }) |provenance| {
+        for ([_]ToolExecutionProvenance{ .fx_local, .provider_executed }) |provenance| {
             const calls = [_]ToolCall{.{ .id = identity, .name = identity, .provisional_id = identity, .arguments_json = "{}", .provenance = provenance, .provider_result = "result" }};
             try std.testing.expectEqual(AuthoritativeToolAdmission.admitted, authoritativeToolAdmission(.{ .tool_calls = &calls }));
             try std.testing.expectEqualStrings(identity, calls[0].id);
@@ -3989,7 +3991,7 @@ test "HistoryTurn helpers duplicate and free owned turns" {
         } },
         .cancelled_command = .{
             .output_replay = .{ .available = .{
-                .handle = try alloc.dupe(u8, "lia-command-replay.bin"),
+                .handle = try alloc.dupe(u8, "fx-command-replay.bin"),
                 .framed_bytes = 42,
             } },
             .command_artifact_handle = try alloc.dupe(u8, "lia-command.log"),
@@ -4002,7 +4004,7 @@ test "HistoryTurn helpers duplicate and free owned turns" {
     const copied_presentation = interrupted_copy.interrupted.cancelled_command.?;
     const original_presentation = interrupted_original.interrupted.cancelled_command.?;
     try std.testing.expectEqualStrings(
-        "lia-command-replay.bin",
+        "fx-command-replay.bin",
         copied_presentation.output_replay.?.available.handle,
     );
     try std.testing.expect(

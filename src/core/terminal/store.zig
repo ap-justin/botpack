@@ -1323,11 +1323,12 @@ pub const RecoveredList = struct {
 };
 
 /// `Record.host_identity` names the lia process instance that owns a terminal:
-/// `lia-process-v1/<instance>/<pid>/<start token>`. The instance is random per
+/// `fx-process-v1/<instance>/<pid>/<start token>`. The instance is random per
 /// process, and the pid and start token prove whether that process still runs.
 /// Records written by the retired terminal host daemon hold a bare instance id
-/// instead and are judged by their terminal process.
-const owner_identity_prefix = "lia-process-v1/";
+/// instead and are judged by their terminal process. The fx name is stored
+/// data: saved terminal records depend on it.
+const owner_identity_prefix = "fx-process-v1/";
 const owner_instance_hex_len = 32;
 
 pub const max_owner_identity_bytes = owner_identity_prefix.len +
@@ -6438,7 +6439,7 @@ test "owner identities round trip and reject malformed text" {
     var buffer: [max_owner_identity_bytes]u8 = undefined;
     const text = try formatOwnerIdentity(&buffer, text_utils.repeat("c", 32), 77, token);
     try std.testing.expectEqualStrings(
-        "lia-process-v1/" ++ text_utils.repeat("c", 32) ++ "/77/linux:00112233445566778899aabbccddeeff:12345",
+        "fx-process-v1/" ++ text_utils.repeat("c", 32) ++ "/77/linux:00112233445566778899aabbccddeeff:12345",
         text,
     );
     const parsed = parse_owner_identity(text).?;
@@ -6449,8 +6450,8 @@ test "owner identities round trip and reject malformed text" {
         formatOwnerIdentity(&buffer, "short", 77, token),
     );
     try std.testing.expect(parse_owner_identity("0123456789abcdef0123456789abcdef") == null);
-    try std.testing.expect(parse_owner_identity("lia-process-v1/" ++ text_utils.repeat("c", 32) ++ "/x/linux:00112233445566778899aabbccddeeff:1") == null);
-    try std.testing.expect(parse_owner_identity("lia-process-v1/" ++ text_utils.repeat("c", 32) ++ "/77/not-a-token") == null);
+    try std.testing.expect(parse_owner_identity("fx-process-v1/" ++ text_utils.repeat("c", 32) ++ "/x/linux:00112233445566778899aabbccddeeff:1") == null);
+    try std.testing.expect(parse_owner_identity("fx-process-v1/" ++ text_utils.repeat("c", 32) ++ "/77/not-a-token") == null);
 }
 
 fn recovered_session_index(

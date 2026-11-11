@@ -4989,7 +4989,7 @@ printf '%s' ${JSON.stringify(trailingMarker)} > ${JSON.stringify(effectPath)}
     const tracePath = join(root.root, "trace.log");
     const before = new Set(
       readdirSync("/tmp").filter((name) =>
-        name.startsWith(".lia-command-replay-")
+        name.startsWith(".fx-command-replay-")
       ),
     );
     const gateway = startGateway(() =>
@@ -5035,7 +5035,7 @@ printf '%s' ${JSON.stringify(trailingMarker)} > ${JSON.stringify(effectPath)}
       await proc.exited;
       await Bun.sleep(50);
       const after = readdirSync("/tmp").filter((name) =>
-        name.startsWith(".lia-command-replay-") && !before.has(name)
+        name.startsWith(".fx-command-replay-") && !before.has(name)
       );
       expect(after).toEqual([]);
       expect(existsSync(join(root.home, ".lia", "sessions"))).toBe(false);
@@ -5467,7 +5467,7 @@ printf '%s' ${JSON.stringify(trailingMarker)} > ${JSON.stringify(effectPath)}
       expect(latest.code).toBe(0);
       const sessionId = JSON.parse(latest.stdout).id as string;
       // One command replay, kept as a blob of the session.
-      const replays = new Set(savedText(root.home, sessionId).match(/lia-command-replay-[a-f0-9]{12}-[a-f0-9]{64}\.bin/g) ?? []);
+      const replays = new Set(savedText(root.home, sessionId).match(/fx-command-replay-[a-f0-9]{12}-[a-f0-9]{64}\.bin/g) ?? []);
       expect(replays.size).toBe(1);
       const replayHash = /([a-f0-9]{64})\.bin$/.exec([...replays][0]!)![1]!;
       expect(existsSync(join(sessionDir(root.home, sessionId), "blobs", replayHash))).toBe(true);
@@ -8252,7 +8252,7 @@ printf '%s' ${JSON.stringify(trailingMarker)} > ${JSON.stringify(effectPath)}
       const firstJson = parseAskJson(first.stdout);
       expect(firstJson.output).toContain("DISTINCT_HANDLES_RECORDED");
       expect(handles).toHaveLength(2);
-      const shape = /^lia-command-replay-([0-9a-f]{12})-([0-9a-f]{64})\.bin$/;
+      const shape = /^fx-command-replay-([0-9a-f]{12})-([0-9a-f]{64})\.bin$/;
       const [a, b] = handles.map((handle) => shape.exec(handle));
       expect(a).not.toBeNull();
       expect(b).not.toBeNull();

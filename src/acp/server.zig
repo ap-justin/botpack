@@ -498,8 +498,8 @@ fn credentialReadyAt(
 }
 
 test "ACP credential readiness rejects refresh-due access tokens" {
-    try std.testing.expect(credentialReadyAt(.lia_login, "token", 11, 10));
-    try std.testing.expect(!credentialReadyAt(.lia_login, "token", 10, 10));
+    try std.testing.expect(credentialReadyAt(.fx_login, "token", 11, 10));
+    try std.testing.expect(!credentialReadyAt(.fx_login, "token", 10, 10));
     try std.testing.expect(credentialReadyAt(.ai_gateway_api_key, "token", null, 10));
     try std.testing.expect(!credentialReadyAt(.ai_gateway_api_key, "", null, 10));
 }
@@ -580,7 +580,7 @@ fn hostManagedCredential() credentials.Credential {
 /// cached credential, since the request itself will say if it is rejected.
 fn cachedCredentialStillStored(secret_store: host_contract.SecretStore, source: ?types.CredentialSource) bool {
     const kind = source orelse return true;
-    if (kind != .lia_login and kind != .stored_key) return true;
+    if (kind != .fx_login and kind != .stored_key) return true;
     return switch (credentials.sourcePresence(secret_store, kind)) {
         .missing => false,
         .present, .unavailable => true,
@@ -625,17 +625,17 @@ test "a cached lia login is checked by presence, not by reading the saved sessio
     defer io_mod.resetEnvironForTest();
     const store = host_contract.unavailable_secret_store;
 
-    try std.testing.expect(!cachedCredentialStillStored(store, .lia_login));
+    try std.testing.expect(!cachedCredentialStillStored(store, .fx_login));
 
     try tmp.dir.createDir(std.testing.io, ".lia", .fromMode(0o700));
     // Present but unparseable: a load would fail, presence still says present.
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".lia/auth.json", .data = "not a session", .flags = .{ .permissions = .fromMode(0o600) } });
-    try std.testing.expect(cachedCredentialStillStored(store, .lia_login));
+    try std.testing.expect(cachedCredentialStillStored(store, .fx_login));
 
     // Readable by others: presence is unavailable, not missing.
     try tmp.dir.deleteFile(std.testing.io, ".lia/auth.json");
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".lia/auth.json", .data = "not a session", .flags = .{ .permissions = .fromMode(0o644) } });
-    try std.testing.expect(cachedCredentialStillStored(store, .lia_login));
+    try std.testing.expect(cachedCredentialStillStored(store, .fx_login));
 }
 
 /// Answers `presence` as configured and counts calls; never holds a secret.
@@ -808,7 +808,7 @@ pub fn refreshModelCredential(
         state,
         &refreshed,
         expected_account_id,
-        if (source == .lia_login) state.gateway_team else null,
+        if (source == .fx_login) state.gateway_team else null,
     );
     return worker_token;
 }

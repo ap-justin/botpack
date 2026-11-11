@@ -4453,7 +4453,7 @@ test "non-object saved function inputs are repaired without changing recorded ou
                 defer session.freeHistoryTurn(alloc, decoded);
                 const step = decoded.assistant.execution.tool_steps[0];
                 try std.testing.expectEqualStrings(if (native_kind == 0) "{}" else arguments, step.tool_calls[0].arguments_json);
-                try std.testing.expectEqual(if (native_kind == 0) types.ToolExecutionProvenance.lia_local else .provider_executed, step.tool_calls[0].provenance);
+                try std.testing.expectEqual(if (native_kind == 0) types.ToolExecutionProvenance.fx_local else .provider_executed, step.tool_calls[0].provenance);
                 try std.testing.expectEqual(types.ToolArgumentIntegrity.valid, step.tool_calls[0].argument_integrity);
                 try std.testing.expectEqual(status, step.tool_results[0].status);
                 try std.testing.expectEqualStrings("stale", step.tool_results[0].output);
@@ -4808,7 +4808,7 @@ test "execution memory codec preserves feedback and reads v1 results without it"
             },
         },
         .command_output_replay = .{ .available = .{
-            .handle = "lia-command-replay-private.bin",
+            .handle = "fx-command-replay-private.bin",
             .framed_bytes = 321,
         } },
         .command_process_presentation = .{ .exit_code = 7 },
@@ -4850,7 +4850,7 @@ test "execution memory codec preserves feedback and reads v1 results without it"
     try std.testing.expect(std.mem.find(u8, encoded.written(), "\"permission_feedback\"") != null);
     try std.testing.expect(std.mem.find(u8, encoded.written(), "\"committed_file_presentation\"") != null);
     try std.testing.expect(std.mem.find(u8, encoded.written(), "\"command_output_replay\"") != null);
-    try std.testing.expect(std.mem.find(u8, encoded.written(), "lia-command-replay-private.bin") != null);
+    try std.testing.expect(std.mem.find(u8, encoded.written(), "fx-command-replay-private.bin") != null);
 
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, encoded.written(), .{});
     defer parsed.deinit();
@@ -4894,7 +4894,7 @@ test "execution memory codec preserves feedback and reads v1 results without it"
         .available => |value| value,
         .unavailable => return error.TestExpectedReplay,
     };
-    try std.testing.expectEqualStrings("lia-command-replay-private.bin", descriptor.handle);
+    try std.testing.expectEqualStrings("fx-command-replay-private.bin", descriptor.handle);
     try std.testing.expectEqual(@as(usize, 321), descriptor.framed_bytes);
     try std.testing.expectEqual(
         types.CommandProcessPresentation{ .exit_code = 7 },
@@ -5667,7 +5667,7 @@ test "interrupted command presentation is strict and round trips" {
         },
         .cancelled_command = .{
             .output_replay = .{ .available = .{
-                .handle = "lia-command-replay.bin",
+                .handle = "fx-command-replay.bin",
                 .framed_bytes = 42,
             } },
             .command_artifact_handle = "lia-command.log",
@@ -5685,7 +5685,7 @@ test "interrupted command presentation is strict and round trips" {
         .available => |value| value,
         .unavailable => return error.TestExpectedReplay,
     };
-    try std.testing.expectEqualStrings("lia-command-replay.bin", descriptor.handle);
+    try std.testing.expectEqualStrings("fx-command-replay.bin", descriptor.handle);
     try std.testing.expectEqual(@as(usize, 42), descriptor.framed_bytes);
     try std.testing.expectEqualStrings("lia-command.log", presentation.command_artifact_handle.?);
     try std.testing.expectEqual(types.InterruptedTerminalReason.cancelled, decoded.interrupted.terminal_reason);

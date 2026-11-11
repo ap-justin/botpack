@@ -2254,7 +2254,8 @@ pub fn permissionStateKeyForCall(
 
     var canonical: std.Io.Writer.Allocating = .init(arena);
     defer canonical.deinit();
-    try writeIdentityField(&canonical.writer, "lia-permission-state-v1");
+    // Stored data: saved permission rules depend on the fx name.
+    try writeIdentityField(&canonical.writer, "fx-permission-state-v1");
     var targets = try permissionTargetsForCall(input, arena, call);
     defer targets.deinit(arena);
     try writeIdentityField(&canonical.writer, call.name);
@@ -2343,7 +2344,8 @@ fn permissionStateKeyForPreparedFileMutation(
 ) !session_permission_state.RuleKey {
     var canonical: std.Io.Writer.Allocating = .init(arena);
     defer canonical.deinit();
-    try writeIdentityField(&canonical.writer, "lia-permission-state-file-v1");
+    // Stored data: saved permission rules depend on the fx name.
+    try writeIdentityField(&canonical.writer, "fx-permission-state-file-v1");
     try writeIdentityField(&canonical.writer, prepared.tool_name);
     try writeIdentityField(&canonical.writer, &prepared.arguments_hash);
     try writeIdentityField(&canonical.writer, prepared.target_path);
@@ -5886,7 +5888,7 @@ test "session deny narrows configured command allow" {
         .arguments_json = "{\"action\":\"run\",\"command\":\"touch configured.txt\"}",
     };
     const key = try permissionStateKeyForCall(input, arena, call);
-    try std.testing.expect(std.mem.find(u8, key.canonical, "lia-permission-state-v2") != null);
+    try std.testing.expect(std.mem.find(u8, key.canonical, "fx-permission-state-v2") != null);
     try std.testing.expect(std.mem.find(u8, key.canonical, "restricted") == null);
     try std.testing.expect(std.mem.find(u8, key.canonical, "none") == null);
     var empty: session_permission_state.State = .{};

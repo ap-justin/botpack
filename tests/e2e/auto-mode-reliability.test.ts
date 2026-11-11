@@ -1556,7 +1556,7 @@ describe("lean auto mode reliability", () => {
             ) as { full_output_handle?: string; exit_code?: number };
             expect(commandResult.exit_code).toBe(0);
             outputHandle = commandResult.full_output_handle ?? "";
-            expect(outputHandle).toMatch(/^lia-command-replay-.+\.bin$/);
+            expect(outputHandle).toMatch(/^fx-command-replay-.+\.bin$/);
             return fakeGatewayToolCall("read_secret_like_output", "read_tool_result", {
               request: { handle: outputHandle, query: "TOOL_DATA_TOKEN=" },
             });

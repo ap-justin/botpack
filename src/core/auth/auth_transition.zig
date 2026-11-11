@@ -127,7 +127,7 @@ test "auth replay is one delivery-safe refresh outside semantic policy" {
 test "credential change distinguishes secret rotation from authority replacement" {
     const stable = CredentialAuthorityFacts{
         .provider = .gateway,
-        .source = .lia_login,
+        .source = .fx_login,
         .account_id = null,
         .team = "team_1",
     };
@@ -143,7 +143,7 @@ test "credential change distinguishes secret rotation from authority replacement
         CredentialChange.authority,
         decideCredentialChange(stable, .{
             .provider = .gateway,
-            .source = .lia_login,
+            .source = .fx_login,
             .account_id = null,
             .team = "team_2",
         }, true),

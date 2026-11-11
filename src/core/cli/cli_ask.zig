@@ -5007,12 +5007,12 @@ test "lia ask publishes a complete refreshed credential before later consumers" 
     );
     defer ctx.deinit();
     ctx.api_key = "stale-token";
-    ctx.credential_source = .lia_login;
+    ctx.credential_source = .fx_login;
     ctx.gateway_team = "team_123";
 
     var refreshed = credentials.Credential{
         .token = try alloc.dupe(u8, "fresh-token"),
-        .source = .lia_login,
+        .source = .fx_login,
         .team_id = try alloc.dupe(u8, "team_123"),
         .refresh_after_ms = 100,
     };
@@ -5022,7 +5022,7 @@ test "lia ask publishes a complete refreshed credential before later consumers" 
 
     try std.testing.expectEqualStrings("fresh-token", worker_token);
     try std.testing.expectEqualStrings("fresh-token", ctx.api_key);
-    try std.testing.expectEqual(credentials.Source.lia_login, ctx.credential_source.?);
+    try std.testing.expectEqual(credentials.Source.fx_login, ctx.credential_source.?);
     try std.testing.expectEqualStrings("team_123", ctx.gateway_team.?);
     try std.testing.expectEqualStrings(
         "fresh-token",

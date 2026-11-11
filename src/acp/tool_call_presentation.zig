@@ -209,7 +209,7 @@ test "read titles say what they read while other tools keep their verb" {
     const read: ToolCall = .{
         .id = "read",
         .name = "read_tool_result",
-        .arguments_json = "{\"request\":{\"handle\":\"lia-command-replay-0123.bin\",\"query\":\"error:\"}}",
+        .arguments_json = "{\"request\":{\"handle\":\"fx-command-replay-0123.bin\",\"query\":\"error:\"}}",
         .resolved_display_target = "zig build test output for \"error:\"",
     };
     try std.testing.expectEqualStrings("Searching zig build test output for \"error:\"", describeToolCall(registry, arena, read, null).title);
@@ -247,7 +247,7 @@ test "shell update content shows the command output instead of the result JSON" 
     try expectShellUpdateContent(
         "hello-42\n",
         "shell",
-        "{\"session_id\":null,\"state\":\"completed\",\"output_truncated\":false,\"full_output_handle\":\"lia-command-replay-1.bin\",\"exit_code\":0,\"error\":null,\"output_delta\":\"hello-42\\n\"}",
+        "{\"session_id\":null,\"state\":\"completed\",\"output_truncated\":false,\"full_output_handle\":\"fx-command-replay-1.bin\",\"exit_code\":0,\"error\":null,\"output_delta\":\"hello-42\\n\"}",
     );
     try expectShellUpdateContent(
         "",

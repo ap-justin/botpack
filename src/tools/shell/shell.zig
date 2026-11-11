@@ -2845,7 +2845,7 @@ test "shell snapshot keeps bounded head tail and control metadata" {
         .state = .{ .completed = .{ .exit_code = 0 } },
         .output_delta = @constCast(output),
         .output_truncated = false,
-        .output_file = @constCast("lia-command-replay-large.bin"),
+        .output_file = @constCast("fx-command-replay-large.bin"),
     }, null);
     defer alloc.free(body);
 
@@ -2854,7 +2854,7 @@ test "shell snapshot keeps bounded head tail and control metadata" {
     defer parsed.deinit();
     const object = parsed.value.object;
     try std.testing.expectEqualStrings(
-        "lia-command-replay-large.bin",
+        "fx-command-replay-large.bin",
         object.get("full_output_handle").?.string,
     );
     try std.testing.expect(object.get("output_truncated").?.bool);
@@ -2875,7 +2875,7 @@ test "shell snapshot projects hostile bytes as readable terminal-safe text" {
         .state = .{ .completed = .{ .exit_code = 0 } },
         .output_delta = @constCast(raw),
         .output_truncated = false,
-        .output_file = @constCast("lia-command-replay-hostile.bin"),
+        .output_file = @constCast("fx-command-replay-hostile.bin"),
     }, null);
     defer alloc.free(body);
 
@@ -2892,7 +2892,7 @@ test "shell snapshot projects hostile bytes as readable terminal-safe text" {
     try std.testing.expect(std.mem.find(u8, output_value.string, "\\xff") != null);
     try std.testing.expect(std.mem.find(u8, output_value.string, "CONTROL_TAIL") != null);
     try std.testing.expectEqualStrings(
-        "lia-command-replay-hostile.bin",
+        "fx-command-replay-hostile.bin",
         parsed.value.object.get("full_output_handle").?.string,
     );
 }
@@ -2908,7 +2908,7 @@ test "shell snapshot keeps a hostile output tail within the result limit" {
         .state = .{ .completed = .{ .exit_code = 0 } },
         .output_delta = @constCast(raw),
         .output_truncated = false,
-        .output_file = @constCast("lia-command-replay-hostile-large.bin"),
+        .output_file = @constCast("fx-command-replay-hostile-large.bin"),
     }, null);
     defer alloc.free(body);
 

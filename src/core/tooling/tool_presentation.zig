@@ -1591,7 +1591,7 @@ test "read_tool_result rows use the resolved source and the request kind" {
     const page: ToolCall = .{
         .id = "page",
         .name = "read_tool_result",
-        .arguments_json = "{\"request\":{\"handle\":\"lia-command-replay-0123.bin\"}}",
+        .arguments_json = "{\"request\":{\"handle\":\"fx-command-replay-0123.bin\"}}",
     };
     const generic = try formatPlainAction(alloc, .{ .tool_registry = registry, .call = page });
     defer alloc.free(generic);

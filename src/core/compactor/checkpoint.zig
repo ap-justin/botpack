@@ -22,7 +22,8 @@ const json_decode = @import("../shared/json_decode.zig");
 
 const Allocator = std.mem.Allocator;
 
-pub const marker = "lia-compactor-v1\n";
+/// Stored data: saved compactions begin with it, so the fx name stays.
+pub const marker = "fx-compactor-v1\n";
 /// How checkpoints written by the previous compactor begin.
 const legacy_handoff_open = "<context_handoff>";
 
@@ -198,14 +199,14 @@ pub fn replacesPriorContext(summary: []const u8) bool {
 
 /// Checkpoints written by the previous compactor name a state file in the
 /// session's tool-results store that holds the user messages word for word
-/// and the summary, as `lia-compaction-state-v1 <handle> <bytes> <sha256>`.
+/// and the summary, as `fx-compaction-state-v1 <handle> <bytes> <sha256>`.
 pub const LegacyStateRef = struct {
     handle: []const u8,
     bytes: usize,
     sha256: [32]u8,
 };
 
-const legacy_state_tag = "lia-compaction-state-v1 ";
+const legacy_state_tag = "fx-compaction-state-v1 ";
 
 /// The state file named by an older checkpoint, if it names one.
 pub fn legacyStateRef(summary: []const u8) ?LegacyStateRef {
@@ -770,7 +771,7 @@ test "older checkpoints yield their exact users from the named state file" {
     const state = "{\"version\":1,\"summary\":\"Earlier work.\",\"users\":[\"okay so you saying that if 2 GB exeeds then what happens ? \",\"yes\"],\"archives\":[]}";
     var digest: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(state, &digest, .{});
-    const summary = try arena.print("{s}\n## Conversation summary\n> lia-compaction-state-v1 result-state-1-2.txt {d} {x}\n> Task state:\n", .{ legacy_handoff_open, state.len, digest });
+    const summary = try arena.print("{s}\n## Conversation summary\n> fx-compaction-state-v1 result-state-1-2.txt {d} {x}\n> Task state:\n", .{ legacy_handoff_open, state.len, digest });
     const ref = legacyStateRef(summary).?;
     try testing.expectEqualStrings("result-state-1-2.txt", ref.handle);
     const payload = (try parseLegacyState(arena, ref, state)).?;

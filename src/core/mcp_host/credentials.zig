@@ -8,12 +8,12 @@
 //! refresh lock.
 //!
 //! Older stores are never read or taken over: v1's `credentials.json`, and
-//! `credentials-v2.json` (Keychain item `LIA_MCP_OAUTH_CREDENTIALS_V2`). Builds
+//! `credentials-v2.json` (Keychain item `FX_MCP_OAUTH_CREDENTIALS_V2`). Builds
 //! from before version 2 of the document read a version-2 store as empty and
-//! write it back, erasing every login in it, and lia processes still running
+//! write it back, erasing every login in it, and fx processes still running
 //! those builds keep refreshing the logins they hold in memory. A login
 //! shared with them would be refreshed apart and signed out, so this store
-//! starts empty, in files and a Keychain item no older lia opens, and each
+//! starts empty, in files and a Keychain item no older fx opens, and each
 //! server signs in once.
 //!
 //! TLA+ models: `tests/tla/mcp_host/Credentials.tla`; for logins shared between

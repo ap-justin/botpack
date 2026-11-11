@@ -5646,7 +5646,7 @@ test "a rejected credential answers AUTH_REQUIRED and a forbidden one a generic 
         };
         const deps = agentRuntimeDeps(&ctx);
         ctx.resetTurnOutcome(session);
-        try deps.push_http_error(deps.ctx, case.status, "provider body secret", .lia_login);
+        try deps.push_http_error(deps.ctx, case.status, "provider body secret", .fx_login);
         try deps.finalize_turn(deps.ctx, 1, .failed, null);
 
         const outcome = ctx.turnOutcome(session);
@@ -5676,8 +5676,8 @@ test "a notice after a rejected credential decides the answer" {
     var ctx = AcpContext{ .alloc = alloc, .state = &state, .session_id = "session_1", .current_prompt_input = &prompt_input };
     const deps = agentRuntimeDeps(&ctx);
     ctx.resetTurnOutcome(session);
-    try deps.push_http_error(deps.ctx, .unauthorized, "", .lia_login);
-    try deps.push_http_error(deps.ctx, .bad_gateway, "upstream down", .lia_login);
+    try deps.push_http_error(deps.ctx, .unauthorized, "", .fx_login);
+    try deps.push_http_error(deps.ctx, .bad_gateway, "upstream down", .fx_login);
     try deps.finalize_turn(deps.ctx, 1, .failed, null);
 
     const outcome = ctx.turnOutcome(session);

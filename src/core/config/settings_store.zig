@@ -1087,7 +1087,7 @@ test "clearing the credential choice removes the key rather than blanking it" {
     var root = try std.json.parseFromSliceLeaky(
         std.json.Value,
         arena.allocator(),
-        "{\"model\":\"m\",\"credential_source\":\"lia_login\"}",
+        "{\"model\":\"m\",\"credential_source\":\"fx_login\"}",
         .{},
     );
     var application = try applyUserPatchToRoot(arena.allocator(), &root, .{ .clear_credential_source = true });

@@ -7512,7 +7512,7 @@ test "dupeWorkerEvent owns a complete refreshed credential publication" {
     const alloc = std.testing.allocator;
     const source: WorkerEvent = .{ .credential_refreshed = .{
         .token = @constCast("fresh-token"),
-        .source = .lia_login,
+        .source = .fx_login,
         .team_id = @constCast("team_123"),
         .refresh_after_ms = 100,
     } };

@@ -106,7 +106,7 @@ pub const ConversationToolCall = struct {
     provisional_id: ?[]const u8 = null,
     provider_result: ?[]const u8 = null,
     final_identity: types.FinalToolIdentity = .valid,
-    provenance: types.ToolExecutionProvenance = .lia_local,
+    provenance: types.ToolExecutionProvenance = .fx_local,
 };
 
 pub const ConversationToolResult = struct {

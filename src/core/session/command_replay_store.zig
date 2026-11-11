@@ -11,6 +11,8 @@ const Allocator = std.mem.Allocator;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 const Stream = command_output_content.Stream;
 const replay_magic = "FXRPLY01";
+/// Stored data: saved sessions name their replay files with the fx prefix.
+const handle_prefix = "fx-command-replay-";
 const frame_header_bytes: usize = 9;
 const max_frame_payload_bytes: usize = 1024 * 1024;
 const max_agent_line_bytes: usize = max_frame_payload_bytes;
@@ -271,7 +273,7 @@ fn blobReplayHandle(alloc: Allocator, hash: session_child_store.Blobs.Hash) ![]u
     var run_id: [6]u8 = undefined;
     try std.Io.randomSecure(io_mod.getIo(), &run_id);
     const run_hex = std.fmt.bytesToHex(run_id, .lower);
-    return std.mem.concat(alloc, u8, &.{ "lia-command-replay-", &run_hex, "-", &hash, ".bin" });
+    return std.mem.concat(alloc, u8, &.{ handle_prefix, &run_hex, "-", &hash, ".bin" });
 }
 
 const OpenSpool = struct {
@@ -883,7 +885,7 @@ fn randomReplayStem(alloc: Allocator) ![]u8 {
     try std.Io.randomSecure(io_mod.getIo(), &random);
     const random_hex = std.fmt.bytesToHex(random, .lower);
     return alloc.print(
-        "lia-command-replay-{s}",
+        handle_prefix ++ "{s}",
         .{&random_hex},
     );
 }
@@ -941,7 +943,7 @@ fn contentAddressedHandle(
 }
 
 pub fn isReplayHandle(handle: []const u8) bool {
-    return std.mem.startsWith(u8, handle, "lia-command-replay-") and
+    return std.mem.startsWith(u8, handle, handle_prefix) and
         std.mem.endsWith(u8, handle, ".bin");
 }
 
@@ -1595,10 +1597,10 @@ test "a v2 session keeps a replay as one blob named by its hash, spooled or inli
     small.releaseRetained(capture_alloc);
 
     // A name this session never stored is not found.
-    try std.testing.expectError(error.ResultHandleNotFound, Reader.openHandle(alloc, &capability, "lia-command-replay-" ++ text_utils.repeat("0", 64) ++ ".bin"));
+    try std.testing.expectError(error.ResultHandleNotFound, Reader.openHandle(alloc, &capability, "fx-command-replay-" ++ text_utils.repeat("0", 64) ++ ".bin"));
     // Every store's blobs share the session: the same blob under a
     // web-fetch download's `.bin` handle is not a replay.
-    const foreign = try std.mem.concat(alloc, u8, &.{ "artifact-", handle["lia-command-replay-".len..] });
+    const foreign = try std.mem.concat(alloc, u8, &.{ "artifact-", handle["fx-command-replay-".len..] });
     defer alloc.free(foreign);
     try std.testing.expectError(error.ResultHandleNotFound, Reader.openHandle(alloc, &capability, foreign));
 }
@@ -1646,7 +1648,7 @@ test "saved and ephemeral replay backings share collision handling" {
     );
     defer capability.deinit();
 
-    const stem = "lia-command-replay-fixed-collision";
+    const stem = "fx-command-replay-fixed-collision";
     var saved = try createSpoolWithStem(alloc, .{ .saved = &capability }, stem);
     defer {
         saved.file.deinit();
@@ -2041,7 +2043,7 @@ test "command replay reader rejects descriptor and frame corruption" {
     var malformed = try capability.createExclusiveFile(
         alloc,
         .command_artifacts,
-        "lia-command-replay-malformed.bin",
+        "fx-command-replay-malformed.bin",
     );
     defer malformed.deinit();
     try malformed.writeAll("not-a-replay");
@@ -2050,19 +2052,19 @@ test "command replay reader rejects descriptor and frame corruption" {
     try std.testing.expectError(
         error.InvalidReplayHeader,
         Reader.open(alloc, &capability, .{
-            .handle = "lia-command-replay-malformed.bin",
+            .handle = "fx-command-replay-malformed.bin",
             .framed_bytes = "not-a-replay".len,
         }),
     );
     try std.testing.expectError(
         error.ReplaySizeMismatch,
         Reader.open(alloc, &capability, .{
-            .handle = "lia-command-replay-malformed.bin",
+            .handle = "fx-command-replay-malformed.bin",
             .framed_bytes = 1,
         }),
     );
 
-    const empty_handle = "lia-command-replay-empty-frame.bin";
+    const empty_handle = "fx-command-replay-empty-frame.bin";
     var empty_replay: [replay_magic.len + frame_header_bytes]u8 = @splat(0);
     @memcpy(empty_replay[0..replay_magic.len], replay_magic);
     var empty_file = try capability.createExclusiveFile(
@@ -2105,7 +2107,7 @@ test "failed ephemeral replay reader construction leaves its backing reusable" {
     var store = EphemeralStore.initForTesting(alloc, temp_path);
     defer store.deinit();
 
-    var spool = try store.createSpoolWithStem(alloc, "lia-command-replay-invalid-header");
+    var spool = try store.createSpoolWithStem(alloc, "fx-command-replay-invalid-header");
     defer {
         spool.file.deinit();
         store.delete(spool.handle);

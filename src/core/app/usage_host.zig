@@ -84,7 +84,7 @@ pub fn credential(auth: *const auth_runtime.Runtime, label_buf: *LabelBuffer) ?u
 pub fn missingReason(auth: *const auth_runtime.Runtime) usage.Unavailable {
     const source = auth.credentialSource() orelse return .no_gateway_sign_in;
     return switch (source) {
-        .lia_login, .stored_key, .ai_gateway_api_key => .no_gateway_sign_in,
+        .fx_login, .stored_key, .ai_gateway_api_key => .no_gateway_sign_in,
         else => .unsupported_provider,
     };
 }
@@ -105,7 +105,7 @@ fn fromParts(
 ) ?usage.Credential {
     const bearer = token orelse return null;
     return switch (source) {
-        .lia_login => .{
+        .fx_login => .{
             .scope = .member,
             .bearer = bearer,
             .team = team,

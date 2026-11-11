@@ -1161,7 +1161,7 @@ describe("cli: status", () => {
 
   for (const scenario of [
     { name: "automatic Gateway", provider: "gateway", source: undefined, help: MISSING_AUTH_MESSAGE },
-    { name: "an exact Gateway login", provider: "gateway", source: "lia_login", help: "lia login is selected but unavailable. Run lia login to reconnect; no other credential was selected." },
+    { name: "an exact Gateway login", provider: "gateway", source: "fx_login", help: "lia login is selected but unavailable. Run lia login to reconnect; no other credential was selected." },
     { name: "an exact OIDC token", provider: "gateway", source: "vercel_oidc_token", help: "VERCEL_OIDC_TOKEN is selected but unavailable. Set VERCEL_OIDC_TOKEN before starting lia; no other credential was selected." },
     { name: "an exact environment key", provider: "gateway", source: "ai_gateway_api_key", help: "AI_GATEWAY_API_KEY is selected but unavailable. Set AI_GATEWAY_API_KEY before starting lia; no other credential was selected." },
     { name: "an exact stored key", provider: "gateway", source: "stored_key", help: "A stored API key is selected but unavailable. Run lia login vercel --api-key to save a key again, or lia login to sign in instead; no other credential was selected." },
@@ -1324,7 +1324,7 @@ describe("cli: status", () => {
       expect(sessionId.length).toBeGreaterThan(0);
       expect(gateway.requests).toHaveLength(1);
 
-      const pinned = JSON.stringify({ ...settings, credential_source: "lia_login" });
+      const pinned = JSON.stringify({ ...settings, credential_source: "fx_login" });
       writeFileSync(settingsPath, pinned);
       const status = await runLia(["status", "--json"], options);
       const help = JSON.parse(status.stdout).auth_help;
@@ -4098,7 +4098,7 @@ describe("cli: models", () => {
       expectPrivate: true,
       expectedTeamQuery: "team_123",
       expectedTrace:
-        "requested_access=authenticated credential_source=lia_login effective_access=authenticated public_only_reason=none anonymous_fallback=false outcome=loaded failure_category=none http_status=none retryable=none",
+        "requested_access=authenticated credential_source=fx_login effective_access=authenticated public_only_reason=none anonymous_fallback=false outcome=loaded failure_category=none http_status=none retryable=none",
     },
     {
       name: "refreshes an expired lia login before loading the selected team catalog",
@@ -4109,7 +4109,7 @@ describe("cli: models", () => {
       expectPrivate: true,
       expectedTeamQuery: "team_123",
       expectedTrace:
-        "requested_access=authenticated credential_source=lia_login effective_access=authenticated public_only_reason=none anonymous_fallback=false outcome=loaded failure_category=none http_status=none retryable=none",
+        "requested_access=authenticated credential_source=fx_login effective_access=authenticated public_only_reason=none anonymous_fallback=false outcome=loaded failure_category=none http_status=none retryable=none",
     },
     {
       name: "sends an API key so the catalog includes team-private models",

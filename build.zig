@@ -92,7 +92,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("test_paths", test_paths_module);
     // The unit tests for the Linux PGSO step that relinks them from
     // transformed code. It builds them position independent: a test there
-    // defines the wasm host's `extern "lia"` functions itself, and Zig rejects
+    // defines the wasm host's `extern "fx"` functions itself, and Zig rejects
     // a library extern in a static executable that is not. `install-test`
     // does not install lia, so the build links only the tests. Run it from the
     // repository root after `zig build` with the same prefix.

@@ -179,7 +179,7 @@ test "tool call id projection never rewrites protected identities" {
     var native = try Projection.init(alloc, &.{.{ .role = .assistant, .tool_calls = &.{call} }});
     defer native.deinit(alloc);
     try std.testing.expectEqualStrings(call.id, native.resolve(call.id));
-    call.provenance = .lia_local;
+    call.provenance = .fx_local;
     var projection = try Projection.init(alloc, &.{.{ .role = .assistant, .tool_calls = &.{call}, .provider_replay = .{ .source = .{ .provider = .gateway, .model = "test" }, .parts_json = "opaque" } }});
     defer projection.deinit(alloc);
     try std.testing.expectEqualStrings(call.id, projection.resolve(call.id));

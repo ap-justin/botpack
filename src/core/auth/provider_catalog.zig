@@ -22,7 +22,7 @@ pub const entries = [_]Entry{
         .route_name = "Vercel AI Gateway",
         .description = "Vercel account or AI Gateway billing",
         .subscription = false,
-        .login_source = .lia_login,
+        .login_source = .fx_login,
     },
 };
 

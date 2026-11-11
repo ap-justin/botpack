@@ -3531,7 +3531,7 @@ const SseToolCallAccumulator = struct {
     provider_result: ?[]u8 = null,
     provider_result_state: ProviderResultState = .none,
     final_identity: types.FinalToolIdentity = .valid,
-    provenance: types.ToolExecutionProvenance = .lia_local,
+    provenance: types.ToolExecutionProvenance = .fx_local,
 
     fn deinit(self: *SseToolCallAccumulator, alloc: std.mem.Allocator) void {
         self.id.deinit(alloc);
@@ -7956,7 +7956,7 @@ test "consumeSseStream rejects malformed final-call provider execution flags" {
     var completion = try consumeSseStream(std.testing.allocator, &reader, undefined, Noop.chunk, null, &cancel_flag);
     defer deinitGatewayCompletion(std.testing.allocator, &completion);
 
-    try std.testing.expectEqual(.lia_local, completion.tool_calls[0].provenance);
+    try std.testing.expectEqual(.fx_local, completion.tool_calls[0].provenance);
     try std.testing.expectEqual(
         types.AuthoritativeToolAdmission{ .reject_malformed_provider_result = .malformed_provider_executed },
         types.authoritativeToolAdmission(completion),

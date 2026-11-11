@@ -112,14 +112,14 @@ export function compactionRecordPath(home: string, id: string, name: string): st
 }
 
 /// The command replays session `id` kept: each is one of its blobs, named in
-/// the session by its handle, `lia-command-replay-<run>-<hash>.bin` (D44, D91).
+/// the session by its handle, `fx-command-replay-<run>-<hash>.bin` (D44, D91).
 /// A handle from before D91 has no run id.
 export function commandReplays(home: string, id: string): { name: string; path: string }[] {
   const names = [...new Set(savedText(home, id).match(commandReplayHandles) ?? [])];
   return names.map((name) => ({ name, path: join(sessionDir(home, id), "blobs", commandReplayHash(name)) }));
 }
 
-const commandReplayHandles = /lia-command-replay-(?:[0-9a-f]{12}-)?[0-9a-f]{64}\.bin/g;
+const commandReplayHandles = /fx-command-replay-(?:[0-9a-f]{12}-)?[0-9a-f]{64}\.bin/g;
 
 /// The hash of the blob a command replay handle names, which comes last.
 export function commandReplayHash(handle: string): string {

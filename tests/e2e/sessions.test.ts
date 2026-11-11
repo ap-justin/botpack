@@ -415,7 +415,7 @@ for (const userHeavy of [false, true]) {
       const compactions = (logLines(fixture.home, id) as any[]).filter((line) => line.kind === "compacted");
       expect(compactions).toHaveLength(1);
       const data = typeof compactions[0].data === "string" ? JSON.parse(compactions[0].data) : compactions[0].data;
-      expect(data.summary.startsWith("lia-compactor-v1\n")).toBe(true);
+      expect(data.summary.startsWith("fx-compactor-v1\n")).toBe(true);
       const turnPath = compactionRecordPath(fixture.home, id, "compacted-M1.txt");
       expect(turnPath).toBeDefined();
       const savedTurn = readFileSync(turnPath!, "utf8");
@@ -521,7 +521,7 @@ test("a long command output is kept as one read-only blob, and the model pages i
   const gateway = startDynamicFakeGateway(async (body) => {
     if (body.includes("Page the output again.")) {
       if (body.includes("replay-read-1")) return fakeGatewayFinalText("REPLAY_PAGED_DONE");
-      const handle = /lia-command-replay-[a-f0-9]{12}-[a-f0-9]{64}\.bin/.exec(body)?.[0] ?? "missing-handle";
+      const handle = /fx-command-replay-[a-f0-9]{12}-[a-f0-9]{64}\.bin/.exec(body)?.[0] ?? "missing-handle";
       return fakeGatewayToolCall("replay-read-1", "read_tool_result", {
         request: { handle, query: "150001" },
       });
@@ -535,9 +535,9 @@ test("a long command output is kept as one read-only blob, and the model pages i
     expect(JSON.parse(created.stdout).output).toBe("LONG_RUN_DONE");
     const id = JSON.parse(created.stdout).session_id;
 
-    const handle = /lia-command-replay-[a-f0-9]{12}-[a-f0-9]{64}\.bin/.exec(JSON.stringify(logLines(fixture.home, id)))?.[0] ?? "";
+    const handle = /fx-command-replay-[a-f0-9]{12}-[a-f0-9]{64}\.bin/.exec(JSON.stringify(logLines(fixture.home, id)))?.[0] ?? "";
     // A run id, then the hash that names the blob (D44, D91).
-    expect(handle).toMatch(/^lia-command-replay-[a-f0-9]{12}-[a-f0-9]{64}\.bin$/);
+    expect(handle).toMatch(/^fx-command-replay-[a-f0-9]{12}-[a-f0-9]{64}\.bin$/);
     const hash = /-([a-f0-9]{64})\./.exec(handle)![1]!;
     expect(blobNames(fixture, id)).toContain(hash);
     expect(blobNames(fixture, id).every((name) => /^[a-f0-9]{64}$/.test(name))).toBe(true);
@@ -1950,7 +1950,7 @@ test("lia session recover copies the good turns and side files of a damaged sess
 }, TIMEOUT * 4);
 
 const COMPACTION_MODEL = "fixture/compaction";
-const COMPACTOR_SUMMARY_MARKER = "lia-compactor-v1\n";
+const COMPACTOR_SUMMARY_MARKER = "fx-compactor-v1\n";
 /// About 300k estimated tokens, past the fixture model's 128k window, so the
 /// next prompt in the session compacts the reply it follows.
 const COMPACTING_REPLY_PADDING = Array.from(
@@ -2020,7 +2020,7 @@ test("ACP load after a compaction shows every earlier turn and never the summary
       const visible = JSON.stringify(client.updates);
       expect(infoTitles(client.updates)).toEqual([prompts[0]]);
       expect(client.texts("user_message_chunk")).toEqual(prompts);
-      expect(visible).not.toContain("lia-compactor-v1");
+      expect(visible).not.toContain("fx-compactor-v1");
       const order = ["V2_EARLIER_VISIBLE", "V2_MIDDLE_VISIBLE", "V2_LATEST_VISIBLE"].map((text) => visible.indexOf(text));
       expect(order.every((at) => at >= 0)).toBe(true);
       expect(order).toEqual([...order].sort((a, b) => a - b));

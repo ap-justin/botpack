@@ -499,7 +499,7 @@ fn keychainReadDeferrable(
     if (!is_macos or keychain_disabled or provider != .gateway) return false;
     const source = preferred orelse return !env_credential_present;
     return switch (source) {
-        .lia_login, .stored_key => true,
+        .fx_login, .stored_key => true,
         .vercel_oidc_token, .ai_gateway_api_key, .host_managed, .configured => false,
     };
 }
@@ -1164,7 +1164,7 @@ test "interactive launch leaves a Keychain credential unresolved for the caller"
     defer tmp.cleanup();
     try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
     try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
-    try writeFixtureFile(tmp.dir, "home/.lia/settings.json", "{\"credential_source\":\"lia_login\"}");
+    try writeFixtureFile(tmp.dir, "home/.lia/settings.json", "{\"credential_source\":\"fx_login\"}");
     const home_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
     defer alloc.free(home_root);
     const workspace_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
@@ -1186,7 +1186,7 @@ test "interactive launch leaves a Keychain credential unresolved for the caller"
         if (keychain_read == .deferred and builtin.target.os.tag == .macos) {
             const request = state.deferred_credential orelse return error.TestExpectedDeferredCredential;
             try std.testing.expectEqual(model_provider.ProviderId.gateway, request.provider);
-            try std.testing.expectEqual(@as(?credentials.Source, .lia_login), request.preferred);
+            try std.testing.expectEqual(@as(?credentials.Source, .fx_login), request.preferred);
             try std.testing.expectEqual(credentials.LiaLoginReadStatus.not_attempted, state.lia_login_status);
         } else {
             // Test builds keep the lia login in the profile, where it is absent.
@@ -1307,13 +1307,13 @@ test "loadStartupState defaults fast mode off and requires bound explicit prefer
 }
 
 test "only a Keychain-backed Gateway credential is deferred past the first frame" {
-    try std.testing.expect(keychainReadDeferrable(true, false, .gateway, .lia_login, false));
+    try std.testing.expect(keychainReadDeferrable(true, false, .gateway, .fx_login, false));
     try std.testing.expect(keychainReadDeferrable(true, false, .gateway, .stored_key, true));
     try std.testing.expect(keychainReadDeferrable(true, false, .gateway, null, false));
     // An environment credential wins automatic precedence without the Keychain.
     try std.testing.expect(!keychainReadDeferrable(true, false, .gateway, null, true));
     try std.testing.expect(!keychainReadDeferrable(true, false, .gateway, .ai_gateway_api_key, false));
     try std.testing.expect(!keychainReadDeferrable(true, false, .gateway, .vercel_oidc_token, false));
-    try std.testing.expect(!keychainReadDeferrable(true, true, .gateway, .lia_login, false));
-    try std.testing.expect(!keychainReadDeferrable(false, false, .gateway, .lia_login, false));
+    try std.testing.expect(!keychainReadDeferrable(true, true, .gateway, .fx_login, false));
+    try std.testing.expect(!keychainReadDeferrable(false, false, .gateway, .fx_login, false));
 }

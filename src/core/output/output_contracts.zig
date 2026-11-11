@@ -2220,7 +2220,7 @@ test "core status snapshot text and json stay stable" {
 test "core status snapshot includes selected team when present" {
     const snapshot = StatusSnapshot{
         .model = "alpha",
-        .auth = .{ .active_source = .lia_login, .team = "example-team" },
+        .auth = .{ .active_source = .fx_login, .team = "example-team" },
         .permission_mode = .ask,
         .workspace_root = "/tmp/lia",
         .history_turns = 0,
@@ -2901,7 +2901,7 @@ test "core session detail JSON includes assistant execution memory" {
         .output_bytes = 48,
         .stored_output_bytes = 48,
         .command_output_replay = .{ .available = .{
-            .handle = "lia-command-replay-private-sentinel.bin",
+            .handle = "fx-command-replay-private-sentinel.bin",
             .framed_bytes = 77,
         } },
         .command_process_presentation = .{ .exit_code = 9 },
@@ -2961,7 +2961,7 @@ test "core session detail JSON includes assistant execution memory" {
     try std.testing.expect(std.mem.find(u8, json, "artifact-file.pdf") != null);
     try std.testing.expect(std.mem.find(u8, json, "command_output_replay") == null);
     try std.testing.expect(std.mem.find(u8, json, "command_process_presentation") == null);
-    try std.testing.expect(std.mem.find(u8, json, "lia-command-replay-private-sentinel.bin") == null);
+    try std.testing.expect(std.mem.find(u8, json, "fx-command-replay-private-sentinel.bin") == null);
 
     const text = try (SessionDetailSnapshot{ .state = detail.state }).renderText(std.testing.allocator);
     defer std.testing.allocator.free(text);

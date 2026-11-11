@@ -388,7 +388,7 @@ test "an unreadable checkpoint numbers new turns, tool calls and ledgers after t
     try records.save(arena, store, .{ .kind = .ledger, .number = 2 }, "ledger two");
     try store.write(arena, "result-shell-1.txt", "not a record");
 
-    const broken = "lia-compactor-v1\n{\"turns\": [";
+    const broken = "fx-compactor-v1\n{\"turns\": [";
     const earlier = (try earlierFrom(arena, store, broken)).?;
     try std.testing.expectEqualStrings(broken, earlier.earlier);
     try std.testing.expectEqual(@as(usize, 3), earlier.turn_count);
@@ -399,7 +399,7 @@ test "an unreadable checkpoint numbers new turns, tool calls and ledgers after t
 
     // A count no session reaches is damage too, as is a record numbered past
     // it; numbering on from either would overflow.
-    const impossible = std.fmt.comptimePrint("lia-compactor-v1\n{{\"tool_count\":{d}}}", .{std.math.maxInt(usize)});
+    const impossible = std.fmt.comptimePrint("fx-compactor-v1\n{{\"tool_count\":{d}}}", .{std.math.maxInt(usize)});
     try store.write(arena, std.fmt.comptimePrint("compacted-T{d}.txt", .{std.math.maxInt(usize)}), "damaged");
     const recovered = (try earlierFrom(arena, store, impossible)).?;
     try std.testing.expectEqualStrings(impossible, recovered.earlier);
