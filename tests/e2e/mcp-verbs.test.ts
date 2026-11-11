@@ -363,7 +363,7 @@ describe("lia mcp", () => {
 
     const unknownVerb = await mcp(root, "nope");
     expect(unknownVerb.code).toBe(2);
-    expect(unknownVerb.stderr).toStartWith("'nope' isn't an lia mcp command.\nusage: lia mcp COMMAND\n");
+    expect(unknownVerb.stderr).toStartWith("'nope' isn't a lia mcp command.\nusage: lia mcp COMMAND\n");
     const badFlag = await mcp(root, "logout", "--json", "x");
     expect(badFlag.code).toBe(2);
     expect(badFlag.stderr).toBe("lia mcp logout: unknown flag --json\nusage: lia mcp logout NAME\n");

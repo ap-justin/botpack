@@ -569,7 +569,7 @@ fn writeLaunchWordProblem(
     switch (err) {
         error.PrintFlagUseAsk => {
             const flag = if (std.mem.findScalar(u8, word, '=')) |at| word[0..at] else word;
-            try writer.print("lia: {s} isn't an lia flag; to run one request and exit, use lia ask ", .{flag});
+            try writer.print("lia: {s} isn't a lia flag; to run one request and exit, use lia ask ", .{flag});
             if (printFlagPrompt(remaining)) |prompt| {
                 try writer.print("\"{f}\"\n", .{text_utils.terminalSafe(prompt)});
             } else {
@@ -5118,15 +5118,15 @@ test "runIfRequested explains a first argument that is neither a command nor a p
         .{ .args = &.{@constCast("version")}, .stderr = "lia: unknown command version (did you mean --version?)\n" },
         .{
             .args = &.{ @constCast("-p"), @constCast("fix the bug") },
-            .stderr = "lia: -p isn't an lia flag; to run one request and exit, use lia ask \"fix the bug\"\n",
+            .stderr = "lia: -p isn't a lia flag; to run one request and exit, use lia ask \"fix the bug\"\n",
         },
         .{
             .args = &.{@constCast("--print")},
-            .stderr = "lia: --print isn't an lia flag; to run one request and exit, use lia ask \"<prompt>\"\n",
+            .stderr = "lia: --print isn't a lia flag; to run one request and exit, use lia ask \"<prompt>\"\n",
         },
         .{
             .args = &.{@constCast("--print=fix it")},
-            .stderr = "lia: --print isn't an lia flag; to run one request and exit, use lia ask \"fix it\"\n",
+            .stderr = "lia: --print isn't a lia flag; to run one request and exit, use lia ask \"fix it\"\n",
         },
         .{ .args = &.{@constCast(" ")}, .stderr = "lia: the prompt is empty\n" },
     };

@@ -39,10 +39,10 @@ pub const Surface = enum {
         };
     }
 
-    /// `prog` after its article, as said aloud: "an lia mcp", "a /mcp".
+    /// `prog` after its article, as said aloud: "a lia mcp", "a /mcp".
     fn progWithArticle(s: Surface) []const u8 {
         return switch (s) {
-            .cli => "an lia mcp",
+            .cli => "a lia mcp",
             .shell => "a /mcp",
         };
     }
@@ -1292,8 +1292,8 @@ test "parse turns mistakes into usage, and old verbs into pointers" {
     const a = arena_state.allocator();
 
     const cases = [_]struct { args: []const []const u8, message: []const u8 }{
-        .{ .args = &.{"nope"}, .message = "'nope' isn't an lia mcp command." },
-        .{ .args = &.{"lsit"}, .message = "'lsit' isn't an lia mcp command; did you mean list?" },
+        .{ .args = &.{"nope"}, .message = "'nope' isn't a lia mcp command." },
+        .{ .args = &.{"lsit"}, .message = "'lsit' isn't a lia mcp command; did you mean list?" },
         .{ .args = &.{"show"}, .message = "lia mcp show needs one server NAME." },
         .{ .args = &.{ "show", "a", "b" }, .message = "lia mcp show needs one server NAME." },
         .{ .args = &.{ "add", "bad name", "https://w" }, .message = "'bad name' can't be a server name: use letters, digits, '-' and '_'." },

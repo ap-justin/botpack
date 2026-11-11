@@ -1,5 +1,5 @@
 //! Root of the `zig build fuzz` test binary. Each import below brings in a
-//! file that holds an lia fuzz target listed in `tests/fuzz/targets.json`.
+//! file that holds a lia fuzz target listed in `tests/fuzz/targets.json`.
 //! The build filters this binary to the registered fuzz tests, so ordinary
 //! unit tests in these files never run here. A new lia fuzz target needs its
 //! file imported here and an entry in the registry.

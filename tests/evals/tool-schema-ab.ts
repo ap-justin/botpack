@@ -1,7 +1,7 @@
 /**
  * Model-backed A/B eval of built-in tool schemas.
  *
- * Each arm is an lia binary plus an optional schema variant. A recording proxy
+ * Each arm is a lia binary plus an optional schema variant. A recording proxy
  * in front of AI Gateway swaps the variant's tool definitions into every
  * agent request, so two arms can share one binary and differ only in the
  * bytes the model sees, while lia's own decoders still judge every call. The

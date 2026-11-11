@@ -37,7 +37,7 @@ export function hashFile(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
-/// A minimal environment for an lia process under test: no inherited
+/// A minimal environment for a lia process under test: no inherited
 /// credentials, sound, keychain, upgrade check, or dotenv.
 export function testEnvironment(values: Record<string, string>, inherited = process.env): Record<string, string> {
   const result: Record<string, string> = {};

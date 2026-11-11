@@ -322,7 +322,7 @@ fn refusalMessage(reason: wire.Reason) []const u8 {
         .unauthorized => "This command was not started by a running lia shell call, or that call has ended. Run lia mcp call from a command lia's shell tool runs, not from one left running in the background.",
         .unsupported_version => "This lia mcp call is from another lia version than the running session. Run the lia that started the session, or restart the session with this one.",
         .busy => "Too many lia mcp call requests are running in this session. Nothing ran; try again when one finishes.",
-        .malformed => "The request was not an lia mcp call request. Send requests with the lia that started the session.",
+        .malformed => "The request was not a lia mcp call request. Send requests with the lia that started the session.",
         .too_large => "The request is over 1 MiB. Pass smaller arguments.",
     };
 }

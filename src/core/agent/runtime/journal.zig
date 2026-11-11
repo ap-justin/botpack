@@ -34,10 +34,10 @@
 //! while `steps` counts all of the turn's tool steps. The first progress of a
 //! turn carries everything, and so does one after anything earlier changed,
 //! such as a compaction during the turn. Events that use `base` or are a
-//! `tool_result` are version 2; every other event stays version 1, so an lia
+//! `tool_result` are version 2; every other event stays version 1, so a lia
 //! that reads only version 1 still loads a journal without them.
 //! An event that names an image instead of holding its bytes, one the host
-//! stored or one the session dropped, is version 3, so an lia that reads only
+//! stored or one the session dropped, is version 3, so a lia that reads only
 //! up to version 2 refuses it as newer.
 //!
 //! A `turn_progress` event lists the inputs its model request carries for
@@ -68,7 +68,7 @@ const delta_version: u8 = 2;
 /// invalid one.
 const naming_version: u8 = 3;
 /// The version of an event that holds a turn with context notes or a saved
-/// runtime context (D93, D94), whatever else it holds, so an lia that reads
+/// runtime context (D93, D94), whatever else it holds, so a lia that reads
 /// only up to version 3 reports a newer journal instead of an invalid one.
 const notes_version: u8 = 4;
 /// The most event bytes one load accepts, and the most bytes one snapshot
@@ -311,7 +311,7 @@ fn eventNamesImages(event: Event, stored: ?*const session_codec.StoredImages) bo
 /// checkpoint of the history. Version 2, a snapshot taken where a turn
 /// yielded, adds the open turn before the checkpoint: a little-endian u32
 /// length, then the JSON `writeOpenTurn` writes. A quiet snapshot stays
-/// version 1, so an lia that reads only version 1 still loads it. Hosts store
+/// version 1, so a lia that reads only version 1 still loads it. Hosts store
 /// it as opaque bytes.
 const snapshot_magic = "FXSN";
 const snapshot_version_quiet: u8 = 1;
@@ -1964,7 +1964,7 @@ test "a turn with context notes or a saved runtime context is a version 4 event 
         try out.writer.writeByte('[');
         _ = try (Cursor{}).write(&out.writer, .{ .turn_committed = turn });
         try out.writer.writeByte(']');
-        // An lia that reads up to version 3 returns UnsupportedJournalVersion
+        // A lia that reads up to version 3 returns UnsupportedJournalVersion
         // for it, which libfx reports as FxJournalVersionError.
         try std.testing.expect(std.mem.startsWith(u8, out.written(), "[{\"v\":4,"));
         var folded = try fold(alloc, out.written());

@@ -4,7 +4,7 @@
 (*                                                                         *)
 (* open(.new) touches nothing on disk. The first turn builds .tmp/{id}:  *)
 (* mkdir, write line 1, fsync the log, rename to {id}, fsync the parent  *)
-(* directory, and only then returns to the caller. An lia crash stops    *)
+(* directory, and only then returns to the caller. A lia crash stops    *)
 (* the sequence anywhere. A machine crash can also undo an unsynced rename,*)
 (* drop an unsynced mkdir, and drop line 1 if it was not fsynced.       *)
 (* Rebuild sweeps leftovers in .tmp.                                     *)
@@ -77,7 +77,7 @@ ProcessCrash ==
     /\ step' = [s \in Ids |-> IF step[s] \in {"idle", "done"} THEN step[s] ELSE "dead"]
     /\ UNCHANGED <<where, line1, acked>>
 
-\* Machine crash (the PowerLoss action): like an lia crash, and unsynced directory changes and unsynced
+\* Machine crash (the PowerLoss action): like a lia crash, and unsynced directory changes and unsynced
 \* line 1 bytes may also be lost. An unsynced rename may be undone, and when
 \* the mkdir of .tmp/{id} was never synced either, the folder may be gone
 \* from both places. Unsynced line 1 bytes may vanish or survive; after the

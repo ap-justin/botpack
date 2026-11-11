@@ -143,7 +143,7 @@ store the same outputs in two different ways, it needs a switch to pick the
 stores, but it builds the switch only when the stored outputs differ, and the
 release build skips the assertion that catches the case. The stores are left
 in blocks nothing branches to, so each caller reads its output uninitialized.
-A transformed unit test read a garbage error code this way, and an lia
+A transformed unit test read a garbage error code this way, and a lia
 candidate had one such function on the out-of-memory path of its footer rows.
 After each outliner run, `ir_size.py dropped-outputs` lists the outlined
 functions with a block nothing branches to and the functions that call them.

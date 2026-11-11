@@ -39,7 +39,7 @@ This workspace designs and verifies the bridge's pure core, `src/core/mcp_host/m
 ## Non-goals
 
 - A "save to file" option on each MCP call. The bash version subsumes it.
-- `lia mcp call` from a terminal outside an lia session. It would need its own logins and permissions.
+- `lia mcp call` from a terminal outside a lia session. It would need its own logins and permissions.
 - A JavaScript or TypeScript code-mode sandbox.
 - Retrying calls automatically, queueing requests, or streaming partial results.
 - Raising the MCP client's own message and result limits.

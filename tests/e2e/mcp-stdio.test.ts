@@ -2356,7 +2356,7 @@ describe("lia mcp call", () => {
     expect(texts.length).toBeLessThanOrEqual(8);
   }, 120_000);
 
-  // A socket that answers like an lia bridge, so the client's own refusals
+  // A socket that answers like a lia bridge, so the client's own refusals
   // can be driven without a session.
   const withFakeBridge = async (reply: string | null, run: (env: Record<string, string>) => Promise<void>) => {
     const dir = mkdtempSync(join(tmpdir(), "fxmc-"));

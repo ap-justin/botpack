@@ -1405,7 +1405,7 @@ describe("MCP login", () => {
   // that takes 15 s to answer, and then takes the login it saved: refreshing
   // with the token the first already sent would be refused. Both are
   // connected before the token runs out, as lia windows in use are.
-  test("an lia waits for another's refresh that takes 15 s, and takes the login it saved", async () => {
+  test("a lia waits for another's refresh that takes 15 s, and takes the login it saved", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url, { singleUseRefresh: { graceMs: 0 }, refreshDelayMs: 15_000 });
     const activeAuth = auth;

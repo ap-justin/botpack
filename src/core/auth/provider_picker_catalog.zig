@@ -13,7 +13,7 @@ const types = @import("../shared/types.zig");
 /// How a provider is authenticated. Subscription providers expose no methods;
 /// choosing one acts directly instead of opening the method column.
 pub const Method = enum {
-    /// Browser sign-in that yields an lia login session.
+    /// Browser sign-in that yields a lia login session.
     oauth,
     /// A pasted AI Gateway key held in the keychain or profile.
     api_key,

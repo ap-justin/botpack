@@ -212,7 +212,7 @@ pub const Store = struct {
         return .{ .dir = dir, .lock = advisory, .lease = .{ .kind = .refresh, .stamp_ms = now } };
     }
 
-    /// Whether an lia that began waiting at `started_ms` for the refresh lock
+    /// Whether a lia that began waiting at `started_ms` for the refresh lock
     /// of the login under `key` goes ahead without it: `hold_slack_ms` after
     /// both the holder's step, at most `step_ms` from its stamp, and the
     /// store's lease ran out. A holder waiting its turn for the store, or in

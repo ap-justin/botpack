@@ -4486,8 +4486,8 @@ describe("cli: interactive startup", () => {
       const cases: Array<[string[], string]> = [
         [["fix", "the", "login", "bug"], 'lia: put the prompt in quotes: lia "fix the login bug"\n'],
         [["stauts"], "lia: unknown command stauts (did you mean status?)\n"],
-        [["-p", "fix the bug"], 'lia: -p isn\'t an lia flag; to run one request and exit, use lia ask "fix the bug"\n'],
-        [["--print"], 'lia: --print isn\'t an lia flag; to run one request and exit, use lia ask "<prompt>"\n'],
+        [["-p", "fix the bug"], 'lia: -p isn\'t a lia flag; to run one request and exit, use lia ask "fix the bug"\n'],
+        [["--print"], 'lia: --print isn\'t a lia flag; to run one request and exit, use lia ask "<prompt>"\n'],
         [[""], "lia: the prompt is empty\n"],
       ];
       for (const [args, stderr] of cases) {

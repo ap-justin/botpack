@@ -625,7 +625,7 @@ pub fn namesImages(user: session.UserTurn, stored: ?*const StoredImages) bool {
 }
 
 /// Whether `execution` is written as schema 11 or 12, with context notes
-/// (D93) or a saved runtime context (D94), which an lia from before them
+/// (D93) or a saved runtime context (D94), which a lia from before them
 /// rejects. A journal event, checkpoint, or snapshot that holds one says so
 /// in its own version, so an older reader reports a newer format instead of
 /// a corrupt one. Matches the choice in `writeExecutionMemoryJsonFrom`.
@@ -5023,7 +5023,7 @@ test "execution memory codec writes context notes only for a turn that has them 
         try std.testing.expect(std.mem.find(u8, shown.written(), "context_notes") == null);
     }
 
-    // Data an lia without notes wrote parses; notes need version 11, and notes
+    // Data a lia without notes wrote parses; notes need version 11, and notes
     // past the turn's steps do not parse.
     for ([_]struct { json: []const u8, valid: bool }{
         .{ .json = "{\"schema_version\":10,\"tool_steps\":[],\"files\":[],\"steering\":[],\"turn_summary\":null}", .valid = true },

@@ -76,7 +76,7 @@ live session as a whole.
 **Binding contracts v2 must keep:**
 - **One writer.** One writing process per session. A contender waits up to 2 s,
   then gets Busy.
-- **Crash safety.** Committed turns survive an lia crash. An unfinished turn is
+- **Crash safety.** Committed turns survive a lia crash. An unfinished turn is
   never silently continued after an unclean exit, and asking stays sticky
   until the turn is resolved (`session_log.zig:38` comment).
 - **Resume by id, by `--resume last` and through the picker.** `--resume last`
@@ -144,7 +144,7 @@ lifecycle.
 - **Hosts hold no session locks.** The four host copies of the save logic
   collapse into the adapter.
 - **Terminal state leaves the session folder (D13).** Hosted terminal state
-  moves to an lia-owned `~/.lia/terminal/{session-id}/`, like Unix
+  moves to a lia-owned `~/.lia/terminal/{session-id}/`, like Unix
   `/var/lib/{service}`. The terminal store keeps its own recovery protocol;
   only its base path changes.
 - **Diagnostics through the caller (D14).** The manager reports every repair
@@ -414,7 +414,7 @@ reused as ideas; no v1 code is shared.
   derived and can be rebuilt.
 - **Write points:** every `append` is one positional `write()` at the end
   offset, which the writer knows because it holds the session flock. That
-  survives an lia crash, because the bytes are already in the kernel. On wasm,
+  survives a lia crash, because the bytes are already in the kernel. On wasm,
   lines not yet committed stay in memory.
 - **Durability points** (a plain `fsync` on native; a `sessionStore` commit
   on wasm):
@@ -432,7 +432,7 @@ reused as ideas; no v1 code is shared.
   written durable, including a line another thread wrote after its own blob,
   so a blob cannot wait for the next durability point (`Fork.tla`
   `RefsExist`). Cost: two `fsync` calls per blob.
-- **What a sync guarantees:** a synced line survives an lia crash and an OS
+- **What a sync guarantees:** a synced line survives a lia crash and an OS
   crash (kernel panic or freeze) on every platform, and a power cut on Linux.
   - On macOS, a plain `fsync` can leave recent data in the drive's own cache,
     so a power cut can lose the newest synced lines.
@@ -458,7 +458,7 @@ reused as ideas; no v1 code is shared.
   Readers accept every version up to their own, skip unknown kinds, and open
   newer versions read-only.
 - **Migration (D8, D16):** on every start with v2 as the default, during the
-  one-release window, an lia background task converts every v1 session with
+  one-release window, a lia background task converts every v1 session with
   at least one turn that isn't in v2 yet. It runs after startup and never on
   the startup path.
   - It uses `open(.import)` under the same id and keeps original timestamps
@@ -611,7 +611,7 @@ The figures are medians from 2026-09-27 on a Mac (APFS, SSD).
   removed the switch with v1.
 - **Side files while the switch exists (D27):** per-session side folders
   (tool results, images, command logs, artifacts, background and terminal
-  state) keep v1's layout under an lia-owned `~/.lia/session-files/{id}/`,
+  state) keep v1's layout under a lia-owned `~/.lia/session-files/{id}/`,
   removed with the session. The move to blobs (D6) and to
   `~/.lia/terminal/{id}/` (D13) happens before the default flips.
 - **Rollback:**
@@ -721,7 +721,7 @@ Settled in the 2026-09-27 scope lock:
   in the adapter.
 
 Settled in the second 2026-09-27 review:
-- **D13 Decision:** hosted terminal state lives in an lia-owned
+- **D13 Decision:** hosted terminal state lives in a lia-owned
   `~/.lia/terminal/{session-id}/`, outside the manager. **Why:** it is mutable
   runtime state of live shells, not history. Unix keeps these apart
   (`/var/log` versus `/run` and `/var/lib/{service}`), and it keeps
@@ -1412,7 +1412,7 @@ Settled while removing v1 (2026-10-17):
 - **D80 Decision:** when lia is killed while a response is being retried,
   the reopened session shows the turn's finished pieces, such as a tool
   call and its result, and the turn as interrupted, but not the text
-  streamed by the attempt being retried, which v1 kept. With D54 an lia
+  streamed by the attempt being retried, which v1 kept. With D54 a lia
   session has no recovery to continue: ACP's `_meta.lia.continueRecovery`
   answers that the session does not support durable recovery, and serves
   only libfx sessions that keep a journal. **Why:** text from an attempt
@@ -1630,7 +1630,7 @@ rewriting a cached prompt prefix):
     says it replaces the earlier copy. A deleted file's rules stay in the
     conversation until compaction. lia no longer rebuilds rules from earlier
     tool calls into the instructions.
-  - **Older lia:** an lia from before D93 does not know the type and leaves
+  - **Older lia:** a lia from before D93 does not know the type and leaves
     the item out (D17), so it reads the turn without the note.
   - **libfx and ACP saved state:** the execution JSON in
     `session_codec.zig` names notes only in schema version 11, written only
@@ -1695,7 +1695,7 @@ permission mode does not rewrite a cached prompt prefix):
     captures the current runtime context. An update kept after the summary
     still counts as what the model last saw, so a turn whose new copy
     differs from it adds one more update.
-  - **Older lia:** an lia from before D94 leaves the item out (D17) and
+  - **Older lia:** a lia from before D94 leaves the item out (D17) and
     rebuilds the runtime context for every request, as it did.
 
   **Why:** the runtime context sits ahead of the history, so any change to
@@ -1765,7 +1765,7 @@ cached prompt prefix):
     whose strings aren't short, valid UTF-8 without control characters, or
     whose numbers are out of range, is left out with a trace line, so a
     record never fails a session. A v1 log never holds one.
-  - **Older lia:** an lia from before D96 leaves the item out (D17).
+  - **Older lia:** a lia from before D96 leaves the item out (D17).
   - **Not yet:** calls made inside tools, such as web search and image
     descriptions, and the permission reviewer's calls have no record.
 
@@ -1794,7 +1794,7 @@ cached prompt prefix):
   - A rare damaged middle line opens the session read-only up to the last
     good line; damage older than the newest snapshot is found by `read` and
     `verify` instead.
-  - The specs model only the guarantee a plain `fsync` gives: an lia or OS
+  - The specs model only the guarantee a plain `fsync` gives: a lia or OS
     crash, or a power cut on Linux.
 - **Unmodeled wasm locking.** wasm's single writer relies on the embedder
   honoring `expectedRevision`. `WriterLock.tla` models only flock; a buggy

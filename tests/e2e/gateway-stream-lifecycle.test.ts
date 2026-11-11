@@ -3632,7 +3632,7 @@ describe("gateway stream lifecycle", () => {
       { length: 160 },
       (_, index) => `fixture line ${index.toString().padStart(3, "0")}: ${"x".repeat(120)}`,
     ).join("\n");
-    const command = `cat <<'LIA_LONG_COMMAND' > long-command-output.txt\n${payload}\nFX_LONG_COMMAND\n`;
+    const command = `cat <<'LIA_LONG_COMMAND' > long-command-output.txt\n${payload}\nLIA_LONG_COMMAND\n`;
     expect(Buffer.byteLength(command)).toBeGreaterThan(20 * 1024);
     const responses = [
       fakeShellRun(callId, command, {

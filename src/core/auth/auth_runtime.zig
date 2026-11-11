@@ -3568,7 +3568,7 @@ test "auth runtime never admits a teamless lia login credential" {
     try std.testing.expect(runtime.gatewayCredential() == null);
 }
 
-test "auth runtime withholds an lia credential across its expiry boundary" {
+test "auth runtime withholds a lia credential across its expiry boundary" {
     const alloc = std.testing.allocator;
     var runtime: Runtime = .{};
     defer runtime.deinit(alloc);

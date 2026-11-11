@@ -645,7 +645,7 @@ export const v1Writer = () => olderRelease(process.env.LIA_TLA_V1_WRITER || last
 
 const releases = new Map<string, string>();
 const releaseCache = process.env.LIA_TLA_RELEASE_CACHE ?? join(tmpdir(), "lia-tla-releases");
-// An lia release or commit, built from the target's own history once per
+// A lia release or commit, built from the target's own history once per
 // machine in a cache outside every repository, to write the v1 formats it
 // wrote; release-<ref>.json records its commit and binary hash. A ref builds
 // only with the Zig it was written for: the default `zig` when its version

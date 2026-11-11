@@ -330,7 +330,7 @@ pub const SignInRuntime = struct {
     /// the input loop can open the browser for it.
     browser_pending: bool = false,
 
-    /// Starts an lia login sign-in. On native hosts the issuer discovery and
+    /// Starts a lia login sign-in. On native hosts the issuer discovery and
     /// device-code request run on the sign-in worker, so the input loop never
     /// waits on them; `snapshot().preparing` holds until the code arrives.
     pub fn start(

@@ -860,7 +860,7 @@ fn fetchCredits(
     );
 }
 
-/// An lia login can reach several teams, so `/v1/credits` rejects it outright
+/// A lia login can reach several teams, so `/v1/credits` rejects it outright
 /// unless the request names one. The endpoint reads the team from a `teamId`
 /// query value and ignores `x-vercel-ai-gateway-team`, which is the reverse of
 /// the inference endpoint. An API key carries its own team and resolves to no
@@ -2550,13 +2550,13 @@ pub fn modelCatalogTeamPath(
 }
 
 /// Returns the `x-vercel-ai-gateway-team` value for a catalog request, borrowed
-/// from `access`, or null for an lia login, whose team travels in the query.
+/// from `access`, or null for a lia login, whose team travels in the query.
 pub fn modelCatalogHeaderTeam(access: credentials.CatalogAccess) ?[]const u8 {
     if (access.credentialSource() == .lia_login) return null;
     return access.teamContext();
 }
 
-test "model catalog names an lia login team in the query and other teams in the header" {
+test "model catalog names a lia login team in the query and other teams in the header" {
     const alloc = std.testing.allocator;
     const cases = [_]struct {
         access: credentials.CatalogAccess,

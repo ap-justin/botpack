@@ -1227,7 +1227,7 @@ test "a failed lia-login refresh is still reported when nothing else resolves" {
     try std.testing.expectEqual(StoredKeyReadStatus.not_found, resolution.stored_key_status);
 }
 
-/// A HOME holding an lia login whose session is expired and whose refresh token
+/// A HOME holding a lia login whose session is expired and whose refresh token
 /// the issuer rejects, which is what an expired or revoked login looks like on
 /// disk. Paired with `oauth_transport.unavailable_provider`, the refresh fails.
 const ExpiredLiaLoginFixture = struct {
@@ -1336,7 +1336,7 @@ test "an invalid lia login refresh retires the rejected session" {
     try std.testing.expect(persisted == null);
 }
 
-test "an lia login refresh without a rotated refresh token retires the session" {
+test "a lia login refresh without a rotated refresh token retires the session" {
     const alloc = std.testing.allocator;
     var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
@@ -1381,7 +1381,7 @@ test "a malformed successful lia login refresh retires the session" {
     try std.testing.expect(persisted == null);
 }
 
-test "an lia login refresh retires the consumed token when durable replacement fails" {
+test "a lia login refresh retires the consumed token when durable replacement fails" {
     const alloc = std.testing.allocator;
     var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
