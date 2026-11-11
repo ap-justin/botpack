@@ -955,6 +955,21 @@ fn appendMarkdownLinkClose(alloc: Allocator, out: *std.ArrayList(u8), uri: []con
     try out.append(alloc, ')');
 }
 
+/// A prompt whose provider has no credential: `server.credentialUnavailableAnswer`
+/// decides between the sign-in answer and a configured provider's plain error.
+fn credentialUnavailableOutcome(state: *const server.ServerState, provider: model_provider.ProviderId) TerminalOutcome {
+    return switch (server.credentialUnavailableAnswer(provider)) {
+        .sign_in => .{ .auth_required = .{
+            .message = credentials.missing_credential_message,
+            .offer = server.authOffer(state),
+        } },
+        .plain_error => .{ .rpc_error = .{
+            .code = ErrorCode.invalid_request,
+            .message = server.configured_credential_unavailable_message,
+        } },
+    };
+}
+
 /// Runs a prompt turn under the mode and permission policy captured at
 /// dispatch. Mid-turn session/set_mode changes only affect later prompts.
 pub fn handlePrompt(
@@ -968,10 +983,7 @@ pub fn handlePrompt(
         .rpc_error = no_active_session_rpc_error,
     };
     if (!try server.selectCredentialForProvider(state, session.provider)) {
-        return .{ .auth_required = .{
-            .message = credentials.missing_credential_message,
-            .offer = server.authOffer(state),
-        } };
+        return credentialUnavailableOutcome(state, session.provider);
     }
     if (!ultrafastPromptAllowed(state, session)) {
         return .{ .rpc_error = .{
@@ -5672,6 +5684,21 @@ test "a notice after a rejected credential decides the answer" {
     try std.testing.expect(outcome == .rpc_error);
     try std.testing.expectEqual(ErrorCode.internal_error, outcome.rpc_error.code);
     try std.testing.expectEqualStrings("HTTP 502: upstream down", outcome.rpc_error.message);
+}
+
+test "a prompt without a credential offers sign-in only for Gateway" {
+    const alloc = std.testing.allocator;
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+
+    const gateway = credentialUnavailableOutcome(&state, .gateway);
+    try std.testing.expect(gateway == .auth_required);
+    try std.testing.expectEqualStrings(credentials.missing_credential_message, gateway.auth_required.message);
+
+    const configured = credentialUnavailableOutcome(&state, model_provider.parse("local").?);
+    try std.testing.expect(configured == .rpc_error);
+    try std.testing.expectEqual(ErrorCode.invalid_request, configured.rpc_error.code);
+    try std.testing.expectEqualStrings(server.configured_credential_unavailable_message, configured.rpc_error.message);
 }
 
 test "a failed or paused turn answers the notice that ended it" {

@@ -1640,10 +1640,12 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
 
     if (method == .authenticate) return handleAuthenticate(state, alloc, msg);
 
-    if (state.auth_pending and (method == .session_new or method == .session_load or method == .session_resume)) {
+    if (state.auth_pending and method == .session_new) {
         if (!try refreshPendingAuth(state)) return writeAuthRequired(state, alloc, msg.id);
     }
-    if (method == .session_new or method == .session_load or method == .session_resume) {
+    // A restore decides by its session's provider, not the process default,
+    // so while sign-in is pending it runs these checks once it knows which.
+    if (method == .session_new or ((method == .session_load or method == .session_resume) and !state.auth_pending)) {
         if (!try validateHeldStartupOverrides(state, alloc, msg)) return;
     }
 
@@ -1723,6 +1725,17 @@ pub fn authOffer(state: *const ServerState) acp_types.AuthOffer {
     };
 }
 
+/// What a request answers when its provider has no credential. Only Gateway
+/// can be signed in to with the methods on offer, which are Vercel's and
+/// cannot supply a configured provider's key.
+pub const CredentialUnavailableAnswer = enum { sign_in, plain_error };
+
+pub const configured_credential_unavailable_message = "Configured provider authentication is unavailable";
+
+pub fn credentialUnavailableAnswer(provider: model_provider.ProviderId) CredentialUnavailableAnswer {
+    return if (provider == .configured) .plain_error else .sign_in;
+}
+
 /// Answers with `AUTH_REQUIRED` and the auth methods the client can offer.
 pub fn writeAuthRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId) !void {
     const offer = authOffer(state);
@@ -1746,7 +1759,7 @@ fn buildAuthRequired(alloc: Allocator, id: ?jsonrpc.RequestId, auth: prompt_hand
 
 /// Re-reads the credentials for the selected provider and ends the pending
 /// state when one is now available. Returns false while there is none.
-fn refreshPendingAuth(state: *ServerState) !bool {
+pub fn refreshPendingAuth(state: *ServerState) !bool {
     if (!state.auth_pending) return true;
     if (!try selectCredentialForProvider(state, state.provider)) return false;
     state.auth_pending = false;
@@ -3353,7 +3366,7 @@ fn applyStartupOverrides(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Me
 /// `initialize` gives when a credential is present. They stay held after a
 /// rejection, so every session call fails until they pass. Returns false after
 /// writing the error response.
-fn validateHeldStartupOverrides(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !bool {
+pub fn validateHeldStartupOverrides(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !bool {
     if (!state.startup_overrides_held) return true;
     std.debug.assert(!state.auth_pending);
     if (!try resolveStartupCatalog(state, alloc, msg)) return false;
@@ -3981,7 +3994,7 @@ fn handleSetConfigOption(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Me
                 if (!try selectCredentialForProvider(state, session.provider)) {
                     return state.writer.writeError(alloc, msg.id, .{
                         .code = ErrorCode.invalid_request,
-                        .message = "Configured provider authentication is unavailable",
+                        .message = configured_credential_unavailable_message,
                     });
                 }
             }

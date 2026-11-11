@@ -908,6 +908,14 @@ fn handleRestoreSession(
         removedSignInReplacementModel(state)
     else
         durable.preferences.model;
+    // While the process's own provider awaits sign-in, a session on that
+    // provider waits with it. A session on another provider is unaffected.
+    if (state.auth_pending and effective_provider.eql(state.provider)) {
+        if (!try server.refreshPendingAuth(state)) {
+            return writeRestoreCredentialUnavailable(state, alloc, msg.id, effective_provider);
+        }
+        if (!try server.validateHeldStartupOverrides(state, alloc, msg)) return;
+    }
     var staged_credential = server.prepareCredentialForProvider(state, effective_provider) catch |err| {
         if (err != error.ProviderCredentialUnavailable) return err;
         return writeRestoreCredentialUnavailable(state, alloc, msg.id, effective_provider);
@@ -1318,20 +1326,21 @@ fn removedSignInReplacementModel(state: *const server.ServerState) []const u8 {
     return if (state.provider == .gateway) state.selected_model else state.cfg.default_model;
 }
 
-/// Answers a load or resume whose provider has no credential. The sign-in
-/// methods on offer are Vercel's, which cannot supply a configured provider's
-/// key, so that provider keeps its plain error.
+/// Answers a load or resume whose provider has no credential, as a prompt
+/// does: `server.credentialUnavailableAnswer` decides.
 fn writeRestoreCredentialUnavailable(
     state: *server.ServerState,
     alloc: Allocator,
     id: ?jsonrpc.RequestId,
     provider: model_provider.ProviderId,
 ) !void {
-    if (provider == .configured) return state.writer.writeError(alloc, id, .{
-        .code = ErrorCode.invalid_request,
-        .message = "Configured provider authentication is unavailable",
-    });
-    return server.writeAuthRequired(state, alloc, id);
+    return switch (server.credentialUnavailableAnswer(provider)) {
+        .plain_error => state.writer.writeError(alloc, id, .{
+            .code = ErrorCode.invalid_request,
+            .message = server.configured_credential_unavailable_message,
+        }),
+        .sign_in => server.writeAuthRequired(state, alloc, id),
+    };
 }
 
 fn handleLoadFailure(
@@ -1396,6 +1405,8 @@ fn handleLoadFailure(
             .message = "Session could not be loaded",
         });
     }
+    // Before sign-in, an unknown session is met with the sign-in answer first.
+    if (state.auth_pending) return writeRestoreCredentialUnavailable(state, alloc, msg.id, state.provider);
     return state.writer.writeError(alloc, msg.id, .{
         .code = ErrorCode.invalid_params,
         .message = "Session not found",

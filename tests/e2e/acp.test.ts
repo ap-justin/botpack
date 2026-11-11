@@ -641,6 +641,41 @@ test("configured provider ACP preserves reasoning between prompts", async () => 
   } finally { await client.close(); fixture.close(); }
 }, 30000);
 
+test("ACP restores a configured-provider session under a Gateway default with nobody signed in", async () => {
+  const fixture = createConfiguredProviderFixture();
+  fixture.settings.provider = "remote";
+  fixture.save();
+  let sessionId = "";
+  {
+    const first = await AcpClient.create({ cwd: fixture.workspace, env: fixture.env });
+    try {
+      await first.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      const created = await first.request("session/new", { cwd: fixture.workspace, mcpServers: [] }) as any;
+      if (created.error) throw new Error(JSON.stringify(created));
+      sessionId = created.result.sessionId;
+      const prompted = await first.request("session/prompt", { prompt: [{ type: "text", text: "save this" }] }) as any;
+      if (prompted.error) throw new Error(JSON.stringify(prompted));
+    } finally { await first.close(); }
+  }
+
+  // The default is now Gateway and no Gateway credential exists, while the
+  // saved session's own provider keeps its key.
+  fixture.settings.provider = "gateway";
+  fixture.save();
+  const env = { ...fixture.env, AI_GATEWAY_API_KEY: undefined, VERCEL_OIDC_TOKEN: undefined, FX_DISABLE_KEYCHAIN: "1" };
+  for (const method of ["session/load", "session/resume"]) {
+    const client = await AcpClient.create({ cwd: fixture.workspace, env });
+    try {
+      const initialized = await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} }) as any;
+      expect(initialized.error).toBeUndefined();
+      const restored = await client.request(method, { sessionId, cwd: fixture.workspace, mcpServers: [] }) as any;
+      if (restored.error) throw new Error(`${method}: ${JSON.stringify(restored)}`);
+      expect(restored.result.configOptions.find((option: any) => option.id === "provider").currentValue).toBe("remote");
+    } finally { await client.close(); }
+  }
+  fixture.close();
+}, 60000);
+
 test.each(["empty", "unrelated"])("configured provider ACP preserves explicit models with %s metadata", async metadata => {
   const fixture = createConfiguredProviderFixture();
   (fixture.settings.providers.local as any).model_metadata = {};
@@ -8091,6 +8126,43 @@ describe("acp: model-independent", () => {
         expect(response.error.data.authMethods.length).toBeGreaterThan(0);
         expect(gateway.requests).toHaveLength(0);
         await expectOneFrameFor(client, 100, 101);
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "session/resume of a saved session answers AUTH_REQUIRED once the Gateway sign-in is removed",
+    async () => {
+      const root = createIsolatedRoot("fx-acp-resume-signed-out-");
+      const gateway = startDynamicFakeGateway(_raw => finalText("saved answer"));
+      try {
+        writeSeededFxAuth(root.home, "team_123");
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: {
+            ...fakeGatewayEnv(root, gateway),
+            AI_GATEWAY_API_KEY: undefined,
+            VERCEL_OIDC_TOKEN: undefined,
+            FX_DISABLE_KEYCHAIN: "1",
+          },
+        });
+        const savedId = await startAutoSession(client);
+        await runPrompt(client, "Save this session.", 8_000);
+        // A second session leaves the first inactive, so resuming it prepares a credential.
+        const other = await client.request("session/new", { mcpServers: [] }, 20) as any;
+        expect(other.error).toBeUndefined();
+        rmSync(join(root.home, ".fx", "auth.json"));
+
+        const resumed = await client.request("session/resume", { sessionId: savedId, mcpServers: [] }, 21) as any;
+        expect(resumed.result).toBeUndefined();
+        expect(resumed.error.code).toBe(-32000);
+        expect(resumed.error.data.authMethods.length).toBeGreaterThan(0);
         expect(client.stderr).toBe("");
       } finally {
         await client?.close();
