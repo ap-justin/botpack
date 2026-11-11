@@ -9144,6 +9144,7 @@ fn processQueuedPromptLoop(
                 finish_trace.finish("invalid_tool_finish");
                 return error.ModelError;
             },
+            .step_limited => unreachable,
         }
         if (successful_vision_mode == .required and completion.tool_calls.len == 0) {
             try pushTerminalAutoRetryStatusIfNeeded(
@@ -9463,6 +9464,7 @@ fn processQueuedPromptLoop(
                     &finish_trace,
                     try emptyReplyNotice(arena, provider_reason, empty_reply_follow_up),
                     "empty_reply",
+                    null,
                 );
                 return;
             }
@@ -12210,6 +12212,7 @@ fn processQueuedPromptLoop(
                 &finish_trace,
                 repeated_malformed_arguments_notice,
                 "repeated_malformed_tool_arguments",
+                null,
             );
             return;
         }
@@ -12234,6 +12237,7 @@ fn processQueuedPromptLoop(
                 &finish_trace,
                 repeated_terminal_validation_notice,
                 "terminal_validation_retry",
+                null,
             );
             return;
         }
@@ -12263,6 +12267,7 @@ fn processQueuedPromptLoop(
                 &finish_trace,
                 repeated_shell_execution_failure_notice,
                 "repeated_shell_execution_failure",
+                null,
             );
             return;
         }
@@ -12431,6 +12436,7 @@ fn processQueuedPromptLoop(
         &finish_trace,
         config.step_limit_notice,
         "step_limit",
+        .step_limited,
     );
 }
 
@@ -12445,6 +12451,7 @@ fn finishFailedTurnWithNotice(
     finish_trace: *PromptFinishTrace,
     notice: []const u8,
     trace_outcome: []const u8,
+    disposition: ?types.ProviderCompletionDisposition,
 ) !void {
     try deps.push_text(deps.ctx, .{ .operational = notice });
     try deps.push_text(deps.ctx, .{ .operational = "\n" });
@@ -12464,7 +12471,7 @@ fn finishFailedTurnWithNotice(
             summary_accumulator,
             assistant_text,
             .failed,
-            null,
+            disposition,
             finish_trace,
             trace_outcome,
             null,
@@ -12483,7 +12490,7 @@ fn finishFailedTurnWithNotice(
     } };
     types.setHistoryTurnSummary(&turn, completed_summary);
     try deps.propagate_history_turn(deps.ctx, turn);
-    try finalization.finish(.failed, null, .{
+    try finalization.finish(.failed, disposition, .{
         .turn = try types.dupeHistoryTurn(std.heap.c_allocator, turn),
         .summary = completed_summary,
     });

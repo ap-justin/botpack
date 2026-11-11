@@ -165,7 +165,7 @@ pub fn parseErrorMessage(err: ParseError) []const u8 {
         error.MissingArgs => "Each stdio MCP server requires args",
         error.InvalidArgs => "MCP server args must be an array of strings",
         error.MissingEnv => "Each stdio MCP server requires env",
-        error.InvalidEnv => "MCP server env must be an array of name/value string entries",
+        error.InvalidEnv => "MCP server env must be an array of name/value string entries; a name must be non-empty with no \"=\" or NUL, and a value must have no NUL",
         error.MissingUrl => "Each HTTP MCP server requires url",
         error.InvalidUrl => "MCP server url must be a valid HTTPS or explicit loopback HTTP endpoint",
         error.MissingHeaders => "Each HTTP MCP server requires headers",
@@ -385,9 +385,10 @@ fn parseEnv(alloc: Allocator, env_value: std.json.Value) ParseError![]mcp_contra
         if (entry_value != .object) return error.InvalidEnv;
         const name_value = entry_value.object.get("name") orelse return error.InvalidEnv;
         const value_value = entry_value.object.get("value") orelse return error.InvalidEnv;
-        if (name_value != .string or name_value.string.len == 0 or value_value != .string) {
-            return error.InvalidEnv;
-        }
+        if (name_value != .string or value_value != .string) return error.InvalidEnv;
+        // The process environment asserts on a name or value it cannot hold.
+        if (!std.process.Environ.Map.validateKeyForPut(name_value.string)) return error.InvalidEnv;
+        if (std.mem.findScalar(u8, value_value.string, 0) != null) return error.InvalidEnv;
         const key = try alloc.dupe(u8, name_value.string);
         errdefer alloc.free(key);
         const value = try alloc.dupe(u8, value_value.string);
@@ -474,11 +475,21 @@ test "ACP MCP parser rejects malformed required stdio fields" {
         .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[1],\"env\":[]}]}", .expected = error.InvalidArgs },
         .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[]}]}", .expected = error.MissingEnv },
         .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[],\"env\":[{\"name\":\"TOKEN\",\"value\":1}]}]}", .expected = error.InvalidEnv },
+        .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[],\"env\":[{\"name\":\"KEY=VALUE\",\"value\":\"v\"}]}]}", .expected = error.InvalidEnv },
+        .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[],\"env\":[{\"name\":\"\",\"value\":\"v\"}]}]}", .expected = error.InvalidEnv },
+        .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[],\"env\":[{\"name\":\"A\\u0000B\",\"value\":\"v\"}]}]}", .expected = error.InvalidEnv },
+        .{ .json = "{\"mcpServers\":[{\"name\":\"x\",\"command\":\"/bin/x\",\"args\":[],\"env\":[{\"name\":\"TOKEN\",\"value\":\"a\\u0000b\"}]}]}", .expected = error.InvalidEnv },
     };
 
     for (cases) |case| {
         try std.testing.expectError(case.expected, parse(std.testing.allocator, case.json));
     }
+}
+
+test "ACP MCP env rejection says what a name and value cannot hold" {
+    const message = parseErrorMessage(error.InvalidEnv);
+    try std.testing.expect(std.mem.find(u8, message, "non-empty with no \"=\" or NUL") != null);
+    try std.testing.expect(std.mem.find(u8, message, "value must have no NUL") != null);
 }
 
 test "ACP MCP parser owns official HTTP request fields" {

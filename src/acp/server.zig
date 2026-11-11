@@ -1,5 +1,6 @@
 const std = @import("std");
 const testing_allocator = @import("../core/shared/testing_allocator.zig");
+const text_utils = @import("../core/shared/text_utils.zig");
 const managed_execution = @import("../core/execution/managed_execution.zig");
 const acp_runner = @import("../core/cli/acp_runner.zig");
 const config_runtime = @import("../core/config/config_runtime.zig");
@@ -16,6 +17,7 @@ const compactor = @import("../core/compactor/compactor.zig");
 const builtin_skills = @import("../builtins/skills.zig");
 const builtin_tools = @import("../builtins/tools.zig");
 const credentials = @import("../core/auth/credentials.zig");
+const host_contract = @import("../core/hosts/host.zig");
 const secret = @import("../core/auth/secret.zig");
 const auth_runtime = @import("../core/auth/auth_runtime.zig");
 const model_provider = @import("../core/config/model_provider.zig");
@@ -226,6 +228,8 @@ const PendingLegacyUrl = struct {
     }
 };
 
+pub const failure_message_max_bytes = 1024;
+
 pub const ActiveSessionState = struct {
     observer_hooks: ?@import("libfx_hooks.zig").Config = null,
     session_id: []u8,
@@ -268,6 +272,11 @@ pub const ActiveSessionState = struct {
     tool_identities: tool_call_identities.Record = .{},
     cancel_flag: std.atomic.Value(bool),
     pending_prompt_id: ?jsonrpc.RequestId,
+    /// The message a failed turn answers `session/prompt` with. It lives here
+    /// because the turn's own context is gone when the response is written.
+    failure_message_buf: [failure_message_max_bytes]u8 = undefined,
+    failure_message_len: usize = 0,
+
     steering: libfx_steering.Runtime = .{},
     /// Set when the host passed a journal; every state change is sent to it.
     journal: ?libfx_journal.Journal = null,
@@ -278,6 +287,21 @@ pub const ActiveSessionState = struct {
     /// an open turn's tool images can take a session past one window and one
     /// prompt, and what a running session held must reopen.
     staging_needed: StagedTotals = .{},
+
+    /// Keeps the whole codepoints of `message` that fit
+    /// `failure_message_max_bytes`, invalid bytes as U+FFFD, since the error
+    /// frame copies the message as raw bytes.
+    pub fn setFailureMessage(self: *ActiveSessionState, message: []const u8) void {
+        self.failure_message_len = text_utils.copyValidUtf8Prefix(&self.failure_message_buf, message).len;
+    }
+
+    pub fn clearFailureMessage(self: *ActiveSessionState) void {
+        self.failure_message_len = 0;
+    }
+
+    pub fn failureMessage(self: *const ActiveSessionState) []const u8 {
+        return self.failure_message_buf[0..self.failure_message_len];
+    }
 
     pub fn retainGrant(self: *ActiveSessionState, alloc: Allocator, tool_name: []const u8, target_path: []const u8) !void {
         for (self.session_grants) |grant| {
@@ -333,8 +357,12 @@ pub const ServerState = struct {
     api_key: []u8 = &.{},
     credential_source: ?types.CredentialSource = null,
     /// `initialize` found no credential for the selected model. Calls that need
-    /// one re-read the credentials and answer `AUTH_REQUIRED` until they exist.
+    /// one re-read the credentials and answer as `credentialUnavailableAnswer`
+    /// decides until they exist.
     auth_pending: bool = false,
+    /// A credential turned up while a turn borrowed the credential slots, so
+    /// the first request that finds no turn running adopts it.
+    auth_adoption_deferred: bool = false,
     /// `initialize` kept the effort, fast and ultrafast overrides unvalidated
     /// because auth was pending. `session/new`, `session/load` and
     /// `session/resume` validate them against the catalog and fail until they
@@ -544,6 +572,107 @@ fn hostManagedCredential() credentials.Credential {
     return .{ .token = &.{}, .source = .host_managed };
 }
 
+/// False when the cached credential came from a saved sign-in or key that has
+/// since been removed, so the request reloads instead of sending a token the
+/// user has signed out of. The probe checks presence only: it takes no auth
+/// lock and reads no secret, so a request never waits on another fx
+/// process refreshing. A store whose state cannot be determined keeps the
+/// cached credential, since the request itself will say if it is rejected.
+fn cachedCredentialStillStored(secret_store: host_contract.SecretStore, source: ?types.CredentialSource) bool {
+    const kind = source orelse return true;
+    if (kind != .fx_login and kind != .stored_key) return true;
+    return switch (credentials.sourcePresence(secret_store, kind)) {
+        .missing => false,
+        .present, .unavailable => true,
+    };
+}
+
+test "a cached credential that no saved sign-in backs is not rechecked against the store" {
+    var store: TestSecretStore = .{ .presence = .missing };
+    try std.testing.expect(cachedCredentialStillStored(store.secretStore(), null));
+    for ([_]types.CredentialSource{ .ai_gateway_api_key, .vercel_oidc_token, .host_managed, .configured }) |source| {
+        try std.testing.expect(cachedCredentialStillStored(store.secretStore(), source));
+    }
+    try std.testing.expectEqual(@as(usize, 0), store.presence_calls);
+}
+
+test "a cached stored key is dropped only when the store says it is missing" {
+    const cases = [_]struct { presence: host_contract.SecretStorePresence, still_stored: bool }{
+        .{ .presence = .present, .still_stored = true },
+        .{ .presence = .missing, .still_stored = false },
+        .{ .presence = .unavailable, .still_stored = true },
+    };
+    for (cases) |case| {
+        var store: TestSecretStore = .{ .presence = case.presence };
+        try std.testing.expectEqual(case.still_stored, cachedCredentialStillStored(store.secretStore(), .stored_key));
+        try std.testing.expectEqual(@as(usize, 1), store.presence_calls);
+        try std.testing.expectEqual(@as(usize, 0), store.load_calls);
+    }
+}
+
+test "a cached fx login is checked by presence, not by reading the saved session" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
+    defer alloc.free(home);
+    var env = std.process.Environ.Map.init(alloc);
+    defer env.deinit();
+    try env.put("HOME", home);
+    try env.put("FX_DISABLE_KEYCHAIN", "1");
+    io_mod.setEnvironMap(&env);
+    defer io_mod.resetEnvironForTest();
+    const store = host_contract.unavailable_secret_store;
+
+    try std.testing.expect(!cachedCredentialStillStored(store, .fx_login));
+
+    try tmp.dir.createDir(std.testing.io, ".fx", .fromMode(0o700));
+    // Present but unparseable: a load would fail, presence still says present.
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".fx/auth.json", .data = "not a session", .flags = .{ .permissions = .fromMode(0o600) } });
+    try std.testing.expect(cachedCredentialStillStored(store, .fx_login));
+
+    // Readable by others: presence is unavailable, not missing.
+    try tmp.dir.deleteFile(std.testing.io, ".fx/auth.json");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".fx/auth.json", .data = "not a session", .flags = .{ .permissions = .fromMode(0o644) } });
+    try std.testing.expect(cachedCredentialStillStored(store, .fx_login));
+}
+
+/// Answers `presence` as configured and counts calls; never holds a secret.
+const TestSecretStore = struct {
+    presence: host_contract.SecretStorePresence,
+    presence_calls: usize = 0,
+    load_calls: usize = 0,
+
+    fn secretStore(self: *TestSecretStore) host_contract.SecretStore {
+        return .{
+            .context = self,
+            .backend_label = "test credential store",
+            .is_disabled_fn = isDisabled,
+            .presence_fn = presenceFn,
+            .load_fn = load,
+            .store_fn = host_contract.unavailable_secret_store.store_fn,
+            .store_interactive_fn = host_contract.unavailable_secret_store.store_interactive_fn,
+        };
+    }
+
+    fn isDisabled(_: ?*anyopaque) bool {
+        return false;
+    }
+
+    fn presenceFn(raw: ?*anyopaque) host_contract.SecretStorePresence {
+        const self: *TestSecretStore = @ptrCast(@alignCast(raw.?));
+        self.presence_calls += 1;
+        return self.presence;
+    }
+
+    fn load(raw: ?*anyopaque, _: Allocator) host_contract.SecretStoreLoadError!?[]u8 {
+        const self: *TestSecretStore = @ptrCast(@alignCast(raw.?));
+        self.load_calls += 1;
+        return null;
+    }
+};
+
 /// Stages authorization without changing any in-flight credential storage.
 /// The caller owns a non-null credential; null retains the current authorization.
 pub fn prepareCredentialForProvider(state: *ServerState, provider: model_provider.ProviderId) !?credentials.Credential {
@@ -557,7 +686,7 @@ pub fn prepareCredentialForProvider(state: *ServerState, provider: model_provide
                 active.api_key,
                 active.credential_refresh_after_ms,
                 now_ms,
-            )) return null;
+            ) and cachedCredentialStillStored(state.cfg.secret_store, active.credential_source)) return null;
     }
     if (provider != .configured and credentialMatchesProvider(state.credential_source, provider) and
         credentialReadyAt(
@@ -565,7 +694,7 @@ pub fn prepareCredentialForProvider(state: *ServerState, provider: model_provide
             state.api_key,
             state.credential_refresh_after_ms,
             now_ms,
-        )) return null;
+        ) and cachedCredentialStillStored(state.cfg.secret_store, state.credential_source)) return null;
 
     return if (provider == .gateway and state.cfg.credential_override != null)
         credentials.Credential{
@@ -1015,8 +1144,9 @@ pub fn runWithTransport(
         if (line_result == null) break;
         const line = switch (line_result.?) {
             .overflow => {
+                // Not -32000: that is AUTH_REQUIRED, which starts a sign-in.
                 state.writer.writeError(alloc, null, .{
-                    .code = ErrorCode.request_frame_too_large,
+                    .code = ErrorCode.invalid_request,
                     .message = "Request frame too large",
                 }) catch break;
                 continue;
@@ -1484,7 +1614,7 @@ fn dispatchNotification(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Mes
     }
 }
 
-fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
+pub fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
     reapActivePrompt(state, false);
     const method = AcpMethod.parse(msg.method);
 
@@ -1497,6 +1627,15 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
             .code = ErrorCode.invalid_request,
             .message = "Not initialized. Call initialize first.",
         });
+    }
+
+    // A sign-in deferred for a turn that has since ended. Failing to adopt it
+    // leaves it pending, and this request answers as it would have.
+    if (state.auth_adoption_deferred and state.active_prompt == null) {
+        if (refreshPendingAuth(state)) |_| {} else |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => debug_trace.logf("auth", "deferred sign-in adoption failed err={s}", .{@errorName(err)}),
+        }
     }
 
     if (method == .session_cancel) {
@@ -1514,19 +1653,28 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
 
     if (method == .authenticate) return handleAuthenticate(state, alloc, msg);
 
-    if (state.auth_pending and (method == .session_new or method == .session_load or method == .session_resume)) {
-        if (!try refreshPendingAuth(state)) return writeAuthRequired(state, alloc, msg.id);
-    }
-    if (method == .session_new or method == .session_load or method == .session_resume) {
-        if (!try validateHeldStartupOverrides(state, alloc, msg)) return;
-    }
-
     if (method == .session_prompt and state.active_prompt != null) {
         return handleSteeringPrompt(state, alloc, msg);
     }
 
     if (method.waitsForActivePrompt() and state.active_prompt != null) {
         return writePromptInProgress(state, alloc, msg.id);
+    }
+
+    // The web core's load never reaches `handleRestoreSession`, and its
+    // sessions are all on Gateway.
+    const waits_for_default_sign_in = method == .session_new or
+        (host_target.is_wasm and method == .session_load and state.provider == .gateway);
+    if (state.auth_pending and waits_for_default_sign_in) {
+        if (!try refreshPendingAuthReplacingTurn(state)) {
+            return writeCredentialUnavailable(state, alloc, msg.id, state.provider);
+        }
+    }
+    // A native restore decides by its session's provider, not the process
+    // default, so while sign-in is pending `handleRestoreSession` runs these
+    // checks itself, and only for a session on the default provider.
+    if (method == .session_new or ((method == .session_load or method == .session_resume) and !state.auth_pending)) {
+        if (!try validateHeldStartupOverrides(state, alloc, msg)) return;
     }
 
     if (comptime host_target.is_wasm) {
@@ -1590,33 +1738,107 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
 
 /// The auth methods this connection is offered, in `initialize` and in
 /// `AUTH_REQUIRED` alike.
-fn authOffer(state: *const ServerState) acp_types.AuthOffer {
+pub fn authOffer(state: *const ServerState) acp_types.AuthOffer {
     return .{
         .login = .forProvider(state.provider),
         .client_terminal_auth = state.client_terminal_auth,
     };
 }
 
+/// What a request answers when its provider has no credential. Only Gateway
+/// can be signed in to with the methods on offer, which are Vercel's and
+/// cannot supply a configured provider's key.
+pub const CredentialUnavailableAnswer = enum { sign_in, plain_error };
+
+pub const configured_credential_unavailable_message = "Configured provider authentication is unavailable";
+
+pub fn credentialUnavailableAnswer(provider: model_provider.ProviderId) CredentialUnavailableAnswer {
+    return if (provider == .configured) .plain_error else .sign_in;
+}
+
+/// Answers a request whose `provider` has no credential, as
+/// `credentialUnavailableAnswer` decides.
+pub fn writeCredentialUnavailable(
+    state: *ServerState,
+    alloc: Allocator,
+    id: ?jsonrpc.RequestId,
+    provider: model_provider.ProviderId,
+) !void {
+    return switch (credentialUnavailableAnswer(provider)) {
+        .plain_error => state.writer.writeError(alloc, id, .{
+            .code = ErrorCode.invalid_request,
+            .message = configured_credential_unavailable_message,
+        }),
+        .sign_in => writeAuthRequired(state, alloc, id),
+    };
+}
+
 /// Answers with `AUTH_REQUIRED` and the auth methods the client can offer.
-fn writeAuthRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId) !void {
+pub fn writeAuthRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId) !void {
     const offer = authOffer(state);
+    return state.writer.send(alloc, try buildAuthRequired(alloc, id, .{
+        .message = offer.login.instruction(),
+        .offer = offer,
+    }));
+}
+
+/// An `AUTH_REQUIRED` error frame whose `data` lists the auth methods offered.
+fn buildAuthRequired(alloc: Allocator, id: ?jsonrpc.RequestId, auth: prompt_handler.AuthRequired) !jsonrpc.Writer.Built {
     var data: std.Io.Writer.Allocating = .init(alloc);
     defer data.deinit();
-    try acp_types.writeAuthRequiredData(&data.writer, offer);
-    return state.writer.writeError(alloc, id, .{
+    try acp_types.writeAuthRequiredData(&data.writer, auth.offer);
+    return jsonrpc.Writer.buildError(alloc, id, .{
         .code = ErrorCode.auth_required,
-        .message = offer.login.instruction(),
+        .message = auth.message,
         .data_json = data.written(),
     });
 }
 
+/// What re-reading the selected provider's credentials found while sign-in
+/// was pending.
+pub const PendingAuth = enum {
+    /// Adopted, so sign-in is no longer pending; or it never was.
+    adopted,
+    /// Available, but a running turn borrows the credential slots adopting
+    /// would replace, so sign-in stays pending.
+    deferred,
+    /// Still none.
+    unavailable,
+};
+
 /// Re-reads the credentials for the selected provider and ends the pending
-/// state when one is now available. Returns false while there is none.
-fn refreshPendingAuth(state: *ServerState) !bool {
-    if (!state.auth_pending) return true;
-    if (!try selectCredentialForProvider(state, state.provider)) return false;
-    state.auth_pending = false;
-    return true;
+/// state when one is now available and no turn is running.
+pub fn refreshPendingAuth(state: *ServerState) !PendingAuth {
+    if (!state.auth_pending) return .adopted;
+    reapActivePrompt(state, false);
+    const outcome: PendingAuth = if (state.active_prompt != null) running: {
+        // A running turn, on a session whose own provider is signed in, borrows
+        // the credential slots that adopting would replace. `dispatch` adopts
+        // the sign-in at the first request that finds no turn running.
+        var staged = prepareCredentialForProvider(state, state.provider) catch |err| {
+            if (err != error.ProviderCredentialUnavailable) return err;
+            break :running .unavailable;
+        };
+        if (staged) |*credential| credential.deinit(state.alloc);
+        break :running .deferred;
+    } else if (try selectCredentialForProvider(state, state.provider)) .adopted else .unavailable;
+    state.auth_adoption_deferred = outcome == .deferred;
+    if (outcome == .adopted) state.auth_pending = false;
+    return outcome;
+}
+
+/// `refreshPendingAuth` for a request that replaces the running turn anyway:
+/// a credential that turned up during it ends the turn so it can be adopted.
+/// True once sign-in is no longer pending.
+pub fn refreshPendingAuthReplacingTurn(state: *ServerState) !bool {
+    switch (try refreshPendingAuth(state)) {
+        .adopted => return true,
+        .unavailable => return false,
+        .deferred => {
+            cancelAndReapActivePrompt(state);
+            return try refreshPendingAuth(state) == .adopted;
+        },
+    }
 }
 
 /// `authenticate`: the person ran the login an advertised method names, so
@@ -1636,7 +1858,9 @@ fn handleAuthenticate(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Messa
             .message = "Unknown authentication method",
         });
     }
-    if (!try refreshPendingAuth(state)) return writeAuthRequired(state, alloc, msg.id);
+    if (try refreshPendingAuth(state) == .unavailable) {
+        return writeCredentialUnavailable(state, alloc, msg.id, state.provider);
+    }
     return state.writer.writeResponse(alloc, msg.id, "{}");
 }
 
@@ -2588,16 +2812,20 @@ fn promptWorkerMain(active: *ActivePrompt) void {
         &active.msg,
         active.mode,
         active.permission_mode,
-    ) catch |err| .{
-        .rpc_error = .{
-            .code = ErrorCode.internal_error,
-            // A storage fault is named (D29); the wasm host keeps the error name.
-            .message = if (active.state.sessions_v2 != null)
-                sessions.v2StorageFaultMessage("Session could not be saved", err) orelse @errorName(err)
-            else
-                @errorName(err),
-        },
+    ) catch |err| blk: {
+        debug_trace.logf("acp", "event=prompt_handler_failed err={s}", .{@errorName(err)});
+        break :blk .{
+            .rpc_error = .{
+                .code = ErrorCode.internal_error,
+                // A storage fault is named (D29); the wasm host keeps the error name.
+                .message = if (active.state.sessions_v2 != null)
+                    sessions.v2StorageFaultMessage("Session could not be saved", err) orelse @errorName(err)
+                else
+                    @errorName(err),
+            },
+        };
     };
+    debug_trace.logf("acp", "event=prompt_handler_returned kind={s}", .{@tagName(outcome)});
     const finished_steering: ?libfx_steering.Finished = if (active.state.active_session) |*session|
         session.steering.finishTurn(active.state.alloc, active.alloc, "turn_finished") catch |err| blk: {
             debug_trace.logf("acp", "failed to collect steering prompts at turn end err={s}", .{@errorName(err)});
@@ -2607,7 +2835,7 @@ fn promptWorkerMain(active: *ActivePrompt) void {
         null;
     defer if (finished_steering) |finished| finished.deinit(active.alloc);
     active.reapable.store(true, .seq_cst);
-    publishPromptOutcome(active, outcome) catch {};
+    publishPromptOutcome(active, outcome);
     if (finished_steering) |finished| publishSteeringOutcomes(active, outcome, finished) catch {};
     prompt_test_controls.pauseAfterTerminalWrite();
 }
@@ -2677,25 +2905,58 @@ pub fn noteSteeringTool(state: *ServerState, call_id: []const u8, started: bool)
     }
 }
 
-fn publishPromptOutcome(active: *ActivePrompt, outcome: prompt_handler.TerminalOutcome) !void {
+fn publishPromptOutcome(active: *ActivePrompt, outcome: prompt_handler.TerminalOutcome) void {
+    const usage = if (active.state.active_session) |*session|
+        session.session_rt.agent.turn_usage
+    else
+        types.Usage{};
+    answerPrompt(&active.state.writer, active.alloc, active.msg.id, outcome, usage);
+}
+
+/// Writes the prompt's answer. A response that cannot be built is traced and
+/// replaced by an error, so the client is never left waiting on a prompt that
+/// has already ended. One that fails while being written gets no second
+/// frame: part of the first may be on the stream, and the two would run
+/// together into a line neither parses from.
+fn answerPrompt(
+    writer: *jsonrpc.Writer,
+    alloc: Allocator,
+    id: ?jsonrpc.RequestId,
+    outcome: prompt_handler.TerminalOutcome,
+    usage: types.Usage,
+) void {
+    debug_trace.logf("acp", "event=prompt_answer kind={s}", .{@tagName(outcome)});
+    const built = buildPromptAnswer(alloc, id, outcome, usage) catch |err| {
+        debug_trace.logf("acp", "event=prompt_answer_build_failed kind={s} err={s}", .{ @tagName(outcome), @errorName(err) });
+        // The allocator may be the reason the answer failed to build.
+        writer.writeErrorUnallocated(id, .{
+            .code = ErrorCode.internal_error,
+            .message = "The prompt's response could not be sent",
+        }) catch |fallback_err| {
+            debug_trace.logf("acp", "event=prompt_answer_fallback_failed err={s}", .{@errorName(fallback_err)});
+        };
+        return;
+    };
+    writer.send(alloc, built) catch |err| {
+        debug_trace.logf("acp", "event=prompt_answer_failed kind={s} err={s}", .{ @tagName(outcome), @errorName(err) });
+    };
+}
+
+fn buildPromptAnswer(
+    alloc: Allocator,
+    id: ?jsonrpc.RequestId,
+    outcome: prompt_handler.TerminalOutcome,
+    usage: types.Usage,
+) !jsonrpc.Writer.Built {
     switch (outcome) {
         .stop_reason => |stop_reason| {
-            var response: std.Io.Writer.Allocating = .init(active.alloc);
+            var response: std.Io.Writer.Allocating = .init(alloc);
             defer response.deinit();
-            const usage = if (active.state.active_session) |*session|
-                session.session_rt.agent.turn_usage
-            else
-                types.Usage{};
-            try acp_types.writePromptResponseWithUsage(
-                &response.writer,
-                stop_reason,
-                usage,
-            );
-            try active.state.writer.writeResponse(active.alloc, active.msg.id, response.writer.buffered());
+            try acp_types.writePromptResponseWithUsage(&response.writer, stop_reason, usage);
+            return jsonrpc.Writer.buildResponse(alloc, id, response.writer.buffered());
         },
-        .rpc_error => |rpc_error| {
-            try active.state.writer.writeError(active.alloc, active.msg.id, rpc_error);
-        },
+        .rpc_error => |rpc_error| return jsonrpc.Writer.buildError(alloc, id, rpc_error),
+        .auth_required => |auth| return buildAuthRequired(alloc, id, auth),
     }
 }
 
@@ -2736,6 +2997,7 @@ fn writeSteeringOutcome(
             try active.state.writer.writeResponse(active.alloc, id, response.written());
         },
         .rpc_error => |rpc_error| try active.state.writer.writeError(active.alloc, id, rpc_error),
+        .auth_required => |auth| try active.state.writer.send(active.alloc, try buildAuthRequired(active.alloc, id, auth)),
     }
 }
 
@@ -3181,7 +3443,7 @@ fn applyStartupOverrides(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Me
 /// `initialize` gives when a credential is present. They stay held after a
 /// rejection, so every session call fails until they pass. Returns false after
 /// writing the error response.
-fn validateHeldStartupOverrides(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !bool {
+pub fn validateHeldStartupOverrides(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !bool {
     if (!state.startup_overrides_held) return true;
     std.debug.assert(!state.auth_pending);
     if (!try resolveStartupCatalog(state, alloc, msg)) return false;
@@ -3809,7 +4071,7 @@ fn handleSetConfigOption(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Me
                 if (!try selectCredentialForProvider(state, session.provider)) {
                     return state.writer.writeError(alloc, msg.id, .{
                         .code = ErrorCode.invalid_request,
-                        .message = "Configured provider authentication is unavailable",
+                        .message = configured_credential_unavailable_message,
                     });
                 }
             }
@@ -4624,6 +4886,81 @@ test "ACP authenticate accepts the agent and terminal method ids" {
     try std.testing.expect(std.mem.find(u8, capture.bytes(), "\"code\":-32602") != null);
 }
 
+/// Holds `state.active_prompt` as a running turn does until it is reaped. The
+/// worker returns at once, so a reap never waits on it.
+pub fn startIdlePromptForTest(state: *ServerState) !void {
+    const active = try state.alloc.create(ActivePrompt);
+    errdefer state.alloc.destroy(active);
+    active.* = .{
+        .state = state,
+        .alloc = state.alloc,
+        .msg = try cloneMessage(state.alloc, &.{ .method = "session/prompt" }),
+        .mode = "",
+        .permission_mode = .ask,
+    };
+    errdefer jsonrpc.freeMessage(state.alloc, &active.msg);
+    active.thread = try std.Thread.spawn(.{}, struct {
+        fn run() void {}
+    }.run, .{});
+    state.active_prompt = active;
+}
+
+/// A configured-provider turn runs while the Gateway default awaits sign-in;
+/// the process credential slots hold the configured key that turn borrows.
+fn pendingGatewayStateForTest(alloc: Allocator, capture: *LastFrame) !ServerState {
+    var state = ServerState{
+        .alloc = alloc,
+        .cfg = undefined,
+        .writer = jsonrpc.Writer.initCallback(capture, LastFrame.write),
+        .provider = .gateway,
+        .auth_pending = true,
+        .credential_source = .configured,
+        .api_key = try alloc.dupe(u8, "configured-key"),
+    };
+    state.cfg.auth_mode = .local;
+    state.cfg.credential_override = "gateway-token";
+    return state;
+}
+
+test "a sign-in found while a turn runs is confirmed, then adopted once that turn is reaped" {
+    const alloc = std.testing.allocator;
+    var capture = LastFrame{};
+    var state = try pendingGatewayStateForTest(alloc, &capture);
+    defer secret.zeroAndFree(alloc, state.api_key);
+    try startIdlePromptForTest(&state);
+    const borrowed = state.api_key;
+
+    try std.testing.expectEqual(PendingAuth.deferred, try refreshPendingAuth(&state));
+    try std.testing.expect(state.active_prompt != null);
+    try std.testing.expectEqual(borrowed.ptr, state.api_key.ptr);
+    try std.testing.expect(state.auth_pending);
+
+    reapActivePrompt(&state, true);
+    try std.testing.expectEqual(PendingAuth.adopted, try refreshPendingAuth(&state));
+    try std.testing.expectEqualStrings("gateway-token", state.api_key);
+    try std.testing.expect(!state.auth_pending);
+    try std.testing.expect(!state.auth_adoption_deferred);
+}
+
+test "authenticate during a turn confirms the sign-in and leaves the turn's credential in place" {
+    const alloc = std.testing.allocator;
+    var capture = LastFrame{};
+    var state = try pendingGatewayStateForTest(alloc, &capture);
+    defer secret.zeroAndFree(alloc, state.api_key);
+    try startIdlePromptForTest(&state);
+    defer reapActivePrompt(&state, true);
+    const borrowed = state.api_key;
+
+    var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "authenticate", .params_raw = "{\"methodId\":\"fx-login\"}" };
+    try handleAuthenticate(&state, alloc, &msg);
+    try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n", capture.bytes());
+    try std.testing.expect(state.active_prompt != null);
+    try std.testing.expectEqual(borrowed.ptr, state.api_key.ptr);
+    // Pending until a request finds the turn over, or a new session or restore
+    // replaces it.
+    try std.testing.expect(state.auth_pending);
+}
+
 test "ACP AUTH_REQUIRED carries the initialize auth methods for the provider" {
     const alloc = std.testing.allocator;
     for ([_]bool{ false, true }) |terminal_auth| {
@@ -5184,4 +5521,95 @@ test "speedSupportedBy keeps only the lanes the new model offers" {
     try std.testing.expectEqual(SessionSpeed{ .fast = false, .ultrafast = false }, speedSupportedBy(on, .gateway, plain));
     const standard: SessionSpeed = .{ .fast = false, .ultrafast = false };
     try std.testing.expectEqual(standard, speedSupportedBy(standard, .gateway, both));
+}
+
+const AnswerCapture = struct {
+    alloc: Allocator,
+    frames: std.ArrayList([]u8) = .empty,
+    fail_results: bool = false,
+
+    fn write(raw: ?*anyopaque, frame: []const u8) anyerror!void {
+        const self: *AnswerCapture = @ptrCast(@alignCast(raw.?));
+        if (self.fail_results and std.mem.find(u8, frame, "\"result\"") != null) return error.BrokenPipe;
+        try self.frames.append(self.alloc, try self.alloc.dupe(u8, frame));
+    }
+
+    fn deinit(self: *AnswerCapture) void {
+        for (self.frames.items) |frame| self.alloc.free(frame);
+        self.frames.deinit(self.alloc);
+    }
+};
+
+test "a prompt whose response cannot be built still gets an error answer" {
+    const alloc = std.testing.allocator;
+    var capture = AnswerCapture{ .alloc = alloc };
+    defer capture.deinit();
+    var writer = jsonrpc.Writer.initCallback(&capture, AnswerCapture.write);
+    const id: jsonrpc.RequestId = .{ .integer = 7 };
+
+    answerPrompt(&writer, alloc, id, .{ .stop_reason = .end_turn }, .{ .input_tokens = 3 });
+    try std.testing.expectEqual(@as(usize, 1), capture.frames.items.len);
+    try std.testing.expect(std.mem.find(u8, capture.frames.items[0], "\"stopReason\":\"end_turn\"") != null);
+
+    var failing: std.testing.FailingAllocator = .init(alloc, .{ .fail_index = 0 });
+    answerPrompt(&writer, failing.allocator(), id, .{ .stop_reason = .end_turn }, .{});
+    try std.testing.expectEqual(@as(usize, 2), capture.frames.items.len);
+    try std.testing.expect(std.mem.find(u8, capture.frames.items[1], "\"id\":7") != null);
+    try std.testing.expect(std.mem.find(u8, capture.frames.items[1], "-32603") != null);
+    try std.testing.expect(std.mem.find(u8, capture.frames.items[1], "could not be sent") != null);
+}
+
+test "a prompt whose response fails while being written gets no second frame" {
+    const alloc = std.testing.allocator;
+    var capture = AnswerCapture{ .alloc = alloc, .fail_results = true };
+    defer capture.deinit();
+    var writer = jsonrpc.Writer.initCallback(&capture, AnswerCapture.write);
+
+    answerPrompt(&writer, alloc, .{ .integer = 7 }, .{ .stop_reason = .end_turn }, .{});
+    try std.testing.expectEqual(@as(usize, 0), capture.frames.items.len);
+}
+
+test "a prompt that needs sign-in answers one AUTH_REQUIRED frame with its notice and auth methods" {
+    const alloc = std.testing.allocator;
+    var capture = AnswerCapture{ .alloc = alloc };
+    defer capture.deinit();
+    var writer = jsonrpc.Writer.initCallback(&capture, AnswerCapture.write);
+
+    answerPrompt(&writer, alloc, .{ .integer = 7 }, .{ .auth_required = .{
+        .message = "fx login authentication failed · HTTP 401",
+        .offer = .{ .client_terminal_auth = true },
+    } }, .{});
+    try std.testing.expectEqual(@as(usize, 1), capture.frames.items.len);
+    const parsed = try std.json.parseFromSlice(std.json.Value, alloc, capture.frames.items[0], .{});
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(i64, 7), parsed.value.object.get("id").?.integer);
+    const err = parsed.value.object.get("error").?.object;
+    try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), err.get("code").?.integer);
+    try std.testing.expectEqualStrings("fx login authentication failed · HTTP 401", err.get("message").?.string);
+    const methods = err.get("data").?.object.get("authMethods").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), methods.len);
+    try std.testing.expectEqualStrings(acp_types.agent_auth_method_id, methods[0].object.get("id").?.string);
+}
+
+test "the unallocated error frame matches the allocated one and writes nothing when too long" {
+    const alloc = std.testing.allocator;
+    var capture = AnswerCapture{ .alloc = alloc };
+    defer capture.deinit();
+    var writer = jsonrpc.Writer.initCallback(&capture, AnswerCapture.write);
+    const err: jsonrpc.RpcError = .{ .code = ErrorCode.internal_error, .message = "The prompt's response could not be sent" };
+    const ids = [_]jsonrpc.RequestId{ .{ .integer = 7 }, .{ .string = "id \"with\" escapes\n" } };
+
+    for (ids) |id| {
+        try writer.writeError(alloc, id, err);
+        try writer.writeErrorUnallocated(id, err);
+        try std.testing.expectEqualStrings(capture.frames.items[capture.frames.items.len - 2], capture.frames.items[capture.frames.items.len - 1]);
+        try std.testing.expect(std.mem.endsWith(u8, capture.frames.items[capture.frames.items.len - 1], "}}\n"));
+    }
+
+    const frames_before = capture.frames.items.len;
+    const long_id = try alloc.alloc(u8, 2048);
+    defer alloc.free(long_id);
+    @memset(long_id, 'x');
+    try std.testing.expectError(error.WriteFailed, writer.writeErrorUnallocated(.{ .string = long_id }, err));
+    try std.testing.expectEqual(frames_before, capture.frames.items.len);
 }

@@ -1325,6 +1325,9 @@ fn parseEnvironment(alloc: Allocator, value: std.json.Value) ![]McpEnvVar {
     var it = value.object.iterator();
     while (it.next()) |entry| {
         if (entry.value_ptr.* != .string) return error.McpConfigInvalidEnvironment;
+        // The process environment asserts on a name or value it cannot hold.
+        if (!std.process.Environ.Map.validateKeyForPut(entry.key_ptr.*)) return error.McpConfigInvalidEnvironment;
+        if (std.mem.findScalar(u8, entry.value_ptr.*.string, 0) != null) return error.McpConfigInvalidEnvironment;
         const key = try alloc.dupe(u8, entry.key_ptr.*);
         errdefer mem_utils.free(alloc, key);
         const entry_value = try alloc.dupe(u8, entry.value_ptr.*.string);
@@ -1871,6 +1874,22 @@ test "workspace parsing isolates invalid entries" {
     try std.testing.expectEqualStrings("good", result.configs.items[0].name);
     try std.testing.expectEqual(@as(usize, 1), result.diagnostics.items.len);
     try std.testing.expectEqualStrings("bad", result.diagnostics.items[0].server_name.?);
+}
+
+test "env names the process environment cannot hold are rejected" {
+    const alloc = std.testing.allocator;
+    const json =
+        \\{"mcpServers":{"good":{"command":"node","env":{"TOKEN":"x"}},"empty":{"command":"node","env":{"":"x"}},"assign":{"command":"node","env":{"A=B":"x"}},"nul":{"command":"node","env":{"A\u0000B":"x"}},"nul_value":{"command":"node","env":{"TOKEN":"x\u0000y"}}}}
+    ;
+    var result = try parseWorkspaceJson(alloc, json, .workspace, .{});
+    defer result.deinit(alloc);
+    try std.testing.expectEqual(@as(usize, 1), result.configs.items.len);
+    try std.testing.expectEqualStrings("good", result.configs.items[0].name);
+    try std.testing.expectEqual(@as(usize, 4), result.diagnostics.items.len);
+    try std.testing.expectError(
+        error.McpConfigInvalidEnvironment,
+        parseProfileJson(alloc, "{\"mcp\":{\"bad\":{\"command\":\"node\",\"env\":{\"A=B\":\"x\"}}}}"),
+    );
 }
 
 test "streamable-http reads as http in both files" {
