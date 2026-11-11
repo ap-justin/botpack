@@ -35,7 +35,7 @@ const Allocator = std.mem.Allocator;
 
 pub const file_name = "history-cache.bin";
 
-const magic = "lia-history-cache\x1a\n"; // 18 bytes; all offsets use magic.len
+const magic = "fx-history-cache\x1a\n"; // 18 bytes; all offsets use magic.len
 // Image source references extend the binary payload without changing the log schema.
 const format_version: u16 = 3;
 /// Frames carry 32-bit lengths; a single log line can be large (embedded tool

@@ -1385,9 +1385,9 @@ test "list lines up its columns and keeps hostile names inert" {
     var out: Writer.Allocating = .init(a);
     try writeList(&out.writer, a, &statuses);
     try testing.expectEqualStrings(
-        \\NAME      SOURCE          TRANSPORT  STATUS
+        \\NAME      SOURCE           TRANSPORT  STATUS
         \\context7  ~/.lia/mcp.json  http       ready, 2 tools
-        \\x\x1b[2J  .mcp.json       stdio      waiting for approval
+        \\x\x1b[2J  .mcp.json        stdio      waiting for approval
         \\
     , out.written());
 

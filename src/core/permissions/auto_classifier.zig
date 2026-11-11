@@ -1854,7 +1854,7 @@ test "automatic review model-facing tool contract stays byte exact" {
     std.crypto.hash.sha2.Sha256.hash(tools_json, &digest, .{});
     const actual_hex = std.fmt.bytesToHex(digest, .lower);
     try std.testing.expectEqualStrings(
-        "124c355e3e7c3960a7e92272e5ab1f719532149ad2f3c6b780a68f72b26021dc",
+        "5b974f4fb65e1c66bfd1b32ade13e6809028def7471359e5e749c55327bd1616",
         &actual_hex,
     );
 }
@@ -2107,15 +2107,15 @@ test "automatic reviewer classifier routes through the registered provider" {
 
 test "automatic review policy matches the tested provider-neutral artifact" {
     const expected_digest = [_]u8{
-        0xe4, 0x93, 0xbb, 0xa4, 0x8d, 0x00, 0xde, 0xa0,
-        0x69, 0xf4, 0xee, 0x89, 0x56, 0x5c, 0x21, 0xdc,
-        0xbd, 0x18, 0xf2, 0x82, 0x85, 0xaf, 0x72, 0xf9,
-        0xb6, 0x86, 0x63, 0xe1, 0x8c, 0x32, 0x75, 0xba,
+        0xb8, 0xb5, 0xce, 0xe6, 0x6a, 0x03, 0xbf, 0x8f,
+        0x77, 0x02, 0x33, 0x47, 0x16, 0x2e, 0x8e, 0xd7,
+        0x64, 0xec, 0x23, 0x50, 0x27, 0x08, 0x0e, 0x23,
+        0x86, 0x10, 0x7e, 0xa9, 0x7e, 0x40, 0x1f, 0x04,
     };
     var actual_digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(review_policy_template, &actual_digest, .{});
 
-    try std.testing.expectEqual(@as(usize, 5485), review_policy_template.len);
+    try std.testing.expectEqual(@as(usize, 5488), review_policy_template.len);
     try std.testing.expectEqualSlices(u8, &expected_digest, &actual_digest);
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, review_policy_template, review_data_marker));
     try std.testing.expect(std.mem.endsWith(u8, review_policy_template, "</permission_review>\n"));

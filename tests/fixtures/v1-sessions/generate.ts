@@ -25,7 +25,7 @@ import {
 import { KINDS as CARRIED } from "../../tla/drivers/session_manager/conversion/recipes";
 
 const out = dirname(new URL(import.meta.url).pathname);
-const root = "/tmp/lia-v1-fixtures";
+const root = "/tmp/fx-v1-fixtures";
 
 // The v1 sessions in the fixture's home, oldest first.
 function sessionIds(f: Fixture): string[] {

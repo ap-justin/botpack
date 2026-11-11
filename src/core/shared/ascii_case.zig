@@ -50,7 +50,7 @@ test "hasMajorVersionAtLeast reads the major version after the family" {
 
 test "containsIgnoreCase finds a needle anywhere, ignoring ASCII case" {
     try std.testing.expect(containsIgnoreCase("Session/Model-Picker", "model"));
-    try std.testing.expect(containsIgnoreCase("lia-commit", "FX-C"));
+    try std.testing.expect(containsIgnoreCase("lia-commit", "LIA-C"));
     try std.testing.expect(containsIgnoreCase("abc", "abc"));
     try std.testing.expect(containsIgnoreCase("abc", ""));
     try std.testing.expect(containsIgnoreCase("", ""));

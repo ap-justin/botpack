@@ -919,11 +919,11 @@ fn testPayload(alloc: Allocator, nonce: []const u8, chatter: []const u8) ![]u8 {
         "FXSNAP:",
         nonce,
         ":NAMES\x00",
-        "ll\x00fx_function\x00\x00",
+        "ll\x00lia_function\x00\x00",
         "FXSNAP:",
         nonce,
         ":REPLAY\x00",
-        "alias ll='ls -l'\nfx_function () {\n\tprint ok\n}\n",
+        "alias ll='ls -l'\nlia_function () {\n\tprint ok\n}\n",
         "\x00FXSNAP:",
         nonce,
         ":END\x00",
@@ -946,7 +946,7 @@ test "snapshot payload parsing ignores startup output and shell-owned variables"
     try testing.expect(generation.defines("lia_function"));
     try testing.expect(!generation.defines("ls"));
     try testing.expectEqualStrings(
-        "alias ll='ls -l'\nfx_function () {\n\tprint ok\n}\n",
+        "alias ll='ls -l'\nlia_function () {\n\tprint ok\n}\n",
         generation.replay,
     );
 }

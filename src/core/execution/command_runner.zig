@@ -2637,7 +2637,7 @@ test "replay marker filter drops the marker however chunks split it" {
         .{ .input = "warning\n" ++ marker, .expected = "warning\n" },
         .{ .input = "ff" ++ marker ++ "f", .expected = "fff" },
         // Partial markers that never complete pass through unchanged.
-        .{ .input = "err\nfx-shell-snapshot\nfx-done\n", .expected = "err\nfx-shell-snapshot\nfx-done\n" },
+        .{ .input = "err\nlia-shell-snapshot\nlia-done\n", .expected = "err\nlia-shell-snapshot\nlia-done\n" },
         .{ .input = "ends with lia-shell-snap", .expected = "ends with lia-shell-snap" },
     };
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -4035,7 +4035,7 @@ test "commands receive lia agent environment" {
     try std.testing.expect(std.mem.find(
         u8,
         result.output,
-        "<stdout>\nfx\n</stdout>",
+        "<stdout>\nlia\n</stdout>",
     ) != null);
 }
 
