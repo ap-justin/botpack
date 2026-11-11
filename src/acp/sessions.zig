@@ -1388,8 +1388,8 @@ fn handleLoadFailure(
             .message = "Session could not be loaded",
         });
     }
-    // Before sign-in, an unknown session is met with the sign-in answer first.
-    // A configured default has no sign-in to offer.
+    // An unknown session gets the sign-in answer only while a Gateway default
+    // still has no credential. A configured default has no sign-in to offer.
     if (state.auth_pending and server.credentialUnavailableAnswer(state.provider) == .sign_in and
         try server.refreshPendingAuth(state) == .unavailable)
     {

@@ -4956,7 +4956,8 @@ test "authenticate during a turn confirms the sign-in and leaves the turn's cred
     try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n", capture.bytes());
     try std.testing.expect(state.active_prompt != null);
     try std.testing.expectEqual(borrowed.ptr, state.api_key.ptr);
-    // The next request that can reap the turn adopts the sign-in.
+    // Pending until a request finds the turn over, or a new session or restore
+    // replaces it.
     try std.testing.expect(state.auth_pending);
 }
 

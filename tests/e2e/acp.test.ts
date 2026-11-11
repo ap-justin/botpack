@@ -705,8 +705,8 @@ test("ACP load and resume of a configured-provider session without its key answe
       if (prompted.error) throw new Error(JSON.stringify(prompted));
     } finally { await first.close(); }
 
-    // The default is the key-less local provider, so the process starts signed
-    // in; only the saved session's own provider has lost its key.
+    // The default is the key-less local provider, so no sign-in is pending;
+    // only the saved session's own provider has lost its key.
     fixture.settings.provider = "local";
     fixture.save();
     const env = { ...fixture.env, FX_TEST_PROVIDER_TOKEN: undefined };
@@ -747,8 +747,8 @@ test("ACP authenticate during a configured-provider turn leaves the turn's key, 
       if (prompted.error) throw new Error(JSON.stringify(prompted));
     } finally { await first.close(); }
 
-    // Gateway is the default again and nobody is signed in to it, against a
-    // fake Gateway standing in for the real one.
+    // Gateway becomes the default with nobody signed in, against a fake
+    // Gateway standing in for the real one.
     fixture.settings.provider = "gateway";
     (fixture.settings.models as any).gateway = FAKE_GATEWAY_MODEL;
     fixture.save();
