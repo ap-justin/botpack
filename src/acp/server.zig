@@ -2736,7 +2736,8 @@ fn answerPrompt(
     debug_trace.logf("acp", "event=prompt_answer kind={s}", .{@tagName(outcome)});
     const built = buildPromptAnswer(alloc, id, outcome, usage) catch |err| {
         debug_trace.logf("acp", "event=prompt_answer_build_failed kind={s} err={s}", .{ @tagName(outcome), @errorName(err) });
-        writer.writeError(alloc, id, .{
+        // The allocator may be the reason the answer failed to build.
+        writer.writeErrorUnallocated(id, .{
             .code = ErrorCode.internal_error,
             .message = "The prompt's response could not be sent",
         }) catch |fallback_err| {

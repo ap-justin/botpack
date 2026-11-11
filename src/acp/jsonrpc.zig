@@ -302,21 +302,35 @@ pub const Writer = struct {
     /// already be on the stream.
     pub fn send(self: *Writer, alloc: Allocator, built: Built) !void {
         defer alloc.free(built.bytes);
+        try self.sendBytes(built.kind, built.bytes);
+    }
 
+    /// Writes an error response rendered into a stack buffer, for a caller
+    /// whose allocator has just failed. An id or message too long for the
+    /// buffer is an error and nothing is written.
+    pub fn writeErrorUnallocated(self: *Writer, id: ?RequestId, err: RpcError) !void {
+        var buf: [1024]u8 = undefined;
+        var fixed: std.Io.Writer = .fixed(&buf);
+        const frame: Frame = .{ .error_response = .{ .id = id, .err = err } };
+        try frame.write(&fixed);
+        try self.sendBytes(std.meta.activeTag(frame), fixed.buffered());
+    }
+
+    fn sendBytes(self: *Writer, kind: std.meta.Tag(Frame), bytes: []const u8) !void {
         // An answer to a request is traced at each step, since a client that
         // never receives one only waits.
-        const answers = built.kind == .response or built.kind == .error_response;
+        const answers = kind == .response or kind == .error_response;
         const io = io_mod.getIo();
-        if (answers) debug_trace.logf("acp", "event=frame_write_begin kind={s} bytes={d}", .{ @tagName(built.kind), built.bytes.len });
+        if (answers) debug_trace.logf("acp", "event=frame_write_begin kind={s} bytes={d}", .{ @tagName(kind), bytes.len });
         self.mutex.lockUncancelable(io);
         defer self.mutex.unlock(io);
-        if (answers) debug_trace.logf("acp", "event=frame_write_locked kind={s}", .{@tagName(built.kind)});
+        if (answers) debug_trace.logf("acp", "event=frame_write_locked kind={s}", .{@tagName(kind)});
         if (self.callback) |callback| {
-            try callback.write_fn(callback.context, built.bytes);
+            try callback.write_fn(callback.context, bytes);
         } else {
-            try self.stdout.writeStreamingAll(io, built.bytes);
+            try self.stdout.writeStreamingAll(io, bytes);
         }
-        if (answers) debug_trace.logf("acp", "event=frame_write_done kind={s}", .{@tagName(built.kind)});
+        if (answers) debug_trace.logf("acp", "event=frame_write_done kind={s}", .{@tagName(kind)});
     }
 
     fn writeFrame(self: *Writer, alloc: Allocator, frame: Frame) !void {
