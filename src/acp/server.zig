@@ -357,8 +357,12 @@ pub const ServerState = struct {
     api_key: []u8 = &.{},
     credential_source: ?types.CredentialSource = null,
     /// `initialize` found no credential for the selected model. Calls that need
-    /// one re-read the credentials and answer `AUTH_REQUIRED` until they exist.
+    /// one re-read the credentials and answer as `credentialUnavailableAnswer`
+    /// decides until they exist.
     auth_pending: bool = false,
+    /// A credential turned up while a turn borrowed the credential slots, so
+    /// the first request that finds no turn running adopts it.
+    auth_adoption_deferred: bool = false,
     /// `initialize` kept the effort, fast and ultrafast overrides unvalidated
     /// because auth was pending. `session/new`, `session/load` and
     /// `session/resume` validate them against the catalog and fail until they
@@ -1610,7 +1614,7 @@ fn dispatchNotification(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Mes
     }
 }
 
-fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
+pub fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
     reapActivePrompt(state, false);
     const method = AcpMethod.parse(msg.method);
 
@@ -1623,6 +1627,15 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
             .code = ErrorCode.invalid_request,
             .message = "Not initialized. Call initialize first.",
         });
+    }
+
+    // A sign-in deferred for a turn that has since ended. Failing to adopt it
+    // leaves it pending, and this request answers as it would have.
+    if (state.auth_adoption_deferred and state.active_prompt == null) {
+        if (refreshPendingAuth(state)) |_| {} else |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => debug_trace.logf("auth", "deferred sign-in adoption failed err={s}", .{@errorName(err)}),
+        }
     }
 
     if (method == .session_cancel) {
@@ -1648,11 +1661,18 @@ fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void 
         return writePromptInProgress(state, alloc, msg.id);
     }
 
-    if (state.auth_pending and method == .session_new) {
-        if (!try refreshPendingAuth(state)) return writeAuthRequired(state, alloc, msg.id);
+    // The web core's load never reaches `handleRestoreSession`, and its
+    // sessions are all on Gateway.
+    const waits_for_default_sign_in = method == .session_new or
+        (host_target.is_wasm and method == .session_load and state.provider == .gateway);
+    if (state.auth_pending and waits_for_default_sign_in) {
+        if (!try refreshPendingAuthReplacingTurn(state)) {
+            return writeCredentialUnavailable(state, alloc, msg.id, state.provider);
+        }
     }
-    // A restore decides by its session's provider, not the process default,
-    // so while sign-in is pending it runs these checks once it knows which.
+    // A native restore decides by its session's provider, not the process
+    // default, so while sign-in is pending `handleRestoreSession` runs these
+    // checks itself, and only for a session on the default provider.
     if (method == .session_new or ((method == .session_load or method == .session_resume) and !state.auth_pending)) {
         if (!try validateHeldStartupOverrides(state, alloc, msg)) return;
     }
@@ -1736,6 +1756,23 @@ pub fn credentialUnavailableAnswer(provider: model_provider.ProviderId) Credenti
     return if (provider == .configured) .plain_error else .sign_in;
 }
 
+/// Answers a request whose `provider` has no credential, as
+/// `credentialUnavailableAnswer` decides.
+pub fn writeCredentialUnavailable(
+    state: *ServerState,
+    alloc: Allocator,
+    id: ?jsonrpc.RequestId,
+    provider: model_provider.ProviderId,
+) !void {
+    return switch (credentialUnavailableAnswer(provider)) {
+        .plain_error => state.writer.writeError(alloc, id, .{
+            .code = ErrorCode.invalid_request,
+            .message = configured_credential_unavailable_message,
+        }),
+        .sign_in => writeAuthRequired(state, alloc, id),
+    };
+}
+
 /// Answers with `AUTH_REQUIRED` and the auth methods the client can offer.
 pub fn writeAuthRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId) !void {
     const offer = authOffer(state);
@@ -1757,26 +1794,51 @@ fn buildAuthRequired(alloc: Allocator, id: ?jsonrpc.RequestId, auth: prompt_hand
     });
 }
 
+/// What re-reading the selected provider's credentials found while sign-in
+/// was pending.
+pub const PendingAuth = enum {
+    /// Adopted, so sign-in is no longer pending; or it never was.
+    adopted,
+    /// Available, but a running turn borrows the credential slots adopting
+    /// would replace, so sign-in stays pending.
+    deferred,
+    /// Still none.
+    unavailable,
+};
+
 /// Re-reads the credentials for the selected provider and ends the pending
-/// state when one is now available, unless a turn is still running, which
-/// leaves it pending. Returns false while there is none.
-pub fn refreshPendingAuth(state: *ServerState) !bool {
-    if (!state.auth_pending) return true;
+/// state when one is now available and no turn is running.
+pub fn refreshPendingAuth(state: *ServerState) !PendingAuth {
+    if (!state.auth_pending) return .adopted;
     reapActivePrompt(state, false);
-    if (state.active_prompt != null) {
+    const outcome: PendingAuth = if (state.active_prompt != null) running: {
         // A running turn, on a session whose own provider is signed in, borrows
-        // the credential slots that adopting would replace. The sign-in is
-        // confirmed now and adopted by the first request after that turn ends.
+        // the credential slots that adopting would replace. `dispatch` adopts
+        // the sign-in at the first request that finds no turn running.
         var staged = prepareCredentialForProvider(state, state.provider) catch |err| {
-            if (err == error.ProviderCredentialUnavailable) return false;
-            return err;
+            if (err != error.ProviderCredentialUnavailable) return err;
+            break :running .unavailable;
         };
         if (staged) |*credential| credential.deinit(state.alloc);
-        return true;
+        break :running .deferred;
+    } else if (try selectCredentialForProvider(state, state.provider)) .adopted else .unavailable;
+    state.auth_adoption_deferred = outcome == .deferred;
+    if (outcome == .adopted) state.auth_pending = false;
+    return outcome;
+}
+
+/// `refreshPendingAuth` for a request that replaces the running turn anyway:
+/// a credential that turned up during it ends the turn so it can be adopted.
+/// True once sign-in is no longer pending.
+pub fn refreshPendingAuthReplacingTurn(state: *ServerState) !bool {
+    switch (try refreshPendingAuth(state)) {
+        .adopted => return true,
+        .unavailable => return false,
+        .deferred => {
+            cancelAndReapActivePrompt(state);
+            return try refreshPendingAuth(state) == .adopted;
+        },
     }
-    if (!try selectCredentialForProvider(state, state.provider)) return false;
-    state.auth_pending = false;
-    return true;
 }
 
 /// `authenticate`: the person ran the login an advertised method names, so
@@ -1796,7 +1858,9 @@ fn handleAuthenticate(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Messa
             .message = "Unknown authentication method",
         });
     }
-    if (!try refreshPendingAuth(state)) return writeAuthRequired(state, alloc, msg.id);
+    if (try refreshPendingAuth(state) == .unavailable) {
+        return writeCredentialUnavailable(state, alloc, msg.id, state.provider);
+    }
     return state.writer.writeResponse(alloc, msg.id, "{}");
 }
 
@@ -4824,7 +4888,7 @@ test "ACP authenticate accepts the agent and terminal method ids" {
 
 /// Holds `state.active_prompt` as a running turn does until it is reaped. The
 /// worker returns at once, so a reap never waits on it.
-fn startIdlePromptForTest(state: *ServerState) !void {
+pub fn startIdlePromptForTest(state: *ServerState) !void {
     const active = try state.alloc.create(ActivePrompt);
     errdefer state.alloc.destroy(active);
     active.* = .{
@@ -4866,15 +4930,16 @@ test "a sign-in found while a turn runs is confirmed, then adopted once that tur
     try startIdlePromptForTest(&state);
     const borrowed = state.api_key;
 
-    try std.testing.expect(try refreshPendingAuth(&state));
+    try std.testing.expectEqual(PendingAuth.deferred, try refreshPendingAuth(&state));
     try std.testing.expect(state.active_prompt != null);
     try std.testing.expectEqual(borrowed.ptr, state.api_key.ptr);
     try std.testing.expect(state.auth_pending);
 
     reapActivePrompt(&state, true);
-    try std.testing.expect(try refreshPendingAuth(&state));
+    try std.testing.expectEqual(PendingAuth.adopted, try refreshPendingAuth(&state));
     try std.testing.expectEqualStrings("gateway-token", state.api_key);
     try std.testing.expect(!state.auth_pending);
+    try std.testing.expect(!state.auth_adoption_deferred);
 }
 
 test "authenticate during a turn confirms the sign-in and leaves the turn's credential in place" {

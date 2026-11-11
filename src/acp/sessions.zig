@@ -911,14 +911,14 @@ fn handleRestoreSession(
     // While the process's own provider awaits sign-in, a session on that
     // provider waits with it. A session on another provider is unaffected.
     if (state.auth_pending and effective_provider.eql(state.provider)) {
-        if (!try server.refreshPendingAuth(state)) {
-            return writeRestoreCredentialUnavailable(state, alloc, msg.id, effective_provider);
+        if (!try server.refreshPendingAuthReplacingTurn(state)) {
+            return server.writeCredentialUnavailable(state, alloc, msg.id, effective_provider);
         }
         if (!try server.validateHeldStartupOverrides(state, alloc, msg)) return;
     }
     var staged_credential = server.prepareCredentialForProvider(state, effective_provider) catch |err| {
         if (err != error.ProviderCredentialUnavailable) return err;
-        return writeRestoreCredentialUnavailable(state, alloc, msg.id, effective_provider);
+        return server.writeCredentialUnavailable(state, alloc, msg.id, effective_provider);
     };
     defer if (staged_credential) |*credential| credential.deinit(alloc);
     const model_copy = try alloc.dupe(u8, effective_model);
@@ -1326,23 +1326,6 @@ fn removedSignInReplacementModel(state: *const server.ServerState) []const u8 {
     return if (state.provider == .gateway) state.selected_model else state.cfg.default_model;
 }
 
-/// Answers a load or resume whose provider has no credential, as a prompt
-/// does: `server.credentialUnavailableAnswer` decides.
-fn writeRestoreCredentialUnavailable(
-    state: *server.ServerState,
-    alloc: Allocator,
-    id: ?jsonrpc.RequestId,
-    provider: model_provider.ProviderId,
-) !void {
-    return switch (server.credentialUnavailableAnswer(provider)) {
-        .plain_error => state.writer.writeError(alloc, id, .{
-            .code = ErrorCode.invalid_request,
-            .message = server.configured_credential_unavailable_message,
-        }),
-        .sign_in => server.writeAuthRequired(state, alloc, id),
-    };
-}
-
 fn handleLoadFailure(
     state: *server.ServerState,
     alloc: Allocator,
@@ -1406,7 +1389,12 @@ fn handleLoadFailure(
         });
     }
     // Before sign-in, an unknown session is met with the sign-in answer first.
-    if (state.auth_pending) return writeRestoreCredentialUnavailable(state, alloc, msg.id, state.provider);
+    // A configured default has no sign-in to offer.
+    if (state.auth_pending and server.credentialUnavailableAnswer(state.provider) == .sign_in and
+        try server.refreshPendingAuth(state) == .unavailable)
+    {
+        return server.writeAuthRequired(state, alloc, msg.id);
+    }
     return state.writer.writeError(alloc, msg.id, .{
         .code = ErrorCode.invalid_params,
         .message = "Session not found",
@@ -3401,8 +3389,8 @@ test "a restore without a credential offers sign-in for Gateway and keeps a conf
     {
         var state = try initAcpSessionTestState(arena, workspace_path, capture);
         defer state.deinit();
-        try writeRestoreCredentialUnavailable(&state, arena, .{ .integer = 1 }, .gateway);
-        try writeRestoreCredentialUnavailable(&state, arena, .{ .integer = 2 }, model_provider.parse("local").?);
+        try server.writeCredentialUnavailable(&state, arena, .{ .integer = 1 }, .gateway);
+        try server.writeCredentialUnavailable(&state, arena, .{ .integer = 2 }, model_provider.parse("local").?);
         try capture.sync(io_mod.getIo());
     }
     var captured_file = try tmp.dir.openFile(io_mod.getIo(), "acp-output.jsonl", .{});
@@ -3429,6 +3417,139 @@ test "a restore without a credential offers sign-in for Gateway and keeps a conf
         }
     }
     try std.testing.expectEqual(@as(usize, 2), answers);
+}
+
+test "session/new during a turn, after a sign-in, ends the turn and adopts the sign-in before it opens" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var arena_state = std.heap.ArenaAllocator.init(alloc);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
+    const home_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
+    defer alloc.free(home_path);
+    const workspace_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
+    defer alloc.free(workspace_path);
+    const test_home = try AcpSessionTestHome.install(alloc, home_path);
+    defer test_home.deinit();
+    try test_home.map.put("FX_DISABLE_KEYCHAIN", "1");
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-output.jsonl", .{ .read = true });
+    defer capture.close(io_mod.getIo());
+    {
+        var state = try initAcpSessionTestState(arena, workspace_path, capture);
+        defer state.deinit();
+        state.initialized = true;
+        // A libfx core loads no startup catalog, so the held overrides
+        // validate without a network.
+        state.cfg.minimal_kernel = true;
+        state.cfg.allow_acp_mcp = false;
+        state.cfg.home_override = home_path;
+        state.sessions_v2 = try session_adapter.Store.open(arena, home_path);
+        // The Gateway default awaits sign-in while a configured-provider turn
+        // borrows the process credential slots; the sign-in has since landed.
+        state.provider = .gateway;
+        state.credential_source = .configured;
+        state.cfg.credential_override = "gateway-token";
+        state.auth_pending = true;
+        state.startup_overrides_held = true;
+        try server.startIdlePromptForTest(&state);
+
+        var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "session/new", .params_raw = "{\"mcpServers\":[]}" };
+        try server.dispatch(&state, arena, &msg);
+
+        try std.testing.expect(state.active_prompt == null);
+        try std.testing.expect(!state.auth_pending);
+        try std.testing.expect(!state.auth_adoption_deferred);
+        try std.testing.expect(!state.startup_overrides_held);
+        try std.testing.expectEqualStrings("gateway-token", state.api_key);
+        try std.testing.expect(state.active_session != null);
+        try capture.sync(io_mod.getIo());
+    }
+    var captured_file = try tmp.dir.openFile(io_mod.getIo(), "acp-output.jsonl", .{});
+    defer captured_file.close(io_mod.getIo());
+    const captured = try io_mod.readFileToEnd(alloc, &captured_file, 1024 * 1024);
+    defer alloc.free(captured);
+
+    var answers: usize = 0;
+    var lines = std.mem.splitScalar(u8, captured, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        const frame = try std.json.parseFromSlice(std.json.Value, alloc, line, .{});
+        defer frame.deinit();
+        const id = frame.value.object.get("id") orelse continue;
+        if (id != .integer or id.integer != 1) continue;
+        answers += 1;
+        const result = frame.value.object.get("result").?.object;
+        try std.testing.expect(result.get("sessionId").? == .string);
+    }
+    try std.testing.expectEqual(@as(usize, 1), answers);
+}
+
+test "an unknown session asks for sign-in only while a Gateway default still has no credential" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var arena_state = std.heap.ArenaAllocator.init(alloc);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
+    const home_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
+    defer alloc.free(home_path);
+    const workspace_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
+    defer alloc.free(workspace_path);
+    const test_home = try AcpSessionTestHome.install(alloc, home_path);
+    defer test_home.deinit();
+    try test_home.map.put("FX_DISABLE_KEYCHAIN", "1");
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-output.jsonl", .{ .read = true });
+    defer capture.close(io_mod.getIo());
+
+    const Case = struct { id: i64, provider: model_provider.ProviderId, credential_override: ?[]const u8 };
+    const cases = [_]Case{
+        // Signed in since `initialize`: the refresh adopts it.
+        .{ .id = 1, .provider = .gateway, .credential_override = "gateway-token" },
+        // A configured default awaiting its key.
+        .{ .id = 2, .provider = model_provider.parse("local").?, .credential_override = null },
+        // Still no Gateway credential.
+        .{ .id = 3, .provider = .gateway, .credential_override = null },
+    };
+    for (cases) |case| {
+        var state = try initAcpSessionTestState(arena, workspace_path, capture);
+        defer state.deinit();
+        state.provider = case.provider;
+        state.credential_source = null;
+        state.cfg.credential_override = case.credential_override;
+        state.auth_pending = true;
+        var msg = jsonrpc.Message{ .id = .{ .integer = case.id }, .method = "session/load" };
+        try handleLoadFailure(&state, arena, &msg, error.SessionNotFound);
+        try std.testing.expectEqual(case.id != 1, state.auth_pending);
+    }
+    try capture.sync(io_mod.getIo());
+
+    var captured_file = try tmp.dir.openFile(io_mod.getIo(), "acp-output.jsonl", .{});
+    defer captured_file.close(io_mod.getIo());
+    const captured = try io_mod.readFileToEnd(alloc, &captured_file, 64 * 1024);
+    defer alloc.free(captured);
+
+    var answers: usize = 0;
+    var lines = std.mem.splitScalar(u8, captured, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        const frame = try std.json.parseFromSlice(std.json.Value, alloc, line, .{});
+        defer frame.deinit();
+        const id = frame.value.object.get("id") orelse continue;
+        const err = frame.value.object.get("error").?.object;
+        answers += 1;
+        if (id.integer == 3) {
+            try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), err.get("code").?.integer);
+        } else {
+            try std.testing.expectEqual(@as(i64, ErrorCode.invalid_params), err.get("code").?.integer);
+            try std.testing.expectEqualStrings("Session not found", err.get("message").?.string);
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 3), answers);
 }
 
 test "libfx/new uses a valid host session id and generates one when none is named" {
