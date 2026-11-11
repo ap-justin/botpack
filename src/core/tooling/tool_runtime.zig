@@ -230,7 +230,7 @@ pub const Context = struct {
     tool_progress_ctx: ?*anyopaque = null,
     on_tool_progress: ?*const fn (*anyopaque, types.ToolLifecycleId, []const u8) void = null,
     /// Where a tool call shows rows for tool calls it makes itself: the MCP
-    /// calls of an `lia mcp call` its command runs. Null shows none.
+    /// calls of a `lia mcp call` its command runs. Null shows none.
     nested_tool_lifecycle: ?ToolLifecyclePublisher = null,
     subagent_status_renderer: ?types.SubagentStatusRenderer = null,
     advertised_dynamic_tool_names: []const []const u8 = &.{},

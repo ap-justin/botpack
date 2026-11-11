@@ -6035,7 +6035,7 @@ describe("cli: MCP profile", () => {
     }
   });
 
-  test.skipIf(platform() === "win32")("list, add, and ask say what's wrong with an ~/.lia/mcp.json lia can't read", async () => {
+  test.skipIf(platform() === "win32")("list, add, and ask say what's wrong with a ~/.lia/mcp.json lia can't read", async () => {
     const linkLoop = "~/.lia/mcp.json is a link that loops or passes through too many links; replace it with a plain file";
     const tooLarge = "~/.lia/mcp.json is over 1 MB, the most lia reads; make it smaller";
     const cases = [

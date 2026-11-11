@@ -183,7 +183,7 @@ export function copyV1Fixture(home: string, kind: string, count = 1, workspace?:
 /// conversion that slow.
 const SLOW_CONVERSION_NOTICE = "lia ask: Converting this session from the previous session format…\n";
 
-/// `stderr` from an `lia ask` that opened a copied v1 session, without the one
+/// `stderr` from a `lia ask` that opened a copied v1 session, without the one
 /// slow-conversion notice it may start with.
 export function withoutConversionNotice(stderr: string): string {
   return stderr.startsWith(SLOW_CONVERSION_NOTICE) ? stderr.slice(SLOW_CONVERSION_NOTICE.length) : stderr;

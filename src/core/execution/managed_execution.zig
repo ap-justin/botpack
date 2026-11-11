@@ -39,7 +39,7 @@ pub const StartCapturedInput = struct {
     /// returns.
     extra_environment: []const command_runner.EnvironmentVariable = &.{},
     /// While this count is above zero, `startCaptured` waits past
-    /// `yield_time_ms`: the command is waiting on an `lia mcp call` whose
+    /// `yield_time_ms`: the command is waiting on a `lia mcp call` whose
     /// owner is this call, which must not end before the answer does.
     yield_hold: ?*const std.atomic.Value(u32) = null,
 };

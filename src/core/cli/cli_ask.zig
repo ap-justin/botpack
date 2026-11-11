@@ -3673,7 +3673,7 @@ fn resolveAskSubagentAuthority(
     );
 }
 
-/// What was wrong with an `lia ask` command line, for its error message.
+/// What was wrong with a `lia ask` command line, for its error message.
 const AskUsageProblem = union(enum) {
     none,
     flag: cli_flags.Failure,
