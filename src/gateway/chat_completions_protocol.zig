@@ -52,7 +52,8 @@ pub const Error = error{
     StreamClosed,
     ProviderError,
     ContentFiltered,
-    Refused,
+    /// Not `Refused`: session storage returns that name for a refused path.
+    ModelRefused,
     EventTooLarge,
     StreamTooLarge,
     TooManyEvents,
@@ -914,7 +915,7 @@ pub const Reducer = struct {
             .stop, .tool_calls, .length => {},
             else => return error.InvalidFinishReason,
         }
-        if (self.refusal_seen) return error.Refused;
+        if (self.refusal_seen) return error.ModelRefused;
         // A cut-off reply may stop anywhere, so only a finished one has to
         // agree with its tool calls.
         if (reason != .length) {
@@ -2231,7 +2232,7 @@ test "chat completions terminal evidence and finish reasons are strict" {
         defer reducer.deinit();
         try test_accept(&reducer, "{\"choices\":[{\"index\":0,\"delta\":{\"refusal\":\"No.\"},\"finish_reason\":\"stop\"}]}");
         try test_accept(&reducer, "[DONE]");
-        try std.testing.expectError(error.Refused, reducer.finish(false));
+        try std.testing.expectError(error.ModelRefused, reducer.finish(false));
     }
     {
         var reducer = try Reducer.init(alloc, test_tool_request(), .{});

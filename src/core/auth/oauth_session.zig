@@ -769,7 +769,7 @@ fn beginExistingNativeMutation() !?Mutation {
     };
     defer home_dir.close();
 
-    const lia_dir = openExistingPrivateFxDir(&home_dir) catch |err| switch (err) {
+    const lia_dir = openExistingPrivateLiaDir(&home_dir) catch |err| switch (err) {
         error.FileNotFound => return null,
         else => return session_presence.storageError(auth_file_name, err),
     };
@@ -858,7 +858,7 @@ fn lockMutationWithBackend(
     };
 }
 
-fn openExistingPrivateFxDir(home_dir: *io_mod.VerifiedDir) !io_mod.VerifiedDir {
+fn openExistingPrivateLiaDir(home_dir: *io_mod.VerifiedDir) !io_mod.VerifiedDir {
     var dir = try home_dir.dir.openDir(io_mod.getIo(), profile_paths.rootName(), .{
         .iterate = true,
         .follow_symlinks = false,

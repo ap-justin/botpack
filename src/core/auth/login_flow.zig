@@ -864,7 +864,7 @@ pub fn loadTeamSelection(
         var loaded = (try mutation.load(alloc)) orelse return LoginError.NoSession;
         errdefer loaded.deinit(alloc);
         if (loaded.expired(io_mod.milliTimestamp())) {
-            try credentials.refreshFxSession(alloc, transport, &mutation, &loaded);
+            try credentials.refreshLiaSession(alloc, transport, &mutation, &loaded);
         }
         break :blk loaded;
     };

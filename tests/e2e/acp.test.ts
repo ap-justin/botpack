@@ -18,7 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { LIA_BIN, HAS_API_KEY, REPO_ROOT, runLia } from "../evals/eval-helpers";
+import { LIA_BIN, REPO_ROOT, runLia } from "../evals/eval-helpers";
 import {
   AUTO_EXA_SERIALIZED_TOOL_NAMES,
   customProviderGuidanceState,
@@ -641,6 +641,169 @@ test("configured provider ACP preserves reasoning between prompts", async () => 
   } finally { await client.close(); fixture.close(); }
 }, 30000);
 
+test("ACP restores a configured-provider session under a Gateway default with nobody signed in", async () => {
+  const fixture = createConfiguredProviderFixture();
+  fixture.settings.provider = "remote";
+  fixture.save();
+  let sessionId = "";
+  {
+    const first = await AcpClient.create({ cwd: fixture.workspace, env: fixture.env });
+    try {
+      await first.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      const created = await first.request("session/new", { cwd: fixture.workspace, mcpServers: [] }) as any;
+      if (created.error) throw new Error(JSON.stringify(created));
+      sessionId = created.result.sessionId;
+      const prompted = await first.request("session/prompt", { prompt: [{ type: "text", text: "save this" }] }) as any;
+      if (prompted.error) throw new Error(JSON.stringify(prompted));
+    } finally { await first.close(); }
+  }
+
+  // The default is now Gateway and no Gateway credential exists, while the
+  // saved session's own provider keeps its key.
+  fixture.settings.provider = "gateway";
+  fixture.save();
+  const env = { ...fixture.env, AI_GATEWAY_API_KEY: undefined, VERCEL_OIDC_TOKEN: undefined, LIA_DISABLE_KEYCHAIN: "1" };
+  try {
+    for (const method of ["session/load", "session/resume"]) {
+      const client = await AcpClient.create({ cwd: fixture.workspace, env });
+      try {
+        const initialized = await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} }) as any;
+        expect(initialized.error).toBeUndefined();
+        const restored = await client.request(method, { sessionId, cwd: fixture.workspace, mcpServers: [] }) as any;
+        if (restored.error) throw new Error(`${method}: ${JSON.stringify(restored)}`);
+        expect(restored.result.configOptions.find((option: any) => option.id === "provider").currentValue).toBe("remote");
+
+        // The restored session is usable with its own provider's key.
+        const before = fixture.requests.length;
+        const prompted = await client.request("session/prompt", { prompt: [{ type: "text", text: `after ${method}` }] }) as any;
+        if (prompted.error) throw new Error(`${method} prompt: ${JSON.stringify(prompted)}`);
+        const sent = fixture.requests.slice(before);
+        expect(sent.length).toBeGreaterThan(0);
+        for (const request of sent) {
+          expect(request.path).toBe("/v1/chat/completions");
+          expect(request.authorization).toBe("Bearer own-provider-token");
+        }
+      } finally { await client.close(); }
+    }
+    expect(fixture.requests.some(request => request.path.startsWith("/unexpected-gateway"))).toBe(false);
+  } finally { fixture.close(); }
+}, 60000);
+
+test("ACP load and resume of a configured-provider session without its key answer a plain error, not AUTH_REQUIRED", async () => {
+  const fixture = createConfiguredProviderFixture();
+  fixture.settings.provider = "remote";
+  fixture.save();
+  let sessionId = "";
+  try {
+    const first = await AcpClient.create({ cwd: fixture.workspace, env: fixture.env });
+    try {
+      await first.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      const created = await first.request("session/new", { cwd: fixture.workspace, mcpServers: [] }) as any;
+      if (created.error) throw new Error(JSON.stringify(created));
+      sessionId = created.result.sessionId;
+      const prompted = await first.request("session/prompt", { prompt: [{ type: "text", text: "save this" }] }) as any;
+      if (prompted.error) throw new Error(JSON.stringify(prompted));
+    } finally { await first.close(); }
+
+    // The default is the key-less local provider, so no sign-in is pending;
+    // only the saved session's own provider has lost its key.
+    fixture.settings.provider = "local";
+    fixture.save();
+    const env = { ...fixture.env, LIA_TEST_PROVIDER_TOKEN: undefined };
+    const requestsBefore = fixture.requests.length;
+    for (const method of ["session/load", "session/resume"]) {
+      const client = await AcpClient.create({ cwd: fixture.workspace, env });
+      try {
+        const initialized = await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} }) as any;
+        expect(initialized.error).toBeUndefined();
+        const rejected = await client.request(method, { sessionId, cwd: fixture.workspace, mcpServers: [] }) as any;
+        expect(rejected.result).toBeUndefined();
+        expect(rejected.error.code).toBe(-32600);
+        expect(rejected.error.message).toBe("Configured provider authentication is unavailable");
+        expect(rejected.error.data?.authMethods).toBeUndefined();
+      } finally { await client.close(); }
+    }
+    expect(fixture.requests).toHaveLength(requestsBefore);
+  } finally { fixture.close(); }
+}, 60000);
+
+test("ACP authenticate during a configured-provider turn leaves the turn's key, and the next session adopts the sign-in", async () => {
+  let hold = false;
+  const held = deferred<Response>();
+  const fixture = createConfiguredProviderFixture(body => hold ? held.promise : configuredCompletion(body.model, "remote answer"));
+  const gateway = startDynamicFakeGateway(_raw => finalText("gateway answer"));
+  fixture.settings.provider = "remote";
+  fixture.save();
+  let sessionId = "";
+  let client: AcpClient | undefined;
+  try {
+    const first = await AcpClient.create({ cwd: fixture.workspace, env: fixture.env });
+    try {
+      await first.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      const created = await first.request("session/new", { cwd: fixture.workspace, mcpServers: [] }) as any;
+      if (created.error) throw new Error(JSON.stringify(created));
+      sessionId = created.result.sessionId;
+      const prompted = await first.request("session/prompt", { prompt: [{ type: "text", text: "save this" }] }) as any;
+      if (prompted.error) throw new Error(JSON.stringify(prompted));
+    } finally { await first.close(); }
+
+    // Gateway becomes the default with nobody signed in, against a fake
+    // Gateway standing in for the real one.
+    fixture.settings.provider = "gateway";
+    (fixture.settings.models as any).gateway = FAKE_GATEWAY_MODEL;
+    fixture.save();
+    const env = {
+      ...fixture.env,
+      AI_GATEWAY_API_KEY: undefined,
+      VERCEL_OIDC_TOKEN: undefined,
+      LIA_DISABLE_KEYCHAIN: "1",
+      LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+      LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    };
+    client = await AcpClient.create({ cwd: fixture.workspace, env });
+    const initialized = await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} }, 1) as any;
+    const methodId = initialized.result.authMethods[0].id;
+    const restored = await client.request("session/load", { sessionId, cwd: fixture.workspace, mcpServers: [] }, 2) as any;
+    if (restored.error) throw new Error(JSON.stringify(restored));
+
+    hold = true;
+    const before = fixture.requests.length;
+    sendPrompt(client, 3, "a turn that stays open");
+    await waitForCondition("the held configured request", () => fixture.requests.length === before + 1);
+
+    writeSeededLiaAuth(fixture.home, "team_123");
+    client.send({ jsonrpc: "2.0", id: 4, method: "authenticate", params: { methodId } });
+    const authenticated = await readResponse(client, 4);
+    expect(authenticated.error).toBeUndefined();
+    expect(authenticated.result).toEqual({});
+    expect(fixture.requests[before]!.authorization).toBe("Bearer own-provider-token");
+    expect(gateway.requests).toHaveLength(0);
+
+    held.resolve(configuredCompletion("remote-model", "held answer"));
+    const finished = await readResponse(client, 3);
+    expect(finished.error).toBeUndefined();
+    expect(finished.result.stopReason).toBe("end_turn");
+    expect(fixture.requests).toHaveLength(before + 1);
+
+    // The first request after the turn adopts the sign-in.
+    const created = await client.request("session/new", { cwd: fixture.workspace, mcpServers: [] }, 5) as any;
+    expect(created.error).toBeUndefined();
+    expect(created.result.sessionId).not.toBe(sessionId);
+    expect(created.result.configOptions.find((option: any) => option.id === "provider").currentValue).toBe("gateway");
+    sendPrompt(client, 6, "ask the Gateway");
+    const answered = await readResponse(client, 6);
+    expect(answered.error).toBeUndefined();
+    expect(gateway.requests).toHaveLength(1);
+    expect(gateway.requests[0]!.headers.get("authorization")).toBe(`Bearer ${SEEDED_GATEWAY_TOKEN}`);
+    expect(fixture.requests).toHaveLength(before + 1);
+  } finally {
+    held.resolve(configuredCompletion("remote-model", "released"));
+    await client?.close();
+    gateway.stop();
+    fixture.close();
+  }
+}, 60000);
+
 test.each(["empty", "unrelated"])("configured provider ACP preserves explicit models with %s metadata", async metadata => {
   const fixture = createConfiguredProviderFixture();
   (fixture.settings.providers.local as any).model_metadata = {};
@@ -1001,13 +1164,15 @@ test("ACP finishes a provider search the turn ended before it finished", async (
     if (created.error) throw new Error(JSON.stringify(created));
     sendPrompt(client, 3, "Search the web.");
     const { responses } = await readUntilResponses(client, [3]);
-    expect(responses.get(3)!.result.stopReason).toBe("refused");
+    expect(responses.get(3)!.result).toBeUndefined();
+    expect(responses.get(3)!.error).toEqual({ code: -32603, message: "⚠ Tool state needs review · unexpected tool call during reconciliation · context preserved" });
     const search = client.rawLines
       .map(line => JSON.parse(line))
       .filter((message: any) => message.method === "session/update" && message.params?.update?.toolCallId === "search_open")
       .map((message: any) => message.params.update);
     expect(search.map((update: any) => update.status)).toEqual(["pending", "failed"]);
     expect(acpContentText(search[1].content)).toBe("Tool state preserved for recovery");
+    await expectOneFrameFor(client, 3, 4);
     expect(client.stderr).toBe("");
   } finally {
     await client?.close();
@@ -1187,6 +1352,26 @@ async function readResponse(
     }
   }
   throw new Error(`timed out waiting for ACP response id=${id}`);
+}
+
+// A prompt gets one answer frame. `readResponse` returns at the first frame
+// with the id, so a second frame behind it is only visible in `rawLines`. A
+// later request's answer shows the server is still reading, and the short
+// settle covers a late frame written after it.
+async function expectOneFrameFor(
+  client: AcpClient,
+  id: number,
+  fenceId: number,
+  settleMs = 300,
+): Promise<void> {
+  client.send({ jsonrpc: "2.0", id: fenceId, method: "session/list", params: {} });
+  const fence = await readResponse(client, fenceId);
+  expect(fence.error).toBeUndefined();
+  await Bun.sleep(settleMs);
+  const frames = client.rawLines
+    .map(line => JSON.parse(line))
+    .filter((message: any) => message.id === id && (message.result !== undefined || message.error !== undefined));
+  expect(frames).toHaveLength(1);
 }
 
 function deferred<T>() {
@@ -1740,6 +1925,71 @@ describe("acp: model-independent", () => {
         expect(titled).toHaveLength(1);
         expect(client.stderr).toBe("");
       } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP answers the first prompt when the gateway reports no usage and the title arrives after the turn",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-title-usage-");
+      const tracePath = join(root.root, "trace.log");
+      // The shape a real gateway streamed in a live trace: metadata events
+      // around the text, no usage on the finish event, and a title that comes
+      // back only after the answer has reached the client.
+      const streamedAnswer = () => fakeGatewaySse([
+        { type: "stream-start", warnings: [] },
+        { type: "response-metadata", id: "resp_1", modelId: FAKE_GATEWAY_MODEL },
+        { type: "text-start", id: "answer_1" },
+        { type: "text-delta", id: "answer_1", delta: "ok" },
+        { type: "text-end", id: "answer_1" },
+        {
+          type: "finish",
+          finishReason: { unified: "stop", raw: "end_turn" },
+          providerMetadata: { gateway: { cost: "0.0001", generationId: "gen_1" } },
+        },
+      ]);
+      const titleGate = deferred<void>();
+      const gateway = startDynamicFakeGateway(_raw => streamedAnswer(), {
+        titleResponses: [async () => {
+          await titleGate.promise;
+          return finalText("A Short Title");
+        }],
+        models: [{ id: "anthropic/claude-haiku-5.5", type: "language", tags: ["explicit-caching", "reasoning", "tool-use"], context_window: 200_000, max_tokens: 64_000 }],
+      });
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: {
+            ...fakeGatewayEnv(root, gateway),
+            LIA_MODEL: "anthropic/claude-haiku-5.5",
+            LIA_TRACE_LOG: tracePath,
+            LIA_TRACE_SCOPES: "acp",
+          },
+        });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        await client.request("session/new", { mcpServers: [] }, 2);
+        await client.readLine();
+        // The client keeps stdin open, so the answer has to be written without
+        // any later request or shutdown to push it out.
+        const result = await runPrompt(client, "Reply with just: ok", 8_000);
+
+        expect(result.promptResult.error).toBeUndefined();
+        expect(result.promptResult.result.stopReason).toBe("end_turn");
+        const kinds = result.messages
+          .filter((message: any) => message.method === "session/update")
+          .map((message: any) => message.params.update.sessionUpdate);
+        expect(kinds).toContain("agent_message_chunk");
+        expect(client.stderr).toBe("");
+        // Pins the scenario: the gateway sent no usage, and the turn skipped
+        // its usage update because of that.
+        expect(readFileSync(tracePath, "utf8")).toContain("event=usage_update_skipped reason=no_usage");
+      } finally {
+        titleGate.resolve();
         await client?.close();
         gateway.stop();
         rmSync(root.root, { recursive: true, force: true });
@@ -3445,8 +3695,8 @@ describe("acp: model-independent", () => {
   );
 
   // Two always-loaded servers whose instructions are cut, and a budget with
-  // room for one tool: the model hears of both limits, and of the cut once per
-  // server however many of its tools a search loads.
+  // room for one tool: the model hears of both limits, and of alpha's cut once,
+  // named for the server.
   for (const withNotices of [false, true]) {
     test(
       `context notices stay out of the agent message ${withNotices ? "and arrive as notices" : "for an editor without notices"}`,
@@ -7831,7 +8081,7 @@ describe("acp: model-independent", () => {
   );
 
   test(
-    "non-retryable prompt failure preserves -32603 and leaves the server usable",
+    "content-filtered prompt answers refusal and leaves the server usable",
     async () => {
       const root = createIsolatedRoot("lia-acp-terminal-failure-");
       const boundary = createPromptTerminalBoundary(root.root);
@@ -7855,10 +8105,9 @@ describe("acp: model-independent", () => {
         sendPrompt(client, 94, "Return the incomplete fixture.");
 
         const failed = await readResponse(client, 94);
-        expect(failed.error).toEqual({
-          code: -32603,
-          message: "ModelError",
-        });
+        expect(failed.error).toBeUndefined();
+        expect(failed.result.stopReason).toBe("refusal");
+        expect(failed.result._meta.lia.stopReason).toBe("content_filter");
         await waitForPath(boundary.terminalReady);
 
         client.send({
@@ -7873,6 +8122,7 @@ describe("acp: model-independent", () => {
         const listed = await readResponse(client, 95);
         expect(listed.error).toBeUndefined();
         expect(Array.isArray(listed.result.sessions)).toBe(true);
+        await expectOneFrameFor(client, 94, 96);
         expect(client.stderr).toBe("");
       } finally {
         releasePromptBoundary(boundary);
@@ -7914,8 +8164,12 @@ describe("acp: model-independent", () => {
           }
         }
 
-        expect(response.error).toBeUndefined();
-        expect(response.result.stopReason).toBe("refused");
+        expect(response.result).toBeUndefined();
+        expect(response.error.code).toBe(-32000);
+        expect(response.error.message).toBe(
+          "AI_GATEWAY_API_KEY authentication failed · HTTP 401",
+        );
+        expect(response.error.data.authMethods.length).toBeGreaterThan(0);
         const authUpdate = messages.find((message) =>
           message.method === "session/update" &&
           message.params?.update?.sessionUpdate === "agent_message_chunk"
@@ -7928,6 +8182,7 @@ describe("acp: model-independent", () => {
         expect(serialized).not.toContain(providerDetail);
         expect(serialized).not.toContain("\u001b");
         expect(gateway.requests).toHaveLength(1);
+        await expectOneFrameFor(client, 96, 97);
         expect(client.stderr).toBe("");
       } finally {
         await client?.close();
@@ -7938,6 +8193,174 @@ describe("acp: model-independent", () => {
     TIMEOUT,
   );
 
+
+  test(
+    "a forbidden turn answers a generic error, not AUTH_REQUIRED",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-forbidden-");
+      const gateway = startFakeGateway([
+        new Response(JSON.stringify({ error: { message: "team restriction" } }), {
+          status: 403,
+          headers: { "content-type": "application/json" },
+        }),
+      ]);
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: fakeGatewayEnv(root, gateway),
+        });
+        await startAutoSession(client);
+        sendPrompt(client, 98, "Exercise the forbidden response.");
+
+        const response = await readResponse(client, 98);
+        expect(response.result).toBeUndefined();
+        expect(response.error.code).toBe(-32603);
+        expect(response.error.data?.authMethods).toBeUndefined();
+        await expectOneFrameFor(client, 98, 99);
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "a prompt whose credential vanished after session/new answers AUTH_REQUIRED with the sign-in methods",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-credential-vanished-");
+      const gateway = startFakeGateway([]);
+      try {
+        writeSeededLiaAuth(root.home, "team_123");
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: {
+            ...fakeGatewayEnv(root, gateway),
+            AI_GATEWAY_API_KEY: undefined,
+            VERCEL_OIDC_TOKEN: undefined,
+            LIA_DISABLE_KEYCHAIN: "1",
+          },
+        });
+        await startAutoSession(client);
+        rmSync(join(root.home, ".lia", "auth.json"));
+        sendPrompt(client, 100, "Exercise the missing credential.");
+
+        const response = await readResponse(client, 100);
+        expect(response.result).toBeUndefined();
+        expect(response.error.code).toBe(-32000);
+        expect(response.error.message).toContain("lia login");
+        expect(response.error.data.authMethods.length).toBeGreaterThan(0);
+        expect(gateway.requests).toHaveLength(0);
+        await expectOneFrameFor(client, 100, 101);
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "session/resume of a saved session answers AUTH_REQUIRED once the Gateway sign-in is removed",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-resume-signed-out-");
+      const gateway = startDynamicFakeGateway(_raw => finalText("saved answer"));
+      try {
+        writeSeededLiaAuth(root.home, "team_123");
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: {
+            ...fakeGatewayEnv(root, gateway),
+            AI_GATEWAY_API_KEY: undefined,
+            VERCEL_OIDC_TOKEN: undefined,
+            LIA_DISABLE_KEYCHAIN: "1",
+          },
+        });
+        const initialized = await client.request(
+          "initialize",
+          { protocolVersion: 1, clientCapabilities: { auth: { terminal: true } } },
+          1,
+        ) as any;
+        const methods = initialized.result.authMethods;
+        expect(methods).toHaveLength(2);
+        const created = await client.request("session/new", { mcpServers: [] }, 2) as any;
+        await client.readLine(); // consume session/update notification
+        await client.request("session/set_mode", { modeId: "auto" }, 3);
+        const savedId = created.result.sessionId as string;
+        await runPrompt(client, "Save this session.", 8_000);
+        // A second session leaves the first inactive, so resuming it prepares a credential.
+        const other = await client.request("session/new", { mcpServers: [] }, 20) as any;
+        expect(other.error).toBeUndefined();
+        rmSync(join(root.home, ".lia", "auth.json"));
+        const requestsBefore = gateway.requests.length;
+        expect(requestsBefore).toBeGreaterThan(0);
+
+        const resumed = await client.request("session/resume", { sessionId: savedId, mcpServers: [] }, 21) as any;
+        expect(resumed.result).toBeUndefined();
+        expect(resumed.error.code).toBe(-32000);
+        expect(resumed.error.data.authMethods).toEqual(methods);
+        expect(gateway.requests).toHaveLength(requestsBefore);
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  for (const method of ["session/load", "session/resume"]) {
+    test(
+      `${method} of a saved Gateway session restarted with no credential answers AUTH_REQUIRED`,
+      async () => {
+        const root = createIsolatedRoot("lia-acp-restart-signed-out-");
+        const gateway = startDynamicFakeGateway(_raw => finalText("saved answer"));
+        const signedOutEnv = {
+          ...fakeGatewayEnv(root, gateway),
+          AI_GATEWAY_API_KEY: undefined,
+          VERCEL_OIDC_TOKEN: undefined,
+          LIA_DISABLE_KEYCHAIN: "1",
+        };
+        let restarted: AcpClient | undefined;
+        try {
+          writeSeededLiaAuth(root.home, "team_123");
+          client = await AcpClient.create({ cwd: root.workspace, env: signedOutEnv });
+          const savedId = await startAutoSession(client);
+          await runPrompt(client, "Save this session.", 8_000);
+          await client.close();
+          const requestsBefore = gateway.requests.length;
+          expect(requestsBefore).toBeGreaterThan(0);
+
+          rmSync(join(root.home, ".lia", "auth.json"));
+          restarted = await AcpClient.create({ cwd: root.workspace, env: signedOutEnv });
+          const initialized = await restarted.request(
+            "initialize",
+            { protocolVersion: 1, clientCapabilities: { auth: { terminal: true } } },
+            1,
+          ) as any;
+          const methods = initialized.result.authMethods;
+          expect(methods).toHaveLength(2);
+
+          const rejected = await restarted.request(method, { sessionId: savedId, cwd: root.workspace, mcpServers: [] }, 2) as any;
+          expect(rejected.result).toBeUndefined();
+          expect(rejected.error.code).toBe(-32000);
+          expect(rejected.error.data.authMethods).toEqual(methods);
+          expect(gateway.requests).toHaveLength(requestsBefore);
+        } finally {
+          await restarted?.close();
+          await client?.close();
+          gateway.stop();
+          rmSync(root.root, { recursive: true, force: true });
+        }
+      },
+      TIMEOUT,
+    );
+  }
 
   test(
     "running prompt rejects non-cancel requests",
@@ -8224,12 +8647,12 @@ describe("acp: model-independent", () => {
         jsonrpc: "2.0",
         id: null,
         error: {
-          code: -32000,
+          code: -32600,
           message: "Request frame too large",
         },
       });
       expect(client.rawLines[1]).toBe(
-        '{"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"Request frame too large"}}',
+        '{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Request frame too large"}}',
       );
 
       const next = await client.request("session/new", {}, 7) as any;
@@ -9033,11 +9456,75 @@ describe("acp: model-independent", () => {
           TIMEOUT,
         );
 
-        expect(result.promptResult.result.stopReason).toBe("max_output_tokens");
+        expect(result.promptResult.result.stopReason).toBe("max_tokens");
+        expect(result.promptResult.result._meta.lia.stopReason).toBe("max_output_tokens");
         expect(JSON.stringify(result.messages)).toContain("ACP partial output");
         expect(JSON.stringify(result.messages)).toContain("did not run them");
         expect(existsSync(sentinelPath)).toBe(false);
         expect(gateway.requests).toHaveLength(1);
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "a turn that hits the step limit answers max_turn_requests with its lia stop reason",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-step-limit-");
+      writeFileSync(join(root.workspace, "a.txt"), "a\n");
+      const gateway = startFakeGateway([
+        fakeGatewayToolCall("read_1", "read_file", { path: "a.txt" }),
+        finalText("UNEXPECTED_CONTINUATION"),
+      ]);
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: { ...fakeGatewayEnv(root, gateway), LIA_MAX_AGENT_STEPS: "1" },
+        });
+        await startAutoSession(client);
+        const result = await runPrompt(client, "Read the fixture file.", TIMEOUT);
+
+        expect(result.promptResult.error).toBeUndefined();
+        expect(result.promptResult.result.stopReason).toBe("max_turn_requests");
+        expect(result.promptResult.result._meta.lia.stopReason).toBe("max_model_turns");
+        expect(gateway.requests).toHaveLength(1);
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "_meta.lia.stopReason appears on a max_tokens turn and not on the end_turn after it",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-meta-pair-");
+      const gateway = startFakeGateway([
+        lengthLimitedCommandCall("printf executed > command-must-not-run.txt"),
+        finalText("pong"),
+      ]);
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: fakeGatewayEnv(root, gateway),
+        });
+        await startAutoSession(client);
+
+        const limited = await runPrompt(client, "Run the fixture command.", TIMEOUT);
+        expect(limited.promptResult.result.stopReason).toBe("max_tokens");
+        expect(limited.promptResult.result._meta.lia.stopReason).toBe("max_output_tokens");
+
+        const ended = await runPrompt(client, "Say exactly: pong", TIMEOUT);
+        expect(ended.promptResult.result.stopReason).toBe("end_turn");
+        expect(ended.promptResult.result._meta).toBeUndefined();
         expect(client.stderr).toBe("");
       } finally {
         await client?.close();
@@ -9073,7 +9560,8 @@ describe("acp: model-independent", () => {
           TIMEOUT,
         );
 
-        expect(result.promptResult.result.stopReason).toBe("max_output_tokens");
+        expect(result.promptResult.result.stopReason).toBe("max_tokens");
+        expect(result.promptResult.result._meta.lia.stopReason).toBe("max_output_tokens");
         // The empty reply's one retry sends the same request with an output
         // limit; neither request asks for a summary.
         expect(gateway.requests).toHaveLength(4);
@@ -10344,7 +10832,7 @@ describe("acp: model catalog authentication", () => {
   );
 });
 
-describe.skipIf(!HAS_API_KEY)("acp: model-backed protocol", () => {
+describe("acp: model-backed protocol", () => {
   let client: AcpClient;
 
   afterEach(async () => {
@@ -10354,11 +10842,19 @@ describe.skipIf(!HAS_API_KEY)("acp: model-backed protocol", () => {
   test(
     "method before initialize returns error -32600",
     async () => {
-      client = await AcpClient.create();
-      const resp = await client.request("session/new", { mcpServers: [] }, 1) as any;
-      expect(resp.error).toBeDefined();
-      expect(resp.error.code).toBe(-32600);
-      expect(resp.error.message).toContain("Not initialized");
+      const root = createIsolatedRoot("lia-acp-before-initialize-");
+      const gateway = startFakeGateway([]);
+      try {
+        client = await AcpClient.create({ cwd: root.workspace, env: fakeGatewayEnv(root, gateway) });
+        const resp = await client.request("session/new", { mcpServers: [] }, 1) as any;
+        expect(resp.error).toBeDefined();
+        expect(resp.error.code).toBe(-32600);
+        expect(resp.error.message).toContain("Not initialized");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
     },
     TIMEOUT,
   );
@@ -10366,24 +10862,20 @@ describe.skipIf(!HAS_API_KEY)("acp: model-backed protocol", () => {
   test(
     "unknown method returns error -32601",
     async () => {
-      client = await AcpClient.create();
-      await client.request("initialize", { protocolVersion: 1 }, 1);
-      const resp = await client.request("nonexistent/method", {}, 2) as any;
-      expect(resp.error).toBeDefined();
-      expect(resp.error.code).toBe(-32601);
-      expect(resp.error.message).toContain("Method not found");
-    },
-    TIMEOUT,
-  );
-
-  test(
-    "invalid JSON returns parse error -32700",
-    async () => {
-      client = await AcpClient.create();
-      (client as any).proc.stdin!.write("this is not json\n");
-      const resp = await client.readLine() as any;
-      expect(resp.error).toBeDefined();
-      expect(resp.error.code).toBe(-32700);
+      const root = createIsolatedRoot("lia-acp-unknown-method-");
+      const gateway = startFakeGateway([]);
+      try {
+        client = await AcpClient.create({ cwd: root.workspace, env: fakeGatewayEnv(root, gateway) });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const resp = await client.request("nonexistent/method", {}, 2) as any;
+        expect(resp.error).toBeDefined();
+        expect(resp.error.code).toBe(-32601);
+        expect(resp.error.message).toContain("Method not found");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
     },
     TIMEOUT,
   );
@@ -10586,6 +11078,63 @@ describe.skipIf(!HAS_API_KEY)("acp: model-backed protocol", () => {
   );
 
   test(
+    "session/new rejects an invalid MCP env entry with -32602 and keeps serving",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-mcp-bad-env-");
+      const gateway = startFakeGateway([finalText("still serving")]);
+      const badEntries = [
+        { name: "A=B", value: "x" },
+        { name: "", value: "x" },
+        { name: "A\u0000B", value: "x" },
+        { name: "OK_NAME", value: "x\u0000y" },
+      ];
+      const withEnv = (env: Array<{ name: string; value: string }>) => ({
+        cwd: root.workspace,
+        mcpServers: [{
+          name: "fixture",
+          command: process.execPath,
+          args: [MCP_STDIO_FIXTURE],
+          env,
+        }],
+      });
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: fakeGatewayEnv(root, gateway),
+        });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const first = await client.request("session/new", { cwd: root.workspace, mcpServers: [] }, 2) as any;
+        expect(first.error).toBeUndefined();
+
+        let id = 3;
+        for (const entry of badEntries) {
+          const rejected = await client.request("session/new", withEnv([entry]), id++) as any;
+          expect(rejected.result).toBeUndefined();
+          expect(rejected.error.code).toBe(-32602);
+          expect(rejected.error.message).toContain("MCP server env must be an array of name/value string entries");
+        }
+
+        // The session made before the rejections still runs a turn.
+        const turn = await runPrompt(client, "Say that you are still serving.", TIMEOUT);
+        expect(turn.promptResult.error).toBeUndefined();
+        expect(turn.promptResult.result.stopReason).toBe("end_turn");
+
+        // The same shape with a valid entry is accepted, so the -32602 above
+        // comes from the env entry and not from the rest of the request.
+        const accepted = await client.request("session/new", withEnv([{ name: "OK_NAME", value: "x" }]), id) as any;
+        expect(accepted.error).toBeUndefined();
+        expect(typeof accepted.result.sessionId).toBe("string");
+        expect(accepted.result.sessionId).not.toBe(first.result.sessionId);
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "session/prompt returns response with stopReason",
     async () => {
       const root = createIsolatedRoot("lia-acp-session-prompt-");
@@ -10620,7 +11169,13 @@ describe.skipIf(!HAS_API_KEY)("acp: model-backed protocol", () => {
         }
 
         expect(promptResult).not.toBeNull();
-        expect(promptResult.result.stopReason).toBeDefined();
+        expect(promptResult.result.stopReason).toBe("end_turn");
+        expect(promptResult.result._meta).toBeUndefined();
+        const agentText = messages
+          .filter((message) => message.params?.update?.sessionUpdate === "agent_message_chunk")
+          .map((message) => message.params.update.content.text)
+          .join("");
+        expect(agentText).toContain("pong");
       } finally {
         await client?.close();
         gateway.stop();
@@ -10631,9 +11186,9 @@ describe.skipIf(!HAS_API_KEY)("acp: model-backed protocol", () => {
   );
 
   test(
-    "session/cancel does not crash the server",
+    "session/cancel with no active prompt, with or without a sessionId, keeps the server answering",
     async () => {
-      const root = createIsolatedRoot("lia-acp-session-cancel-");
+      const root = createIsolatedRoot("lia-acp-idle-cancel-");
       const gateway = startFakeGateway([]);
       try {
         client = await AcpClient.create({
@@ -10641,15 +11196,25 @@ describe.skipIf(!HAS_API_KEY)("acp: model-backed protocol", () => {
           env: fakeGatewayEnv(root, gateway),
         });
         await client.request("initialize", { protocolVersion: 1 }, 1);
-        await client.request("session/new", { mcpServers: [] }, 2);
-        await client.readLine(); // consume session/update notification
+        const created = await client.request("session/new", { mcpServers: [] }, 2) as any;
+        expect(created.error).toBeUndefined();
 
+        // The client fills in the active session id, so this is the idle
+        // cancel of a real session.
         client.send({ jsonrpc: "2.0", method: "session/cancel", params: {} });
-        await new Promise((r) => setTimeout(r, 300));
+        const afterIdle = await client.request("session/list", {}, 3) as any;
+        expect(afterIdle.error).toBeUndefined();
+        expect(Array.isArray(afterIdle.result.sessions)).toBe(true);
 
-        const listResp = await client.request("session/list", {}, 3) as any;
-        expect(listResp.result).toBeDefined();
-        expect(Array.isArray(listResp.result.sessions)).toBe(true);
+        // Written to stdin directly, so the cancel carries no sessionId.
+        (client as any).proc.stdin!.write(
+          JSON.stringify({ jsonrpc: "2.0", method: "session/cancel", params: {} }) + "\n",
+        );
+        const afterBare = await client.request("session/list", {}, 4) as any;
+        expect(afterBare.error).toBeUndefined();
+        expect(Array.isArray(afterBare.result.sessions)).toBe(true);
+        expect(client.closed).toBe(false);
+        expect(client.stderr).toBe("");
       } finally {
         await client?.close();
         gateway.stop();

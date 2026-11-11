@@ -1,6 +1,6 @@
 //! The libfx journal: one session as the ordered events a host stores.
 //!
-//! A host passes a `persistence` store to `createFxEngine`; lia appends an
+//! A host passes a `persistence` store to `createLiaEngine`; lia appends an
 //! event for each state change and rebuilds the session from the stored
 //! events. This file
 //! only encodes and folds events. Sending them is the ACP layer's job.

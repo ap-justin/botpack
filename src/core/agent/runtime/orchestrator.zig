@@ -2572,11 +2572,7 @@ fn prepareAvailabilityTerminal(
     };
 }
 
-/// Advertises live MCP tools the model called without loading them first, so
-/// those calls reach normal validation and MCP permission instead of failing
-/// as unselected. Names that do not resolve, including lookups that fail or
-/// are cancelled, keep the unsupported-tool path, where the turn's normal
-/// cancellation handling still applies.
+/// What `advertiseUnselectedMcpCalls` hands back for a step's calls.
 const UnselectedMcpCalls = struct {
     /// The step's calls, a server-qualified name rewritten to the tool's
     /// exposed name.
@@ -2585,10 +2581,16 @@ const UnselectedMcpCalls = struct {
     unresolved: []const ?[]u8,
 };
 
-/// Loads, for each call to an MCP tool the model did not select, the tool's
-/// definition so the call can run, and rewrites a server-qualified name
-/// (`server.tool`) to the tool's exposed name first, so permissions, the
-/// transcript, and the call itself use the one name.
+/// Advertises live MCP tools the model called without loading them first, so
+/// those calls reach normal validation and MCP permission instead of failing
+/// as unselected. A server-qualified name (`server.tool`) is rewritten to the
+/// tool's exposed name first, so permissions, the transcript, and the call
+/// itself use the one name. A name written as an MCP reference (a `.` or `/`
+/// in it, or an `mcp_` prefix) that fits no tool, or more than one, is
+/// answered with the name format or the candidates. Other
+/// names that do not resolve, including lookups that fail or are cancelled,
+/// keep the unsupported-tool path, where the turn's normal cancellation
+/// handling still applies.
 fn advertiseUnselectedMcpCalls(
     deps: *const AgentRuntimeDeps,
     arena: Allocator,
@@ -9142,6 +9144,7 @@ fn processQueuedPromptLoop(
                 finish_trace.finish("invalid_tool_finish");
                 return error.ModelError;
             },
+            .step_limited => unreachable,
         }
         if (successful_vision_mode == .required and completion.tool_calls.len == 0) {
             try pushTerminalAutoRetryStatusIfNeeded(
@@ -9461,6 +9464,7 @@ fn processQueuedPromptLoop(
                     &finish_trace,
                     try emptyReplyNotice(arena, provider_reason, empty_reply_follow_up),
                     "empty_reply",
+                    null,
                 );
                 return;
             }
@@ -10856,7 +10860,7 @@ fn processQueuedPromptLoop(
                                     .{
                                         .increment_error = true,
                                         .record_completion = true,
-                                        .status = runtime_execution_memory.persistedStatusForCurrentFxLocalResult(
+                                        .status = runtime_execution_memory.persistedStatusForCurrentLiaLocalResult(
                                             .failure,
                                             safe_output,
                                         ),
@@ -12047,7 +12051,7 @@ fn processQueuedPromptLoop(
                         .increment_error = execution.status == .failure or
                             tool_result_errors.isToolOutputError(safe_tool_output),
                         .record_completion = execution.status == .success,
-                        .status = runtime_execution_memory.persistedStatusForCurrentFxLocalResult(
+                        .status = runtime_execution_memory.persistedStatusForCurrentLiaLocalResult(
                             execution.status,
                             safe_tool_output,
                         ),
@@ -12208,6 +12212,7 @@ fn processQueuedPromptLoop(
                 &finish_trace,
                 repeated_malformed_arguments_notice,
                 "repeated_malformed_tool_arguments",
+                null,
             );
             return;
         }
@@ -12232,6 +12237,7 @@ fn processQueuedPromptLoop(
                 &finish_trace,
                 repeated_terminal_validation_notice,
                 "terminal_validation_retry",
+                null,
             );
             return;
         }
@@ -12261,6 +12267,7 @@ fn processQueuedPromptLoop(
                 &finish_trace,
                 repeated_shell_execution_failure_notice,
                 "repeated_shell_execution_failure",
+                null,
             );
             return;
         }
@@ -12429,6 +12436,7 @@ fn processQueuedPromptLoop(
         &finish_trace,
         config.step_limit_notice,
         "step_limit",
+        .step_limited,
     );
 }
 
@@ -12443,6 +12451,7 @@ fn finishFailedTurnWithNotice(
     finish_trace: *PromptFinishTrace,
     notice: []const u8,
     trace_outcome: []const u8,
+    disposition: ?types.ProviderCompletionDisposition,
 ) !void {
     try deps.push_text(deps.ctx, .{ .operational = notice });
     try deps.push_text(deps.ctx, .{ .operational = "\n" });
@@ -12462,7 +12471,7 @@ fn finishFailedTurnWithNotice(
             summary_accumulator,
             assistant_text,
             .failed,
-            null,
+            disposition,
             finish_trace,
             trace_outcome,
             null,
@@ -12481,7 +12490,7 @@ fn finishFailedTurnWithNotice(
     } };
     types.setHistoryTurnSummary(&turn, completed_summary);
     try deps.propagate_history_turn(deps.ctx, turn);
-    try finalization.finish(.failed, null, .{
+    try finalization.finish(.failed, disposition, .{
         .turn = try types.dupeHistoryTurn(std.heap.c_allocator, turn),
         .summary = completed_summary,
     });

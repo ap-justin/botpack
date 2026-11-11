@@ -111,9 +111,20 @@ const ToolPermissionDecision = types.ToolPermissionDecision;
 const ToolExecutionResult = agent_runtime.ToolExecutionResult;
 const McpHasToolFn = tool_mcp_runtime.HasToolFn;
 
+/// What a failed turn's prompt answers when the failure named no message.
+const turn_failed_message = "The turn stopped before it finished";
+
 pub const TerminalOutcome = union(enum) {
     stop_reason: acp_types.StopReason,
     rpc_error: jsonrpc.RpcError,
+    /// ACP's `AUTH_REQUIRED`: the credential is missing or the provider
+    /// rejected it, so the client offers the sign-in methods again.
+    auth_required: AuthRequired,
+};
+
+pub const AuthRequired = struct {
+    message: []const u8,
+    offer: acp_types.AuthOffer,
 };
 
 fn promptInputFailure(err: anyerror) anyerror!TerminalOutcome {
@@ -244,6 +255,18 @@ const AcpContext = struct {
     message_id: acp_types.MessageIdBuffer = undefined,
     message_kind: ?AgentMessageKind = null,
     stop_reason: acp_types.StopReason = .end_turn,
+    /// The turn ended as an error, not at a stop reason; its prompt answers
+    /// with a JSON-RPC error carrying the session's failure message.
+    turn_failed: bool = false,
+    /// The provider's content filter ended the turn. Set from its terminal
+    /// status, because the turn then throws the same `error.ModelError` as
+    /// any other provider failure.
+    content_filtered: bool = false,
+    /// The recorded failure notice is the provider rejecting the credential
+    /// (HTTP 401 after the refresh-and-replay attempt), so a failed turn
+    /// answers `AUTH_REQUIRED`. A 403 is not one: signing in again does not
+    /// lift a team restriction.
+    credential_rejected: bool = false,
     auto_classifier: permission_auto_classifier.Classifier =
         permission_auto_classifier.Classifier.disabled(),
     /// Mode and permission policy captured at prompt dispatch so mid-turn
@@ -263,6 +286,77 @@ const AcpContext = struct {
         var keys = self.published_tool_calls.keyIterator();
         while (keys.next()) |key| self.alloc.free(key.*);
         self.published_tool_calls.deinit(self.alloc);
+    }
+
+    /// Forgets how the previous turn ended, so the next turn alone decides
+    /// what the prompt answers.
+    fn resetTurnOutcome(self: *AcpContext, session: *server.ActiveSessionState) void {
+        self.stop_reason = .end_turn;
+        self.turn_failed = false;
+        self.content_filtered = false;
+        self.credential_rejected = false;
+        session.clearFailureMessage();
+    }
+
+    fn noteFailureNotice(self: *AcpContext, notice: []const u8) !void {
+        return self.recordFailureNotice(notice, false);
+    }
+
+    fn noteCredentialRejectedNotice(self: *AcpContext, notice: []const u8) !void {
+        return self.recordFailureNotice(notice, true);
+    }
+
+    /// Keeps `notice` as the message the prompt answers with if its turn
+    /// fails, without the ANSI escapes the client never receives. Only the
+    /// user's turn answers with it; a subagent's turn has no prompt.
+    fn recordFailureNotice(self: *AcpContext, notice: []const u8, credential_rejected: bool) !void {
+        if (self.current_prompt_input == null) return;
+        const session = if (self.state.active_session) |*active| active else return;
+        const plain = try stripAnsiAlloc(self.alloc, notice);
+        defer if (plain.ptr != notice.ptr) self.alloc.free(plain);
+        const trimmed = std.mem.trim(u8, plain, &std.ascii.whitespace);
+        if (trimmed.len == 0) return;
+        session.setFailureMessage(trimmed);
+        self.credential_rejected = credential_rejected;
+    }
+
+    /// A new model reply starts, so the notices before it no longer say why
+    /// the turn might fail.
+    fn forgetFailureNotice(self: *AcpContext) void {
+        if (self.current_prompt_input == null) return;
+        self.credential_rejected = false;
+        if (self.state.active_session) |*session| session.clearFailureMessage();
+    }
+
+    /// The prompt's answer from how its last turn ended; a cancel is the
+    /// caller's to check first.
+    fn turnOutcome(self: *const AcpContext, session: *const server.ActiveSessionState) TerminalOutcome {
+        if (!self.turn_failed) return .{ .stop_reason = self.stop_reason };
+        const message = session.failureMessage();
+        if (self.credential_rejected and message.len > 0) return .{ .auth_required = .{
+            .message = message,
+            .offer = server.authOffer(self.state),
+        } };
+        return .{ .rpc_error = .{
+            .code = ErrorCode.internal_error,
+            .message = if (message.len > 0) message else turn_failed_message,
+        } };
+    }
+
+    /// The prompt's answer from a turn that ended by throwing `err`. Content
+    /// the provider blocked or the model refused is ACP v1's `refusal`, a
+    /// result rather than an error. A failed turn that recorded a notice
+    /// answers with it; otherwise `err` decides.
+    fn thrownTurnOutcome(self: *const AcpContext, session: *const server.ActiveSessionState, err: anyerror) anyerror!TerminalOutcome {
+        if (self.content_filtered or err == error.ContentFiltered or err == error.ModelRefused) {
+            return .{ .stop_reason = .content_filter };
+        }
+        if (promptExecutionFailure(err)) |outcome| return outcome else |rethrown| {
+            if (rethrown != error.OutOfMemory and self.turn_failed and session.failureMessage().len > 0) {
+                return self.turnOutcome(session);
+            }
+            return rethrown;
+        }
     }
 
     fn sendUpdate(self: *AcpContext, update_json: []const u8) !void {
@@ -861,6 +955,21 @@ fn appendMarkdownLinkClose(alloc: Allocator, out: *std.ArrayList(u8), uri: []con
     try out.append(alloc, ')');
 }
 
+/// A prompt whose provider has no credential: `server.credentialUnavailableAnswer`
+/// decides between the sign-in answer and a configured provider's plain error.
+fn credentialUnavailableOutcome(state: *const server.ServerState, provider: model_provider.ProviderId) TerminalOutcome {
+    return switch (server.credentialUnavailableAnswer(provider)) {
+        .sign_in => .{ .auth_required = .{
+            .message = credentials.missing_credential_message,
+            .offer = server.authOffer(state),
+        } },
+        .plain_error => .{ .rpc_error = .{
+            .code = ErrorCode.invalid_request,
+            .message = server.configured_credential_unavailable_message,
+        } },
+    };
+}
+
 /// Runs a prompt turn under the mode and permission policy captured at
 /// dispatch. Mid-turn session/set_mode changes only affect later prompts.
 pub fn handlePrompt(
@@ -874,10 +983,7 @@ pub fn handlePrompt(
         .rpc_error = no_active_session_rpc_error,
     };
     if (!try server.selectCredentialForProvider(state, session.provider)) {
-        return .{ .rpc_error = .{
-            .code = ErrorCode.invalid_request,
-            .message = credentials.missing_credential_message,
-        } };
+        return credentialUnavailableOutcome(state, session.provider);
     }
     if (!ultrafastPromptAllowed(state, session)) {
         return .{ .rpc_error = .{
@@ -1135,6 +1241,7 @@ pub fn handlePrompt(
 
     // A turn whose completions report no tokens sends no `usage_update`.
     session.context_used.store(0, .release);
+    ctx.resetTurnOutcome(session);
     const deps = agentRuntimeDeps(&ctx);
     var dynamic_tool_arena = std.heap.ArenaAllocator.init(alloc);
     defer dynamic_tool_arena.deinit();
@@ -1180,10 +1287,11 @@ pub fn handlePrompt(
             endJournalTurn(alloc, state.alloc, session) catch |end_err| {
                 debug_trace.logf("session", "event=libfx_journal_turn_end_failed err={s} turn_err={s}", .{ @errorName(end_err), @errorName(err) });
             };
-            return promptExecutionFailure(err);
+            return ctx.thrownTurnOutcome(session, err);
         }
     };
     try endJournalTurn(alloc, state.alloc, session);
+    debug_trace.logf("acp", "event=prompt_turn_ended session={s}", .{session.session_id});
     if (try runReportTurns(state, session, alloc, &ctx, &deps, agent_config, job)) |outcome| {
         prompt_input.retainImageSnapshots();
         return outcome;
@@ -1192,14 +1300,12 @@ pub fn handlePrompt(
     completeAcpTitleTask(state, session);
     try sessions.sendActiveSessionInfoUpdate(state, alloc);
     try sessions.sendActiveSessionUsageUpdate(state, alloc);
+    debug_trace.logf("acp", "event=prompt_updates_sent session={s}", .{session.session_id});
 
     // A steer's interrupt the turn finished before reaching is not a cancel.
     if (state.cfg.minimal_kernel) server.releaseSteeringInterrupt(state);
-    if (session.cancel_flag.load(.seq_cst)) {
-        ctx.stop_reason = .cancelled;
-    }
-
-    return .{ .stop_reason = ctx.stop_reason };
+    if (session.cancel_flag.load(.seq_cst)) return .{ .stop_reason = .cancelled };
+    return ctx.turnOutcome(session);
 }
 
 /// Starts background title generation for a fresh persisted ACP session. The
@@ -2254,8 +2360,10 @@ fn finalizeTurn(raw_ctx: *anyopaque, turn_id: u64, outcome: types.TurnPresentati
     const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
     if (disposition == .length_limited) {
         ctx.stop_reason = .max_output_tokens;
+    } else if (disposition == .step_limited) {
+        ctx.stop_reason = .max_model_turns;
     } else if (outcome == .failed or outcome == .paused) {
-        ctx.stop_reason = .refused;
+        ctx.turn_failed = true;
     }
     // The core reports no more tool events once a turn finishes, so close
     // what it left open, as the terminal transcript does at the same point.
@@ -3001,6 +3109,7 @@ fn runReportTurns(
         job.unversioned_history_count = session.session_rt.unversionedHistoryEnd();
         job.recovery_checkpoint = null;
         job.recovery_source_already_presented = false;
+        ctx.resetTurnOutcome(session);
         debug_trace.eventf("mailbox", "acp_next_turn", .{}, "author={s} call_id={s}", .{ @tagName(next.author), call_id });
         agent_runtime.processAgentPrompt(&session.session_rt.agent, deps, null, .{
             .view = state.lifecycle_view,
@@ -3019,7 +3128,7 @@ fn runReportTurns(
                 return null;
             }
             if (err == error.Cancelled and session.cancel_flag.load(.seq_cst)) return null;
-            return try promptExecutionFailure(err);
+            return try ctx.thrownTurnOutcome(session, err);
         };
         try endJournalTurn(alloc, state.alloc, session);
     }
@@ -3280,6 +3389,16 @@ fn pushRouteRecoveryStatus(
     status: types.RouteRecoveryStatus,
 ) !void {
     const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
+    // These end the turn with this status and no text, so its label is the
+    // notice. A content filter answers `refusal`, not a notice.
+    switch (status.kind) {
+        .terminal_provider_error, .unsafe_assistant_output, .unsafe_tool_start => {
+            var label_buf: [types.RouteRecoveryStatus.label_max_bytes]u8 = undefined;
+            try ctx.noteFailureNotice(status.label(&label_buf));
+        },
+        .content_filter => ctx.content_filtered = true,
+        else => {},
+    }
     try ctx.sendModelRecoveryStatus(status);
 }
 
@@ -3288,12 +3407,16 @@ fn pushText(raw_ctx: *anyopaque, emission: agent_runtime.TextEmission) !void {
     const text, const message_id = switch (emission) {
         .assistant_started => {
             ctx.message_kind = null;
+            ctx.forgetFailureNotice();
             return;
         },
         .assistant_source => |text| .{ text, ctx.assistantMessageId() },
         .assistant_rendered => return,
         .assistant_restarted => |text| .{ text, ctx.operationalMessageId() },
-        .operational => |text| .{ text, ctx.operationalMessageId() },
+        .operational => |text| blk: {
+            try ctx.noteFailureNotice(text);
+            break :blk .{ text, ctx.operationalMessageId() };
+        },
     };
     if (text.len == 0) return;
     ctx.sendAgentText(message_id, text) catch {};
@@ -3361,25 +3484,43 @@ fn pushContextNotice(raw_ctx: *anyopaque, text: []const u8) !void {
 
 fn pushDiffBlock(raw_ctx: *anyopaque, payload: agent_runtime.DiffEntryPayload) !void {
     defer diff_mod.freeDiffEntryPayload(std.heap.c_allocator, payload);
-    try pushText(raw_ctx, .{ .operational = payload.preview });
+    // Sent as operational text without `noteFailureNotice`: a diff never
+    // becomes the message a failed prompt answers with.
+    const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
+    if (payload.preview.len == 0) return;
+    ctx.sendAgentText(ctx.operationalMessageId(), payload.preview) catch {};
 }
 
 fn pushCommandOutputComplete(_: *anyopaque, _: ?types.ToolLifecycleId) !void {}
 
 fn pushHttpError(raw_ctx: *anyopaque, status: std.http.Status, detail: []const u8, credential_source: ?types.CredentialSource) !void {
     const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
-    var buf: [1024]u8 = undefined;
+    var buf: [http_error_message_max_bytes]u8 = undefined;
     const auth_failure = auth_runtime.FailureSnapshot.fromHttp(status, credential_source);
     const owned_message = if (auth_failure) |failure|
         try failure.renderText(ctx.alloc)
     else
         null;
     defer if (owned_message) |message| ctx.alloc.free(message);
-    const msg = owned_message orelse if (detail.len > 0)
-        std.mem.print(&buf, "HTTP {d}: {s}", .{ @backingInt(status), detail }) catch "HTTP error"
-    else
-        std.mem.print(&buf, "HTTP {d}", .{@backingInt(status)}) catch "HTTP error";
+    const msg = owned_message orelse formatHttpError(&buf, status, detail);
+    if (auth_failure != null) try ctx.noteCredentialRejectedNotice(msg) else try ctx.noteFailureNotice(msg);
     ctx.sendAgentText(ctx.operationalMessageId(), msg) catch {};
+}
+
+const http_error_message_max_bytes = 1024;
+
+/// `HTTP <status>: <detail>`, the detail cut at a UTF-8 boundary to fit `buf`
+/// so the JSON writer never meets a split sequence.
+fn formatHttpError(buf: *[http_error_message_max_bytes]u8, status: std.http.Status, detail: []const u8) []const u8 {
+    // A status is at most four digits, so the head always fits.
+    const head = std.mem.print(buf, "HTTP {d}", .{@backingInt(status)}) catch unreachable;
+    if (detail.len == 0) return head;
+    const separator = ": ";
+    @memcpy(buf[head.len..][0..separator.len], separator);
+    const detail_start = head.len + separator.len;
+    const kept = text_utils.utf8PrefixByBytes(detail, buf.len - detail_start);
+    @memcpy(buf[detail_start..][0..kept.len], kept);
+    return buf[0 .. detail_start + kept.len];
 }
 
 fn formatToolExecutionError(_: *anyopaque, arena: Allocator, tool_name: []const u8, err: anyerror) ![]const u8 {
@@ -3906,6 +4047,7 @@ test "ACP maps selected-model image capability failures to one stable error" {
                 );
             },
             .stop_reason => return error.UnexpectedStopReason,
+            .auth_required => return error.UnexpectedAuthRequired,
         }
     }
     try std.testing.expectError(error.OutOfMemory, promptExecutionFailure(error.OutOfMemory));
@@ -5318,10 +5460,13 @@ test "ACP finalization maps failed turns and provider length" {
         outcome: types.TurnPresentationOutcome,
         disposition: ?types.ProviderCompletionDisposition,
         expected: acp_types.StopReason,
+        failed: bool,
     }{
-        .{ .outcome = .completed, .disposition = .length_limited, .expected = .max_output_tokens },
-        .{ .outcome = .failed, .disposition = .length_limited, .expected = .max_output_tokens },
-        .{ .outcome = .failed, .disposition = null, .expected = .refused },
+        .{ .outcome = .completed, .disposition = .length_limited, .expected = .max_output_tokens, .failed = false },
+        .{ .outcome = .failed, .disposition = .length_limited, .expected = .max_output_tokens, .failed = false },
+        .{ .outcome = .failed, .disposition = .step_limited, .expected = .max_model_turns, .failed = false },
+        .{ .outcome = .failed, .disposition = null, .expected = .end_turn, .failed = true },
+        .{ .outcome = .paused, .disposition = null, .expected = .end_turn, .failed = true },
     };
 
     for (cases) |case| {
@@ -5334,7 +5479,362 @@ test "ACP finalization maps failed turns and provider length" {
         try deps.finalize_turn(deps.ctx, 8, case.outcome, case.disposition);
 
         try std.testing.expectEqual(case.expected, ctx.stop_reason);
+        try std.testing.expectEqual(case.failed, ctx.turn_failed);
     }
+}
+
+test "a content-filtered turn answers refusal and another model error still throws" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-content-filter.jsonl", .{});
+    defer capture.close(io_mod.getIo());
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+    state.writer = .{ .stdout = capture };
+    const session = &state.active_session.?;
+    var prompt_input = ParsedPromptInput{ .text = &.{} };
+
+    const cases = [_]struct {
+        status: ?types.RouteRecoveryStatus.Kind,
+        thrown: anyerror,
+        refusal: bool,
+    }{
+        .{ .status = .content_filter, .thrown = error.ModelError, .refusal = true },
+        .{ .status = null, .thrown = error.ContentFiltered, .refusal = true },
+        .{ .status = null, .thrown = error.ModelRefused, .refusal = true },
+        .{ .status = .failed, .thrown = error.ModelError, .refusal = false },
+        .{ .status = null, .thrown = error.ModelError, .refusal = false },
+    };
+    for (cases) |case| {
+        var ctx = AcpContext{ .alloc = alloc, .state = &state, .session_id = "session_1", .current_prompt_input = &prompt_input };
+        const deps = agentRuntimeDeps(&ctx);
+        ctx.resetTurnOutcome(session);
+        if (case.status) |kind| try deps.push_route_recovery_status(deps.ctx, .{ .kind = kind });
+        try deps.finalize_turn(deps.ctx, 1, .failed, null);
+
+        if (case.refusal) {
+            const outcome = try ctx.thrownTurnOutcome(session, case.thrown);
+            try std.testing.expect(outcome == .stop_reason);
+            try std.testing.expectEqual(acp_types.StopReason.content_filter, outcome.stop_reason);
+        } else {
+            try std.testing.expectError(case.thrown, ctx.thrownTurnOutcome(session, case.thrown));
+        }
+    }
+}
+
+test "a thrown turn failure answers its recorded notice without ANSI escapes" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-thrown-notice.jsonl", .{});
+    defer capture.close(io_mod.getIo());
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+    state.writer = .{ .stdout = capture };
+    const session = &state.active_session.?;
+    var prompt_input = ParsedPromptInput{ .text = &.{} };
+
+    const Step = union(enum) {
+        operational: []const u8,
+        status: types.RouteRecoveryStatus,
+    };
+    const cases = [_]struct {
+        step: ?Step,
+        thrown: anyerror,
+        // Null: the turn rethrows `thrown`.
+        expected: ?[]const u8,
+    }{
+        .{
+            .step = .{ .operational = "\x1b[31mThe model sent an empty reply.\x1b[0m\n" },
+            .thrown = error.StreamInterrupted,
+            .expected = "The model sent an empty reply.",
+        },
+        .{
+            .step = .{ .status = .{ .kind = .terminal_provider_error, .attempt = 2 } },
+            .thrown = error.ModelError,
+            .expected = "⚠ Provider unavailable · stopped after 2 attempts",
+        },
+        .{
+            .step = .{ .status = .{ .kind = .unsafe_assistant_output } },
+            .thrown = error.ModelError,
+            .expected = "⚠ Response interrupted · partial output preserved",
+        },
+        .{ .step = null, .thrown = error.ModelError, .expected = null },
+        .{ .step = .{ .operational = "The model sent an empty reply." }, .thrown = error.OutOfMemory, .expected = null },
+    };
+    for (cases) |case| {
+        var ctx = AcpContext{ .alloc = alloc, .state = &state, .session_id = "session_1", .current_prompt_input = &prompt_input };
+        const deps = agentRuntimeDeps(&ctx);
+        ctx.resetTurnOutcome(session);
+        if (case.step) |step| switch (step) {
+            .operational => |text| try deps.push_text(deps.ctx, .{ .operational = text }),
+            .status => |status| try deps.push_route_recovery_status(deps.ctx, status),
+        };
+        try deps.finalize_turn(deps.ctx, 1, .failed, null);
+
+        if (case.expected) |expected| {
+            const outcome = try ctx.thrownTurnOutcome(session, case.thrown);
+            try std.testing.expect(outcome == .rpc_error);
+            try std.testing.expectEqual(ErrorCode.internal_error, outcome.rpc_error.code);
+            try std.testing.expectEqualStrings(expected, outcome.rpc_error.message);
+        } else {
+            try std.testing.expectError(case.thrown, ctx.thrownTurnOutcome(session, case.thrown));
+        }
+    }
+}
+
+test "a failed prompt answers its own failure, not an earlier prompt's HTTP error" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-stale-failure.jsonl", .{});
+    defer capture.close(io_mod.getIo());
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+    state.writer = .{ .stdout = capture };
+    const session = &state.active_session.?;
+    var prompt_input = ParsedPromptInput{ .text = &.{} };
+
+    var first = AcpContext{ .alloc = alloc, .state = &state, .session_id = "session_1", .current_prompt_input = &prompt_input };
+    first.resetTurnOutcome(session);
+    const first_deps = agentRuntimeDeps(&first);
+    try first_deps.push_http_error(first_deps.ctx, .bad_gateway, "upstream down", null);
+    try first_deps.finalize_turn(first_deps.ctx, 1, .failed, null);
+    const first_outcome = first.turnOutcome(session);
+    try std.testing.expect(first_outcome == .rpc_error);
+    try std.testing.expectEqualStrings("HTTP 502: upstream down", first_outcome.rpc_error.message);
+
+    var second = AcpContext{ .alloc = alloc, .state = &state, .session_id = "session_1", .current_prompt_input = &prompt_input };
+    second.resetTurnOutcome(session);
+    const second_deps = agentRuntimeDeps(&second);
+    try second_deps.finalize_turn(second_deps.ctx, 2, .failed, null);
+    const second_outcome = second.turnOutcome(session);
+    try std.testing.expect(second_outcome == .rpc_error);
+    try std.testing.expectEqual(ErrorCode.internal_error, second_outcome.rpc_error.code);
+    try std.testing.expectEqualStrings(turn_failed_message, second_outcome.rpc_error.message);
+}
+
+test "a rejected credential answers AUTH_REQUIRED and a forbidden one a generic error" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-auth-failure.jsonl", .{});
+    defer capture.close(io_mod.getIo());
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+    state.writer = .{ .stdout = capture };
+    const session = &state.active_session.?;
+    var prompt_input = ParsedPromptInput{ .text = &.{} };
+
+    const cases = [_]struct {
+        user_turn: bool = true,
+        status: std.http.Status,
+        // Null: the prompt answers a generic error.
+        auth_message: ?[]const u8,
+    }{
+        .{ .status = .unauthorized, .auth_message = "lia login authentication failed · HTTP 401" },
+        .{ .status = .forbidden, .auth_message = null },
+        .{ .user_turn = false, .status = .unauthorized, .auth_message = null },
+    };
+    for (cases) |case| {
+        var ctx = AcpContext{
+            .alloc = alloc,
+            .state = &state,
+            .session_id = "session_1",
+            .current_prompt_input = if (case.user_turn) &prompt_input else null,
+        };
+        const deps = agentRuntimeDeps(&ctx);
+        ctx.resetTurnOutcome(session);
+        try deps.push_http_error(deps.ctx, case.status, "provider body secret", .lia_login);
+        try deps.finalize_turn(deps.ctx, 1, .failed, null);
+
+        const outcome = ctx.turnOutcome(session);
+        if (case.auth_message) |expected| {
+            try std.testing.expect(outcome == .auth_required);
+            try std.testing.expectEqualStrings(expected, outcome.auth_required.message);
+            try std.testing.expectEqual(server.authOffer(&state), outcome.auth_required.offer);
+        } else {
+            try std.testing.expect(outcome == .rpc_error);
+            try std.testing.expectEqual(ErrorCode.internal_error, outcome.rpc_error.code);
+        }
+    }
+}
+
+test "a notice after a rejected credential decides the answer" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-auth-later-notice.jsonl", .{});
+    defer capture.close(io_mod.getIo());
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+    state.writer = .{ .stdout = capture };
+    const session = &state.active_session.?;
+    var prompt_input = ParsedPromptInput{ .text = &.{} };
+
+    var ctx = AcpContext{ .alloc = alloc, .state = &state, .session_id = "session_1", .current_prompt_input = &prompt_input };
+    const deps = agentRuntimeDeps(&ctx);
+    ctx.resetTurnOutcome(session);
+    try deps.push_http_error(deps.ctx, .unauthorized, "", .lia_login);
+    try deps.push_http_error(deps.ctx, .bad_gateway, "upstream down", .lia_login);
+    try deps.finalize_turn(deps.ctx, 1, .failed, null);
+
+    const outcome = ctx.turnOutcome(session);
+    try std.testing.expect(outcome == .rpc_error);
+    try std.testing.expectEqual(ErrorCode.internal_error, outcome.rpc_error.code);
+    try std.testing.expectEqualStrings("HTTP 502: upstream down", outcome.rpc_error.message);
+}
+
+test "a prompt without a credential offers sign-in only for Gateway" {
+    const alloc = std.testing.allocator;
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+
+    const gateway = credentialUnavailableOutcome(&state, .gateway);
+    try std.testing.expect(gateway == .auth_required);
+    try std.testing.expectEqualStrings(credentials.missing_credential_message, gateway.auth_required.message);
+
+    const configured = credentialUnavailableOutcome(&state, model_provider.parse("local").?);
+    try std.testing.expect(configured == .rpc_error);
+    try std.testing.expectEqual(ErrorCode.invalid_request, configured.rpc_error.code);
+    try std.testing.expectEqualStrings(server.configured_credential_unavailable_message, configured.rpc_error.message);
+}
+
+test "a failed or paused turn answers the notice that ended it" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-turn-notice.jsonl", .{});
+    defer capture.close(io_mod.getIo());
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+    state.writer = .{ .stdout = capture };
+    const session = &state.active_session.?;
+    var prompt_input = ParsedPromptInput{ .text = &.{} };
+
+    const Step = union(enum) {
+        operational: []const u8,
+        assistant_started,
+        diff: []const u8,
+        uncertain_tool,
+    };
+    const cases = [_]struct {
+        user_turn: bool = true,
+        steps: []const Step,
+        outcome: types.TurnPresentationOutcome = .failed,
+        expected: []const u8,
+    }{
+        .{
+            .steps = &.{ .{ .operational = "The model sent an empty reply." }, .{ .operational = "\n" } },
+            .expected = "The model sent an empty reply.",
+        },
+        .{
+            .steps = &.{ .{ .operational = "Gateway did not confirm ultrafast.\n" }, .assistant_started },
+            .expected = turn_failed_message,
+        },
+        .{ .steps = &.{.{ .diff = "--- a/x\n+++ b/x\n" }}, .expected = turn_failed_message },
+        .{ .user_turn = false, .steps = &.{.{ .operational = "Subagent notice" }}, .expected = turn_failed_message },
+        .{ .steps = &.{.uncertain_tool}, .outcome = .paused, .expected = "⚠ Tool state needs review · context preserved" },
+    };
+    for (cases) |case| {
+        var ctx = AcpContext{
+            .alloc = alloc,
+            .state = &state,
+            .session_id = "session_1",
+            .current_prompt_input = if (case.user_turn) &prompt_input else null,
+        };
+        const deps = agentRuntimeDeps(&ctx);
+        ctx.resetTurnOutcome(session);
+        for (case.steps) |step| switch (step) {
+            .operational => |text| try deps.push_text(deps.ctx, .{ .operational = text }),
+            .assistant_started => try deps.push_text(deps.ctx, .assistant_started),
+            .diff => |preview| try deps.push_diff_block(deps.ctx, .{ .preview = try std.heap.c_allocator.dupe(u8, preview) }),
+            .uncertain_tool => try deps.push_route_recovery_status(deps.ctx, .{ .kind = .unsafe_tool_start }),
+        };
+        try deps.finalize_turn(deps.ctx, 1, case.outcome, null);
+
+        const outcome = ctx.turnOutcome(session);
+        try std.testing.expect(outcome == .rpc_error);
+        try std.testing.expectEqualStrings(case.expected, outcome.rpc_error.message);
+    }
+}
+
+test "a failure message keeps whole codepoints and replaces invalid bytes" {
+    const alloc = std.testing.allocator;
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+    const session = &state.active_session.?;
+
+    var long: [server.failure_message_max_bytes + 8]u8 = @splat('a');
+    // "é" is two bytes; its first byte is the buffer's last.
+    @memcpy(long[server.failure_message_max_bytes - 1 ..][0..2], "é");
+    session.setFailureMessage(&long);
+    try std.testing.expectEqual(server.failure_message_max_bytes - 1, session.failureMessage().len);
+
+    session.setFailureMessage("bad \xff detail");
+    try std.testing.expectEqualStrings("bad \u{FFFD} detail", session.failureMessage());
+}
+
+test "a report turn that completes decides the prompt's answer after a failed turn" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-report-turn.jsonl", .{});
+    defer capture.close(io_mod.getIo());
+    var state = try initTestAcpState(alloc, "/tmp/workspace", .ask);
+    defer state.deinit();
+    state.writer = .{ .stdout = capture };
+    const session = &state.active_session.?;
+    var prompt_input = ParsedPromptInput{ .text = &.{} };
+
+    // Each case runs the user's turn, then one report turn on the same context
+    // as `runReportTurns` does.
+    const cases = [_]struct {
+        http_error: bool,
+        user_outcome: types.TurnPresentationOutcome,
+        user_disposition: ?types.ProviderCompletionDisposition,
+    }{
+        .{ .http_error = true, .user_outcome = .failed, .user_disposition = null },
+        .{ .http_error = false, .user_outcome = .paused, .user_disposition = null },
+        .{ .http_error = false, .user_outcome = .completed, .user_disposition = .length_limited },
+    };
+    for (cases) |case| {
+        var ctx = AcpContext{ .alloc = alloc, .state = &state, .session_id = "session_1", .current_prompt_input = &prompt_input };
+        const deps = agentRuntimeDeps(&ctx);
+        ctx.resetTurnOutcome(session);
+        if (case.http_error) try deps.push_http_error(deps.ctx, .bad_gateway, "upstream down", null);
+        try deps.finalize_turn(deps.ctx, 1, case.user_outcome, case.user_disposition);
+
+        ctx.resetTurnOutcome(session);
+        try deps.finalize_turn(deps.ctx, 2, .completed, null);
+
+        const outcome = ctx.turnOutcome(session);
+        try std.testing.expect(outcome == .stop_reason);
+        try std.testing.expectEqual(acp_types.StopReason.end_turn, outcome.stop_reason);
+        try std.testing.expectEqualStrings("", session.failureMessage());
+    }
+}
+
+test "a long HTTP error keeps its status and cuts the detail at a UTF-8 boundary" {
+    var buf: [http_error_message_max_bytes]u8 = undefined;
+    const head = "HTTP 502: ";
+    // "é" is two bytes; its first byte lands on the buffer's last byte.
+    var detail_buf: [4096]u8 = @splat('<');
+    const multibyte_at = http_error_message_max_bytes - head.len - 1;
+    @memset(detail_buf[0..multibyte_at], 'a');
+    @memcpy(detail_buf[multibyte_at..][0..2], "é");
+    const detail: []const u8 = &detail_buf;
+
+    const message = formatHttpError(&buf, .bad_gateway, detail);
+
+    try std.testing.expectEqual(http_error_message_max_bytes - 1, message.len);
+    try std.testing.expect(std.mem.startsWith(u8, message, head));
+    try std.testing.expect(std.unicode.utf8ValidateSlice(message));
+    try std.testing.expectEqualStrings(detail[0 .. message.len - head.len], message[head.len..]);
+
+    try std.testing.expectEqualStrings("HTTP 502: short", formatHttpError(&buf, .bad_gateway, "short"));
+    try std.testing.expectEqualStrings("HTTP 404", formatHttpError(&buf, .not_found, ""));
 }
 
 test "ACP deps reject malformed native web_search calls" {

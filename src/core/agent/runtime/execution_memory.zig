@@ -342,7 +342,7 @@ test "empty restored steering keeps its checkpoint boundary" {
     try std.testing.expectEqual(@as(usize, 1), try retainedMessageOffset(messages.items, .{ .steering = 1 }));
 }
 
-pub fn persistedStatusForCurrentFxLocalResult(
+pub fn persistedStatusForCurrentLiaLocalResult(
     status: ToolExecutionStatus,
     output: []const u8,
 ) types.PersistedToolStatus {

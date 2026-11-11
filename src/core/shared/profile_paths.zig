@@ -24,7 +24,7 @@ const logs_dir_name = "logs";
 const trace_log_file_name = "trace.log";
 const recordings_dir_name = "recordings";
 
-/// The folder `LIA_HOME` names, set once at startup by `useFxHome` before any
+/// The folder `LIA_HOME` names, set once at startup by `useLiaHome` before any
 /// other thread runs. Null means lia keeps its files in `~/.lia`.
 var lia_home: ?[]const u8 = null;
 
@@ -35,7 +35,7 @@ pub const LiaHomeError = error{ LiaHomeNotAbsolute, LiaHomeIsRoot, LiaHomeIsHome
 /// would close the home folder to everyone else. Trailing slashes are
 /// ignored, and an empty value leaves the default. `value` must outlive the
 /// process, as an environment string does.
-pub fn useFxHome(value: []const u8, home: ?[]const u8) LiaHomeError!void {
+pub fn useLiaHome(value: []const u8, home: ?[]const u8) LiaHomeError!void {
     const trimmed = std.mem.trimEnd(u8, value, "/");
     if (value.len == 0) return;
     if (!std.Io.Dir.path.isAbsolute(value)) return error.LiaHomeNotAbsolute;
@@ -213,14 +213,14 @@ test "LIA_HOME moves every profile path and how messages name it" {
     try std.testing.expectEqualStrings("/tmp/fake-home", rootParent("/tmp/fake-home"));
     try std.testing.expectEqualStrings(".lia", rootName());
     try std.testing.expectEqualStrings("back up ~/.lia/sessions", displayText("back up ~/.lia/sessions"));
-    try useFxHome("", null);
+    try useLiaHome("", null);
     try std.testing.expect(!liaHomeActive());
-    try std.testing.expectError(error.LiaHomeNotAbsolute, useFxHome("profiles/work", null));
-    try std.testing.expectError(error.LiaHomeIsRoot, useFxHome("///", null));
-    try std.testing.expectError(error.LiaHomeIsHome, useFxHome("/Users/me/", "/Users/me"));
+    try std.testing.expectError(error.LiaHomeNotAbsolute, useLiaHome("profiles/work", null));
+    try std.testing.expectError(error.LiaHomeIsRoot, useLiaHome("///", null));
+    try std.testing.expectError(error.LiaHomeIsHome, useLiaHome("/Users/me/", "/Users/me"));
     try std.testing.expect(!liaHomeActive());
 
-    try useFxHome("/tmp/lia-profile/", "/Users/me");
+    try useLiaHome("/tmp/lia-profile/", "/Users/me");
     try std.testing.expectEqualStrings("/tmp", liaHomeParent().?);
     try std.testing.expect(liaHomeActive());
     try std.testing.expectEqualStrings("$LIA_HOME", displayRoot());
@@ -245,7 +245,7 @@ test "LIA_HOME moves every profile path and how messages name it" {
     defer alloc.free(trace);
     try std.testing.expectEqualStrings("/tmp/lia-profile/logs/trace.log", trace);
 
-    try useFxHome("/lia", null);
+    try useLiaHome("/lia", null);
     try std.testing.expectEqualStrings("/", rootParent("/tmp/fake-home"));
     try std.testing.expectEqualStrings("lia", rootName());
 }

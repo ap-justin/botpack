@@ -452,7 +452,7 @@ pub const Dashboard = struct {
     }
 
     fn readCache(self: *Dashboard, identity: cache.Identity) ?cache.Owned {
-        var lia_dir = self.openFxDir() orelse return null;
+        var lia_dir = self.openLiaDir() orelse return null;
         defer lia_dir.close(self.io());
         return cache.read(self.gpa, self.io(), lia_dir, identity);
     }
@@ -464,7 +464,7 @@ pub const Dashboard = struct {
         return Io.Dir.openDirAbsolute(self.io(), self.host.home, .{}) catch null;
     }
 
-    fn openFxDir(self: *Dashboard) ?Io.Dir {
+    fn openLiaDir(self: *Dashboard) ?Io.Dir {
         var home = self.openHome() orelse return null;
         defer home.close(self.io());
         return home.openDir(self.io(), self.host.lia_dir_name, .{}) catch null;
@@ -472,7 +472,7 @@ pub const Dashboard = struct {
 
     /// `~/.lia`, created private when missing: `lia usage` with only an API
     /// key may run before anything else made it.
-    fn openOrCreateFxDir(self: *Dashboard) ?Io.Dir {
+    fn openOrCreateLiaDir(self: *Dashboard) ?Io.Dir {
         var home = self.openHome() orelse return null;
         defer home.close(self.io());
         home.createDir(self.io(), self.host.lia_dir_name, .fromMode(0o700)) catch |err| switch (err) {
@@ -626,7 +626,7 @@ fn fetchAll(dashboard: *Dashboard, job: *const Job) Outcome {
     var latest = dashboard.ownedEntryFor(job.identity);
     defer if (latest) |*l| l.deinit();
     const held: ?cache.Entry = if (latest) |l| l.entry else null;
-    var lia_dir = dashboard.openOrCreateFxDir() orelse return unsaved(dashboard, job, fetched, now, held);
+    var lia_dir = dashboard.openOrCreateLiaDir() orelse return unsaved(dashboard, job, fetched, now, held);
     defer lia_dir.close(dashboard.io());
     const stored = cache.store(dashboard.gpa, dashboard.io(), lia_dir, job.identity, fetched, now, held) catch |err| switch (err) {
         // The fetch itself is unfit to keep.

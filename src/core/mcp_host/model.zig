@@ -325,7 +325,8 @@ pub const Catalog = struct {
     /// The tools `name` may mean when it spells a tool as `server.tool`,
     /// `server/tool`, `mcp__server__tool`, or `mcp_server_tool`, deferred
     /// tools included. Tools the permission rules or `access` refuse are not
-    /// candidates. Lists of the servers the name begins with load first.
+    /// candidates. Any server the name begins with has its tool list loaded
+    /// first, so a name can resolve before the model has searched.
     pub fn resolveQualified(
         c: *Catalog,
         alloc: Allocator,

@@ -2,6 +2,7 @@ const std = @import("std");
 const testing_allocator = @import("../core/shared/testing_allocator.zig");
 const io_mod = @import("../core/shared/io.zig");
 const host_target = @import("../core/hosts/target.zig");
+const debug_trace = @import("../core/shared/debug_trace.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -46,7 +47,6 @@ fn writeOneLine(w: *std.Io.Writer, json: []const u8) !void {
 }
 
 pub const ErrorCode = struct {
-    pub const request_frame_too_large: i64 = -32000;
     /// ACP `AUTH_REQUIRED`: the agent needs the client to authenticate first.
     pub const auth_required: i64 = -32000;
     pub const parse_error: i64 = -32700;
@@ -276,23 +276,65 @@ pub const Writer = struct {
         } });
     }
 
-    fn writeFrame(self: *Writer, alloc: Allocator, frame: Frame) !void {
+    /// A frame rendered but not yet sent, owned by the allocator it was
+    /// built with until `send` takes it.
+    pub const Built = struct {
+        bytes: []u8,
+        kind: std.meta.Tag(Frame),
+    };
+
+    pub fn buildResponse(alloc: Allocator, id: ?RequestId, result_json: []const u8) !Built {
+        return build(alloc, .{ .response = .{ .id = id, .result_json = result_json } });
+    }
+
+    pub fn buildError(alloc: Allocator, id: ?RequestId, err: RpcError) !Built {
+        return build(alloc, .{ .error_response = .{ .id = id, .err = err } });
+    }
+
+    fn build(alloc: Allocator, frame: Frame) !Built {
         var out: std.Io.Writer.Allocating = .init(alloc);
         defer out.deinit();
-
         try frame.write(&out.writer);
+        return .{ .bytes = try out.toOwnedSlice(), .kind = frame };
+    }
 
-        const slice = try out.toOwnedSlice();
-        defer alloc.free(slice);
+    /// Writes `built` and frees it. On an error part of the frame may
+    /// already be on the stream.
+    pub fn send(self: *Writer, alloc: Allocator, built: Built) !void {
+        defer alloc.free(built.bytes);
+        try self.sendBytes(built.kind, built.bytes);
+    }
 
+    /// Writes an error response rendered into a stack buffer, for a caller
+    /// whose allocator has just failed. A frame too long for the buffer, from
+    /// its id, message or data, is an error and nothing is written.
+    pub fn writeErrorUnallocated(self: *Writer, id: ?RequestId, err: RpcError) !void {
+        var buf: [1024]u8 = undefined;
+        var fixed: std.Io.Writer = .fixed(&buf);
+        const frame: Frame = .{ .error_response = .{ .id = id, .err = err } };
+        try frame.write(&fixed);
+        try self.sendBytes(std.meta.activeTag(frame), fixed.buffered());
+    }
+
+    fn sendBytes(self: *Writer, kind: std.meta.Tag(Frame), bytes: []const u8) !void {
+        // An answer to a request is traced at each step, since a client that
+        // never receives one only waits.
+        const answers = kind == .response or kind == .error_response;
         const io = io_mod.getIo();
+        if (answers) debug_trace.logf("acp", "event=frame_write_begin kind={s} bytes={d}", .{ @tagName(kind), bytes.len });
         self.mutex.lockUncancelable(io);
         defer self.mutex.unlock(io);
+        if (answers) debug_trace.logf("acp", "event=frame_write_locked kind={s}", .{@tagName(kind)});
         if (self.callback) |callback| {
-            try callback.write_fn(callback.context, slice);
+            try callback.write_fn(callback.context, bytes);
         } else {
-            try self.stdout.writeStreamingAll(io, slice);
+            try self.stdout.writeStreamingAll(io, bytes);
         }
+        if (answers) debug_trace.logf("acp", "event=frame_write_done kind={s}", .{@tagName(kind)});
+    }
+
+    fn writeFrame(self: *Writer, alloc: Allocator, frame: Frame) !void {
+        try self.send(alloc, try build(alloc, frame));
     }
 
     pub fn writeId(w: *std.Io.Writer, id: ?RequestId) !void {

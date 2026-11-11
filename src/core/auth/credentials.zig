@@ -422,7 +422,7 @@ pub fn resolvePreferring(
     // stored key that works. OutOfMemory stays fatal, as it does for them.
     var lia_login_status: LiaLoginReadStatus = .absent;
     var failure: ?LoadFailure = null;
-    const lia_login = loadFxLoginForPrecedence(alloc, transport, mode) catch |err| blk: {
+    const lia_login = loadLiaLoginForPrecedence(alloc, transport, mode) catch |err| blk: {
         if (err == error.OutOfMemory) return err;
         lia_login_status = .unavailable;
         failure = .{ .source = .lia_login, .err = err };
@@ -463,14 +463,14 @@ fn unavailableExplicitResolution(source: Source, err: anyerror) Resolution {
     return resolution;
 }
 
-fn loadFxLoginForPrecedence(
+fn loadLiaLoginForPrecedence(
     alloc: std.mem.Allocator,
     transport: oauth_transport.Provider,
     mode: LoadMode,
 ) !?Credential {
     return switch (mode) {
-        .stored => loadStoredFxLoginCredential(alloc),
-        .refresh_if_needed => loadFxLoginCredential(alloc, transport),
+        .stored => loadStoredLiaLoginCredential(alloc),
+        .refresh_if_needed => loadLiaLoginCredential(alloc, transport),
     };
 }
 
@@ -486,8 +486,8 @@ fn loadPreferredSource(
 ) !?Credential {
     return switch (source) {
         .lia_login => switch (mode) {
-            .stored => loadStoredFxLoginCredential(alloc),
-            .refresh_if_needed => loadFxLoginCredential(alloc, transport),
+            .stored => loadStoredLiaLoginCredential(alloc),
+            .refresh_if_needed => loadLiaLoginCredential(alloc, transport),
         },
         else => loadSource(alloc, transport, secret_store, source),
     };
@@ -502,7 +502,7 @@ pub fn loadSource(
     return switch (source) {
         .vercel_oidc_token => loadEnvCredential(alloc, "VERCEL_OIDC_TOKEN", source),
         .ai_gateway_api_key => loadEnvCredential(alloc, "AI_GATEWAY_API_KEY", source),
-        .lia_login => loadFxLoginCredential(alloc, transport),
+        .lia_login => loadLiaLoginCredential(alloc, transport),
         .stored_key => loadStoredKeyCredential(alloc, secret_store),
         .host_managed, .configured => null,
     };
@@ -617,7 +617,7 @@ fn nonEmptyValue(value: ?[]const u8) ?[]const u8 {
     return raw;
 }
 
-pub fn loadFxLoginCredential(
+pub fn loadLiaLoginCredential(
     alloc: std.mem.Allocator,
     transport: oauth_transport.Provider,
 ) !?Credential {
@@ -626,27 +626,27 @@ pub fn loadFxLoginCredential(
     defer session.deinit(alloc);
 
     if (session.expired(io_mod.milliTimestamp())) {
-        return refreshFxLoginCredentialLocked(alloc, transport, .if_needed);
+        return refreshLiaLoginCredentialLocked(alloc, transport, .if_needed);
     }
 
     return takeCredentialFromSession(&session, null);
 }
 
-fn loadStoredFxLoginCredential(alloc: std.mem.Allocator) !?Credential {
+fn loadStoredLiaLoginCredential(alloc: std.mem.Allocator) !?Credential {
     try requireSourceStorage(.lia_login);
     var session = (try oauth_session.load(alloc)) orelse return null;
     defer session.deinit(alloc);
     return takeCredentialFromSession(&session, null);
 }
 
-pub fn refreshFxLoginCredential(
+pub fn refreshLiaLoginCredential(
     alloc: std.mem.Allocator,
     transport: oauth_transport.Provider,
 ) !?Credential {
-    return refreshFxLoginCredentialLocked(alloc, transport, .force);
+    return refreshLiaLoginCredentialLocked(alloc, transport, .force);
 }
 
-fn refreshFxLoginCredentialLocked(
+fn refreshLiaLoginCredentialLocked(
     alloc: std.mem.Allocator,
     transport: oauth_transport.Provider,
     mode: LiaLoginRefreshMode,
@@ -660,13 +660,13 @@ fn refreshFxLoginCredentialLocked(
 
     var refreshed_at_ms: ?i64 = null;
     if (mode == .force or session.expired(io_mod.milliTimestamp())) {
-        try refreshFxSession(alloc, transport, &mutation, &session);
+        try refreshLiaSession(alloc, transport, &mutation, &session);
         refreshed_at_ms = io_mod.milliTimestamp();
     }
     return takeCredentialFromSession(&session, refreshed_at_ms);
 }
 
-pub fn refreshFxSession(
+pub fn refreshLiaSession(
     alloc: std.mem.Allocator,
     transport: oauth_transport.Provider,
     mutation: *oauth_session.Mutation,
@@ -1074,7 +1074,7 @@ test "a remembered lia login never refreshes in stored mode" {
     defer env.deinit();
 
     // No session exists, so both modes resolve to nothing. What matters is the
-    // route taken: `.stored` must reach loadStoredFxLoginCredential, which never
+    // route taken: `.stored` must reach loadStoredLiaLoginCredential, which never
     // performs the network refresh that a diagnostic is forbidden from making.
     for ([_]LoadMode{ .stored, .refresh_if_needed }) |mode| {
         var resolution = try resolvePreferring(alloc, oauth_transport.unavailable_provider, host.unavailable_secret_store, mode, .lia_login);
@@ -1186,7 +1186,7 @@ test "credential resolution preserves unreadable store classification" {
 
 test "a failed lia-login refresh falls through to the stored key" {
     const alloc = std.testing.allocator;
-    var fixture = try ExpiredFxLoginFixture.install(alloc);
+    var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
     var store_fixture = SecretStoreFixture{ .value = "stored-key-that-works" };
 
@@ -1208,7 +1208,7 @@ test "a failed lia-login refresh falls through to the stored key" {
 
 test "a failed lia-login refresh is still reported when nothing else resolves" {
     const alloc = std.testing.allocator;
-    var fixture = try ExpiredFxLoginFixture.install(alloc);
+    var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
     var store_fixture = SecretStoreFixture{};
 
@@ -1230,13 +1230,13 @@ test "a failed lia-login refresh is still reported when nothing else resolves" {
 /// A HOME holding an lia login whose session is expired and whose refresh token
 /// the issuer rejects, which is what an expired or revoked login looks like on
 /// disk. Paired with `oauth_transport.unavailable_provider`, the refresh fails.
-const ExpiredFxLoginFixture = struct {
+const ExpiredLiaLoginFixture = struct {
     alloc: std.mem.Allocator,
     tmp: std.testing.TmpDir,
     env: *CredentialTestEnv,
     home: []u8,
 
-    fn install(alloc: std.mem.Allocator) !ExpiredFxLoginFixture {
+    fn install(alloc: std.mem.Allocator) !ExpiredLiaLoginFixture {
         var tmp = std.testing.tmpDir(.{});
         errdefer tmp.cleanup();
         const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "");
@@ -1262,7 +1262,7 @@ const ExpiredFxLoginFixture = struct {
         return .{ .alloc = alloc, .tmp = tmp, .env = env, .home = home };
     }
 
-    fn deinit(self: *ExpiredFxLoginFixture) void {
+    fn deinit(self: *ExpiredLiaLoginFixture) void {
         self.env.deinit();
         self.alloc.free(self.home);
         self.tmp.cleanup();
@@ -1318,7 +1318,7 @@ const LiaLoginRefreshProbe = struct {
 
 test "an invalid lia login refresh retires the rejected session" {
     const alloc = std.testing.allocator;
-    var fixture = try ExpiredFxLoginFixture.install(alloc);
+    var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
     var refresh = LiaLoginRefreshProbe{
         .token_disposition = .rejected,
@@ -1327,7 +1327,7 @@ test "an invalid lia login refresh retires the rejected session" {
 
     try std.testing.expectError(
         error.InvalidGrant,
-        refreshFxLoginCredential(alloc, refresh.provider()),
+        refreshLiaLoginCredential(alloc, refresh.provider()),
     );
     try std.testing.expectEqual(@as(usize, 2), refresh.calls);
 
@@ -1338,14 +1338,14 @@ test "an invalid lia login refresh retires the rejected session" {
 
 test "an lia login refresh without a rotated refresh token retires the session" {
     const alloc = std.testing.allocator;
-    var fixture = try ExpiredFxLoginFixture.install(alloc);
+    var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
     var refresh = LiaLoginRefreshProbe{
         .token_disposition = .accepted,
         .token_body = "{\"access_token\":\"new-access\",\"expires_in\":3600,\"scope\":\"openid offline_access\",\"token_type\":\"Bearer\"}",
     };
 
-    if (refreshFxLoginCredential(alloc, refresh.provider())) |maybe_credential| {
+    if (refreshLiaLoginCredential(alloc, refresh.provider())) |maybe_credential| {
         if (maybe_credential) |credential_value| {
             var credential = credential_value;
             credential.deinit(alloc);
@@ -1363,7 +1363,7 @@ test "an lia login refresh without a rotated refresh token retires the session" 
 
 test "a malformed successful lia login refresh retires the session" {
     const alloc = std.testing.allocator;
-    var fixture = try ExpiredFxLoginFixture.install(alloc);
+    var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
     var refresh = LiaLoginRefreshProbe{
         .token_disposition = .accepted,
@@ -1372,7 +1372,7 @@ test "a malformed successful lia login refresh retires the session" {
 
     try std.testing.expectError(
         error.NoRefreshToken,
-        refreshFxLoginCredential(alloc, refresh.provider()),
+        refreshLiaLoginCredential(alloc, refresh.provider()),
     );
     try std.testing.expectEqual(@as(usize, 2), refresh.calls);
 
@@ -1383,7 +1383,7 @@ test "a malformed successful lia login refresh retires the session" {
 
 test "an lia login refresh retires the consumed token when durable replacement fails" {
     const alloc = std.testing.allocator;
-    var fixture = try ExpiredFxLoginFixture.install(alloc);
+    var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
     const auth_path = try std.Io.Dir.path.join(alloc, &.{ fixture.home, ".lia", "auth.json" });
     defer alloc.free(auth_path);
@@ -1395,7 +1395,7 @@ test "an lia login refresh retires the consumed token when durable replacement f
 
     try std.testing.expectError(
         error.OAuthSessionCleanupUncertain,
-        refreshFxLoginCredential(alloc, refresh.provider()),
+        refreshLiaLoginCredential(alloc, refresh.provider()),
     );
     try std.testing.expectEqual(@as(usize, 2), refresh.calls);
 
@@ -1406,7 +1406,7 @@ test "an lia login refresh retires the consumed token when durable replacement f
 
 test "a disabled store still reports why the lia login was silent" {
     const alloc = std.testing.allocator;
-    var fixture = try ExpiredFxLoginFixture.install(alloc);
+    var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
     var store_fixture = SecretStoreFixture{ .disabled = true };
 

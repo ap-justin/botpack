@@ -72,7 +72,7 @@ fn mainC(c_argc: c_int, c_argv: [*][*:0]c_char, c_envp: [*:null]?[*:0]c_char) !v
     const raw_args = rawArgs(c_argc, c_argv);
     const raw_env: RawEnviron = @ptrCast(c_envp);
     // Before any mode runs, since terminal helpers write under lia's folder too.
-    try useFxHomeFromEnv(raw_env);
+    try useLiaHomeFromEnv(raw_env);
 
     if (comptime terminal_native_session.isSupported()) {
         if (terminal_native_session.isControlModeRaw(raw_args)) {
@@ -122,9 +122,9 @@ fn mainC(c_argc: c_int, c_argv: [*][*:0]c_char, c_envp: [*:null]?[*:0]c_char) !v
 
 /// `LIA_HOME` replaces `~/.lia` for the whole process. A bad value stops
 /// lia before it reads or writes anything there.
-fn useFxHomeFromEnv(raw_env: RawEnviron) !void {
+fn useLiaHomeFromEnv(raw_env: RawEnviron) !void {
     const value = rawEnvValue(raw_env, "LIA_HOME") orelse return;
-    profile_paths.useFxHome(value, rawEnvValue(raw_env, "HOME")) catch |err| {
+    profile_paths.useLiaHome(value, rawEnvValue(raw_env, "HOME")) catch |err| {
         try writeStderrFast(switch (err) {
             error.LiaHomeNotAbsolute => "lia: LIA_HOME must be an absolute path\n",
             error.LiaHomeIsRoot => "lia: LIA_HOME can't be the root folder\n",

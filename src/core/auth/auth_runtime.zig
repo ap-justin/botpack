@@ -255,8 +255,8 @@ fn loadCredentialForRefresh(
 ) !?credentials.Credential {
     return switch (source) {
         .lia_login => switch (mode) {
-            .if_needed, .reload => credentials.loadFxLoginCredential(alloc, transport),
-            .force => credentials.refreshFxLoginCredential(alloc, transport),
+            .if_needed, .reload => credentials.loadLiaLoginCredential(alloc, transport),
+            .force => credentials.refreshLiaLoginCredential(alloc, transport),
         },
         else => null,
     };
@@ -3012,8 +3012,8 @@ pub const Runtime = struct {
         return previous != null;
     }
 
-    pub fn reconcileAfterFxLoginLogout(self: *Self, alloc: Allocator) !bool {
-        return self.reconcileAfterFxLoginLogoutWithDeps(
+    pub fn reconcileAfterLiaLoginLogout(self: *Self, alloc: Allocator) !bool {
+        return self.reconcileAfterLiaLoginLogoutWithDeps(
             alloc,
             self,
             probeCredentialSource,
@@ -3021,7 +3021,7 @@ pub const Runtime = struct {
         );
     }
 
-    fn reconcileAfterFxLoginLogoutWithDeps(
+    fn reconcileAfterLiaLoginLogoutWithDeps(
         self: *Self,
         alloc: Allocator,
         ctx: ?*anyopaque,
@@ -3690,7 +3690,7 @@ test "confirmed source removal clears stale store status after adoption and logo
     _ = runtime.adoptCredential(alloc, &login);
     runtime.applySourceInventory(.{ .available = SourceSet.initOne(.lia_login) });
     var fixture: LogoutFixture = .{ .existing = .empty };
-    _ = try runtime.reconcileAfterFxLoginLogoutWithDeps(alloc, &fixture, LogoutFixture.probe, LogoutFixture.load);
+    _ = try runtime.reconcileAfterLiaLoginLogoutWithDeps(alloc, &fixture, LogoutFixture.probe, LogoutFixture.load);
 
     try std.testing.expectEqualStrings(credentials.missing_credential_message, runtime.statusSnapshotAt(100, .gateway, null).missingHelp().?);
 }
@@ -4071,7 +4071,7 @@ test "logout replaces an active lia login with the next available source" {
     var fixture = LogoutFixture{
         .existing = SourceSet.initMany(&.{ .ai_gateway_api_key, .stored_key }),
     };
-    try std.testing.expect(try runtime.reconcileAfterFxLoginLogoutWithDeps(
+    try std.testing.expect(try runtime.reconcileAfterLiaLoginLogoutWithDeps(
         alloc,
         &fixture,
         LogoutFixture.probe,
@@ -4096,7 +4096,7 @@ test "logout preserves an active non-login credential" {
     runtime.source_inventory.insert(.lia_login);
 
     var fixture = LogoutFixture{ .existing = SourceSet.initOne(.ai_gateway_api_key) };
-    try std.testing.expect(!try runtime.reconcileAfterFxLoginLogoutWithDeps(
+    try std.testing.expect(!try runtime.reconcileAfterLiaLoginLogoutWithDeps(
         alloc,
         &fixture,
         LogoutFixture.probe,
@@ -4120,7 +4120,7 @@ test "logout clears the active login and re-enables auth selection when no sourc
     _ = runtime.adoptCredential(alloc, &active);
 
     var fixture = LogoutFixture{ .existing = .empty };
-    try std.testing.expect(try runtime.reconcileAfterFxLoginLogoutWithDeps(
+    try std.testing.expect(try runtime.reconcileAfterLiaLoginLogoutWithDeps(
         alloc,
         &fixture,
         LogoutFixture.probe,
@@ -4142,7 +4142,7 @@ test "logout reconciliation adopts a newer concurrent lia login" {
     _ = runtime.adoptCredential(alloc, &active);
 
     var fixture = LogoutFixture{ .existing = SourceSet.initOne(.lia_login) };
-    try std.testing.expect(try runtime.reconcileAfterFxLoginLogoutWithDeps(
+    try std.testing.expect(try runtime.reconcileAfterLiaLoginLogoutWithDeps(
         alloc,
         &fixture,
         LogoutFixture.probe,
