@@ -17,6 +17,7 @@ const compactor = @import("../core/compactor/compactor.zig");
 const builtin_skills = @import("../builtins/skills.zig");
 const builtin_tools = @import("../builtins/tools.zig");
 const credentials = @import("../core/auth/credentials.zig");
+const host_contract = @import("../core/hosts/host.zig");
 const secret = @import("../core/auth/secret.zig");
 const auth_runtime = @import("../core/auth/auth_runtime.zig");
 const model_provider = @import("../core/config/model_provider.zig");
@@ -569,24 +570,104 @@ fn hostManagedCredential() credentials.Credential {
 
 /// False when the cached credential came from a saved sign-in or key that has
 /// since been removed, so the next prompt reloads instead of sending a token
-/// the user has signed out of. A store that cannot be read keeps the cached
-/// credential, since the request itself will say if it is rejected.
-fn cachedCredentialStillStored(state: *const ServerState, source: ?types.CredentialSource) !bool {
+/// the user has signed out of. The probe checks presence only: it takes no
+/// auth lock and reads no secret, so a prompt never waits on another fx
+/// process refreshing. A store whose state cannot be determined keeps the
+/// cached credential, since the request itself will say if it is rejected.
+fn cachedCredentialStillStored(secret_store: host_contract.SecretStore, source: ?types.CredentialSource) bool {
     const kind = source orelse return true;
     if (kind != .fx_login and kind != .stored_key) return true;
-    return credentials.sourceExists(state.alloc, state.cfg.secret_store, kind) catch |err| switch (err) {
-        error.OutOfMemory => return err,
-        else => true,
+    return switch (credentials.sourcePresence(secret_store, kind)) {
+        .missing => false,
+        .present, .unavailable => true,
     };
 }
 
 test "a cached credential that no saved sign-in backs is not rechecked against the store" {
-    const state: ServerState = undefined;
-    try std.testing.expect(try cachedCredentialStillStored(&state, null));
+    var store: TestSecretStore = .{ .presence = .missing };
+    try std.testing.expect(cachedCredentialStillStored(store.secretStore(), null));
     for ([_]types.CredentialSource{ .ai_gateway_api_key, .vercel_oidc_token, .host_managed, .configured }) |source| {
-        try std.testing.expect(try cachedCredentialStillStored(&state, source));
+        try std.testing.expect(cachedCredentialStillStored(store.secretStore(), source));
+    }
+    try std.testing.expectEqual(@as(usize, 0), store.presence_calls);
+}
+
+test "a cached stored key is dropped only when the store says it is missing" {
+    const cases = [_]struct { presence: host_contract.SecretStorePresence, still_stored: bool }{
+        .{ .presence = .present, .still_stored = true },
+        .{ .presence = .missing, .still_stored = false },
+        .{ .presence = .unavailable, .still_stored = true },
+    };
+    for (cases) |case| {
+        var store: TestSecretStore = .{ .presence = case.presence };
+        try std.testing.expectEqual(case.still_stored, cachedCredentialStillStored(store.secretStore(), .stored_key));
+        try std.testing.expectEqual(@as(usize, 1), store.presence_calls);
+        try std.testing.expectEqual(@as(usize, 0), store.load_calls);
     }
 }
+
+test "a cached fx login is checked by presence, not by reading the saved session" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
+    defer alloc.free(home);
+    var env = std.process.Environ.Map.init(alloc);
+    defer env.deinit();
+    try env.put("HOME", home);
+    try env.put("FX_DISABLE_KEYCHAIN", "1");
+    io_mod.setEnvironMap(&env);
+    defer io_mod.resetEnvironForTest();
+    const store = host_contract.unavailable_secret_store;
+
+    try std.testing.expect(!cachedCredentialStillStored(store, .fx_login));
+
+    try tmp.dir.createDir(std.testing.io, ".fx", .fromMode(0o700));
+    // Present but unparseable: a load would fail, presence still says present.
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".fx/auth.json", .data = "not a session", .flags = .{ .permissions = .fromMode(0o600) } });
+    try std.testing.expect(cachedCredentialStillStored(store, .fx_login));
+
+    // Readable by others: presence is unavailable, not missing.
+    try tmp.dir.deleteFile(std.testing.io, ".fx/auth.json");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".fx/auth.json", .data = "not a session", .flags = .{ .permissions = .fromMode(0o644) } });
+    try std.testing.expect(cachedCredentialStillStored(store, .fx_login));
+}
+
+/// Answers `presence` as configured and counts calls; never holds a secret.
+const TestSecretStore = struct {
+    presence: host_contract.SecretStorePresence,
+    presence_calls: usize = 0,
+    load_calls: usize = 0,
+
+    fn secretStore(self: *TestSecretStore) host_contract.SecretStore {
+        return .{
+            .context = self,
+            .backend_label = "test credential store",
+            .is_disabled_fn = isDisabled,
+            .presence_fn = presenceFn,
+            .load_fn = load,
+            .store_fn = host_contract.unavailable_secret_store.store_fn,
+            .store_interactive_fn = host_contract.unavailable_secret_store.store_interactive_fn,
+        };
+    }
+
+    fn isDisabled(_: ?*anyopaque) bool {
+        return false;
+    }
+
+    fn presenceFn(raw: ?*anyopaque) host_contract.SecretStorePresence {
+        const self: *TestSecretStore = @ptrCast(@alignCast(raw.?));
+        self.presence_calls += 1;
+        return self.presence;
+    }
+
+    fn load(raw: ?*anyopaque, _: Allocator) host_contract.SecretStoreLoadError!?[]u8 {
+        const self: *TestSecretStore = @ptrCast(@alignCast(raw.?));
+        self.load_calls += 1;
+        return null;
+    }
+};
 
 /// Stages authorization without changing any in-flight credential storage.
 /// The caller owns a non-null credential; null retains the current authorization.
@@ -601,7 +682,7 @@ pub fn prepareCredentialForProvider(state: *ServerState, provider: model_provide
                 active.api_key,
                 active.credential_refresh_after_ms,
                 now_ms,
-            ) and try cachedCredentialStillStored(state, active.credential_source)) return null;
+            ) and cachedCredentialStillStored(state.cfg.secret_store, active.credential_source)) return null;
     }
     if (provider != .configured and credentialMatchesProvider(state.credential_source, provider) and
         credentialReadyAt(
@@ -609,7 +690,7 @@ pub fn prepareCredentialForProvider(state: *ServerState, provider: model_provide
             state.api_key,
             state.credential_refresh_after_ms,
             now_ms,
-        ) and try cachedCredentialStillStored(state, state.credential_source)) return null;
+        ) and cachedCredentialStillStored(state.cfg.secret_store, state.credential_source)) return null;
 
     return if (provider == .gateway and state.cfg.credential_override != null)
         credentials.Credential{
