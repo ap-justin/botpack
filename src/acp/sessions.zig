@@ -910,13 +910,7 @@ fn handleRestoreSession(
         durable.preferences.model;
     var staged_credential = server.prepareCredentialForProvider(state, effective_provider) catch |err| {
         if (err != error.ProviderCredentialUnavailable) return err;
-        // The sign-in methods on offer are Vercel's, which cannot supply a
-        // configured provider's key.
-        if (effective_provider == .configured) return state.writer.writeError(alloc, msg.id, .{
-            .code = ErrorCode.invalid_request,
-            .message = "Configured provider authentication is unavailable",
-        });
-        return server.writeAuthRequired(state, alloc, msg.id);
+        return writeRestoreCredentialUnavailable(state, alloc, msg.id, effective_provider);
     };
     defer if (staged_credential) |*credential| credential.deinit(alloc);
     const model_copy = try alloc.dupe(u8, effective_model);
@@ -1322,6 +1316,22 @@ const ConversionNotice = struct {
 /// startup provider is Gateway.
 fn removedSignInReplacementModel(state: *const server.ServerState) []const u8 {
     return if (state.provider == .gateway) state.selected_model else state.cfg.default_model;
+}
+
+/// Answers a load or resume whose provider has no credential. The sign-in
+/// methods on offer are Vercel's, which cannot supply a configured provider's
+/// key, so that provider keeps its plain error.
+fn writeRestoreCredentialUnavailable(
+    state: *server.ServerState,
+    alloc: Allocator,
+    id: ?jsonrpc.RequestId,
+    provider: model_provider.ProviderId,
+) !void {
+    if (provider == .configured) return state.writer.writeError(alloc, id, .{
+        .code = ErrorCode.invalid_request,
+        .message = "Configured provider authentication is unavailable",
+    });
+    return server.writeAuthRequired(state, alloc, id);
 }
 
 fn handleLoadFailure(
@@ -3316,6 +3326,12 @@ test "loading a session after its stored key was removed answers AUTH_REQUIRED w
 
         var new_msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "session/new", .params_raw = "{\"mcpServers\":[]}" };
         try handleNewSession(&state, arena, &new_msg);
+        // A session is saved with its first turn; one never prompted has
+        // nothing to load.
+        try state.active_session.?.v2.?.commitTurn(.{ .assistant = .{
+            .user = .{ .text = @constCast("remember this") },
+            .assistant = @constCast("retained answer"),
+        } }, .literal("en"));
         const session_id = try alloc.dupe(u8, state.active_session.?.session_id);
         defer alloc.free(session_id);
         try server.releaseActiveSession(&state);
@@ -3357,6 +3373,51 @@ test "loading a session after its stored key was removed answers AUTH_REQUIRED w
         try std.testing.expectEqualStrings(acp_types.agent_auth_method_id, methods[0].object.get("id").?.string);
     }
     try std.testing.expectEqual(@as(usize, 1), load_answers);
+}
+
+test "a restore without a credential offers sign-in for Gateway and keeps a configured provider's plain error" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var arena_state = std.heap.ArenaAllocator.init(alloc);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
+    const workspace_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
+    defer alloc.free(workspace_path);
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-output.jsonl", .{ .read = true });
+    defer capture.close(io_mod.getIo());
+    {
+        var state = try initAcpSessionTestState(arena, workspace_path, capture);
+        defer state.deinit();
+        try writeRestoreCredentialUnavailable(&state, arena, .{ .integer = 1 }, .gateway);
+        try writeRestoreCredentialUnavailable(&state, arena, .{ .integer = 2 }, model_provider.parse("local").?);
+        try capture.sync(io_mod.getIo());
+    }
+    var captured_file = try tmp.dir.openFile(io_mod.getIo(), "acp-output.jsonl", .{});
+    defer captured_file.close(io_mod.getIo());
+    const captured = try io_mod.readFileToEnd(alloc, &captured_file, 64 * 1024);
+    defer alloc.free(captured);
+
+    var answers: usize = 0;
+    var lines = std.mem.splitScalar(u8, captured, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        const frame = try std.json.parseFromSlice(std.json.Value, alloc, line, .{});
+        defer frame.deinit();
+        const id = frame.value.object.get("id") orelse continue;
+        const err = frame.value.object.get("error").?.object;
+        answers += 1;
+        if (id.integer == 1) {
+            try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), err.get("code").?.integer);
+            try std.testing.expect(err.get("data").?.object.get("authMethods").?.array.items.len > 0);
+        } else {
+            try std.testing.expectEqual(@as(i64, ErrorCode.invalid_request), err.get("code").?.integer);
+            try std.testing.expectEqualStrings("Configured provider authentication is unavailable", err.get("message").?.string);
+            try std.testing.expect(err.get("data") == null);
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2), answers);
 }
 
 test "libfx/new uses a valid host session id and generates one when none is named" {
