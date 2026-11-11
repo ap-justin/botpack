@@ -1758,7 +1758,8 @@ fn buildAuthRequired(alloc: Allocator, id: ?jsonrpc.RequestId, auth: prompt_hand
 }
 
 /// Re-reads the credentials for the selected provider and ends the pending
-/// state when one is now available. Returns false while there is none.
+/// state when one is now available, unless a turn is still running, which
+/// leaves it pending. Returns false while there is none.
 pub fn refreshPendingAuth(state: *ServerState) !bool {
     if (!state.auth_pending) return true;
     reapActivePrompt(state, false);
