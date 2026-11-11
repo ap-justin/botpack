@@ -569,9 +569,9 @@ fn hostManagedCredential() credentials.Credential {
 }
 
 /// False when the cached credential came from a saved sign-in or key that has
-/// since been removed, so the next prompt reloads instead of sending a token
-/// the user has signed out of. The probe checks presence only: it takes no
-/// auth lock and reads no secret, so a prompt never waits on another fx
+/// since been removed, so the request reloads instead of sending a token the
+/// user has signed out of. The probe checks presence only: it takes no auth
+/// lock and reads no secret, so a request never waits on another fx
 /// process refreshing. A store whose state cannot be determined keeps the
 /// cached credential, since the request itself will say if it is rejected.
 fn cachedCredentialStillStored(secret_store: host_contract.SecretStore, source: ?types.CredentialSource) bool {

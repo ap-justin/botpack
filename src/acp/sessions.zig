@@ -3320,8 +3320,9 @@ test "loading a session after its stored key was removed answers AUTH_REQUIRED w
         defer alloc.free(session_id);
         try server.releaseActiveSession(&state);
 
-        // The cached key is a stored key, and the store `acpSessionTestConfig`
-        // sets reports none: the sign-out happened after session/new.
+        // The cached credential came from a stored key, and the store
+        // `acpSessionTestConfig` sets holds none, as after a sign-out that
+        // followed session/new.
         state.credential_source = .stored_key;
 
         var load_params: std.Io.Writer.Allocating = .init(arena);
