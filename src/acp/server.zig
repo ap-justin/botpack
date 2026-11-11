@@ -5323,3 +5323,26 @@ test "a prompt that needs sign-in answers one AUTH_REQUIRED frame with its notic
     try std.testing.expectEqual(@as(usize, 2), methods.len);
     try std.testing.expectEqualStrings(acp_types.agent_auth_method_id, methods[0].object.get("id").?.string);
 }
+
+test "the unallocated error frame matches the allocated one and writes nothing when too long" {
+    const alloc = std.testing.allocator;
+    var capture = AnswerCapture{ .alloc = alloc };
+    defer capture.deinit();
+    var writer = jsonrpc.Writer.initCallback(&capture, AnswerCapture.write);
+    const err: jsonrpc.RpcError = .{ .code = ErrorCode.internal_error, .message = "The prompt's response could not be sent" };
+    const ids = [_]jsonrpc.RequestId{ .{ .integer = 7 }, .{ .string = "id \"with\" escapes\n" } };
+
+    for (ids) |id| {
+        try writer.writeError(alloc, id, err);
+        try writer.writeErrorUnallocated(id, err);
+        try std.testing.expectEqualStrings(capture.frames.items[capture.frames.items.len - 2], capture.frames.items[capture.frames.items.len - 1]);
+        try std.testing.expect(std.mem.endsWith(u8, capture.frames.items[capture.frames.items.len - 1], "}}\n"));
+    }
+
+    const frames_before = capture.frames.items.len;
+    const long_id = try alloc.alloc(u8, 2048);
+    defer alloc.free(long_id);
+    @memset(long_id, 'x');
+    try std.testing.expectError(error.WriteFailed, writer.writeErrorUnallocated(.{ .string = long_id }, err));
+    try std.testing.expectEqual(frames_before, capture.frames.items.len);
+}

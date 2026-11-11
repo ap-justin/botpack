@@ -306,8 +306,8 @@ pub const Writer = struct {
     }
 
     /// Writes an error response rendered into a stack buffer, for a caller
-    /// whose allocator has just failed. An id or message too long for the
-    /// buffer is an error and nothing is written.
+    /// whose allocator has just failed. A frame too long for the buffer, from
+    /// its id, message or data, is an error and nothing is written.
     pub fn writeErrorUnallocated(self: *Writer, id: ?RequestId, err: RpcError) !void {
         var buf: [1024]u8 = undefined;
         var fixed: std.Io.Writer = .fixed(&buf);
