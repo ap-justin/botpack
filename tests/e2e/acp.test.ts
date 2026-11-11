@@ -727,6 +727,83 @@ test("ACP load and resume of a configured-provider session without its key answe
   } finally { fixture.close(); }
 }, 60000);
 
+test("ACP authenticate during a configured-provider turn leaves the turn's key, and the next session adopts the sign-in", async () => {
+  let hold = false;
+  const held = deferred<Response>();
+  const fixture = createConfiguredProviderFixture(body => hold ? held.promise : configuredCompletion(body.model, "remote answer"));
+  const gateway = startDynamicFakeGateway(_raw => finalText("gateway answer"));
+  fixture.settings.provider = "remote";
+  fixture.save();
+  let sessionId = "";
+  let client: AcpClient | undefined;
+  try {
+    const first = await AcpClient.create({ cwd: fixture.workspace, env: fixture.env });
+    try {
+      await first.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      const created = await first.request("session/new", { cwd: fixture.workspace, mcpServers: [] }) as any;
+      if (created.error) throw new Error(JSON.stringify(created));
+      sessionId = created.result.sessionId;
+      const prompted = await first.request("session/prompt", { prompt: [{ type: "text", text: "save this" }] }) as any;
+      if (prompted.error) throw new Error(JSON.stringify(prompted));
+    } finally { await first.close(); }
+
+    // Gateway is the default again and nobody is signed in to it, against a
+    // fake Gateway standing in for the real one.
+    fixture.settings.provider = "gateway";
+    (fixture.settings.models as any).gateway = FAKE_GATEWAY_MODEL;
+    fixture.save();
+    const env = {
+      ...fixture.env,
+      AI_GATEWAY_API_KEY: undefined,
+      VERCEL_OIDC_TOKEN: undefined,
+      FX_DISABLE_KEYCHAIN: "1",
+      FX_GATEWAY_BASE_URL: gateway.baseUrl,
+      FX_GATEWAY_CHAT_URL: gateway.chatUrl,
+    };
+    client = await AcpClient.create({ cwd: fixture.workspace, env });
+    const initialized = await client.request("initialize", { protocolVersion: 1, clientCapabilities: {} }, 1) as any;
+    const methodId = initialized.result.authMethods[0].id;
+    const restored = await client.request("session/load", { sessionId, cwd: fixture.workspace, mcpServers: [] }, 2) as any;
+    if (restored.error) throw new Error(JSON.stringify(restored));
+
+    hold = true;
+    const before = fixture.requests.length;
+    sendPrompt(client, 3, "a turn that stays open");
+    await waitForCondition("the held configured request", () => fixture.requests.length === before + 1);
+
+    writeSeededFxAuth(fixture.home, "team_123");
+    client.send({ jsonrpc: "2.0", id: 4, method: "authenticate", params: { methodId } });
+    const authenticated = await readResponse(client, 4);
+    expect(authenticated.error).toBeUndefined();
+    expect(authenticated.result).toEqual({});
+    expect(fixture.requests[before]!.authorization).toBe("Bearer own-provider-token");
+    expect(gateway.requests).toHaveLength(0);
+
+    held.resolve(configuredCompletion("remote-model", "held answer"));
+    const finished = await readResponse(client, 3);
+    expect(finished.error).toBeUndefined();
+    expect(finished.result.stopReason).toBe("end_turn");
+    expect(fixture.requests).toHaveLength(before + 1);
+
+    // The first request after the turn adopts the sign-in.
+    const created = await client.request("session/new", { cwd: fixture.workspace, mcpServers: [] }, 5) as any;
+    expect(created.error).toBeUndefined();
+    expect(created.result.sessionId).not.toBe(sessionId);
+    expect(created.result.configOptions.find((option: any) => option.id === "provider").currentValue).toBe("gateway");
+    sendPrompt(client, 6, "ask the Gateway");
+    const answered = await readResponse(client, 6);
+    expect(answered.error).toBeUndefined();
+    expect(gateway.requests).toHaveLength(1);
+    expect(gateway.requests[0]!.headers.get("authorization")).toBe(`Bearer ${SEEDED_GATEWAY_TOKEN}`);
+    expect(fixture.requests).toHaveLength(before + 1);
+  } finally {
+    held.resolve(configuredCompletion("remote-model", "released"));
+    await client?.close();
+    gateway.stop();
+    fixture.close();
+  }
+}, 60000);
+
 test.each(["empty", "unrelated"])("configured provider ACP preserves explicit models with %s metadata", async metadata => {
   const fixture = createConfiguredProviderFixture();
   (fixture.settings.providers.local as any).model_metadata = {};
