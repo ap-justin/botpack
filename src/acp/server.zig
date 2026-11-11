@@ -567,6 +567,27 @@ fn hostManagedCredential() credentials.Credential {
     return .{ .token = &.{}, .source = .host_managed };
 }
 
+/// False when the cached credential came from a saved sign-in or key that has
+/// since been removed, so the next prompt reloads instead of sending a token
+/// the user has signed out of. A store that cannot be read keeps the cached
+/// credential, since the request itself will say if it is rejected.
+fn cachedCredentialStillStored(state: *const ServerState, source: ?types.CredentialSource) !bool {
+    const kind = source orelse return true;
+    if (kind != .fx_login and kind != .stored_key) return true;
+    return credentials.sourceExists(state.alloc, state.cfg.secret_store, kind) catch |err| switch (err) {
+        error.OutOfMemory => return err,
+        else => true,
+    };
+}
+
+test "a cached credential that no saved sign-in backs is not rechecked against the store" {
+    const state: ServerState = undefined;
+    try std.testing.expect(try cachedCredentialStillStored(&state, null));
+    for ([_]types.CredentialSource{ .ai_gateway_api_key, .vercel_oidc_token, .host_managed, .configured }) |source| {
+        try std.testing.expect(try cachedCredentialStillStored(&state, source));
+    }
+}
+
 /// Stages authorization without changing any in-flight credential storage.
 /// The caller owns a non-null credential; null retains the current authorization.
 pub fn prepareCredentialForProvider(state: *ServerState, provider: model_provider.ProviderId) !?credentials.Credential {
@@ -580,7 +601,7 @@ pub fn prepareCredentialForProvider(state: *ServerState, provider: model_provide
                 active.api_key,
                 active.credential_refresh_after_ms,
                 now_ms,
-            )) return null;
+            ) and try cachedCredentialStillStored(state, active.credential_source)) return null;
     }
     if (provider != .configured and credentialMatchesProvider(state.credential_source, provider) and
         credentialReadyAt(
@@ -588,7 +609,7 @@ pub fn prepareCredentialForProvider(state: *ServerState, provider: model_provide
             state.api_key,
             state.credential_refresh_after_ms,
             now_ms,
-        )) return null;
+        ) and try cachedCredentialStillStored(state, state.credential_source)) return null;
 
     return if (provider == .gateway and state.cfg.credential_override != null)
         credentials.Credential{
