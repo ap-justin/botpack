@@ -456,7 +456,7 @@ function seedClone(repo: string, remote: string, files: Record<string, string>, 
 let liaClone: string | null = null;
 /** Replaces `repo` with a shallow clone of the real lia repository, cloned once per process. */
 function seedLiaClone(repo: string): void {
-  const remote = "https://github.com/ap-justin/lia.git";
+  const remote = "https://github.com/vercel-labs/fx.git";
   if (!liaClone) {
     liaClone = join(mkdtempSync(join(tmpdir(), "lia-schema-ab-lia-")), "lia");
     git(tmpdir(), "clone", "-q", "--depth", "20", "--single-branch", remote, liaClone);

@@ -1,6 +1,6 @@
 ---- MODULE ElicitationRouting ----
 \* Where lia routes an MCP server's questions and the user's answers
-\* (ap-justin/lia at 53a561bea), for one server and one call that can ask.
+\* (vercel-labs/fx at 53a561bea), for one server and one call that can ask.
 \*
 \* Code:
 \*   - src/core/mcp_host/runtime.zig onServer `.elicit` (2025): callAsking

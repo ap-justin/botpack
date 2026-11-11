@@ -1,7 +1,7 @@
 ---- MODULE HostLifecycle ----
 \* lia's MCP host lifecycle, as the shell runs it.
 \*
-\* Code (ap-justin/lia):
+\* Code (vercel-labs/fx):
 \*   - src/core/app/app_mcp_runtime.zig: loadHost, refreshHost (a check:
 \*     reloadHost when the config stamp changed since the last load, or a
 \*     `/mcp` command changed the config), reloadHost (the host takes the

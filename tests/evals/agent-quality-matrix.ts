@@ -227,7 +227,7 @@ export const AGENT_QUALITY_BASELINE_MATRIX: readonly AgentQualityMatrixRow[] = [
     currentBaselineResult: {
       status: "partial",
       notes:
-        "Live ./zig-out/bin/lia ask --auto --json --no-save answered from existing context with zero tool calls. First tool: none; forbidden tools: none; behavior cited src/core/slash_commands/command_specs.zig but did not perform local discovery first.",
+        "Live ./zig-out/bin/fx ask --auto --json --no-save answered from existing context with zero tool calls. First tool: none; forbidden tools: none; behavior cited src/core/slash_commands/command_specs.zig but did not perform local discovery first.",
     },
     targetResult:
       "Starts with local discovery and identifies src/core/slash_commands/command_specs.zig from local evidence.",
@@ -258,7 +258,7 @@ export const AGENT_QUALITY_BASELINE_MATRIX: readonly AgentQualityMatrixRow[] = [
     currentBaselineResult: {
       status: "passing",
       notes:
-        "Live ./zig-out/bin/lia ask --auto --json --no-save used grep_files first and made five grep_files calls total. Forbidden tools: none; behavior reported concrete local matches in command_policy.zig, tool_permission.zig, and terminal.zig.",
+        "Live ./zig-out/bin/fx ask --auto --json --no-save used grep_files first and made five grep_files calls total. Forbidden tools: none; behavior reported concrete local matches in command_policy.zig, tool_permission.zig, and terminal.zig.",
     },
     targetResult: "Uses local search tools only and reports concrete local matches.",
     coveredEntrypoints: [
@@ -325,7 +325,7 @@ export const AGENT_QUALITY_BASELINE_MATRIX: readonly AgentQualityMatrixRow[] = [
     currentBaselineResult: {
       status: "passing",
       notes:
-        "Live ./zig-out/bin/lia ask --auto --json --no-save used read_file first, then a second read_file. Forbidden tools: none; behavior inspected MCP runtime/docs before answering and did not ask the user.",
+        "Live ./zig-out/bin/fx ask --auto --json --no-save used read_file first, then a second read_file. Forbidden tools: none; behavior inspected MCP runtime/docs before answering and did not ask the user.",
     },
     targetResult: "At least one local inspection happens before any user question.",
     coveredEntrypoints: [
@@ -373,7 +373,7 @@ export const AGENT_QUALITY_BASELINE_MATRIX: readonly AgentQualityMatrixRow[] = [
   {
     id: "github-pr-comments-gh-auth-blocker",
     userPrompt:
-      "Read https://github.com/ap-justin/lia/pull/57 comments, and if gh is missing or unauthenticated report the blocker.",
+      "Read https://github.com/vercel-labs/fx/pull/57 comments, and if gh is missing or unauthenticated report the blocker.",
     failureCategory: "GitHub routing",
     expectedFirstTool: {
       category: "GitHub CLI metadata read",
@@ -479,7 +479,7 @@ export const AGENT_QUALITY_BASELINE_MATRIX: readonly AgentQualityMatrixRow[] = [
   },
   {
     id: "github-pr-comments-gh",
-    userPrompt: "Read https://github.com/ap-justin/lia/pull/57 comments.",
+    userPrompt: "Read https://github.com/vercel-labs/fx/pull/57 comments.",
     failureCategory: "GitHub routing",
     expectedFirstTool: {
       category: "GitHub CLI metadata read",
@@ -493,7 +493,7 @@ export const AGENT_QUALITY_BASELINE_MATRIX: readonly AgentQualityMatrixRow[] = [
       type: "tool-call recorder test",
       status: "planned",
       notes:
-        "Concrete public PR fixture chosen; a recorded JSON fixture can assert gh routing for ap-justin/lia#57.",
+        "Concrete public PR fixture chosen; a recorded JSON fixture can assert gh routing for vercel-labs/fx#57.",
     },
     modelBackedEval: {
       required: true,
@@ -502,7 +502,7 @@ export const AGENT_QUALITY_BASELINE_MATRIX: readonly AgentQualityMatrixRow[] = [
     currentBaselineResult: {
       status: "passing",
       notes:
-        "Live ./zig-out/bin/lia ask --auto --json --no-save used shell.run first with gh pr view 57 --repo ap-justin/lia --comments. Forbidden tools: none; behavior summarized PR review comments and bot deploy comments from gh output.",
+        "Live ./zig-out/bin/fx ask --auto --json --no-save used shell.run first with gh pr view 57 --repo vercel-labs/fx --comments. Forbidden tools: none; behavior summarized PR review comments and bot deploy comments from gh output.",
     },
     targetResult: "Routes known GitHub PR comments to gh and reports an actionable blocker if gh cannot run.",
     coveredEntrypoints: [

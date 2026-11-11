@@ -96,7 +96,7 @@ function seedV0ChangelogRepo(dir: string): void {
 
 function seedLiaHistoryRepo(dir: string): void {
   // A shallow clone of the real repository: its history and origin/main agree with GitHub.
-  execSync("git clone -q --depth 20 --single-branch https://github.com/ap-justin/lia.git .", { cwd: dir, stdio: "pipe" });
+  execSync("git clone -q --depth 20 --single-branch https://github.com/vercel-labs/fx.git .", { cwd: dir, stdio: "pipe" });
 }
 
 function assertNoWebSearchOrHandleQuestion(result: EvalResult): void {

@@ -1,5 +1,5 @@
 ---- MODULE SignIn ----
-\* lia's MCP sign-in for one HTTP server (ap-justin/lia at 53a561bea).
+\* lia's MCP sign-in for one HTTP server (vercel-labs/fx at 53a561bea).
 \*
 \* Code:
 \*   - src/core/mcp_host/runtime.zig: startLogin (a login already under way

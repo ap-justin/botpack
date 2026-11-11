@@ -22,10 +22,10 @@ const INITIAL_OR_RUNNABLE_PROMPTS = [
   "Investigate how command policy is wired in this repo.",
   "What does the MCP feature do in this repo?",
   "Investigate how the current GitHub repo changelog works; do not ask me for my GitHub handle.",
-  "Read https://github.com/ap-justin/lia/pull/57 comments, and if gh is missing or unauthenticated report the blocker.",
+  "Read https://github.com/vercel-labs/fx/pull/57 comments, and if gh is missing or unauthenticated report the blocker.",
   "Remove either the logs directory or the session cache, whichever you think is safer.",
   "Prepare release notes, but first choose whether this should be a patch, minor, or major release.",
-  "Read https://github.com/ap-justin/lia/pull/57 comments.",
+  "Read https://github.com/vercel-labs/fx/pull/57 comments.",
   "A command failed, retry it.",
   "Continue.",
   "What are you doing right now?",
@@ -254,7 +254,7 @@ describe("agent quality baseline matrix", () => {
 
     expect(firstToolMatchesExpectation(ghBlockerRow!, {
       name: "shell",
-      command_result: { command: "gh pr view 57 --repo ap-justin/lia --comments" },
+      command_result: { command: "gh pr view 57 --repo vercel-labs/fx --comments" },
     })).toBe(true);
     expect(firstToolMatchesExpectation(ghBlockerRow!, {
       name: "shell",
@@ -379,7 +379,7 @@ describe("agent quality baseline matrix", () => {
     expect(broadWeb?.expectedUserVisibleBehavior).toContain("linked sources");
     expect(firstToolMatchesExpectation(githubMetadata!, {
       name: "shell",
-      command_result: { command: "gh pr view 57 --repo ap-justin/lia --comments" },
+      command_result: { command: "gh pr view 57 --repo vercel-labs/fx --comments" },
     })).toBe(true);
     expect(firstToolMatchesExpectation(githubMetadata!, { name: "web_fetch" })).toBe(false);
   });
