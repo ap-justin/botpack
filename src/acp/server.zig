@@ -18,6 +18,7 @@ const builtin_skills = @import("../builtins/skills.zig");
 const builtin_tools = @import("../builtins/tools.zig");
 const credentials = @import("../core/auth/credentials.zig");
 const login_flow = @import("../core/auth/login_flow.zig");
+const oauth_session = @import("../core/auth/oauth_session.zig");
 const oauth_transport = @import("../core/auth/oauth_transport.zig");
 const host_contract = @import("../core/hosts/host.zig");
 const secret = @import("../core/auth/secret.zig");
@@ -1868,6 +1869,8 @@ fn handleAuthenticate(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Messa
     const runs_sign_in = !host_target.is_wasm and state.provider == .gateway and
         std.mem.eql(u8, method_id, acp_types.agent_auth_method_id);
     if (!runs_sign_in) return writeCredentialUnavailable(state, alloc, msg.id, state.provider);
+    // A new sign-in would not choose a team either.
+    if (try storedSignInLacksTeam(alloc)) return writeTeamRequired(state, alloc, msg.id);
     signInToGateway(state) catch |err| {
         if (err == error.OutOfMemory) return error.OutOfMemory;
         debug_trace.logf("auth", "acp sign-in failed err={s}", .{@errorName(err)});
@@ -1877,17 +1880,32 @@ fn handleAuthenticate(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Messa
         });
     };
     // `.deferred`, while a turn runs, confirms the sign-in too.
-    if (try refreshPendingAuth(state) == .unavailable) {
-        return state.writer.writeError(alloc, msg.id, .{
-            .code = ErrorCode.invalid_request,
-            .message = sign_in_without_team_message,
-        });
-    }
+    if (try refreshPendingAuth(state) == .unavailable) return writeTeamRequired(state, alloc, msg.id);
     return state.writer.writeResponse(alloc, msg.id, "{}");
 }
 
 const sign_in_poll_ms: u64 = 100;
 const sign_in_without_team_message = "Signed in to Vercel AI Gateway, but no team is selected. Run lia teams to choose one, then retry.";
+
+/// `AUTH_REQUIRED` for a saved sign-in that has no Gateway team.
+fn writeTeamRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId) !void {
+    return state.writer.send(alloc, try buildAuthRequired(alloc, id, .{
+        .message = sign_in_without_team_message,
+        .offer = authOffer(state),
+    }));
+}
+
+/// Whether a `lia login` session is saved without a team. A session that
+/// cannot be read counts as none; the sign-in then reports the storage error.
+fn storedSignInLacksTeam(alloc: Allocator) Allocator.Error!bool {
+    var session = (oauth_session.load(alloc) catch |err| {
+        if (err == error.OutOfMemory) return error.OutOfMemory;
+        debug_trace.logf("auth", "acp sign-in session check failed err={s}", .{@errorName(err)});
+        return false;
+    }) orelse return false;
+    defer session.deinit(alloc);
+    return session.team_id == null and session.team_slug == null;
+}
 
 /// Runs the `lia login` browser sign-in and saves its session. Blocks until
 /// the person approves or denies it or its code expires, so requests sent
@@ -5309,11 +5327,19 @@ test "authenticate with lia-login saves a sign-in with several teams but asks fo
     defer alloc.free(stdout_bytes);
 
     try std.testing.expectEqualStrings("", stdout_bytes);
+    try std.testing.expect(std.mem.find(u8, capture.bytes(), "\"code\":-32000") != null);
     try std.testing.expect(std.mem.find(u8, capture.bytes(), sign_in_without_team_message) != null);
     try std.testing.expect(state.auth_pending);
     const saved = try home.read(".lia/auth.json");
     defer secret.zeroAndFree(alloc, saved);
     try std.testing.expect(std.mem.find(u8, saved, "signed-in-refresh") != null);
+
+    // Signing in again would not choose a team, so a retry runs no sign-in.
+    const retry_stdout = try authenticateTrappedForTest(&state, home, acp_types.agent_auth_method_id);
+    defer alloc.free(retry_stdout);
+    try std.testing.expect(std.mem.find(u8, capture.bytes(), "\"code\":-32000") != null);
+    try std.testing.expect(std.mem.find(u8, capture.bytes(), sign_in_without_team_message) != null);
+    try std.testing.expectEqual(@as(usize, 1), fake.token_polls);
 }
 
 test "authenticate with lia-login-api-key runs no sign-in and still asks for a key" {
