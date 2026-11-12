@@ -307,8 +307,8 @@ pub const AgentCapabilities = struct {
     mcp_sse: bool = true,
 };
 
-/// The `agent` auth method, always advertised: `authenticate` with it runs the
-/// `lia login` browser sign-in when no credential is stored. The registry's
+/// The `agent` auth method, always advertised: on Gateway, `authenticate` with
+/// it runs the `lia login` browser sign-in when no credential is stored. The registry's
 /// auth check never sends `auth.terminal`, so this is the entry that keeps
 /// `authMethods` non-empty.
 pub const agent_auth_method_id = "lia-login";
