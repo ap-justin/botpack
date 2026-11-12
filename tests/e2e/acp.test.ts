@@ -2284,7 +2284,7 @@ describe("acp: model-independent", () => {
         const opened = await client.request("session/new", { cwd: fixture.root.workspace, mcpServers: [] }, 4) as any;
         expect(modelOf(opened)).toBe(connectionModel);
         sendPrompt(client, 5, "Hold this turn.");
-        await waitForCondition("the turn's Gateway request", () => turnStarted);
+        await waitForCondition("the turn's Gateway request", () => turnStarted, TIMEOUT);
 
         breakSessionStore(fixture.root);
         const failed = await client.request("session/new", { cwd: project, mcpServers: [] }, 6) as any;
