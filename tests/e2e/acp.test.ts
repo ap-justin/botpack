@@ -2101,6 +2101,46 @@ describe("acp: model-independent", () => {
   );
 
   test(
+    "ACP authenticate lia-login before session/new with another cwd, and the session uses that folder's model",
+    async () => {
+      // v1 sends cwd only in session/new, so the sign-in runs while lia still sits in the launch folder.
+      const launchModel = "anthropic/a-launch-folder-model";
+      const projectModel = "openai/z-workspace-folder-model";
+      const entry = (id: string) => ({ id, type: "language", tags: ["tool-use"], context_window: 128_000 });
+      let project = "";
+      const fixture = await startSignIn(
+        {},
+        root => {
+          project = root.external;
+          writeFileSync(
+            join(root.home, ".lia", "settings.json"),
+            JSON.stringify({ workspaces: { [project]: { models: { gateway: projectModel } } } }),
+          );
+        },
+        { LIA_MODEL: undefined },
+        { models: [entry(launchModel), entry(projectModel)] },
+      );
+      try {
+        sendAuthenticate(2);
+        expectSignInCode(await readResponse(client, 2), fixture.issuer.issuerUrl);
+        sendAuthenticate(3);
+        expect((await readResponse(client, 3)).result).toEqual({});
+        // The switch ran in the launch folder, which names no model of its own.
+        expect(readSavedSettings(fixture.root).models.gateway).toBe(launchModel);
+
+        const created = await client.request("session/new", { cwd: project, mcpServers: [] }, 4) as any;
+        expect(created.error).toBeUndefined();
+        const modelOption = created.result.configOptions.find((option: any) => option.id === "model");
+        expect(modelOption.currentValue).toBe(projectModel);
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "ACP authenticate lia-login with several teams asks for lia teams, picks none and does not sign in again",
     async () => {
       const fixture = await startSignIn({

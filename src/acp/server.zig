@@ -400,6 +400,10 @@ pub const ServerState = struct {
     /// How a sign-in failed after its code was handed out, with no
     /// `authenticate` waiting; the next `lia-login` answers with it.
     sign_in_failure: ?anyerror = null,
+    /// The folder whose settings the last sign-in's profile switch read,
+    /// owned, until the next `session/new` has chosen its model from the
+    /// session's own folder.
+    sign_in_root: ?[]u8 = null,
     subagent_authority_mutex: std.Io.Mutex = .init,
     skills: skill_runtime.Runtime = .{},
     context_snapshot: context_contract.GatheredContextSnapshot = .{},
@@ -435,6 +439,7 @@ pub const ServerState = struct {
 
     pub fn deinit(self: *ServerState) void {
         acp_sign_in.stop(self);
+        if (self.sign_in_root) |root| self.alloc.free(root);
         // Terminals end with this process. Ending them first also releases
         // an active prompt waiting on one.
         self.terminal_client.closeOwnedTerminals();

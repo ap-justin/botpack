@@ -10,6 +10,7 @@ const auth_runtime = @import("../core/auth/auth_runtime.zig");
 const credentials = @import("../core/auth/credentials.zig");
 const login_flow = @import("../core/auth/login_flow.zig");
 const oauth_session = @import("../core/auth/oauth_session.zig");
+const config_runtime = @import("../core/config/config_runtime.zig");
 const provider_activation = @import("../core/cli/provider_activation.zig");
 const host_target = @import("../core/hosts/target.zig");
 const debug_trace = @import("../core/shared/debug_trace.zig");
@@ -21,6 +22,7 @@ const model_catalog = @import("../core/gateway/model_catalog.zig");
 const provider_set = @import("../core/gateway/provider_set.zig");
 const secret = @import("../core/auth/secret.zig");
 const sessions = @import("sessions.zig");
+const session_adapter = @import("../core/session/session_adapter.zig");
 
 const Allocator = std.mem.Allocator;
 const ErrorCode = jsonrpc.ErrorCode;
@@ -329,6 +331,7 @@ pub fn reap(state: *ServerState, wait: bool) void {
     job.thread.join();
     const signed_in = job.signed_in;
     if (job.unreported) |err| state.sign_in_failure = err;
+    if (signed_in) rememberSwitchRoot(state, job.workspace_root);
     job.destroy();
     state.sign_in = null;
     if (!signed_in) return;
@@ -336,6 +339,56 @@ pub fn reap(state: *ServerState, wait: bool) void {
     _ = server.refreshPendingAuth(state) catch |err| {
         debug_trace.logf("auth", "acp sign-in adoption failed err={s}", .{@errorName(err)});
     };
+}
+
+/// Keeps the folder the profile switch read, for `selectModelForSession`.
+/// Without it the session keeps the model the connection already has.
+fn rememberSwitchRoot(state: *ServerState, root: []const u8) void {
+    const owned = state.alloc.dupe(u8, root) catch |err| {
+        debug_trace.logf("auth", "acp sign-in could not keep its settings folder err={s}", .{@errorName(err)});
+        return;
+    };
+    if (state.sign_in_root) |old| state.alloc.free(old);
+    state.sign_in_root = owned;
+}
+
+/// Called by `session/new` with the session's folder. The sign-in's profile
+/// switch read the settings of the folder it started in, which for ACP v1 is
+/// where lia was launched, since `cwd` arrives only here. When the session's
+/// folder is another one, picks the connection's model again from that
+/// folder's settings, on top of what the switch saved. Does nothing when no
+/// sign-in switched the profile since the last session, when its folder is
+/// this one, or when the model is fixed for the process.
+pub fn selectModelForSession(state: *ServerState, workspace_root: []const u8) void {
+    if (comptime host_target.is_wasm) return;
+    const switched_root = state.sign_in_root orelse return;
+    defer {
+        state.alloc.free(switched_root);
+        state.sign_in_root = null;
+    }
+    if (std.mem.eql(u8, switched_root, workspace_root)) return;
+    if (state.provider != .gateway or state.process_model_override) return;
+    var settings = (if (state.cfg.home_override) |home|
+        config_runtime.loadMergedSettingsFromHome(state.alloc, home, workspace_root)
+    else
+        config_runtime.loadMergedSettings(state.alloc, workspace_root)) catch |err| {
+        debug_trace.logf("config", "acp session settings load failed err={s}", .{@errorName(err)});
+        return;
+    };
+    defer settings.deinit(state.alloc);
+    const selection = config_runtime.selectProviderModel(state.cfg.default_model, &settings, .gateway, null) catch return;
+    if (std.mem.eql(u8, selection.model, state.selected_model)) return;
+    const selected = state.alloc.dupe(u8, selection.model) catch return;
+    const configured = state.alloc.dupe(u8, selection.model) catch {
+        state.alloc.free(selected);
+        return;
+    };
+    // A running turn reads these.
+    server.cancelAndReapActivePrompt(state);
+    if (state.selected_model.len > 0) state.alloc.free(state.selected_model);
+    if (state.configured_model.len > 0) state.alloc.free(state.configured_model);
+    state.selected_model = selected;
+    state.configured_model = configured;
 }
 
 /// Stops the sign-in that would answer `requested` and answers that request
@@ -1033,6 +1086,49 @@ test "the profile switch reads the connection's workspace settings, not the fold
         std.debug.print("settings.json: {s}\n", .{settings});
         return err;
     };
+}
+
+test "a session opened after the sign-in uses its own folder's settings, not the folder lia was launched in" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, .{});
+    defer home.deinit();
+    try home.tmp.dir.createDirPath(io_mod.getIo(), "project");
+    const project = try io_mod.dirRealpathAlloc(alloc, home.tmp.dir, "project");
+    defer alloc.free(project);
+    // `models`, as `lia config set` writes it: the sign-in's save clears a
+    // workspace's older `model` key.
+    const profile = try alloc.print("{{\"workspaces\":{{\"{s}\":{{\"models\":{{\"gateway\":\"{s}\"}}}}}}}}", .{ project, workspace_model });
+    defer alloc.free(profile);
+    try home.writePrivate(".lia/settings.json", profile, 0o600);
+    var fake: FakeVercel = .{};
+    var frames: Frames = .{ .alloc = alloc };
+    defer frames.deinit();
+    // Launched in HOME, as an editor does; the project arrives with session/new.
+    var state = try signInTestState(alloc, home, &frames, &fake);
+    defer state.deinit();
+    state.cfg.provider_set = provider_set.gateway_only(.{ .model_catalog = .{ .context = null, .fetch_fn = fetchTwoModels } });
+    state.cfg.allow_acp_mcp = false;
+    state.sessions_v2 = try session_adapter.Store.open(alloc, home.home);
+    state.selected_model = try alloc.dupe(u8, "test/model");
+    state.configured_model = try alloc.dupe(u8, "test/model");
+
+    var trap = try StdStreamTrap.begin(home.tmp.dir);
+    defer trap.end();
+    try authenticateForTest(&state, 7);
+    const answer = try frames.waitFor(7);
+    defer answer.deinit();
+    try expectSignedIn(answer);
+    const new_params = try alloc.print("{{\"cwd\":\"{s}\",\"mcpServers\":[]}}", .{project});
+    defer alloc.free(new_params);
+    try dispatchForTest(&state, 8, "session/new", new_params);
+    trap.end();
+
+    try std.testing.expect(!state.auth_pending);
+    try std.testing.expectEqualStrings(project, state.active_session.?.workspace_root);
+    try std.testing.expectEqualStrings(workspace_model, state.active_session.?.model);
+    try std.testing.expectEqualStrings(workspace_model, state.selected_model);
+    try std.testing.expect(state.sign_in_root == null);
 }
 
 /// Waits up to 10 s for the connection's sign-in to reach its outcome.

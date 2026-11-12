@@ -13,6 +13,7 @@ const client_instructions = @import("client_instructions.zig");
 const tool_call_identities = @import("tool_call_identities.zig");
 const workspace_binding = @import("workspace_binding.zig");
 const server = @import("server.zig");
+const acp_sign_in = @import("sign_in.zig");
 const session_codec = @import("../core/session/session_codec.zig");
 const session_display_metadata = @import("../core/session/session_display_metadata.zig");
 const session_store = @import("../core/session/session_store.zig");
@@ -487,6 +488,7 @@ fn startV2Session(
     var session_host_owned = true;
     defer if (session_host_owned) if (session_host) |h| h.destroy();
     const workspace_root = if (start.workspace) |binding| binding.root else state.workspace_root;
+    acp_sign_in.selectModelForSession(state, workspace_root);
     const v2 = session_adapter.Session.create(alloc, v2_store, workspace_root, .acp, .{
         .preferences = .{
             .provider = state.provider,
