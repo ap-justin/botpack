@@ -4941,6 +4941,9 @@ test "lia ask hands its model to the turn context and leaves an unset model out"
 
     TestTransientModelFixture.calls = 0;
     TestTransientModelFixture.model = "stale";
+    // AskContext.init seeds the model from the config default; clear it to
+    // cover the unset case.
+    ctx.model = "";
     try appendRuntimeContext(&ctx, arena_state.allocator(), &messages);
     try std.testing.expectEqual(@as(usize, 1), TestTransientModelFixture.calls);
     try std.testing.expect(TestTransientModelFixture.model == null);
