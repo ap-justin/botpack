@@ -8,7 +8,7 @@ lia's first release, based on fx 0.0.16, ships Linux builds for x86_64 and aarch
 
 - The command is `lia`. Settings live in `~/.lia`, environment variables start with `LIA_`, and commands run with `AI_AGENT=lia`. lia doesn't read `~/.fx`: sign-in, settings and MCP servers start fresh, and sessions saved by fx load once copied into `~/.lia`.
 - `lia acp` answers with ACP v1 stop reasons. A content-filtered turn answers `refusal`, and a failed turn answers with a JSON-RPC error that carries the notice the user saw.
-- ACP clients: `initialize` succeeds with no key, and a new `authenticate` request signs in. The `_meta.fx` key is now `_meta.lia`, and the sign-in method ids `fx-login*` are now `lia-login*`, so clients keyed on the old names need updating.
+- ACP clients: `initialize` succeeds without a key and lists `lia-login` in `authMethods`, and the new `authenticate` request picks up a login the person ran with `lia login`. lia's extension fields moved from `_meta.fx` to `_meta.lia`, and `agentInfo.name` is `lia`, so clients that read the old names need updating.
 - A missing Vercel AI Gateway key, or one the gateway rejects during a prompt, answers `AUTH_REQUIRED` with the sign-in methods. A configured provider with no key gets a plain error instead. `initialize` advertises a terminal sign-in method to clients that support terminal auth.
 - MCP servers behind a proxy that drops the newer handshake's headers fall back to the older one, and the error names the real reason when both fail.
 - MCP versions are negotiated with servers that refuse lia's preferred one.
@@ -17,7 +17,7 @@ lia's first release, based on fx 0.0.16, ships Linux builds for x86_64 and aarch
 - Context notices stay out of agent replies over ACP. Each MCP server's instructions are sent once per load, not once per tool.
 - Cached Anthropic requests go to Anthropic first unless you set a provider order, and loaded MCP tools carry across turns, so the prompt cache is reused.
 - An invalid MCP server environment name is rejected with an error instead of stopping every session.
-- Removed: the terminal UI with its slash commands and resume controls, the `--profile` flag, ChatGPT and Grok sign-in, the Node and WebAssembly SDKs, the Slack install, fx's own GitHub publishing, and `lia upgrade` with auto-upgrade. `lia ask` prints plain text, `--json` or `--quiet` output.
+- Removed: the terminal UI with its slash commands, the `resume` and `replay` commands and the `--resume`/`--continue` launch flags, ChatGPT and Grok sign-in, the Node and WebAssembly SDKs, the Slack install, the `--create` option of `lia pr` and `lia issue`, and `lia upgrade` with auto-upgrade. `lia ask` no longer styles its output on a terminal: it prints raw Markdown, or JSON with `--json`, or no reply with `--quiet`.
 
 # fx
 
