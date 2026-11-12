@@ -54,6 +54,8 @@ import {
 
 const TIMEOUT = 30_000;
 const LIVE_TIMEOUT = 120_000;
+// Nothing listens on loopback port 1.
+const UNREACHABLE_ISSUER_URL = "http://127.0.0.1:1";
 const SEEDED_GATEWAY_TOKEN = "seeded-access-token";
 const TERMINAL_FIXTURE_SHELL = terminalFixtureShell();
 const MCP_STDIO_FIXTURE = join(
@@ -396,6 +398,9 @@ class AcpClient {
     const args = opts?.args ?? ["acp"];
     const inheritedEnv: Record<string, string | undefined> = { ...process.env };
     if (opts?.omitHome) delete inheritedEnv.HOME;
+    // A sign-in that no test pointed at a fake issuer fails on a refused connection and opens no browser.
+    inheritedEnv.LIA_TEST_OAUTH_ISSUER_URL = UNREACHABLE_ISSUER_URL;
+    inheritedEnv.LIA_NO_OPEN_BROWSER = "1";
     for (const [key, value] of Object.entries(opts?.env ?? {})) {
       if (value === undefined) {
         delete inheritedEnv[key];
@@ -1555,10 +1560,19 @@ describe("acp: model-independent", () => {
     LIA_DISABLE_KEYCHAIN: "1",
   });
 
-  // A loopback issuer that runs the OAuth device flow: it approves the
-  // first poll, or answers `tokenError` to every poll when one is given.
-  const startFakeDeviceIssuer = (tokenError?: string) => {
+  // A loopback issuer that runs the OAuth device flow. It approves the first
+  // poll, unless `held` keeps every poll pending until `approve()` or
+  // `reject(error)`, or `tokenError` answers every poll with that error.
+  const startFakeDeviceIssuer = (options: {
+    tokenError?: string;
+    held?: boolean;
+    expiresIn?: number;
+    teams?: Array<{ id: string; slug: string; name: string }>;
+  } = {}) => {
     const requests: string[] = [];
+    let approved = !options.held;
+    let tokenError = options.tokenError;
+    const teams = options.teams ?? [{ id: "team_123", slug: "vercel-labs", name: "Vercel Labs" }];
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -1581,12 +1595,13 @@ describe("acp: model-independent", () => {
             user_code: "ABCD-1234",
             verification_uri: `${issuer}/verify`,
             verification_uri_complete: `${issuer}/verify?user_code=ABCD-1234`,
-            expires_in: 600,
+            expires_in: options.expiresIn ?? 600,
             interval: 1,
           });
         }
         if (url.pathname === "/oauth/token") {
           if (tokenError) return Response.json({ error: tokenError }, { status: 400 });
+          if (!approved) return Response.json({ error: "authorization_pending" }, { status: 400 });
           return Response.json({
             access_token: "device-flow-access-token",
             refresh_token: "device-flow-refresh-token",
@@ -1596,7 +1611,7 @@ describe("acp: model-independent", () => {
           });
         }
         if (url.pathname === "/v2/teams") {
-          return Response.json({ teams: [{ id: "team_123", slug: "vercel-labs", name: "Vercel Labs" }] });
+          return Response.json({ teams });
         }
         return new Response("not found", { status: 404 });
       },
@@ -1604,6 +1619,16 @@ describe("acp: model-independent", () => {
     return {
       issuerUrl: `http://127.0.0.1:${server.port}`,
       requests,
+      get deviceRequests() {
+        return requests.filter(path => path === "/oauth/device").length;
+      },
+      approve() {
+        approved = true;
+      },
+      // Answers every following poll with `error`.
+      reject(error: string) {
+        tokenError = error;
+      },
       stop() {
         server.stop(true);
       },
@@ -1905,31 +1930,368 @@ describe("acp: model-independent", () => {
     TIMEOUT,
   );
 
+  const startSignIn = async (
+    issuerOptions: Parameters<typeof startFakeDeviceIssuer>[0] = {},
+    prepare?: (root: ReturnType<typeof createIsolatedRoot>) => void,
+  ) => {
+    const root = createIsolatedRoot("lia-acp-sign-in-");
+    const gateway = startFakeGateway([finalText("unused")]);
+    const issuer = startFakeDeviceIssuer(issuerOptions);
+    prepare?.(root);
+    client = await AcpClient.create({
+      cwd: root.workspace,
+      env: { ...noCredentialEnv(root, gateway), LIA_TEST_OAUTH_ISSUER_URL: issuer.issuerUrl },
+    });
+    const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+    return {
+      root,
+      gateway,
+      issuer,
+      initialized,
+      async stop() {
+        await client.close();
+        gateway.stop();
+        issuer.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      },
+    };
+  };
+
+  const sendAuthenticate = (id: number) =>
+    client.send({ jsonrpc: "2.0", id, method: "authenticate", params: { methodId: "lia-login" } });
+
+  const answerFrames = (id: number) =>
+    client.rawLines
+      .map(line => JSON.parse(line))
+      .filter((message: any) => message.id === id && (message.result !== undefined || message.error !== undefined));
+
+  // The no-browser answer: the sign-in URL and code in a -32000 error that
+  // offers the auth methods again, while the sign-in keeps polling.
+  const expectSignInCode = (answer: any, issuerUrl: string) => {
+    expect(answer.result).toBeUndefined();
+    expect(answer.error.code).toBe(-32000);
+    expect(answer.error.message).toContain(`${issuerUrl}/verify?user_code=ABCD-1234`);
+    expect(answer.error.message).toContain("ABCD-1234");
+    expect(answer.error.data.authMethods[0].id).toBe("lia-login");
+  };
+
+  // stdout carries only JSON-RPC frames; the sign-in code goes to stderr.
+  const expectOnlyJsonRpcOnStdout = () => {
+    expect(client.rawLines.length).toBeGreaterThan(0);
+    for (const line of client.rawLines) expect(JSON.parse(line).jsonrpc).toBe("2.0");
+  };
+
+  const readSavedAuth = (root: ReturnType<typeof createIsolatedRoot>) =>
+    JSON.parse(readFileSync(join(root.home, ".lia", "auth.json"), "utf8"));
+
+  const readSavedSettings = (root: ReturnType<typeof createIsolatedRoot>) =>
+    JSON.parse(readFileSync(join(root.home, ".lia", "settings.json"), "utf8"));
+
   test(
-    "ACP authenticate accepts the lia-login method id and starts a sign-in the issuer can deny",
+    "ACP authenticate lia-login answers with the sign-in code, then reports the issuer's denial",
     async () => {
-      const root = createIsolatedRoot("lia-acp-auth-login-id-");
-      const gateway = startFakeGateway([finalText("unused")]);
-      const issuer = startFakeDeviceIssuer("access_denied");
+      const fixture = await startSignIn({ held: true });
       try {
-        client = await AcpClient.create({
-          cwd: root.workspace,
-          env: {
-            ...noCredentialEnv(root, gateway),
-            LIA_TEST_OAUTH_ISSUER_URL: issuer.issuerUrl,
-            LIA_NO_OPEN_BROWSER: "1",
-          },
-        });
-        await client.request("initialize", { protocolVersion: 1 }, 1);
-        const denied = await client.request("authenticate", { methodId: "lia-login" }, 2) as any;
+        sendAuthenticate(2);
+        expectSignInCode(await readResponse(client, 2), fixture.issuer.issuerUrl);
+        sendAuthenticate(3);
+        fixture.issuer.reject("access_denied");
+        const denied = await readResponse(client, 3);
         expect(denied.error.code).toBe(-32600);
         expect(denied.error.message).toContain("Sign-in to Vercel AI Gateway was denied.");
-        expect(issuer.requests).toContain("/oauth/token");
+        expect(fixture.issuer.deviceRequests).toBe(1);
+        expect(existsSync(join(fixture.root.home, ".lia", "auth.json"))).toBe(false);
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP authenticate lia-login signs in without a terminal, switches the profile to the login and session/new then succeeds",
+    async () => {
+      const fixture = await startSignIn();
+      try {
+        sendAuthenticate(2);
+        expectSignInCode(await readResponse(client, 2), fixture.issuer.issuerUrl);
+        sendAuthenticate(3);
+        const authenticated = await readResponse(client, 3);
+        expect(authenticated.error).toBeUndefined();
+        expect(authenticated.result).toEqual({});
+        expect(readSavedAuth(fixture.root).team_id).toBe("team_123");
+        expect(readSavedSettings(fixture.root).credential_source).toBe("fx_login");
+
+        const created = await client.request("session/new", { mcpServers: [] }, 4) as any;
+        expect(created.error).toBeUndefined();
+        expect(typeof created.result.sessionId).toBe("string");
+        expect(fixture.gateway.modelRequests.length).toBeGreaterThan(0);
+        for (const request of fixture.gateway.modelRequests) {
+          expect(request.headers.get("authorization")).toBe("Bearer device-flow-access-token");
+        }
+        expect(fixture.issuer.deviceRequests).toBe(1);
+        expect(client.stderr).toContain("ABCD-1234");
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP authenticate lia-login switches a profile that names a stored API key to the fresh login",
+    async () => {
+      const fixture = await startSignIn({}, root => {
+        writeFileSync(
+          join(root.home, ".lia", "settings.json"),
+          JSON.stringify({ provider: "gateway", models: { gateway: FAKE_GATEWAY_MODEL }, credential_source: "stored_key" }),
+        );
+      });
+      try {
+        sendAuthenticate(2);
+        await readResponse(client, 2);
+        sendAuthenticate(3);
+        expect((await readResponse(client, 3)).result).toEqual({});
+        expect(readSavedSettings(fixture.root).credential_source).toBe("fx_login");
+
+        const created = await client.request("session/new", { mcpServers: [] }, 4) as any;
+        expect(created.error).toBeUndefined();
+        expect(fixture.gateway.modelRequests.at(-1)!.headers.get("authorization")).toBe("Bearer device-flow-access-token");
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP authenticate lia-login with several teams asks for lia teams, picks none and does not sign in again",
+    async () => {
+      const fixture = await startSignIn({
+        teams: [
+          { id: "team_a", slug: "team-a", name: "Team A" },
+          { id: "team_b", slug: "team-b", name: "Team B" },
+        ],
+      });
+      try {
+        sendAuthenticate(2);
+        expectSignInCode(await readResponse(client, 2), fixture.issuer.issuerUrl);
+        sendAuthenticate(3);
+        const needsTeam = await readResponse(client, 3);
+        expect(needsTeam.result).toBeUndefined();
+        expect(needsTeam.error.code).toBe(-32000);
+        expect(needsTeam.error.message).toContain("Run lia teams");
+        const saved = readSavedAuth(fixture.root);
+        expect(saved.access_token).toBe("device-flow-access-token");
+        expect(saved.team_id).toBeUndefined();
+
+        sendAuthenticate(4);
+        const again = await readResponse(client, 4);
+        expect(again.error.code).toBe(-32000);
+        expect(again.error.message).toContain("Run lia teams");
+        expect(fixture.issuer.deviceRequests).toBe(1);
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP authenticate lia-login with a saved login answers at once without contacting the issuer",
+    async () => {
+      const fixture = await startSignIn({}, root => writeSeededLiaAuth(root.home, "team_saved"));
+      try {
+        sendAuthenticate(2);
+        const answer = await readResponse(client, 2);
+        expect(answer.error).toBeUndefined();
+        expect(answer.result).toEqual({});
+        expect(fixture.issuer.requests).toEqual([]);
+        expect(readSavedAuth(fixture.root).access_token).toBe(SEEDED_GATEWAY_TOKEN);
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP a second lia-login waits on the same sign-in and a third is refused while it waits",
+    async () => {
+      const fixture = await startSignIn({ held: true });
+      try {
+        sendAuthenticate(2);
+        expectSignInCode(await readResponse(client, 2), fixture.issuer.issuerUrl);
+        sendAuthenticate(3);
+        sendAuthenticate(4);
+        const refused = await readResponse(client, 4);
+        expect(refused.error.code).toBe(-32600);
+        expect(refused.error.message).toContain("already waiting");
+        expect(answerFrames(3)).toHaveLength(0);
+
+        fixture.issuer.approve();
+        const approved = await readResponse(client, 3);
+        expect(approved.error).toBeUndefined();
+        expect(approved.result).toEqual({});
+        expect(fixture.issuer.deviceRequests).toBe(1);
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP answers other requests while a lia-login sign-in waits",
+    async () => {
+      const fixture = await startSignIn({ held: true });
+      try {
+        sendAuthenticate(2);
+        await readResponse(client, 2);
+        sendAuthenticate(3);
+        client.send({ jsonrpc: "2.0", id: 4, method: "session/list", params: {} });
+        const listed = await readResponse(client, 4);
+        expect(listed.result).toEqual({ sessions: [] });
+        client.send({ jsonrpc: "2.0", id: 5, method: "no/such_method", params: {} });
+        expect((await readResponse(client, 5)).error.code).toBe(-32601);
+        expect(answerFrames(3)).toHaveLength(0);
+
+        fixture.issuer.approve();
+        expect((await readResponse(client, 3)).result).toEqual({});
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP $/cancel_request cancels a waiting lia-login with -32800 and saves nothing",
+    async () => {
+      const fixture = await startSignIn({ held: true });
+      try {
+        sendAuthenticate(2);
+        await readResponse(client, 2);
+        sendAuthenticate(3);
+        client.send({ jsonrpc: "2.0", method: "$/cancel_request", params: { requestId: 3 } });
+        const cancelled = await readResponse(client, 3);
+        expect(cancelled.error.code).toBe(-32800);
+        expect(existsSync(join(fixture.root.home, ".lia", "auth.json"))).toBe(false);
+        expect(answerFrames(3)).toHaveLength(1);
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP closing stdin during a waiting lia-login cancels it and exits",
+    async () => {
+      const fixture = await startSignIn({ held: true });
+      try {
+        sendAuthenticate(2);
+        await readResponse(client, 2);
+        sendAuthenticate(3);
+        client.endStdin();
+        expect(await client.waitForExit()).toBe(0);
+        const frames = answerFrames(3);
+        expect(frames).toHaveLength(1);
+        expect(frames[0].error.code).toBe(-32800);
+        expect(existsSync(join(fixture.root.home, ".lia", "auth.json"))).toBe(false);
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP lia-login reports a sign-in code that expires before approval",
+    async () => {
+      const fixture = await startSignIn({ held: true, expiresIn: 1 });
+      try {
+        sendAuthenticate(2);
+        await readResponse(client, 2);
+        sendAuthenticate(3);
+        const expired = await readResponse(client, 3);
+        expect(expired.error.code).toBe(-32600);
+        expect(expired.error.message).toContain("sign-in code expired before it was approved");
+        expect(existsSync(join(fixture.root.home, ".lia", "auth.json"))).toBe(false);
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP lia-login reports an expired_token answer from the issuer",
+    async () => {
+      const fixture = await startSignIn({ held: true });
+      try {
+        sendAuthenticate(2);
+        await readResponse(client, 2);
+        sendAuthenticate(3);
+        fixture.issuer.reject("expired_token");
+        const expired = await readResponse(client, 3);
+        expect(expired.error.code).toBe(-32600);
+        expect(expired.error.message).toContain("Vercel says the sign-in code expired");
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP lia-login tells a person who approved that the sign-in could not be saved",
+    async () => {
+      const fixture = await startSignIn({ held: true });
+      try {
+        sendAuthenticate(2);
+        await readResponse(client, 2);
+        // A directory where auth.json belongs: the offer passed its storage check at initialize, and the save after approval cannot replace it.
+        mkdirSync(join(fixture.root.home, ".lia", "auth.json"));
+        sendAuthenticate(3);
+        fixture.issuer.approve();
+        const failed = await readResponse(client, 3);
+        expect(failed.error.code).toBe(-32600);
+        expect(failed.error.message).toContain("could not save the sign-in");
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP lia-login without an issuer override reaches no real issuer and reports the network failure",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-sign-in-closed-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      try {
+        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const failed = await client.request("authenticate", { methodId: "lia-login" }, 2) as any;
+        expect(failed.error.code).toBe(-32600);
+        expect(failed.error.message).toContain("Could not reach Vercel to sign in");
         expect(existsSync(join(root.home, ".lia", "auth.json"))).toBe(false);
       } finally {
         await client?.close();
         gateway.stop();
-        issuer.stop();
         rmSync(root.root, { recursive: true, force: true });
       }
     },
@@ -1937,42 +2299,41 @@ describe("acp: model-independent", () => {
   );
 
   test(
-    "ACP authenticate with lia-login signs in without a terminal and session/new then succeeds",
+    "ACP initialize offers an unavailable sign-in without HOME and authenticate states the reason",
     async () => {
-      const root = createIsolatedRoot("lia-acp-auth-login-flow-");
       const gateway = startFakeGateway([finalText("unused")]);
       const issuer = startFakeDeviceIssuer();
       try {
         client = await AcpClient.create({
-          cwd: root.workspace,
+          omitHome: true,
           env: {
-            ...noCredentialEnv(root, gateway),
+            AI_GATEWAY_API_KEY: undefined,
+            VERCEL_OIDC_TOKEN: undefined,
+            LIA_DISABLE_KEYCHAIN: "1",
+            LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+            LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
             LIA_TEST_OAUTH_ISSUER_URL: issuer.issuerUrl,
-            LIA_NO_OPEN_BROWSER: "1",
           },
         });
-        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
+        expect(initialized.error).toBeUndefined();
+        const methods = initialized.result.authMethods;
+        expect(methods).toHaveLength(1);
+        expect(methods[0].id).toBe("lia-login");
+        expect(methods[0].name).toBe("Vercel AI Gateway sign-in unavailable");
+        expect(methods[0].description).toContain("HOME is not set or does not exist");
 
-        const authenticated = await client.request("authenticate", { methodId: "lia-login" }, 2) as any;
-        expect(authenticated.error).toBeUndefined();
-        expect(authenticated.result).toEqual({});
-        expect(JSON.parse(readFileSync(join(root.home, ".lia", "auth.json"), "utf8")).team_id).toBe("team_123");
-
-        const created = await client.request("session/new", { mcpServers: [] }, 3) as any;
-        expect(created.error).toBeUndefined();
-        expect(typeof created.result.sessionId).toBe("string");
-        expect(gateway.modelRequests).toHaveLength(1);
-        expect(gateway.modelRequests[0]!.headers.get("authorization")).toBe("Bearer device-flow-access-token");
-
-        // stdout carries only JSON-RPC frames; the sign-in code goes to stderr.
-        expect(client.rawLines.length).toBeGreaterThan(0);
-        for (const line of client.rawLines) expect(JSON.parse(line).jsonrpc).toBe("2.0");
-        expect(client.stderr).toContain("ABCD-1234");
+        sendAuthenticate(2);
+        const refused = await readResponse(client, 2);
+        expect(refused.error.code).toBe(-32600);
+        expect(refused.error.message).toContain("HOME is not set or does not exist");
+        expect(issuer.requests).toEqual([]);
+        expect(client.stderr).toBe("");
+        expectOnlyJsonRpcOnStdout();
       } finally {
         await client?.close();
         gateway.stop();
         issuer.stop();
-        rmSync(root.root, { recursive: true, force: true });
       }
     },
     TIMEOUT,
@@ -2002,33 +2363,30 @@ describe("acp: model-independent", () => {
   );
 
   test(
-    "ACP initialize succeeds when a saved login cannot be loaded and the calls that need it report the storage error",
+    "ACP initialize succeeds when a saved login cannot be loaded and lia-login replaces it with a new sign-in",
     async () => {
-      const root = createIsolatedRoot("lia-acp-auth-unreadable-");
-      const gateway = startFakeGateway([finalText("unused")]);
+      const fixture = await startSignIn({}, root => {
+        writeFileSync(join(root.home, ".lia", "auth.json"), "not-json", { mode: 0o600 });
+      });
       try {
-        const liaDir = join(root.home, ".lia");
-        mkdirSync(liaDir, { recursive: true, mode: 0o700 });
-        writeFileSync(join(liaDir, "auth.json"), "not-json", { mode: 0o600 });
-        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
-        const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-        expect(initialized.error).toBeUndefined();
-        expect(initialized.result.authMethods[0].id).toBe("lia-login");
+        expect(fixture.initialized.error).toBeUndefined();
+        expect(fixture.initialized.result.authMethods[0].id).toBe("lia-login");
+        expect(fixture.initialized.result.authMethods[0].name).toBe("Sign in to Vercel AI Gateway");
 
-        for (const [id, method, params] of [
-          [2, "session/new", { mcpServers: [] }],
-          [3, "authenticate", { methodId: "lia-login" }],
-        ] as const) {
-          const failed = await client.request(method, params, id) as any;
-          expect(failed.result).toBeUndefined();
-          expect(failed.error.code).toBe(-32600);
-          expect(failed.error.message).toContain("Saved credential storage is unavailable");
-        }
-        expect(readFileSync(join(root.home, ".lia", "auth.json"), "utf8")).toBe("not-json");
+        const blocked = await client.request("session/new", { mcpServers: [] }, 2) as any;
+        expect(blocked.result).toBeUndefined();
+        expect(blocked.error.code).toBe(-32600);
+        expect(blocked.error.message).toContain("Saved credential storage is unavailable");
+
+        sendAuthenticate(3);
+        expectSignInCode(await readResponse(client, 3), fixture.issuer.issuerUrl);
+        sendAuthenticate(4);
+        expect((await readResponse(client, 4)).result).toEqual({});
+        expect(readSavedAuth(fixture.root).access_token).toBe("device-flow-access-token");
+        expect(fixture.issuer.deviceRequests).toBe(1);
+        expectOnlyJsonRpcOnStdout();
       } finally {
-        await client?.close();
-        gateway.stop();
-        rmSync(root.root, { recursive: true, force: true });
+        await fixture.stop();
       }
     },
     TIMEOUT,
