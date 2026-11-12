@@ -1845,7 +1845,8 @@ pub fn refreshPendingAuthReplacingTurn(state: *ServerState) !bool {
 }
 
 /// `authenticate`: succeeds at once when the credentials, re-read, hold one.
-/// Otherwise `lia-login` on Gateway runs the `lia login` browser sign-in, and
+/// Otherwise `lia-login` on Gateway runs the `lia login` browser sign-in, or
+/// asks for `lia teams` when the saved sign-in has no team, and
 /// `lia-login-api-key` stays unavailable until a key is saved.
 fn handleAuthenticate(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
     const method_id = authenticateMethodId(alloc, msg.params_raw) catch |err| switch (err) {
