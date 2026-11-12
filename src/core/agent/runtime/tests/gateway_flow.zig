@@ -9984,7 +9984,10 @@ test "two turns of one session share the prompt prefix and the tool list" {
     var fixture = PromptFixture{};
     var job = fixture.job();
     job.permission_mode = .auto;
-    hooks.runtime_context_text = try renderedTurnContext(context_arena.allocator(), job.model);
+    // One render for both turns: each render reads the real clock, and a
+    // date_utc that rolls over between them would add an update note.
+    const turn_context = try renderedTurnContext(context_arena.allocator(), job.model);
+    hooks.runtime_context_text = turn_context;
     try runFakePrompt(&gateway, &hooks, fixture.config(), job);
     try std.testing.expectEqual(@as(usize, 3), gateway.request_bodies.items.len);
 
@@ -9998,7 +10001,7 @@ test "two turns of one session share the prompt prefix and the tool list" {
     var second_job = second_fixture.job();
     second_job.prompt = @constCast("follow up");
     second_job.history = hooks.history_turns.items;
-    second_hooks.runtime_context_text = try renderedTurnContext(context_arena.allocator(), second_job.model);
+    second_hooks.runtime_context_text = turn_context;
     try runFakePrompt(&second_gateway, &second_hooks, second_fixture.config(), second_job);
 
     const first_prefix = try promptThroughLastBreakpoint(alloc, gateway.request_bodies.items[0]);
@@ -10024,6 +10027,55 @@ test "two turns of one session share the prompt prefix and the tool list" {
     const names = try toolNames(alloc, second_gateway.request_bodies.items[0]);
     defer freeToolNames(alloc, names);
     try std.testing.expectEqualStrings("mcp_fixture_echo", names[names.len - 1]);
+}
+
+test "switching the model between turns keeps the prompt prefix and sends the new model in one update note" {
+    const alloc = std.testing.allocator;
+    var context_arena: std.heap.ArenaAllocator = .init(alloc);
+    defer context_arena.deinit();
+    const completions = [_]FakeCompletion{.{ .content = "First answer" }};
+    var gateway = FakeGateway.init(alloc, &completions);
+    defer gateway.deinit();
+    var hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer hooks.deinit();
+    var fixture = PromptFixture{};
+    const job = fixture.job();
+    hooks.runtime_context_text = try renderedTurnContext(context_arena.allocator(), job.model);
+    try runFakePrompt(&gateway, &hooks, fixture.config(), job);
+    try std.testing.expectEqualStrings("anthropic/claude-opus-4.6", gateway.request_models.items[0]);
+
+    const second_completions = [_]FakeCompletion{.{ .content = "Second answer" }};
+    var second_gateway = FakeGateway.init(alloc, &second_completions);
+    defer second_gateway.deinit();
+    var second_hooks = FakeAgentRuntimeDeps.init(alloc);
+    defer second_hooks.deinit();
+    var second_fixture = PromptFixture{};
+    var second_job = second_fixture.job();
+    second_job.model = @constCast("anthropic/claude-sonnet-4.6");
+    second_job.prompt = @constCast("follow up");
+    second_job.history = hooks.history_turns.items;
+    second_hooks.runtime_context_text = try renderedTurnContext(context_arena.allocator(), second_job.model);
+    try runFakePrompt(&second_gateway, &second_hooks, second_fixture.config(), second_job);
+    try std.testing.expectEqualStrings("anthropic/claude-sonnet-4.6", second_gateway.request_models.items[0]);
+
+    const first_prefix = try promptThroughLastBreakpoint(alloc, gateway.request_bodies.items[0]);
+    defer alloc.free(first_prefix);
+    const second_prefix = try promptThroughLastBreakpoint(alloc, second_gateway.request_bodies.items[0]);
+    defer alloc.free(second_prefix);
+    try std.testing.expectEqualStrings(first_prefix, second_prefix);
+    try expectPromptExtends(alloc, gateway.request_bodies.items[0], second_gateway.request_bodies.items[0]);
+
+    // The replayed first context still names the old model; the new one
+    // arrives once, inside the turn's single update note.
+    const body = second_gateway.request_bodies.items[0];
+    const old_model_line = "\\nmodel: anthropic/claude-opus-4.6\\n";
+    const new_model_line = "\\nmodel: anthropic/claude-sonnet-4.6\\n";
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, body, old_model_line));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, body, new_model_line));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, body, "<lia-context-update>"));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, body, "</lia-context-update>"));
+    const update_order = [_][]const u8{ "follow up", "<lia-context-update>", new_model_line, "</lia-context-update>" };
+    try expectBodyContainsInOrder(&second_gateway, 0, &update_order);
 }
 
 /// The turn context a host sends for `model`, from the real context provider.
