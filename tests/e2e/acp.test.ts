@@ -2006,6 +2006,28 @@ describe("acp: model-independent", () => {
     expect(answer.error.data.authMethods[0].id).toBe("lia-login");
   };
 
+  // Asks authenticate every `paceMs` until the answer is not the sign-in code,
+  // so the sign-in's failure is the first answer once it has ended. Each ask
+  // while the sign-in still polls returns the code and changes nothing.
+  const askUntilSignInFailure = async (firstId: number, paceMs: number) => {
+    let id = firstId;
+    let lastAskedAt = 0;
+    let failure: any;
+    await waitForCondition("the sign-in failure", () => {
+      const reply = answerFrames(id - 1)[0];
+      if (id > firstId && reply && reply.error?.code !== -32000) {
+        failure = reply;
+        return true;
+      }
+      if ((id === firstId || reply) && Date.now() - lastAskedAt >= paceMs) {
+        lastAskedAt = Date.now();
+        sendAuthenticate(id++);
+      }
+      return false;
+    }, TIMEOUT);
+    return failure;
+  };
+
   // stdout carries only JSON-RPC frames; the sign-in code goes to stderr. A
   // write without a newline never reaches `rawLines`, so it is checked apart.
   const expectOnlyJsonRpcOnStdout = () => {
@@ -2679,22 +2701,12 @@ describe("acp: model-independent", () => {
   test(
     "ACP lia-login reports a sign-in code that expired with nobody waiting",
     async () => {
-      // The kept failure lasts one more lifetime from when the sign-in ends, so
-      // a long lifetime leaves a runner stalled for seconds well inside it.
-      const lifetimeS = 10;
-      const fixture = await startSignIn({ held: true, expiresIn: lifetimeS });
+      const fixture = await startSignIn({ held: true, expiresIn: 5 });
       try {
         sendAuthenticate(2);
         await readResponse(client, 2);
-        // Nothing approves the code. The worker ends the sign-in within its
-        // 100 ms tick of the code's expiry. Wait until the sign-in has been
-        // polling and the issuer's clock is past the expiry and that tick,
-        // which leaves most of the kept window to authenticate in.
-        await waitForCondition("the sign-in polled the issuer", () => fixture.issuer.answeredPolls > 0, TIMEOUT);
-        const endedAt = fixture.issuer.deviceIssuedAt + lifetimeS * 1000 + 500;
-        await waitForCondition("the sign-in code expired", () => Date.now() >= endedAt, TIMEOUT);
-        sendAuthenticate(3);
-        const expired = await readResponse(client, 3);
+        // Nothing approves the code; the worker ends the sign-in at its expiry.
+        const expired = await askUntilSignInFailure(3, 250);
         expect(expired.error.code).toBe(-32600);
         expect(expired.error.message).toContain("The sign-in code expired before it was approved. Try again.");
         expect(expired.error.message).not.toContain("Vercel says");
@@ -2715,22 +2727,8 @@ describe("acp: model-independent", () => {
       try {
         sendAuthenticate(2);
         expectSignInCode(await readResponse(client, 2), fixture.issuer.issuerUrl);
-        // The sign-in ends at once, with nobody waiting. Ask until the answer is
-        // the failure rather than the code still being polled.
-        let id = 3;
-        let failure: any;
-        await waitForCondition("the sign-in failure", () => {
-          if (failure) return true;
-          const reply = answerFrames(id - 1)[0];
-          if (id === 3 || reply) {
-            if (reply && !reply.error.message.includes("verify?user_code")) {
-              failure = reply;
-              return true;
-            }
-            sendAuthenticate(id++);
-          }
-          return false;
-        }, TIMEOUT);
+        // The sign-in ends at once, with nobody waiting.
+        const failure = await askUntilSignInFailure(3, 0);
         expect(failure.error.code).toBe(-32600);
         expect(failure.error.message).toContain("Could not reach Vercel to sign in");
 
