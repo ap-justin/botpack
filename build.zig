@@ -80,9 +80,15 @@ pub fn build(b: *std.Build) void {
 
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
+        .filters = b.option(
+            []const []const u8,
+            "test-filter",
+            "Run only the lia unit tests whose names contain this text",
+        ) orelse &.{},
     });
     const run_exe_tests = b.addRunArtifact(exe_tests);
     run_exe_tests.step.dependOn(b.getInstallStep());
+    b.step("test-lia", "Run lia's unit tests, without the session manager's").dependOn(&run_exe_tests.step);
     // Tests launch the installed lia binary, and the session boundary test
     // walks the source tree.
     const test_paths = b.addOptions();

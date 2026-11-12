@@ -3236,13 +3236,6 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
         });
     };
     defer startup.deinit(alloc);
-    if (state.cfg.auth_mode == .local and startup.credential == null and
-        !(startup.provider == .gateway and state.cfg.credential_override != null))
-    {
-        if (startup.credential_load_failure) |failure| {
-            if (auth_runtime.preparationError(auth_runtime.classifyCredentialFailure(failure.source, failure.err))) |err| return err;
-        }
-    }
     if (!state.cfg.minimal_kernel) {
         try app_lifecycle.applyWorkspaceLaunch(
             &startup,
@@ -3316,13 +3309,21 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
         } else if (startup_credential_is_final)
             &startup_credential.?
         else routed: {
-            routed_credential = try auth_runtime.prepareCredential(
+            routed_credential = auth_runtime.prepareCredential(
                 alloc,
                 state.cfg.gateway_provider.oauth_transport,
                 state.cfg.secret_store,
                 state.provider,
                 if (state.provider == .gateway) startup.credential_source_preference else null,
-            );
+            ) catch |err| switch (err) {
+                // The registry's auth check runs under a HOME that may not
+                // exist; the session calls report the storage error instead.
+                error.CredentialStorageUnavailable => storage: {
+                    debug_trace.logf("auth", "acp initialize deferred credential err={s}", .{@errorName(err)});
+                    break :storage null;
+                },
+                else => return err,
+            };
             break :routed if (routed_credential != null) &routed_credential.? else null;
         };
         // Without a credential, initialize still succeeds; the calls that need

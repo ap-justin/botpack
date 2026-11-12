@@ -3487,6 +3487,47 @@ test "session/new during a turn, after a sign-in, ends the turn and adopts the s
     try std.testing.expectEqual(@as(usize, 1), answers);
 }
 
+test "initialize succeeds and offers sign-in when HOME does not exist" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var arena_state = std.heap.ArenaAllocator.init(alloc);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
+    const tmp_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
+    defer alloc.free(tmp_path);
+    const missing_home = try std.Io.Dir.path.join(alloc, &.{ tmp_path, "missing-home" });
+    defer alloc.free(missing_home);
+    const workspace_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
+    defer alloc.free(workspace_path);
+    // Only HOME is set, as in the ACP registry's auth check.
+    const test_home = try AcpSessionTestHome.install(alloc, missing_home);
+    defer test_home.deinit();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "acp-output.jsonl", .{ .read = true });
+    defer capture.close(io_mod.getIo());
+    {
+        var state = try initAcpSessionTestState(arena, workspace_path, capture);
+        defer state.deinit();
+        state.cfg.secret_store = @import("../core/hosts/native_secret_store.zig").provider;
+        state.cfg.workspace_root_override = workspace_path;
+        var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "initialize", .params_raw = "{\"protocolVersion\":1}" };
+        try server.dispatch(&state, arena, &msg);
+        try std.testing.expect(state.initialized);
+        try std.testing.expect(state.auth_pending);
+        try capture.sync(io_mod.getIo());
+    }
+    var captured_file = try tmp.dir.openFile(io_mod.getIo(), "acp-output.jsonl", .{});
+    defer captured_file.close(io_mod.getIo());
+    const captured = try io_mod.readFileToEnd(alloc, &captured_file, 1024 * 1024);
+    defer alloc.free(captured);
+    const frame = try std.json.parseFromSlice(std.json.Value, alloc, std.mem.trimEnd(u8, captured, "\n"), .{});
+    defer frame.deinit();
+    try std.testing.expect(frame.value.object.get("error") == null);
+    const methods = frame.value.object.get("result").?.object.get("authMethods").?.array.items;
+    try std.testing.expectEqualStrings(acp_types.agent_auth_method_id, methods[0].object.get("id").?.string);
+}
+
 test "an unknown session asks for sign-in only while a Gateway default still has no credential" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
