@@ -1308,6 +1308,169 @@ test "a session/new that fails to create its session leaves the model, the runni
     try std.testing.expect(state.sign_in_root == null);
 }
 
+test "a sign-in picks a session's model again only for another folder, on Gateway, with no model fixed for the process" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, .{});
+    defer home.deinit();
+    try home.tmp.dir.createDirPath(io_mod.getIo(), "project");
+    const project = try io_mod.dirRealpathAlloc(alloc, home.tmp.dir, "project");
+    defer alloc.free(project);
+    // The global model is what the sign-in's switch saved for the folder it read.
+    const profile = try alloc.print("{{\"models\":{{\"gateway\":\"openai/gpt-5.5\"}},\"workspaces\":{{\"{s}\":{{\"models\":{{\"gateway\":\"{s}\"}}}}}}}}", .{ project, workspace_model });
+    defer alloc.free(profile);
+    try home.writePrivate(".lia/settings.json", profile, 0o600);
+    var fake: FakeVercel = .{};
+    var frames: Frames = .{ .alloc = alloc };
+    defer frames.deinit();
+    var state = try signInTestState(alloc, home, &frames, &fake);
+    defer state.deinit();
+    state.selected_model = try alloc.dupe(u8, "test/model");
+    state.configured_model = try alloc.dupe(u8, "test/model");
+
+    const without_sign_in = modelForSession(&state, project);
+    state.sign_in_root = try alloc.dupe(u8, home.home);
+    const picked = modelForSession(&state, project);
+    defer if (picked) |model| model.deinit(alloc);
+    const same_folder = modelForSession(&state, home.home);
+    state.process_model_override = true;
+    const pinned = modelForSession(&state, project);
+    state.process_model_override = false;
+    state.provider = .{ .configured = .{ .len = 0 } };
+    const configured_provider = modelForSession(&state, project);
+    state.provider = .gateway;
+
+    try std.testing.expect(without_sign_in == null);
+    try std.testing.expectEqualStrings(workspace_model, picked.?.selected);
+    try std.testing.expectEqualStrings(workspace_model, picked.?.configured);
+    try std.testing.expect(same_folder == null);
+    try std.testing.expect(pinned == null);
+    try std.testing.expect(configured_provider == null);
+    // Picking changes nothing until the session is active.
+    try std.testing.expectEqualStrings(home.home, state.sign_in_root.?);
+    try std.testing.expectEqualStrings("test/model", state.selected_model);
+}
+
+test "session/new after a sign-in ends the running turn, takes its folder's model, and a second session/new keeps it" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, .{});
+    defer home.deinit();
+    try home.tmp.dir.createDirPath(io_mod.getIo(), "project");
+    try home.tmp.dir.createDirPath(io_mod.getIo(), "other");
+    const project = try io_mod.dirRealpathAlloc(alloc, home.tmp.dir, "project");
+    defer alloc.free(project);
+    const other = try io_mod.dirRealpathAlloc(alloc, home.tmp.dir, "other");
+    defer alloc.free(other);
+    const profile = try alloc.print(
+        "{{\"workspaces\":{{\"{s}\":{{\"models\":{{\"gateway\":\"{s}\"}}}},\"{s}\":{{\"models\":{{\"gateway\":\"openai/gpt-5.5\"}}}}}}}}",
+        .{ project, workspace_model, other },
+    );
+    defer alloc.free(profile);
+    try home.writePrivate(".lia/settings.json", profile, 0o600);
+    var fake: FakeVercel = .{};
+    var frames: Frames = .{ .alloc = alloc };
+    defer frames.deinit();
+    var state = try signInTestState(alloc, home, &frames, &fake);
+    defer state.deinit();
+    state.cfg.provider_set = provider_set.gateway_only(.{ .model_catalog = .{ .context = null, .fetch_fn = fetchTwoModels } });
+    state.cfg.allow_acp_mcp = false;
+    state.sessions_v2 = try session_adapter.Store.open(alloc, home.home);
+    state.selected_model = try alloc.dupe(u8, "test/model");
+    state.configured_model = try alloc.dupe(u8, "test/model");
+
+    var trap = try StdStreamTrap.begin(home.tmp.dir);
+    defer trap.end();
+    try authenticateForTest(&state, 7);
+    const answer = try frames.waitFor(7);
+    defer answer.deinit();
+    // Adopts the sign-in before the turn starts, which would defer it.
+    try dispatchForTest(&state, 8, "lia/unknown", "{}");
+    try server.startIdlePromptForTest(&state);
+    defer server.cancelAndReapActivePrompt(&state);
+    const project_params = try alloc.print("{{\"cwd\":\"{s}\",\"mcpServers\":[]}}", .{project});
+    defer alloc.free(project_params);
+    try dispatchForTest(&state, 9, "session/new", project_params);
+    const turn_ended = state.active_prompt == null;
+    const first_model = try alloc.dupe(u8, state.selected_model);
+    defer alloc.free(first_model);
+    const other_params = try alloc.print("{{\"cwd\":\"{s}\",\"mcpServers\":[]}}", .{other});
+    defer alloc.free(other_params);
+    try dispatchForTest(&state, 10, "session/new", other_params);
+    trap.end();
+
+    try expectSignedIn(answer);
+    try std.testing.expect(turn_ended);
+    try std.testing.expectEqualStrings(workspace_model, first_model);
+    try std.testing.expectEqualStrings(other, state.active_session.?.workspace_root);
+    try std.testing.expectEqualStrings(workspace_model, state.active_session.?.model);
+    try std.testing.expectEqualStrings(workspace_model, state.selected_model);
+}
+
+test "a failure kept from a real sign-in lasts as long as its device code" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, .{ .open_browser = false });
+    defer home.deinit();
+    var fake: FakeVercel = .{
+        .approved = .init(false),
+        .device_expires_in = 600,
+        .token_disposition = .rejected,
+        .token_body = "{\"error\":\"access_denied\"}",
+    };
+    var frames: Frames = .{ .alloc = alloc };
+    defer frames.deinit();
+    var state = try signInTestState(alloc, home, &frames, &fake);
+    defer state.deinit();
+
+    var trap = try StdStreamTrap.begin(home.tmp.dir);
+    defer trap.end();
+    try authenticateForTest(&state, 7);
+    const code_answer = try frames.waitFor(7);
+    defer code_answer.deinit();
+    const before_ms = io_mod.milliTimestamp();
+    // Denied at the next poll, with nobody waiting.
+    fake.approved.store(true, .seq_cst);
+    try waitForSignInEnd(&state);
+    const after_ms = io_mod.milliTimestamp();
+    try dispatchForTest(&state, 8, "lia/unknown", "{}");
+    trap.end();
+
+    try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), code_answer.value.object.get("error").?.object.get("code").?.integer);
+    const kept = state.sign_in_failure orelse return error.TestExpectedKeptFailure;
+    try std.testing.expect(kept.expires_at_ms >= before_ms + 600_000);
+    try std.testing.expect(kept.expires_at_ms <= after_ms + 600_000);
+}
+
+test "a device code whose lifetime is 0 keeps the failure for 15 minutes" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, .{ .open_browser = false });
+    defer home.deinit();
+    // The code is handed out, then polling it fails: it has no deadline.
+    var fake: FakeVercel = .{ .approved = .init(false), .device_expires_in = 0 };
+    var frames: Frames = .{ .alloc = alloc };
+    defer frames.deinit();
+    var state = try signInTestState(alloc, home, &frames, &fake);
+    defer state.deinit();
+
+    var trap = try StdStreamTrap.begin(home.tmp.dir);
+    defer trap.end();
+    const before_ms = io_mod.milliTimestamp();
+    try authenticateForTest(&state, 7);
+    const code_answer = try frames.waitFor(7);
+    defer code_answer.deinit();
+    try waitForSignInEnd(&state);
+    const after_ms = io_mod.milliTimestamp();
+    try dispatchForTest(&state, 8, "lia/unknown", "{}");
+    trap.end();
+
+    try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), code_answer.value.object.get("error").?.object.get("code").?.integer);
+    const kept = state.sign_in_failure orelse return error.TestExpectedKeptFailure;
+    try std.testing.expect(kept.expires_at_ms >= before_ms + kept_failure_default_ms);
+    try std.testing.expect(kept.expires_at_ms <= after_ms + kept_failure_default_ms);
+}
+
 /// Waits up to 10 s for the connection's sign-in to reach its outcome.
 fn waitForSignInEnd(state: *ServerState) !void {
     const job = state.sign_in orelse return;
