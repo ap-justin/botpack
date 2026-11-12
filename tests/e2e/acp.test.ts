@@ -3823,7 +3823,7 @@ describe("acp: model-independent", () => {
   );
 
   test(
-    "ACP starts a supplied stdio server in the session's folder and names the model to the model",
+    "ACP session/new starts a supplied stdio server in the session's folder and names the model to the model",
     async () => {
       const root = createIsolatedRoot("lia-acp-mcp-cwd-");
       const cwdPath = join(root.root, "fixture.cwd");
@@ -3859,6 +3859,49 @@ describe("acp: model-independent", () => {
         expect(bodyText(0)).toContain(modelLine);
         // The second turn replays the first turn's context: one model line, no update note.
         expect(bodyText(2).split(modelLine)).toHaveLength(2);
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        client = null;
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    LIVE_TIMEOUT,
+  );
+
+  test(
+    "ACP session/load starts a supplied stdio server in the session's folder",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-mcp-load-cwd-");
+      const cwdPath = join(root.root, "fixture.cwd");
+      const launchDir = join(root.root, "launch");
+      mkdirSync(launchDir);
+      const gateway = startFakeGateway([
+        finalText("saved"),
+        fakeGatewayToolCall("call_cwd", MCP_TOOL_NAME, { text: "cwd" }),
+        finalText("done"),
+      ]);
+      // lia itself runs in `launchDir`; the session's folder is the workspace.
+      const server = acpStdioServer("CWD", join(root.root, "fixture.pid"), "normal", { LIA_MCP_CWD_CAPTURE: cwdPath });
+      try {
+        client = await AcpClient.create({ cwd: launchDir, env: { ...fakeGatewayEnv(root, gateway) } });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        // No server at session/new: whatever the capture file records came from session/load.
+        const created = await client.request("session/new", { cwd: root.workspace, mcpServers: [] }, 2) as any;
+        expect(created.error).toBeUndefined();
+        await client.readLine();
+        await client.request("session/set_mode", { modeId: "auto" }, 3);
+        const first = await runPrompt(client, "Say something so this session is saved.", TIMEOUT);
+        expect(first.promptResult.result.stopReason).toBe("end_turn");
+        expect(existsSync(cwdPath)).toBe(false);
+
+        const loaded = await client.request("session/load", { sessionId: created.result.sessionId, cwd: root.workspace, mcpServers: [server] }, 4) as any;
+        expect(loaded.error).toBeUndefined();
+        const called = await runPrompt(client, "Call the supplied MCP echo tool.", TIMEOUT);
+        expect(called.promptResult.result.stopReason).toBe("end_turn");
+        await waitForCondition("the server to report its folder", () => existsSync(cwdPath) && readFileSync(cwdPath, "utf8") !== "", 10_000);
+        expect(realpathSync(readFileSync(cwdPath, "utf8"))).toBe(realpathSync(root.workspace));
         expect(client.stderr).toBe("");
       } finally {
         await client?.close();
