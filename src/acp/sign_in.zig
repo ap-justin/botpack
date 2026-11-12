@@ -1351,7 +1351,27 @@ test "a sign-in picks a session's model again only for another folder, on Gatewa
     try std.testing.expectEqualStrings("test/model", state.selected_model);
 }
 
-test "session/new after a sign-in ends the running turn, takes its folder's model, and a second session/new keeps it" {
+/// A turn that runs until its session is cancelled, then reads the
+/// connection's model as the turn's last act.
+const ModelAtTurnEnd = struct {
+    cancel_flag: *const std.atomic.Value(bool),
+    model: *const []u8,
+    buffer: [64]u8 = undefined,
+    len: usize = 0,
+
+    fn run(self: *ModelAtTurnEnd) void {
+        while (!self.cancel_flag.load(.seq_cst)) io_mod.sleep(std.time.ns_per_ms);
+        const model = self.model.*;
+        self.len = @min(model.len, self.buffer.len);
+        @memcpy(self.buffer[0..self.len], model[0..self.len]);
+    }
+
+    fn seen(self: *const ModelAtTurnEnd) []const u8 {
+        return self.buffer[0..self.len];
+    }
+};
+
+test "session/new after a sign-in ends the running turn before it takes its folder's model, a failed one leaves the turn, and a second one keeps the model" {
     if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     const home = try SignInTestHome.install(alloc, .{});
@@ -1384,23 +1404,41 @@ test "session/new after a sign-in ends the running turn, takes its folder's mode
     try authenticateForTest(&state, 7);
     const answer = try frames.waitFor(7);
     defer answer.deinit();
-    // Adopts the sign-in before the turn starts, which would defer it.
-    try dispatchForTest(&state, 8, "lia/unknown", "{}");
-    try server.startIdlePromptForTest(&state);
+    // The turn runs in a session, so a cancel reaches it; that first session
+    // spends this sign-in's folder.
+    const home_params = try alloc.print("{{\"cwd\":\"{s}\",\"mcpServers\":[]}}", .{home.home});
+    defer alloc.free(home_params);
+    try dispatchForTest(&state, 8, "session/new", home_params);
+    // A sign-in made while that session is open.
+    state.sign_in_root = try alloc.dupe(u8, home.home);
+    var turn: ModelAtTurnEnd = .{ .cancel_flag = &state.active_session.?.cancel_flag, .model = &state.selected_model };
+    try server.startPromptForTest(&state, ModelAtTurnEnd.run, .{&turn});
     defer server.cancelAndReapActivePrompt(&state);
+
+    // A file where the sessions folder goes: the session cannot be created.
+    try home.writePrivate(".lia/sessions", "", 0o600);
     const project_params = try alloc.print("{{\"cwd\":\"{s}\",\"mcpServers\":[]}}", .{project});
     defer alloc.free(project_params);
     try dispatchForTest(&state, 9, "session/new", project_params);
+    const failed = try frames.waitFor(9);
+    defer failed.deinit();
+    const turn_left_running = state.active_prompt != null and !turn.cancel_flag.load(.seq_cst);
+    try home.tmp.dir.deleteFile(io_mod.getIo(), ".lia/sessions");
+
+    try dispatchForTest(&state, 10, "session/new", project_params);
     const turn_ended = state.active_prompt == null;
     const first_model = try alloc.dupe(u8, state.selected_model);
     defer alloc.free(first_model);
     const other_params = try alloc.print("{{\"cwd\":\"{s}\",\"mcpServers\":[]}}", .{other});
     defer alloc.free(other_params);
-    try dispatchForTest(&state, 10, "session/new", other_params);
+    try dispatchForTest(&state, 11, "session/new", other_params);
     trap.end();
 
     try expectSignedIn(answer);
+    try expectError(failed, ErrorCode.internal_error, "Failed to create session");
+    try std.testing.expect(turn_left_running);
     try std.testing.expect(turn_ended);
+    try std.testing.expectEqualStrings("test/model", turn.seen());
     try std.testing.expectEqualStrings(workspace_model, first_model);
     try std.testing.expectEqualStrings(other, state.active_session.?.workspace_root);
     try std.testing.expectEqualStrings(workspace_model, state.active_session.?.model);

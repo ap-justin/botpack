@@ -4915,6 +4915,13 @@ test "ACP authenticate accepts the agent and terminal method ids" {
 /// Holds `state.active_prompt` as a running turn does until it is reaped. The
 /// worker returns at once, so a reap never waits on it.
 pub fn startIdlePromptForTest(state: *ServerState) !void {
+    try startPromptForTest(state, struct {
+        fn run() void {}
+    }.run, .{});
+}
+
+/// A turn whose thread runs `function`, reaped like any other.
+pub fn startPromptForTest(state: *ServerState, comptime function: anytype, args: anytype) !void {
     const active = try state.alloc.create(ActivePrompt);
     errdefer state.alloc.destroy(active);
     active.* = .{
@@ -4925,9 +4932,7 @@ pub fn startIdlePromptForTest(state: *ServerState) !void {
         .permission_mode = .ask,
     };
     errdefer jsonrpc.freeMessage(state.alloc, &active.msg);
-    active.thread = try std.Thread.spawn(.{}, struct {
-        fn run() void {}
-    }.run, .{});
+    active.thread = try std.Thread.spawn(.{}, function, args);
     state.active_prompt = active;
 }
 
