@@ -1471,6 +1471,32 @@ test "a device code whose lifetime is 0 keeps the failure for 15 minutes" {
     try std.testing.expect(kept.expires_at_ms <= after_ms + kept_failure_default_ms);
 }
 
+test "lia-login on a connection started on a configured provider runs no Gateway sign-in and keeps that provider" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, .{});
+    defer home.deinit();
+    // Its key's variable is not set.
+    try home.writePrivate(".lia/settings.json", "{\"providers\":{\"router\":{\"protocol\":\"openai-chat-completions\"," ++
+        "\"base_url\":\"https://openrouter.ai/api/v1\",\"auth\":{\"type\":\"bearer\",\"env\":\"LIA_TEST_UNSET_ROUTER_KEY\"}}},\"provider\":\"router\"}", 0o600);
+    var fake: FakeVercel = .{};
+    var frames: Frames = .{ .alloc = alloc };
+    defer frames.deinit();
+    var state = try signInTestState(alloc, home, &frames, &fake);
+    defer state.deinit();
+    state.provider = @import("../core/config/model_provider.zig").parse("router").?;
+    state.credential_source = .configured;
+
+    try authenticateForTest(&state, 7);
+    const answer = try frames.waitFor(7);
+    defer answer.deinit();
+
+    try expectError(answer, ErrorCode.invalid_request, server.configured_credential_unavailable_message);
+    try std.testing.expect(state.sign_in == null);
+    try std.testing.expectEqual(@as(usize, 0), fake.device_requests.load(.seq_cst));
+    try std.testing.expect(state.provider == .configured);
+}
+
 /// Waits up to 10 s for the connection's sign-in to reach its outcome.
 fn waitForSignInEnd(state: *ServerState) !void {
     const job = state.sign_in orelse return;
