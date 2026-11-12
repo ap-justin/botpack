@@ -346,6 +346,8 @@ pub const TransientContextInput = struct {
     access_scope: ?workspace_access.AccessScope = null,
     interactive: bool,
     permission_mode: types.PermissionMode,
+    /// The model id this turn's requests send; null leaves it out.
+    model: ?[]const u8 = null,
 };
 
 pub const Provider = struct {

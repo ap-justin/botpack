@@ -426,6 +426,7 @@ pub fn handleNewSession(state: *server.ServerState, alloc: Allocator, msg: *json
         });
     }
     if (state.cfg.allow_acp_mcp) {
+        try mcp_servers.startStdioServersInWorkspace(alloc, &mcp_configs, workspace_root);
         try appendProfileMcpConfigsIfRequested(state, alloc, msg.params_raw, &mcp_configs);
         try appendProjectMcpConfigs(state, alloc, workspace_root, &mcp_configs);
     }
@@ -813,6 +814,7 @@ fn handleRestoreSession(
             });
         }
     } else {
+        try mcp_servers.startStdioServersInWorkspace(alloc, &mcp_configs, workspace_root);
         try appendProfileMcpConfigsIfRequested(state, alloc, msg.params_raw, &mcp_configs);
         try appendProjectMcpConfigs(state, alloc, workspace_root, &mcp_configs);
     }

@@ -4317,6 +4317,162 @@ describe("acp: model-independent", () => {
   );
 
   test(
+    "ACP session/new starts a supplied stdio server in the session's folder and names the model to the model",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-mcp-cwd-");
+      const cwdPath = join(root.root, "fixture.cwd");
+      const launchDir = join(root.root, "launch");
+      mkdirSync(launchDir);
+      const gateway = startFakeGateway([
+        fakeGatewayToolCall("call_cwd", MCP_TOOL_NAME, { text: "cwd" }),
+        finalText("first"),
+        finalText("second"),
+      ]);
+      // lia itself runs in `launchDir`; the session's folder is the workspace.
+      const server = acpStdioServer("CWD", join(root.root, "fixture.pid"), "normal", { LIA_MCP_CWD_CAPTURE: cwdPath });
+      try {
+        client = await AcpClient.create({ cwd: launchDir, env: { ...fakeGatewayEnv(root, gateway) } });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const created = await client.request("session/new", { cwd: root.workspace, mcpServers: [server] }, 2) as any;
+        expect(created.error).toBeUndefined();
+        await client.readLine();
+        await client.request("session/set_mode", { modeId: "auto" }, 3);
+        const first = await runPrompt(client, "Which model are you?", TIMEOUT);
+        expect(first.promptResult.result.stopReason).toBe("end_turn");
+        await waitForCondition("the server to report its folder", () => existsSync(cwdPath) && readFileSync(cwdPath, "utf8") !== "", 10_000);
+        expect(realpathSync(readFileSync(cwdPath, "utf8"))).toBe(realpathSync(root.workspace));
+
+        const second = await runPrompt(client, "And now?", TIMEOUT);
+        expect(second.promptResult.result.stopReason).toBe("end_turn");
+        // The request body is JSON text, where the context's newlines are escaped.
+        const modelLine = `\\nmodel: ${FAKE_GATEWAY_MODEL}\\n`;
+        const bodyText = (index: number) => {
+          const body = gateway.requests[index]!.body as unknown;
+          return typeof body === "string" ? body : JSON.stringify(body);
+        };
+        expect(bodyText(0)).toContain(modelLine);
+        // The second turn replays the first turn's context: one model line. An update note
+        // repeats the whole context, model line included, so this also asserts the second turn adds
+        // none; a run crossing midnight UTC changes `date_utc`, adds a note and fails here.
+        expect(bodyText(2).split(modelLine)).toHaveLength(2);
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        client = null;
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    LIVE_TIMEOUT,
+  );
+
+  test(
+    "ACP model switch between turns arrives as one update note with the new model line",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-model-switch-note-");
+      const otherModel = "o4-mini";
+      const gateway = startFakeGateway(
+        [finalText("first"), finalText("second")],
+        {
+          models: [
+            { id: FAKE_GATEWAY_MODEL, type: "language", tags: ["tool-use"] },
+            { id: otherModel, type: "language", tags: ["tool-use"] },
+          ],
+        },
+      );
+      try {
+        client = await AcpClient.create({ cwd: root.workspace, env: { ...fakeGatewayEnv(root, gateway) } });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const created = await client.request("session/new", { cwd: root.workspace, mcpServers: [] }, 2) as any;
+        expect(created.error).toBeUndefined();
+        await client.readLine();
+        const first = await runPrompt(client, "Which model are you?", TIMEOUT);
+        expect(first.promptResult.result.stopReason).toBe("end_turn");
+
+        const switched = await client.request(
+          "session/set_config_option",
+          { sessionId: created.result.sessionId, configId: "model", value: otherModel },
+          3,
+        ) as any;
+        expect(switched.error).toBeUndefined();
+        const second = await runPrompt(client, "And now?", TIMEOUT);
+        expect(second.promptResult.result.stopReason).toBe("end_turn");
+
+        // The request body is JSON text, where the context's newlines are escaped.
+        const oldLine = `\\nmodel: ${FAKE_GATEWAY_MODEL}\\n`;
+        const newLine = `\\nmodel: ${otherModel}\\n`;
+        // The default prompt also names the tag in prose, so match the note's own opening.
+        const noteOpen = "<lia-context-update>\\nThe runtime context changed";
+        const noteClose = "</lia-context-update>";
+        const firstBody = gateway.requests[0]!.body;
+        const secondBody = gateway.requests[1]!.body;
+        expect(firstBody).toContain(oldLine);
+        expect(firstBody).not.toContain(newLine);
+        expect(gateway.requests[1]!.headers.get("ai-language-model-id")).toBe(otherModel);
+
+        // The replayed first context keeps the old line; the note carries the new one.
+        expect(secondBody.split(oldLine)).toHaveLength(2);
+        expect(secondBody.split(newLine)).toHaveLength(2);
+        expect(secondBody.split(noteOpen)).toHaveLength(2);
+        expect(secondBody.indexOf(oldLine)).toBeLessThan(secondBody.indexOf(noteOpen));
+        expect(secondBody.indexOf(newLine)).toBeGreaterThan(secondBody.indexOf(noteOpen));
+        expect(secondBody.split(noteClose)).toHaveLength(2);
+        expect(secondBody.indexOf(newLine)).toBeLessThan(secondBody.indexOf(noteClose));
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        client = null;
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    LIVE_TIMEOUT,
+  );
+
+  test(
+    "ACP session/load starts a supplied stdio server in the session's folder",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-mcp-load-cwd-");
+      const cwdPath = join(root.root, "fixture.cwd");
+      const launchDir = join(root.root, "launch");
+      mkdirSync(launchDir);
+      const gateway = startFakeGateway([
+        finalText("saved"),
+        fakeGatewayToolCall("call_cwd", MCP_TOOL_NAME, { text: "cwd" }),
+        finalText("done"),
+      ]);
+      // lia itself runs in `launchDir`; the session's folder is the workspace.
+      const server = acpStdioServer("CWD", join(root.root, "fixture.pid"), "normal", { LIA_MCP_CWD_CAPTURE: cwdPath });
+      try {
+        client = await AcpClient.create({ cwd: launchDir, env: { ...fakeGatewayEnv(root, gateway) } });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        // No server at session/new: whatever the capture file records came from session/load.
+        const created = await client.request("session/new", { cwd: root.workspace, mcpServers: [] }, 2) as any;
+        expect(created.error).toBeUndefined();
+        await client.readLine();
+        await client.request("session/set_mode", { modeId: "auto" }, 3);
+        const first = await runPrompt(client, "Say something so this session is saved.", TIMEOUT);
+        expect(first.promptResult.result.stopReason).toBe("end_turn");
+        expect(existsSync(cwdPath)).toBe(false);
+
+        const loaded = await client.request("session/load", { sessionId: created.result.sessionId, cwd: root.workspace, mcpServers: [server] }, 4) as any;
+        expect(loaded.error).toBeUndefined();
+        const called = await runPrompt(client, "Call the supplied MCP echo tool.", TIMEOUT);
+        expect(called.promptResult.result.stopReason).toBe("end_turn");
+        await waitForCondition("the server to report its folder", () => existsSync(cwdPath) && readFileSync(cwdPath, "utf8") !== "", 10_000);
+        expect(realpathSync(readFileSync(cwdPath, "utf8"))).toBe(realpathSync(root.workspace));
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        client = null;
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    LIVE_TIMEOUT,
+  );
+
+  test(
     "ACP answers session/load at once while the old session's stdio server stops",
     async () => {
       const root = createIsolatedRoot("lia-acp-mcp-v2-load-stop-");
