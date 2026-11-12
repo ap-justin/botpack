@@ -3857,10 +3857,9 @@ describe("acp: model-independent", () => {
           return typeof body === "string" ? body : JSON.stringify(body);
         };
         expect(bodyText(0)).toContain(modelLine);
-        // The second turn replays the first turn's context: one model line. The host renders
-        // the context afresh each turn and an update note repeats all of it, model line included,
-        // so a second line means a note. (Zero notes isn't asserted: a date or branch change
-        // between the turns would legitimately add one.)
+        // The second turn replays the first turn's context: one model line. An update note
+        // repeats the whole context, model line included, so a second line means a note. Zero
+        // notes isn't asserted: a date or branch change between the turns legitimately adds one.
         expect(bodyText(2).split(modelLine)).toHaveLength(2);
         expect(client.stderr).toBe("");
       } finally {
