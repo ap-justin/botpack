@@ -33,6 +33,7 @@ const host = @import("../hosts/host.zig");
 const login_flow = @import("../auth/login_flow.zig");
 const oauth_transport = @import("../auth/oauth_transport.zig");
 const provider_catalog = @import("../auth/provider_catalog.zig");
+const provider_activation = @import("provider_activation.zig");
 const secret = @import("../auth/secret.zig");
 const output_contracts = @import("../output/output_contracts.zig");
 const prompt_policy = @import("../config/prompt_policy.zig");
@@ -249,18 +250,6 @@ fn parseLoginArgs(rest: []const [:0]const u8) error{ InvalidLoginProviderArgs, A
     }
     if (parsed.api_key and (parsed.provider orelse .gateway) != .gateway) return error.ApiKeyNeedsVercel;
     return parsed;
-}
-
-fn selectCatalogModel(
-    entries: []const model_catalog.ModelCatalogEntry,
-    saved: ?[]const u8,
-) ?[]const u8 {
-    if (saved) |candidate| {
-        for (entries) |entry| {
-            if (std.mem.eql(u8, entry.id, candidate)) return entry.id;
-        }
-    }
-    return if (entries.len > 0) entries[0].id else null;
 }
 
 const SessionListOptions = struct {
@@ -895,11 +884,6 @@ fn runNoConfigIfRequestedWithDeps(
     return true;
 }
 
-const ProviderActivationCaller = enum {
-    provider_command,
-    provider_login,
-};
-
 const CliTeamValidationContext = struct {
     alloc: Allocator,
     cfg: *const Config,
@@ -928,261 +912,30 @@ fn validateCliTeamCredential(
     };
 }
 
-fn writeProviderActivationError(
-    alloc: Allocator,
-    deps: RunDeps,
-    caller: ProviderActivationCaller,
-    detail: []const u8,
-) !void {
-    const message = try alloc.print(
-        "{s}: {s}\n",
-        .{ if (caller == .provider_login) "lia login" else "lia provider", detail },
-    );
-    defer alloc.free(message);
-    try writeStderr(deps, message);
+fn activationEnv(cfg: Config) provider_activation.Env {
+    return .{
+        .auth_mode = cfg.auth_mode,
+        .default_model = cfg.default_model,
+        .models_path = cfg.models_path,
+        .gateway_provider = cfg.gateway_provider,
+        .provider_set = cfg.provider_set,
+        .secret_store = cfg.secret_store,
+        .url_opener = cfg.url_opener,
+    };
+}
+
+fn activationOutput(deps: RunDeps) provider_activation.Output {
+    return .{
+        .stdout_ctx = deps.stdout_ctx,
+        .stderr_ctx = deps.stderr_ctx,
+        .write_stdout = deps.write_stdout,
+        .write_stderr = deps.write_stderr,
+    };
 }
 
 fn writeHostManagedAuthResult(deps: RunDeps) !void {
     try writeStdout(deps, credentials.host_managed_auth_message);
     try writeStdout(deps, "\n");
-}
-
-fn activateProviderSelection(
-    alloc: Allocator,
-    cfg: Config,
-    deps: RunDeps,
-    target: model_provider.ProviderId,
-    caller: ProviderActivationCaller,
-    exact_source: ?credentials.Source,
-) !bool {
-    return activateProviderSelectionFallible(alloc, cfg, deps, target, caller, exact_source) catch |err| {
-        switch (err) {
-            error.CredentialStorageUnavailable,
-            error.CredentialTemporarilyUnavailable,
-            error.CredentialRefreshPersistenceUncertain,
-            error.CredentialAuthorityChanged,
-            => {},
-            else => return err,
-        }
-        const detail = try auth_runtime.preparationFailureText(alloc, target, err);
-        defer alloc.free(detail);
-        try writeProviderActivationError(alloc, deps, caller, detail);
-        return false;
-    };
-}
-
-fn runProviderLogin(alloc: Allocator, cfg: Config, provider: model_provider.ProviderId) !void {
-    switch (provider) {
-        .gateway => try login_flow.runLogin(alloc, cfg.gateway_provider.oauth_transport, cfg.url_opener),
-        .configured => return error.ConfiguredProviderUsesEnvironmentAuth,
-    }
-}
-
-fn writeProviderLoginFailure(alloc: Allocator, deps: RunDeps, provider: model_provider.ProviderId, caller: ProviderActivationCaller, err: anyerror) !void {
-    debug_trace.logf("auth", "provider sign-in failed provider={t} err={s}", .{ provider, @errorName(err) });
-    const failure = auth_runtime.classifyCredentialFailure(provider_catalog.find(provider).login_source, err);
-    if (failure.reason == .invalid_storage or failure.reason == .persistence_uncertain) {
-        const detail = try auth_runtime.preparationFailureText(alloc, provider, err);
-        defer alloc.free(detail);
-        try writeProviderActivationError(alloc, deps, caller, detail);
-        return;
-    }
-    try writeProviderActivationError(alloc, deps, caller, switch (err) {
-        error.ClientIdMissing => "missing LIA_OAUTH_CLIENT_ID; configure the lia Vercel App client id first",
-        error.AccessDenied => "authorization denied",
-        error.ExpiredToken, error.LoginTimedOut => "authorization expired; run lia login again",
-        else => "failed to sign in",
-    });
-}
-
-fn activateProviderSelectionFallible(
-    alloc: Allocator,
-    cfg: Config,
-    deps: RunDeps,
-    target: model_provider.ProviderId,
-    caller: ProviderActivationCaller,
-    exact_source: ?credentials.Source,
-) !bool {
-    const workspace_root = try io_mod.realpathAlloc(alloc, ".");
-    defer alloc.free(workspace_root);
-    var settings = config_runtime.loadMergedSettings(alloc, workspace_root) catch |err| {
-        try writeProviderActivationError(alloc, deps, caller, "could not load settings");
-        debug_trace.logf("config", "provider selection settings load failed err={s}", .{@errorName(err)});
-        return false;
-    };
-    defer settings.deinit(alloc);
-
-    if (target == .configured) {
-        const bound = target.bind(settings.providers orelse .{}) catch |err| switch (err) {
-            error.UnknownConfiguredProvider => {
-                const detail = try config_runtime.unknownProviderMessage(alloc, target.label());
-                defer alloc.free(detail);
-                try writeProviderActivationError(alloc, deps, caller, detail);
-                // A name lia doesn't know is a bad argument, so the caller
-                // exits as a usage error.
-                return error.UnknownConfiguredProvider;
-            },
-            error.ConfiguredProviderChanged => return err,
-        };
-        const selected_model = settings.models.get(bound) orelse return error.ConfiguredModelNotSelected;
-        var attempt = config_runtime.attemptUserPreferences(alloc, .{
-            .provider = bound,
-            .model_preference = .{ .provider = bound, .model = selected_model },
-        });
-        defer attempt.deinit(alloc);
-        switch (attempt) {
-            .failure => {
-                try writeProviderActivationError(alloc, deps, caller, "failed to save provider selection");
-                return false;
-            },
-            .outcome => {},
-        }
-        const message = try alloc.print("Provider set to {s}.\n", .{bound.label()});
-        defer alloc.free(message);
-        if (caller == .provider_command) try writeStdout(deps, message);
-        return true;
-    }
-    const preferred_source = exact_source orelse settings.credential_source;
-    var prepared_credential = if (cfg.auth_mode == .host_managed)
-        null
-    else
-        try auth_runtime.prepareCredential(
-            alloc,
-            cfg.gateway_provider.oauth_transport,
-            cfg.secret_store,
-            target,
-            preferred_source,
-        );
-    defer if (prepared_credential) |*credential| credential.deinit(alloc);
-
-    const already_selected = (settings.provider orelse @as(model_provider.ProviderId, .gateway)).eql(target);
-    // A selected provider without a persisted model still needs one chosen
-    // below; LIA_MODEL only covers a single run, so it does not count here.
-    const has_persisted_model = if (config_runtime.selectProviderModel(cfg.default_model, &settings, target, null)) |_| true else |_| false;
-    if (caller == .provider_command and already_selected and has_persisted_model and
-        (cfg.auth_mode == .host_managed or prepared_credential != null))
-    {
-        try writeStdout(deps, switch (target) {
-            .gateway => "Gateway is already selected.\n",
-            .configured => "Configured provider is already selected.\n",
-        });
-        return true;
-    }
-
-    var performed_login: ?model_provider.ProviderId = null;
-    if (cfg.auth_mode == .local and prepared_credential == null and provider_catalog.find(target).subscription and caller == .provider_command) {
-        runProviderLogin(alloc, cfg, target) catch |err| {
-            try writeProviderLoginFailure(alloc, deps, target, caller, err);
-            return false;
-        };
-        performed_login = target;
-        prepared_credential = try auth_runtime.prepareCredential(
-            alloc,
-            cfg.gateway_provider.oauth_transport,
-            cfg.secret_store,
-            target,
-            preferred_source,
-        );
-    }
-
-    const credential = if (cfg.auth_mode == .host_managed)
-        null
-    else if (prepared_credential) |*value|
-        value
-    else {
-        try writeProviderActivationError(
-            alloc,
-            deps,
-            caller,
-            switch (target) {
-                .gateway => "configure a Gateway credential first",
-                .configured => "configure the provider auth environment variable first",
-            },
-        );
-        return false;
-    };
-    const catalog_provider = cfg.provider_set.select(target).model_catalog orelse {
-        try writeProviderActivationError(alloc, deps, caller, switch (target) {
-            .gateway => "Gateway model catalog is unavailable",
-            .configured => "Configured model catalog is unavailable",
-        });
-        return false;
-    };
-    const fetch_result = model_catalog.fetchWithPublicFallback(catalog_provider, alloc, .{
-        .access = if (cfg.auth_mode == .host_managed)
-            .host_managed
-        else
-            credentials.catalogAccessAt(
-                credential.?.*,
-                io_mod.milliTimestamp(),
-            ).withExplicitAuthority(),
-        .endpoint = cfg.models_path,
-        .view = .picker,
-    });
-    var loaded = switch (fetch_result) {
-        .loaded => |loaded| blk: {
-            if (loaded.provenance.access.level != .authenticated or
-                loaded.provenance.anonymous_fallback_used)
-            {
-                var rejected = loaded.catalog;
-                model_catalog.freeModelCatalog(alloc, &rejected);
-                try writeProviderActivationError(
-                    alloc,
-                    deps,
-                    caller,
-                    "target credential did not produce an authenticated model catalog",
-                );
-                return false;
-            }
-            break :blk loaded;
-        },
-        .failed => |failure| {
-            debug_trace.logf("catalog", "provider selection catalog failed provider={s} category={s}", .{ @tagName(target), @tagName(failure.failure.category) });
-            const detail = if (failure.failure.category == .transport)
-                try alloc.print(
-                    "couldn't connect to {s} to load the target model catalog; check your network connection or firewall",
-                    .{model_catalog.serviceName(target)},
-                )
-            else
-                try alloc.print(
-                    "could not load the target model catalog ({s})",
-                    .{@tagName(failure.failure.category)},
-                );
-            defer alloc.free(detail);
-            try writeProviderActivationError(alloc, deps, caller, detail);
-            return false;
-        },
-    };
-    defer model_catalog.freeModelCatalog(alloc, &loaded.catalog);
-    const saved_model = settings.models.get(target);
-    const selected_model = selectCatalogModel(loaded.catalog.items, saved_model) orelse {
-        try writeProviderActivationError(alloc, deps, caller, "target model catalog is empty");
-        return false;
-    };
-    var attempt = config_runtime.attemptUserPreferences(alloc, .{
-        .provider = target,
-        .model_preference = .{ .provider = target, .model = selected_model },
-        .credential_source = exact_source,
-    });
-    defer attempt.deinit(alloc);
-    switch (attempt) {
-        .failure => |failure| {
-            debug_trace.logf("config", "provider selection persistence failed err={s}", .{@errorName(failure.err)});
-            try writeProviderActivationError(alloc, deps, caller, "failed to save provider selection");
-            return false;
-        },
-        .outcome => {},
-    }
-    if (performed_login) |provider| switch (provider) {
-        .gateway, .configured => unreachable,
-    };
-    if (caller == .provider_command) {
-        try writeStdout(deps, switch (target) {
-            .gateway => "Provider set to Gateway.\n",
-            .configured => "Provider set to configured connection.\n",
-        });
-    }
-    return true;
 }
 
 fn runIfRequestedWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Config, deps: RunDeps) !RunResult {
@@ -1352,14 +1105,14 @@ fn runNonInteractiveWithDeps(
             }
             // Preserve the original `lia login` behavior for scripts and users.
             const login_provider = login_args.provider orelse .gateway;
-            runProviderLogin(alloc, cfg, login_provider) catch |err| {
-                try writeProviderLoginFailure(alloc, deps, login_provider, .provider_login, err);
+            provider_activation.runProviderLogin(alloc, activationEnv(cfg), login_provider) catch |err| {
+                try provider_activation.writeProviderLoginFailure(alloc, activationOutput(deps), login_provider, .provider_login, err);
                 return .handled_failure;
             };
-            if (!try activateProviderSelection(
+            if (!try provider_activation.activateProviderSelection(
                 alloc,
-                cfg,
-                deps,
+                activationEnv(cfg),
+                activationOutput(deps),
                 login_provider,
                 .provider_login,
                 if (login_provider == .gateway) .fx_login else null,
@@ -1448,10 +1201,10 @@ fn runNonInteractiveWithDeps(
                 try writeStderr(deps, message);
                 return .handled_failure;
             };
-            if (!try activateProviderSelection(
+            if (!try provider_activation.activateProviderSelection(
                 alloc,
-                cfg,
-                deps,
+                activationEnv(cfg),
+                activationOutput(deps),
                 .gateway,
                 .provider_login,
                 .fx_login,
@@ -1467,7 +1220,7 @@ fn runNonInteractiveWithDeps(
                 try writeStderr(deps, "lia provider: expected gateway or a configured name\n");
                 return usage_failure;
             };
-            const activated = activateProviderSelection(alloc, cfg, deps, target, .provider_command, null) catch |err| switch (err) {
+            const activated = provider_activation.activateProviderSelection(alloc, activationEnv(cfg), activationOutput(deps), target, .provider_command, null) catch |err| switch (err) {
                 error.UnknownConfiguredProvider => return usage_failure,
                 else => return err,
             };
