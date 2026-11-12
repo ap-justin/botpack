@@ -30,6 +30,9 @@ const ServerState = server.ServerState;
 
 const poll_ms: u64 = 100;
 pub const team_required_message = "Signed in to Vercel AI Gateway, but no team is selected. Run lia teams to choose one, then retry.";
+/// How long a failure nobody was told of stays worth reporting when the
+/// sign-in's device code gave no lifetime.
+const kept_failure_default_ms: i64 = 15 * 60 * 1000;
 const cancelled_message = "Sign-in to Vercel AI Gateway was cancelled.";
 
 /// How a sign-in ended, as its `authenticate` is answered.
@@ -41,6 +44,24 @@ const Outcome = union(enum) {
     failed: anyerror,
     cancelled,
 };
+
+/// A sign-in failure no `authenticate` was waiting for, kept for the next one.
+pub const KeptFailure = struct {
+    err: anyerror,
+    /// Wall-clock milliseconds after which it is dropped instead of reported.
+    expires_at_ms: i64,
+
+    fn expired(self: KeptFailure, now_ms: i64) bool {
+        return now_ms >= self.expires_at_ms;
+    }
+};
+
+/// A failure stays for as long as the sign-in's device code lives, from when
+/// it was kept; 15 minutes when no lifetime is known.
+fn keptUntil(now_ms: i64, code_lifetime_s: i64) i64 {
+    const lifetime_ms = if (code_lifetime_s > 0) std.math.mul(i64, code_lifetime_s, 1000) catch std.math.maxInt(i64) else kept_failure_default_ms;
+    return now_ms +| lifetime_ms;
+}
 
 /// The one sign-in a connection runs at a time, owned by `ServerState.sign_in`.
 /// Its worker reads `state.cfg` and writes through `state.writer`, and leaves
@@ -66,7 +87,10 @@ pub const Job = struct {
     signed_in: bool = false,
     /// A failure no request was waiting for, as the next `lia-login` hears
     /// it. Read only after `finished`.
-    unreported: ?anyerror = null,
+    unreported: ?KeptFailure = null,
+    /// Seconds the device code lives, once known. Written and read by the
+    /// worker alone.
+    code_lifetime_s: i64 = 0,
 
     fn alloc(self: *const Job) Allocator {
         return self.state.alloc;
@@ -172,6 +196,7 @@ pub const Job = struct {
     /// the sign-in goes on for the next `authenticate` to wait on.
     fn announce(self: *Job, flow: login_flow.SignInSnapshot) void {
         const url = flow.verification_uri_complete orelse flow.verification_uri;
+        self.code_lifetime_s = flow.expires_in;
         const text = std.mem.concat(self.alloc(), u8, &.{ "Open ", url, "\nCode: ", flow.user_code, "\n" }) catch |err| {
             debug_trace.logf("auth", "acp sign-in announcement skipped err={s}", .{@errorName(err)});
             return;
@@ -219,7 +244,7 @@ pub const Job = struct {
         const waiting = self.waiting;
         self.waiting = null;
         // A stopped sign-in's request was already answered as cancelled.
-        if (waiting == null and outcome == .failed and !self.stop.load(.seq_cst)) self.unreported = outcome.failed;
+        if (waiting == null and outcome == .failed and !self.stop.load(.seq_cst)) self.unreported = .{ .err = outcome.failed, .expires_at_ms = keptUntil(io_mod.milliTimestamp(), self.code_lifetime_s) };
         self.finished.store(true, .seq_cst);
         self.mutex.unlock(io_mod.getIo());
         const id = waiting orelse return;
@@ -277,8 +302,6 @@ pub fn authenticate(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestI
         }),
         .ended => reap(state, true),
     };
-    const unreported = state.sign_in_failure;
-    state.sign_in_failure = null;
     const pending = server.refreshPendingAuth(state) catch |err| switch (err) {
         // A new sign-in replaces a saved one that cannot be read.
         error.CredentialStorageUnavailable => .unavailable,
@@ -292,8 +315,16 @@ pub fn authenticate(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestI
         else => return err,
     };
     // `.deferred`, while a turn runs, confirms the sign-in too.
-    if (pending != .unavailable) return state.writer.writeResponse(alloc, id, "{}");
-    if (unreported) |err| return writeFailure(state, alloc, id, err);
+    // A usable credential makes a kept failure moot.
+    if (pending != .unavailable) {
+        state.sign_in_failure = null;
+        return state.writer.writeResponse(alloc, id, "{}");
+    }
+    // Kept until reported: a refresh error above leaves it for the next one.
+    if (state.sign_in_failure) |kept| {
+        state.sign_in_failure = null;
+        if (!kept.expired(io_mod.milliTimestamp())) return writeFailure(state, alloc, id, kept.err);
+    }
     if (signInBlock()) |block| return state.writer.writeError(alloc, id, .{
         .code = ErrorCode.invalid_request,
         .message = block.reason(),
@@ -330,7 +361,7 @@ pub fn reap(state: *ServerState, wait: bool) void {
     if (!wait and !job.finished.load(.seq_cst)) return;
     job.thread.join();
     const signed_in = job.signed_in;
-    if (job.unreported) |err| state.sign_in_failure = err;
+    if (job.unreported) |kept| state.sign_in_failure = kept;
     if (signed_in) rememberSwitchRoot(state, job.workspace_root);
     job.destroy();
     state.sign_in = null;
@@ -1016,6 +1047,75 @@ test "a sign-in that fails with nobody waiting is reported to the next lia-login
     // Reported once: the next lia-login starts a new sign-in.
     try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), next.value.object.get("error").?.object.get("code").?.integer);
     try std.testing.expectEqual(@as(usize, 2), fake.device_requests.load(.seq_cst));
+}
+
+test "a kept failure survives a credential refresh error and reaches the next lia-login" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, .{ .open_browser = false });
+    defer home.deinit();
+    try home.saveLogin("team_saved", 0);
+    var fake: FakeVercel = .{ .refresh_body = "{\"error\":\"temporarily_unavailable\"}" };
+    var frames: Frames = .{ .alloc = alloc };
+    defer frames.deinit();
+    var state = try signInTestState(alloc, home, &frames, &fake);
+    defer state.deinit();
+    state.sign_in_failure = .{ .err = error.LoginTimedOut, .expires_at_ms = io_mod.milliTimestamp() + 60_000 };
+
+    var trap = try StdStreamTrap.begin(home.tmp.dir);
+    defer trap.end();
+    try authenticateForTest(&state, 7);
+    const refused = try frames.waitFor(7);
+    defer refused.deinit();
+    const kept_after_refresh_error = state.sign_in_failure != null;
+    const sign_ins_after_refresh_error = fake.device_requests.load(.seq_cst);
+    // The saved login is revoked now, so the refresh no longer errors.
+    fake.refresh_body = "{\"error\":\"invalid_grant\"}";
+    try authenticateForTest(&state, 8);
+    const reported = try frames.waitFor(8);
+    defer reported.deinit();
+    trap.end();
+
+    try expectError(refused, ErrorCode.invalid_request, signInFailureMessage(error.CredentialTemporarilyUnavailable));
+    try std.testing.expect(kept_after_refresh_error);
+    try std.testing.expectEqual(@as(usize, 0), sign_ins_after_refresh_error);
+    try expectError(reported, ErrorCode.invalid_request, signInFailureMessage(error.LoginTimedOut));
+    try std.testing.expect(state.sign_in_failure == null);
+    try std.testing.expectEqual(@as(usize, 0), fake.device_requests.load(.seq_cst));
+}
+
+test "an expired kept failure is dropped and the next lia-login starts a new sign-in" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, .{ .open_browser = false });
+    defer home.deinit();
+    var fake: FakeVercel = .{ .approved = .init(false) };
+    var frames: Frames = .{ .alloc = alloc };
+    defer frames.deinit();
+    var state = try signInTestState(alloc, home, &frames, &fake);
+    defer state.deinit();
+    state.sign_in_failure = .{ .err = error.LoginTimedOut, .expires_at_ms = io_mod.milliTimestamp() - 1 };
+
+    var trap = try StdStreamTrap.begin(home.tmp.dir);
+    defer trap.end();
+    try authenticateForTest(&state, 7);
+    const answer = try frames.waitFor(7);
+    defer answer.deinit();
+    trap.end();
+
+    try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), answer.value.object.get("error").?.object.get("code").?.integer);
+    try std.testing.expect(state.sign_in_failure == null);
+    try std.testing.expectEqual(@as(usize, 1), fake.device_requests.load(.seq_cst));
+}
+
+test "a kept failure lasts as long as the device code, or 15 minutes when that is unknown" {
+    try std.testing.expectEqual(@as(i64, 1_000 + 300_000), keptUntil(1_000, 300));
+    try std.testing.expectEqual(@as(i64, 1_000 + 900_000), keptUntil(1_000, 0));
+    try std.testing.expectEqual(@as(i64, 1_000 + 900_000), keptUntil(1_000, -5));
+    try std.testing.expectEqual(@as(i64, std.math.maxInt(i64)), keptUntil(std.math.maxInt(i64) - 1, std.math.maxInt(i64)));
+    const kept: KeptFailure = .{ .err = error.LoginTimedOut, .expires_at_ms = 5_000 };
+    try std.testing.expect(!kept.expired(4_999));
+    try std.testing.expect(kept.expired(5_000));
 }
 
 test "a cancel that lands as the sign-in is saved still selects the team and switches the profile" {

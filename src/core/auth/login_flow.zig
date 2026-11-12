@@ -197,6 +197,8 @@ pub const SignInSnapshot = struct {
     verification_uri: []const u8 = "",
     verification_uri_complete: ?[]const u8 = null,
     user_code: []const u8 = "",
+    /// Seconds the device code lived when it was issued; 0 before it is.
+    expires_in: i64 = 0,
     accepts_manual_code: bool = false,
 };
 
@@ -456,6 +458,7 @@ pub const SignInRuntime = struct {
             .verification_uri = flow.device.verification_uri,
             .verification_uri_complete = flow.device.verification_uri_complete,
             .user_code = flow.device.user_code,
+            .expires_in = flow.device.expires_in,
             .accepts_manual_code = self.deps.submit_manual_code != null,
         };
     }

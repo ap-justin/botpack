@@ -2439,13 +2439,14 @@ describe("acp: model-independent", () => {
   test(
     "ACP lia-login reports a sign-in code that expired with nobody waiting",
     async () => {
-      const fixture = await startSignIn({ held: true, expiresIn: 1 });
+      const fixture = await startSignIn({ held: true, expiresIn: 2 });
       try {
         sendAuthenticate(2);
         await readResponse(client, 2);
-        // Nothing approves the code. Past its one second the worker ends the
-        // sign-in with nobody waiting, and the next authenticate hears why.
-        await Bun.sleep(2_500);
+        // Nothing approves the code. Past its two seconds the worker ends the
+        // sign-in with nobody waiting, and the next authenticate hears why,
+        // within the two seconds the failure is kept.
+        await Bun.sleep(3_000);
         sendAuthenticate(3);
         const expired = await readResponse(client, 3);
         expect(expired.error.code).toBe(-32600);
