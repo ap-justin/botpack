@@ -3857,8 +3857,71 @@ describe("acp: model-independent", () => {
           return typeof body === "string" ? body : JSON.stringify(body);
         };
         expect(bodyText(0)).toContain(modelLine);
-        // The second turn replays the first turn's context: one model line, no update note.
+        // The second turn replays the first turn's context: one model line. The host renders
+        // the context afresh each turn and an update note repeats all of it, model line included,
+        // so a second line means a note. (Zero notes isn't asserted: a date or branch change
+        // between the turns would legitimately add one.)
         expect(bodyText(2).split(modelLine)).toHaveLength(2);
+        expect(client.stderr).toBe("");
+      } finally {
+        await client?.close();
+        client = null;
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    LIVE_TIMEOUT,
+  );
+
+  test(
+    "ACP model switch between turns arrives as one update note with the new model line",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-model-switch-note-");
+      const otherModel = "o4-mini";
+      const gateway = startFakeGateway(
+        [finalText("first"), finalText("second")],
+        {
+          models: [
+            { id: FAKE_GATEWAY_MODEL, type: "language", tags: ["tool-use"] },
+            { id: otherModel, type: "language", tags: ["tool-use"] },
+          ],
+        },
+      );
+      try {
+        client = await AcpClient.create({ cwd: root.workspace, env: { ...fakeGatewayEnv(root, gateway) } });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const created = await client.request("session/new", { cwd: root.workspace, mcpServers: [] }, 2) as any;
+        expect(created.error).toBeUndefined();
+        await client.readLine();
+        const first = await runPrompt(client, "Which model are you?", TIMEOUT);
+        expect(first.promptResult.result.stopReason).toBe("end_turn");
+
+        const switched = await client.request(
+          "session/set_config_option",
+          { sessionId: created.result.sessionId, configId: "model", value: otherModel },
+          3,
+        ) as any;
+        expect(switched.error).toBeUndefined();
+        const second = await runPrompt(client, "And now?", TIMEOUT);
+        expect(second.promptResult.result.stopReason).toBe("end_turn");
+
+        // The request body is JSON text, where the context's newlines are escaped.
+        const oldLine = `\\nmodel: ${FAKE_GATEWAY_MODEL}\\n`;
+        const newLine = `\\nmodel: ${otherModel}\\n`;
+        // The default prompt also names the tag in prose, so match the note's own opening.
+        const noteOpen = "<lia-context-update>\\nThe runtime context changed";
+        const firstBody = gateway.requests[0]!.body;
+        const secondBody = gateway.requests[1]!.body;
+        expect(firstBody).toContain(oldLine);
+        expect(firstBody).not.toContain(newLine);
+        expect(gateway.requests[1]!.headers.get("ai-language-model-id")).toBe(otherModel);
+
+        // The replayed first context keeps the old line; the note carries the new one.
+        expect(secondBody.split(oldLine)).toHaveLength(2);
+        expect(secondBody.split(newLine)).toHaveLength(2);
+        expect(secondBody.split(noteOpen)).toHaveLength(2);
+        expect(secondBody.indexOf(oldLine)).toBeLessThan(secondBody.indexOf(noteOpen));
+        expect(secondBody.indexOf(newLine)).toBeGreaterThan(secondBody.indexOf(noteOpen));
         expect(client.stderr).toBe("");
       } finally {
         await client?.close();
