@@ -1581,6 +1581,7 @@ describe("acp: model-independent", () => {
   } = {}) => {
     const requests: string[] = [];
     let deviceIssuedAt = 0;
+    let answeredPolls = 0;
     let release = () => {};
     const gate = options.holdPolls ? new Promise<void>(resolve => { release = resolve; }) : undefined;
     let approved = !options.held;
@@ -1615,6 +1616,7 @@ describe("acp: model-independent", () => {
         }
         if (url.pathname === "/oauth/token") {
           await gate;
+          answeredPolls++;
           if (tokenError) return Response.json({ error: tokenError }, { status: 400 });
           if (!approved) return Response.json({ error: "authorization_pending" }, { status: 400 });
           return Response.json({
@@ -1640,6 +1642,10 @@ describe("acp: model-independent", () => {
       // When the device code went out, in ms since the epoch.
       get deviceIssuedAt() {
         return deviceIssuedAt;
+      },
+      // Polls whose answer is on its way back to lia, after any hold.
+      get answeredPolls() {
+        return answeredPolls;
       },
       approve() {
         approved = true;
@@ -2319,15 +2325,18 @@ describe("acp: model-independent", () => {
         expectSignInCode(await readResponse(client, 2), fixture.issuer.issuerUrl);
         sendAuthenticate(3);
         await waitForCondition("the first poll reached the issuer", () => polls() > 0, TIMEOUT);
-        // The poll is answered with a failure as the cancel lands, before the
-        // worker's next look at it: the worker then ends the stopped sign-in
-        // with a failure and nobody waiting.
         client.send({ jsonrpc: "2.0", method: "$/cancel_request", params: { requestId: 3 } });
-        fixture.issuer.reject("access_denied");
+        // The poll stays parked until lia has received the cancel and answered
+        // it, so the worker meets the failure with its sign-in already stopped
+        // and nobody waiting.
         expect((await readResponse(client, 3)).error.code).toBe(-32800);
         expect(answerFrames(3)).toHaveLength(1);
+        fixture.issuer.reject("access_denied");
+        await waitForCondition("the parked poll was answered", () => fixture.issuer.answeredPolls > 0, TIMEOUT);
 
         // A kept denial would be the answer here, with no second device code.
+        // The next authenticate joins the stopped worker before it looks for a
+        // kept failure, so it cannot run ahead of the worker's end.
         sendAuthenticate(4);
         expectSignInCode(await readResponse(client, 4), fixture.issuer.issuerUrl);
         expect(fixture.issuer.deviceRequests).toBe(2);
