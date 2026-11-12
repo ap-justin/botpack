@@ -3216,6 +3216,7 @@ test "a libfx/new that fails leaves the running turn, the connection's model and
     msg = .{ .id = .{ .integer = 3 }, .method = "libfx/new", .params_raw = "{}" };
     try handleNewLibfxSession(&state, alloc, &msg);
     try std.testing.expect(state.active_prompt == null);
+    try std.testing.expect(!turn.gave_up);
     try std.testing.expectEqualStrings("test/model", turn.seenModel());
     try std.testing.expectEqualStrings("openai/z-libfx-folder", state.selected_model);
     try std.testing.expect(state.sign_in_root == null);
@@ -3223,7 +3224,9 @@ test "a libfx/new that fails leaves the running turn, the connection's model and
 
 /// A turn that reads its session as a prompt's thread does: the model and
 /// id it borrowed at the start, and `state.active_session` re-read unlocked
-/// until that session is cancelled.
+/// until that session is cancelled. It gives up after `give_up_ms`, so a
+/// handler that frees the session without cancelling it fails the test
+/// rather than leaving the reap joining this thread forever.
 const SessionReadingTurn = struct {
     state: *const server.ServerState,
     session_id: []const u8,
@@ -3231,6 +3234,9 @@ const SessionReadingTurn = struct {
     seen_model: [64]u8 = undefined,
     seen_model_len: usize = 0,
     ended_in_own_session: bool = false,
+    gave_up: bool = false,
+
+    const give_up_ms = 10 * std.time.ms_per_s;
 
     fn init(state: *const server.ServerState) SessionReadingTurn {
         const session = &state.active_session.?;
@@ -3238,13 +3244,19 @@ const SessionReadingTurn = struct {
     }
 
     fn run(self: *SessionReadingTurn) void {
+        const deadline = io_mod.awakeMilliTimestamp() + give_up_ms;
         while (true) {
             if (self.state.active_session) |*session| if (session.cancel_flag.load(.seq_cst)) break;
+            if (io_mod.awakeMilliTimestamp() >= deadline) {
+                self.gave_up = true;
+                break;
+            }
             io_mod.sleep(std.time.ns_per_ms);
         }
         self.seen_model_len = @min(self.model.len, self.seen_model.len);
         @memcpy(self.seen_model[0..self.seen_model_len], self.model[0..self.seen_model_len]);
-        const session = &self.state.active_session.?;
+        // Null when the session was released without its turn being ended.
+        const session = if (self.state.active_session) |*active| active else return;
         self.ended_in_own_session = std.mem.eql(u8, session.session_id, self.session_id);
     }
 
@@ -3293,6 +3305,7 @@ test "libfx/new ends the running turn before it frees the turn's session, then t
     const turn_ended = state.active_prompt == null;
     server.cancelAndReapActivePrompt(&state);
 
+    try std.testing.expect(!turn.gave_up);
     try std.testing.expectEqualStrings("test/model", turn.seenModel());
     try std.testing.expect(turn.ended_in_own_session);
     try std.testing.expect(turn_ended);
