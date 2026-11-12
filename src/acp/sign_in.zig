@@ -414,7 +414,7 @@ pub fn selectModelForSession(state: *ServerState, workspace_root: []const u8) vo
         state.alloc.free(selected);
         return;
     };
-    // A running turn reads these.
+    // The turn ends first: a running turn reads these.
     server.cancelAndReapActivePrompt(state);
     if (state.selected_model.len > 0) state.alloc.free(state.selected_model);
     if (state.configured_model.len > 0) state.alloc.free(state.configured_model);

@@ -399,7 +399,7 @@ pub const ServerState = struct {
     sign_in: ?*acp_sign_in.Job = null,
     /// How a sign-in failed after its code was handed out, with no
     /// `authenticate` waiting; the next `lia-login` answers with it, unless
-    /// it is older than `expires_at_ms`.
+    /// `expires_at_ms` has passed.
     sign_in_failure: ?acp_sign_in.KeptFailure = null,
     /// The folder whose settings the last sign-in's profile switch read,
     /// owned, until the next `session/new` has chosen its model from the
