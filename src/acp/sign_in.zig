@@ -48,6 +48,9 @@ pub const Job = struct {
     /// The auth methods its `AUTH_REQUIRED` answers list, as the request
     /// loop saw them when the sign-in started.
     offer: acp_types.AuthOffer,
+    /// Whose settings the profile switch reads, owned: the active session's
+    /// workspace, else the connection's.
+    workspace_root: []u8,
     thread: std.Thread = undefined,
     mutex: std.Io.Mutex = .init,
     /// The `authenticate` request this sign-in answers, owned; null once it
@@ -55,12 +58,22 @@ pub const Job = struct {
     waiting: ?jsonrpc.RequestId,
     /// Set under `mutex` once the outcome is known, before it is written.
     finished: std.atomic.Value(bool) = .init(false),
+    /// Set when the client cancels the waiting request or goes away.
     stop: std.atomic.Value(bool) = .init(false),
     /// Read only after `finished`.
     signed_in: bool = false,
+    /// A failure no request was waiting for, as the next `lia-login` hears
+    /// it. Read only after `finished`.
+    unreported: ?anyerror = null,
 
     fn alloc(self: *const Job) Allocator {
         return self.state.alloc;
+    }
+
+    fn destroy(self: *Job) void {
+        const owner = self.alloc();
+        owner.free(self.workspace_root);
+        owner.destroy(self);
     }
 
     fn run(self: *Job) void {
@@ -94,11 +107,11 @@ pub const Job = struct {
         const started = runtime.start(self.alloc(), self.state.cfg.gateway_provider.oauth_transport) catch |err| return .{ .failed = err };
         if (!started) return .{ .failed = error.SignInAlreadyRunning };
         while (true) {
-            if (self.stop.load(.seq_cst)) {
-                _ = runtime.cancel(self.alloc());
-                return .cancelled;
-            }
-            if (runtime.takeBrowserPending()) self.announce(runtime.snapshot());
+            if (runtime.takeBrowserPending() and !self.stop.load(.seq_cst)) self.announce(runtime.snapshot());
+            // A stop that loses to the approval finds the sign-in already
+            // saved; it is finished below like any other, so the saved login
+            // gets its team and the profile.
+            if (self.stop.load(.seq_cst) and runtime.cancel(self.alloc())) return .cancelled;
             switch (runtime.pollTransition(self.alloc())) {
                 .none => io_mod.sleep(poll_ms * std.time.ns_per_ms),
                 .succeeded => |completion| {
@@ -137,6 +150,7 @@ pub const Job = struct {
     fn switchProfile(self: *Job) void {
         const cfg = &self.state.cfg;
         const switched = provider_activation.activateProviderSelection(self.alloc(), .{
+            .workspace_root = self.workspace_root,
             .auth_mode = cfg.auth_mode,
             .default_model = cfg.default_model,
             .models_path = cfg.gateway_models_path,
@@ -200,9 +214,11 @@ pub const Job = struct {
     fn finish(self: *Job, outcome: Outcome) void {
         self.mutex.lockUncancelable(io_mod.getIo());
         self.signed_in = outcome == .signed_in;
-        self.finished.store(true, .seq_cst);
         const waiting = self.waiting;
         self.waiting = null;
+        // A stopped sign-in's request was already answered as cancelled.
+        if (waiting == null and outcome == .failed and !self.stop.load(.seq_cst)) self.unreported = outcome.failed;
+        self.finished.store(true, .seq_cst);
         self.mutex.unlock(io_mod.getIo());
         const id = waiting orelse return;
         defer freeRequestId(self.alloc(), id);
@@ -215,27 +231,19 @@ pub const Job = struct {
         switch (outcome) {
             .signed_in => try self.state.writer.writeResponse(self.alloc(), id, "{}"),
             .team_required => try self.writeAuthRequired(id, team_required_message),
-            .failed => |err| {
-                debug_trace.logf("auth", "acp sign-in failed err={s}", .{@errorName(err)});
-                try self.state.writer.writeError(self.alloc(), id, .{
-                    .code = ErrorCode.invalid_request,
-                    .message = signInFailureMessage(err),
-                });
-            },
-            .cancelled => try self.state.writer.writeError(self.alloc(), id, .{
-                .code = ErrorCode.request_cancelled,
-                .message = cancelled_message,
-            }),
+            .failed => |err| try writeFailure(self.state, self.alloc(), id, err),
+            .cancelled => try writeCancelled(self.state, self.alloc(), id),
         }
     }
 
-    const Join = enum { waiting, busy, finished };
+    const Join = enum { waiting, busy, ended };
 
     /// Makes `id` the request this sign-in answers, unless one already is.
+    /// `.ended` once the sign-in has its outcome or is stopping.
     fn join(self: *Job, id: ?jsonrpc.RequestId) Allocator.Error!Join {
         self.mutex.lockUncancelable(io_mod.getIo());
         defer self.mutex.unlock(io_mod.getIo());
-        if (self.finished.load(.seq_cst)) return .finished;
+        if (self.finished.load(.seq_cst) or self.stop.load(.seq_cst)) return .ended;
         if (self.waiting != null) return .busy;
         self.waiting = try dupeRequestId(self.alloc(), id);
         return .waiting;
@@ -254,7 +262,9 @@ fn writeStderr(_: ?*anyopaque, text: []const u8) anyerror!void {
 
 /// Answers `authenticate` with `lia-login` on a Gateway connection: `{}` once
 /// a credential is usable, otherwise after the saved `lia login` is adopted
-/// or a new browser sign-in resolves. Joins a sign-in already running.
+/// or a new browser sign-in resolves. Joins a sign-in already running; after
+/// a cancelled one has stopped, starts a new one. A failure nobody was
+/// waiting for is the answer once, unless a credential is usable by now.
 pub fn authenticate(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId) !void {
     reap(state, false);
     if (state.sign_in) |job| switch (try job.join(id)) {
@@ -263,8 +273,10 @@ pub fn authenticate(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestI
             .code = ErrorCode.invalid_request,
             .message = signInFailureMessage(error.SignInAlreadyRunning),
         }),
-        .finished => reap(state, true),
+        .ended => reap(state, true),
     };
+    const unreported = state.sign_in_failure;
+    state.sign_in_failure = null;
     const pending = server.refreshPendingAuth(state) catch |err| switch (err) {
         // A new sign-in replaces a saved one that cannot be read.
         error.CredentialStorageUnavailable => .unavailable,
@@ -279,6 +291,7 @@ pub fn authenticate(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestI
     };
     // `.deferred`, while a turn runs, confirms the sign-in too.
     if (pending != .unavailable) return state.writer.writeResponse(alloc, id, "{}");
+    if (unreported) |err| return writeFailure(state, alloc, id, err);
     if (signInBlock()) |block| return state.writer.writeError(alloc, id, .{
         .code = ErrorCode.invalid_request,
         .message = block.reason(),
@@ -289,14 +302,21 @@ pub fn authenticate(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestI
 fn start(state: *ServerState, id: ?jsonrpc.RequestId) !void {
     const job = try state.alloc.create(Job);
     errdefer state.alloc.destroy(job);
+    // The settings `lia login` would read run in this workspace; an editor
+    // rarely launches lia there.
+    const workspace_root = if (state.active_session) |*session| session.workspace_root else state.workspace_root;
+    const owned_root = try state.alloc.dupe(u8, workspace_root);
+    errdefer state.alloc.free(owned_root);
     job.* = .{
         .state = state,
         .offer = server.authOffer(state),
+        .workspace_root = owned_root,
         .waiting = try dupeRequestId(state.alloc, id),
     };
     errdefer if (job.waiting) |owned| freeRequestId(state.alloc, owned);
-    job.thread = try std.Thread.spawn(.{}, Job.run, .{job});
     state.sign_in = job;
+    errdefer state.sign_in = null;
+    job.thread = try std.Thread.spawn(.{}, Job.run, .{job});
 }
 
 /// Releases a finished sign-in, or with `wait`, waits for it to finish. A
@@ -308,7 +328,8 @@ pub fn reap(state: *ServerState, wait: bool) void {
     if (!wait and !job.finished.load(.seq_cst)) return;
     job.thread.join();
     const signed_in = job.signed_in;
-    state.alloc.destroy(job);
+    if (job.unreported) |err| state.sign_in_failure = err;
+    job.destroy();
     state.sign_in = null;
     if (!signed_in) return;
     state.gateway_source_preference = .fx_login;
@@ -317,28 +338,53 @@ pub fn reap(state: *ServerState, wait: bool) void {
     };
 }
 
-/// Stops the sign-in that would answer `requested`. Its `authenticate` is
-/// answered as cancelled. False when no sign-in answers that request.
+/// Stops the sign-in that would answer `requested` and answers that request
+/// as cancelled at once. False when no sign-in answers that request.
 pub fn cancelRequest(state: *ServerState, requested: jsonrpc.RequestId) bool {
     if (comptime host_target.is_wasm) return false;
     const job = state.sign_in orelse return false;
     job.mutex.lockUncancelable(io_mod.getIo());
-    const matches = if (job.waiting) |id| server.requestIdsEqual(id, requested) else false;
+    const waiting = job.waiting;
+    const matches = if (waiting) |id| server.requestIdsEqual(id, requested) else false;
+    if (matches) {
+        job.waiting = null;
+        job.stop.store(true, .seq_cst);
+    }
     job.mutex.unlock(io_mod.getIo());
-    if (matches) job.stop.store(true, .seq_cst);
-    return matches;
+    if (!matches) return false;
+    const id = waiting.?;
+    defer freeRequestId(state.alloc, id);
+    writeCancelled(state, state.alloc, id) catch |err| {
+        debug_trace.logf("auth", "acp sign-in cancel answer failed err={s}", .{@errorName(err)});
+    };
+    return true;
 }
 
 /// Stops the connection's sign-in when the client goes away, and waits for
-/// its worker. A sign-in still polling answers its `authenticate` as
-/// cancelled, while the channel still takes it.
+/// its worker. A waiting `authenticate` is answered as cancelled, or `{}`
+/// when the approval was already saved, while the channel still takes it.
 pub fn stop(state: *ServerState) void {
     if (comptime host_target.is_wasm) return;
     const job = state.sign_in orelse return;
     job.stop.store(true, .seq_cst);
     job.thread.join();
-    state.alloc.destroy(job);
+    job.destroy();
     state.sign_in = null;
+}
+
+fn writeFailure(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId, err: anyerror) !void {
+    debug_trace.logf("auth", "acp sign-in failed err={s}", .{@errorName(err)});
+    try state.writer.writeError(alloc, id, .{
+        .code = ErrorCode.invalid_request,
+        .message = signInFailureMessage(err),
+    });
+}
+
+fn writeCancelled(state: *ServerState, alloc: Allocator, id: jsonrpc.RequestId) !void {
+    try state.writer.writeError(alloc, id, .{
+        .code = ErrorCode.request_cancelled,
+        .message = cancelled_message,
+    });
 }
 
 /// Why this machine cannot save a `lia login` sign-in, or null when it can.
@@ -403,6 +449,9 @@ const FakeVercel = struct {
     token_polls: std.atomic.Value(usize) = .init(0),
     refresh_requests: std.atomic.Value(usize) = .init(0),
     opened: std.atomic.Value(bool) = .init(false),
+    /// Opening the page waits until the sign-in is saved, then cancels the
+    /// request that waits on it: the cancel lands just after the approval.
+    cancel_once_saved: ?struct { state: *ServerState, home: *SignInTestHome, request: i64 } = null,
 
     const issuer = "https://vercel.com";
     const verification_url = issuer ++ "/oauth/device?code=USER-CODE";
@@ -452,19 +501,36 @@ const FakeVercel = struct {
         const self: *FakeVercel = @ptrCast(@alignCast(raw.?));
         if (!std.mem.eql(u8, url, verification_url)) return false;
         self.opened.store(true, .seq_cst);
+        if (self.cancel_once_saved) |target| {
+            target.home.waitForFile(".lia/auth.json") catch return false;
+            _ = cancelRequest(target.state, .{ .integer = target.request });
+        }
         return true;
     }
 };
 
 /// A Gateway catalog with one model, so switching the profile can pick it.
 fn fetchOneModel(_: ?*anyopaque, alloc: Allocator, _: model_catalog.FetchInput) Allocator.Error!model_catalog.ProviderResult {
+    return catalogOf(alloc, &.{"openai/gpt-5.5"});
+}
+
+/// A Gateway catalog whose first model is not the one a workspace picks.
+fn fetchTwoModels(_: ?*anyopaque, alloc: Allocator, _: model_catalog.FetchInput) Allocator.Error!model_catalog.ProviderResult {
+    return catalogOf(alloc, &.{ "openai/gpt-5.5", workspace_model });
+}
+
+const workspace_model = "anthropic/claude-sonnet-4.6";
+
+fn catalogOf(alloc: Allocator, ids: []const []const u8) Allocator.Error!model_catalog.ProviderResult {
     var entries: std.ArrayList(model_catalog.ModelCatalogEntry) = .empty;
     errdefer model_catalog.freeModelCatalog(alloc, &entries);
-    const id = try alloc.dupe(u8, "openai/gpt-5.5");
-    errdefer alloc.free(id);
-    const model_type = try alloc.dupe(u8, "language");
-    errdefer alloc.free(model_type);
-    try entries.append(alloc, .{ .id = id, .model_type = model_type });
+    for (ids) |model_id| {
+        const id = try alloc.dupe(u8, model_id);
+        errdefer alloc.free(id);
+        const model_type = try alloc.dupe(u8, "language");
+        errdefer alloc.free(model_type);
+        try entries.append(alloc, .{ .id = id, .model_type = model_type });
+    }
     return .{ .catalog = entries };
 }
 
@@ -612,6 +678,16 @@ const SignInTestHome = struct {
         return io_mod.readFileToEnd(self.alloc, &file, 64 * 1024);
     }
 
+    /// Waits up to 10 s for the file at `name` under HOME to exist.
+    fn waitForFile(self: *SignInTestHome, name: []const u8) !void {
+        const deadline = io_mod.awakeMilliTimestamp() + 10_000;
+        while (true) {
+            if (self.tmp.dir.statFile(io_mod.getIo(), name, .{})) |_| return else |_| {}
+            if (io_mod.awakeMilliTimestamp() >= deadline) return error.TestFileMissing;
+            io_mod.sleep(10 * std.time.ns_per_ms);
+        }
+    }
+
     fn writePrivate(self: *SignInTestHome, name: []const u8, data: []const u8, mode: u32) !void {
         try self.tmp.dir.createDirPath(io_mod.getIo(), ".lia");
         try self.tmp.dir.writeFile(io_mod.getIo(), .{ .sub_path = name, .data = data, .flags = .{ .permissions = .fromMode(mode) } });
@@ -632,10 +708,10 @@ const SignInTestHome = struct {
     }
 };
 
-/// A Gateway connection, initialized and awaiting sign-in, whose sign-in
-/// requests reach `fake`. Free it with `deinit`, which is also how the
-/// connection ends when the client goes away.
-fn signInTestState(alloc: Allocator, frames: *Frames, fake: *FakeVercel) ServerState {
+/// A Gateway connection, initialized in `home` and awaiting sign-in, whose
+/// sign-in requests reach `fake`. Free it with `deinit`, which is also how
+/// the connection ends when the client goes away.
+fn signInTestState(alloc: Allocator, home: *SignInTestHome, frames: *Frames, fake: *FakeVercel) !ServerState {
     var cfg = sessions.acpSessionTestConfig();
     cfg.gateway_provider.oauth_transport = fake.transport();
     cfg.url_opener = fake.opener();
@@ -645,6 +721,7 @@ fn signInTestState(alloc: Allocator, frames: *Frames, fake: *FakeVercel) ServerS
         .cfg = cfg,
         .writer = jsonrpc.Writer.initCallback(frames, Frames.write),
         .initialized = true,
+        .workspace_root = try alloc.dupe(u8, home.home),
         .provider = .gateway,
         .auth_pending = true,
     };
@@ -686,7 +763,7 @@ test "lia-login signs in, saves the login, switches the profile to it and adopts
     var fake: FakeVercel = .{};
     var frames: Frames = .{ .alloc = alloc };
     defer frames.deinit();
-    var state = signInTestState(alloc, &frames, &fake);
+    var state = try signInTestState(alloc, home, &frames, &fake);
     defer state.deinit();
     state.gateway_source_preference = .stored_key;
 
@@ -730,7 +807,7 @@ test "a retry after the sign-in was saved answers {} and switches the profile wi
     var frames: Frames = .{ .alloc = alloc };
     defer frames.deinit();
     {
-        var first = signInTestState(alloc, &frames, &fake);
+        var first = try signInTestState(alloc, home, &frames, &fake);
         defer first.deinit();
         var trap = try StdStreamTrap.begin(home.tmp.dir);
         defer trap.end();
@@ -740,7 +817,7 @@ test "a retry after the sign-in was saved answers {} and switches the profile wi
     }
     // The profile still names a stored key, as when switching it failed.
     try home.writePrivate(".lia/settings.json", "{\"credential_source\":\"stored_key\"}", 0o600);
-    var state = signInTestState(alloc, &frames, &fake);
+    var state = try signInTestState(alloc, home, &frames, &fake);
     defer state.deinit();
     state.gateway_source_preference = .stored_key;
 
@@ -767,7 +844,7 @@ test "lia-login with a valid saved login answers {} without signing in" {
     var fake: FakeVercel = .{};
     var frames: Frames = .{ .alloc = alloc };
     defer frames.deinit();
-    var state = signInTestState(alloc, &frames, &fake);
+    var state = try signInTestState(alloc, home, &frames, &fake);
     defer state.deinit();
 
     try authenticateForTest(&state, 7);
@@ -789,7 +866,7 @@ test "requests are answered while a sign-in waits, and $/cancel_request ends it 
     var fake: FakeVercel = .{ .approved = .init(false) };
     var frames: Frames = .{ .alloc = alloc };
     defer frames.deinit();
-    var state = signInTestState(alloc, &frames, &fake);
+    var state = try signInTestState(alloc, home, &frames, &fake);
     defer state.deinit();
 
     var trap = try StdStreamTrap.begin(home.tmp.dir);
@@ -818,6 +895,156 @@ test "requests are answered while a sign-in waits, and $/cancel_request ends it 
     try std.testing.expectError(error.FileNotFound, home.tmp.dir.statFile(io_mod.getIo(), ".lia/auth.json", .{}));
 }
 
+test "an authenticate right after a cancel starts a fresh sign-in instead of answering that one is waiting" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, .{});
+    defer home.deinit();
+    var fake: FakeVercel = .{ .approved = .init(false) };
+    var frames: Frames = .{ .alloc = alloc };
+    defer frames.deinit();
+    var state = try signInTestState(alloc, home, &frames, &fake);
+    defer state.deinit();
+
+    var trap = try StdStreamTrap.begin(home.tmp.dir);
+    defer trap.end();
+    try authenticateForTest(&state, 7);
+    try waitForCount(&fake.token_polls, 1);
+    var cancel = jsonrpc.Message{ .method = "$/cancel_request", .params_raw = "{\"requestId\":7}" };
+    try server.dispatchNotification(&state, alloc, &cancel);
+    try authenticateForTest(&state, 8);
+    var early = try frames.answer(8);
+    defer if (early) |*parsed| parsed.deinit();
+    try waitForCount(&fake.device_requests, 2);
+    fake.approved.store(true, .seq_cst);
+    const cancelled = try frames.waitFor(7);
+    defer cancelled.deinit();
+    const signed_in = try frames.waitFor(8);
+    defer signed_in.deinit();
+    trap.end();
+
+    if (early) |answer| {
+        std.debug.print("answered before the new sign-in resolved: {f}\n", .{std.json.fmt(answer.value, .{})});
+        return error.TestAnsweredEarly;
+    }
+    try expectError(cancelled, ErrorCode.request_cancelled, cancelled_message);
+    try expectSignedIn(signed_in);
+}
+
+test "a sign-in that fails with nobody waiting is reported to the next lia-login, then cleared" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, .{ .open_browser = false });
+    defer home.deinit();
+    var fake: FakeVercel = .{ .approved = .init(false), .device_expires_in = 1 };
+    var frames: Frames = .{ .alloc = alloc };
+    defer frames.deinit();
+    var state = try signInTestState(alloc, home, &frames, &fake);
+    defer state.deinit();
+
+    var trap = try StdStreamTrap.begin(home.tmp.dir);
+    defer trap.end();
+    try authenticateForTest(&state, 7);
+    const code_answer = try frames.waitFor(7);
+    defer code_answer.deinit();
+    try waitForSignInEnd(&state);
+    try authenticateForTest(&state, 8);
+    const expired = try frames.waitFor(8);
+    defer expired.deinit();
+    const device_requests_after_report = fake.device_requests.load(.seq_cst);
+    try authenticateForTest(&state, 9);
+    const next = try frames.waitFor(9);
+    defer next.deinit();
+    trap.end();
+
+    try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), code_answer.value.object.get("error").?.object.get("code").?.integer);
+    try expectError(expired, ErrorCode.invalid_request, signInFailureMessage(error.LoginTimedOut));
+    try std.testing.expectEqual(@as(usize, 1), device_requests_after_report);
+    // Reported once: the next lia-login starts a new sign-in.
+    try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), next.value.object.get("error").?.object.get("code").?.integer);
+    try std.testing.expectEqual(@as(usize, 2), fake.device_requests.load(.seq_cst));
+}
+
+test "a cancel that lands as the sign-in is saved still selects the team and switches the profile" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, .{});
+    defer home.deinit();
+    var fake: FakeVercel = .{};
+    var frames: Frames = .{ .alloc = alloc };
+    defer frames.deinit();
+    var state = try signInTestState(alloc, home, &frames, &fake);
+    defer state.deinit();
+    fake.cancel_once_saved = .{ .state = &state, .home = home, .request = 7 };
+
+    var trap = try StdStreamTrap.begin(home.tmp.dir);
+    defer trap.end();
+    try authenticateForTest(&state, 7);
+    const cancelled = try frames.waitFor(7);
+    defer cancelled.deinit();
+    try authenticateForTest(&state, 8);
+    const retry = try frames.waitFor(8);
+    defer retry.deinit();
+    trap.end();
+
+    try expectError(cancelled, ErrorCode.request_cancelled, cancelled_message);
+    try expectSignedIn(retry);
+    try std.testing.expectEqual(@as(usize, 1), fake.device_requests.load(.seq_cst));
+    try std.testing.expectEqualStrings("team_solo", state.gateway_team orelse "");
+    const saved = try home.read(".lia/auth.json");
+    defer secret.zeroAndFree(alloc, saved);
+    try std.testing.expect(std.mem.find(u8, saved, "team_solo") != null);
+    const settings = try home.read(".lia/settings.json");
+    defer alloc.free(settings);
+    try std.testing.expect(std.mem.find(u8, settings, "\"credential_source\":\"fx_login\"") != null);
+}
+
+test "the profile switch reads the connection's workspace settings, not the folder lia was launched in" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, .{});
+    defer home.deinit();
+    try home.tmp.dir.createDirPath(io_mod.getIo(), "project");
+    const project = try io_mod.dirRealpathAlloc(alloc, home.tmp.dir, "project");
+    defer alloc.free(project);
+    const profile = try alloc.print("{{\"workspaces\":{{\"{s}\":{{\"model\":\"{s}\"}}}}}}", .{ project, workspace_model });
+    defer alloc.free(profile);
+    try home.writePrivate(".lia/settings.json", profile, 0o600);
+    var fake: FakeVercel = .{};
+    var frames: Frames = .{ .alloc = alloc };
+    defer frames.deinit();
+    var state = try signInTestState(alloc, home, &frames, &fake);
+    defer state.deinit();
+    state.cfg.provider_set = provider_set.gateway_only(.{ .model_catalog = .{ .context = null, .fetch_fn = fetchTwoModels } });
+    alloc.free(state.workspace_root);
+    state.workspace_root = try alloc.dupe(u8, project);
+
+    var trap = try StdStreamTrap.begin(home.tmp.dir);
+    defer trap.end();
+    try authenticateForTest(&state, 7);
+    const answer = try frames.waitFor(7);
+    defer answer.deinit();
+    trap.end();
+
+    try expectSignedIn(answer);
+    const settings = try home.read(".lia/settings.json");
+    defer alloc.free(settings);
+    std.testing.expect(std.mem.find(u8, settings, "\"models\":{\"gateway\":\"" ++ workspace_model ++ "\"}") != null) catch |err| {
+        std.debug.print("settings.json: {s}\n", .{settings});
+        return err;
+    };
+}
+
+/// Waits up to 10 s for the connection's sign-in to reach its outcome.
+fn waitForSignInEnd(state: *ServerState) !void {
+    const job = state.sign_in orelse return;
+    const deadline = io_mod.awakeMilliTimestamp() + 10_000;
+    while (!job.finished.load(.seq_cst)) {
+        if (io_mod.awakeMilliTimestamp() >= deadline) return error.TestSignInStillRunning;
+        io_mod.sleep(10 * std.time.ns_per_ms);
+    }
+}
+
 test "a client that goes away stops the sign-in and its authenticate is answered as cancelled" {
     if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
@@ -826,7 +1053,7 @@ test "a client that goes away stops the sign-in and its authenticate is answered
     var fake: FakeVercel = .{ .approved = .init(false) };
     var frames: Frames = .{ .alloc = alloc };
     defer frames.deinit();
-    var state = signInTestState(alloc, &frames, &fake);
+    var state = try signInTestState(alloc, home, &frames, &fake);
 
     var trap = try StdStreamTrap.begin(home.tmp.dir);
     defer trap.end();
@@ -855,7 +1082,7 @@ test "without a browser, authenticate answers with the sign-in URL and code and 
     var fake: FakeVercel = .{ .approved = .init(false) };
     var frames: Frames = .{ .alloc = alloc };
     defer frames.deinit();
-    var state = signInTestState(alloc, &frames, &fake);
+    var state = try signInTestState(alloc, home, &frames, &fake);
     defer state.deinit();
 
     var trap = try StdStreamTrap.begin(home.tmp.dir);
@@ -901,7 +1128,7 @@ test "a sign-in with several teams is saved but asks for lia teams, and a retry 
         "{\"id\":\"team_b\",\"slug\":\"b\",\"name\":\"B\"}]}" };
     var frames: Frames = .{ .alloc = alloc };
     defer frames.deinit();
-    var state = signInTestState(alloc, &frames, &fake);
+    var state = try signInTestState(alloc, home, &frames, &fake);
     defer state.deinit();
 
     var trap = try StdStreamTrap.begin(home.tmp.dir);
@@ -932,7 +1159,7 @@ test "a saved login whose refresh token is revoked is replaced by a new sign-in"
     var fake: FakeVercel = .{};
     var frames: Frames = .{ .alloc = alloc };
     defer frames.deinit();
-    var state = signInTestState(alloc, &frames, &fake);
+    var state = try signInTestState(alloc, home, &frames, &fake);
     defer state.deinit();
 
     var trap = try StdStreamTrap.begin(home.tmp.dir);
@@ -958,7 +1185,7 @@ test "a saved login that cannot be read is replaced by a new sign-in" {
     var fake: FakeVercel = .{};
     var frames: Frames = .{ .alloc = alloc };
     defer frames.deinit();
-    var state = signInTestState(alloc, &frames, &fake);
+    var state = try signInTestState(alloc, home, &frames, &fake);
     defer state.deinit();
 
     var trap = try StdStreamTrap.begin(home.tmp.dir);
@@ -991,7 +1218,7 @@ test "a failed sign-in answers with what failed" {
         var fake = case.fake;
         var frames: Frames = .{ .alloc = alloc };
         defer frames.deinit();
-        var state = signInTestState(alloc, &frames, &fake);
+        var state = try signInTestState(alloc, home, &frames, &fake);
         defer state.deinit();
 
         var trap = try StdStreamTrap.begin(home.tmp.dir);
@@ -1039,7 +1266,7 @@ test "storage that cannot save a sign-in is named in the offer and the authentic
         var fake: FakeVercel = .{};
         var frames: Frames = .{ .alloc = alloc };
         defer frames.deinit();
-        var state = signInTestState(alloc, &frames, &fake);
+        var state = try signInTestState(alloc, home, &frames, &fake);
         defer state.deinit();
 
         try authenticateForTest(&state, 7);

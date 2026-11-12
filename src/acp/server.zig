@@ -397,6 +397,9 @@ pub const ServerState = struct {
     active_prompt: ?*ActivePrompt = null,
     /// The `lia-login` browser sign-in this connection is running.
     sign_in: ?*acp_sign_in.Job = null,
+    /// How a sign-in failed after its code was handed out, with no
+    /// `authenticate` waiting; the next `lia-login` answers with it.
+    sign_in_failure: ?anyerror = null,
     subagent_authority_mutex: std.Io.Mutex = .init,
     skills: skill_runtime.Runtime = .{},
     context_snapshot: context_contract.GatheredContextSnapshot = .{},

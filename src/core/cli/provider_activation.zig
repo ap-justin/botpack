@@ -42,6 +42,8 @@ pub const Output = struct {
 
 /// The process configuration activation reads.
 pub const Env = struct {
+    /// Whose workspace settings are read; null for the directory lia runs in.
+    workspace_root: ?[]const u8 = null,
     auth_mode: credentials.AuthMode,
     default_model: []const u8,
     models_path: []const u8,
@@ -136,7 +138,7 @@ fn activateProviderSelectionFallible(
     caller: Caller,
     exact_source: ?credentials.Source,
 ) !bool {
-    const workspace_root = try io_mod.realpathAlloc(alloc, ".");
+    const workspace_root = if (env.workspace_root) |root| try alloc.dupe(u8, root) else try io_mod.realpathAlloc(alloc, ".");
     defer alloc.free(workspace_root);
     var settings = config_runtime.loadMergedSettings(alloc, workspace_root) catch |err| {
         try writeProviderActivationError(alloc, output, caller, "could not load settings");
