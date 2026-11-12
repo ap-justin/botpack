@@ -307,10 +307,10 @@ pub const AgentCapabilities = struct {
     mcp_sse: bool = true,
 };
 
-/// The `agent` auth method, always advertised: the person runs the login its
-/// text names, then the client calls `authenticate` and lia re-reads the
-/// credentials. The registry's auth check never sends `auth.terminal`, so this
-/// is the entry that keeps `authMethods` non-empty.
+/// The `agent` auth method, always advertised: `authenticate` with it runs the
+/// `lia login` browser sign-in when no credential is stored. The registry's
+/// auth check never sends `auth.terminal`, so this is the entry that keeps
+/// `authMethods` non-empty.
 pub const agent_auth_method_id = "lia-login";
 /// The Terminal Auth method, advertised only to a client that sent
 /// `clientCapabilities.auth.terminal: true`. It runs
@@ -349,9 +349,15 @@ pub const AuthLogin = enum {
         };
     }
 
+    fn agentName(self: AuthLogin) []const u8 {
+        return switch (self) {
+            .vercel => "Sign in to Vercel AI Gateway",
+        };
+    }
+
     fn terminalName(self: AuthLogin) []const u8 {
         return switch (self) {
-            .vercel => "Sign in with an AI Gateway API key",
+            .vercel => "Use a Vercel AI Gateway API key",
         };
     }
 
@@ -372,11 +378,10 @@ pub const AuthOffer = struct {
 /// The `authMethods` array. `initialize` and `AUTH_REQUIRED` both write it, so
 /// a connection sees one list.
 pub fn writeAuthMethods(w: *std.Io.Writer, offer: AuthOffer) !void {
-    const instruction = offer.login.instruction();
     try w.writeAll("[{\"id\":\"" ++ agent_auth_method_id ++ "\",\"name\":");
-    try writeJsonStr(instruction, w);
+    try writeJsonStr(offer.login.agentName(), w);
     try w.writeAll(",\"description\":");
-    try writeJsonStr(instruction, w);
+    try writeJsonStr(offer.login.instruction(), w);
     try w.writeByte('}');
     if (offer.client_terminal_auth) {
         try w.writeAll(",{\"id\":\"" ++ terminal_auth_method_id ++ "\",\"name\":");
@@ -845,7 +850,7 @@ test "initialize offers only the agent auth method without auth.terminal" {
     defer out.deinit();
     try writeAuthMethods(&out.writer, .{});
     try std.testing.expectEqualStrings(
-        "[{\"id\":\"lia-login\",\"name\":\"" ++ vercel_help ++ "\",\"description\":\"" ++ vercel_help ++ "\"}]",
+        "[{\"id\":\"lia-login\",\"name\":\"Sign in to Vercel AI Gateway\",\"description\":\"" ++ vercel_help ++ "\"}]",
         out.written(),
     );
 
@@ -867,6 +872,7 @@ test "initialize adds the terminal auth method only with auth.terminal" {
     try std.testing.expect(methods[0].object.get("type") == null);
     const terminal = methods[1].object;
     try std.testing.expectEqualStrings("lia-login-api-key", terminal.get("id").?.string);
+    try std.testing.expectEqualStrings("Use a Vercel AI Gateway API key", terminal.get("name").?.string);
     try std.testing.expectEqualStrings("terminal", terminal.get("type").?.string);
     const args = terminal.get("args").?.array.items;
     try std.testing.expectEqual(@as(usize, 3), args.len);

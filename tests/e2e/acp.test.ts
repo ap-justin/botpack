@@ -1568,8 +1568,8 @@ describe("acp: model-independent", () => {
         expect(methods).toHaveLength(1);
         expect(methods[0].id).toBe("lia-login");
         expect(methods[0].type).toBeUndefined();
-        expect(methods[0].name).toContain("lia login vercel --api-key");
-        expect(methods[0].description).toBe(methods[0].name);
+        expect(methods[0].name).toBe("Sign in to Vercel AI Gateway");
+        expect(methods[0].description).toContain("lia login vercel --api-key");
       } finally {
         await client?.close();
         gateway.stop();
