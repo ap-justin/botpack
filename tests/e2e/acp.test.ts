@@ -2001,8 +2001,8 @@ describe("acp: model-independent", () => {
   };
 
   // Asks authenticate every `paceMs` until the answer is not the sign-in code,
-  // and returns it once its message contains `expectedMessage`; any other
-  // error fails the call. Precondition: the sign-in is already polling, so
+  // and returns that answer; it throws unless its message contains
+  // `expectedMessage`. Precondition: the sign-in is already polling, so
   // each ask answers the code and consumes nothing; the first answer past the
   // code is the sign-in's kept failure.
   const askUntilSignInFailure = async (firstId: number, paceMs: number, expectedMessage: string) => {
