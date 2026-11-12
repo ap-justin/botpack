@@ -308,9 +308,9 @@ pub const AgentCapabilities = struct {
 };
 
 /// The `agent` auth method, always advertised: on Gateway, `authenticate` with
-/// it runs the `lia login` browser sign-in when no credential is stored. The registry's
-/// auth check never sends `auth.terminal`, so this is the entry that keeps
-/// `authMethods` non-empty.
+/// it runs the `lia login` browser sign-in when no credential is stored. The
+/// registry's auth check never sends `auth.terminal`, so this is the entry that
+/// keeps `authMethods` non-empty.
 pub const agent_auth_method_id = "lia-login";
 /// The Terminal Auth method, advertised only to a client that sent
 /// `clientCapabilities.auth.terminal: true`. It runs
