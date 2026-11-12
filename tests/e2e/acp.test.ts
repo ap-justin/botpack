@@ -10,6 +10,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   truncateSync,
@@ -2211,14 +2212,19 @@ describe("acp: model-independent", () => {
     return created.result.configOptions.find((option: any) => option.id === "model").currentValue;
   };
 
-  // A file where the sessions folder goes: session/new fails until it is removed.
+  // A file where the sessions folder goes: session/new fails until it is mended.
+  // The folder is set aside, not removed, so a session already open keeps its files.
   const breakSessionStore = (root: ReturnType<typeof createIsolatedRoot>) => {
-    rmSync(join(root.home, ".lia", "sessions"), { recursive: true, force: true });
-    writeFileSync(join(root.home, ".lia", "sessions"), "not a directory");
+    const sessions = join(root.home, ".lia", "sessions");
+    if (existsSync(sessions)) renameSync(sessions, `${sessions}.aside`);
+    writeFileSync(sessions, "not a directory");
   };
 
-  const mendSessionStore = (root: ReturnType<typeof createIsolatedRoot>) =>
-    rmSync(join(root.home, ".lia", "sessions"), { force: true });
+  const mendSessionStore = (root: ReturnType<typeof createIsolatedRoot>) => {
+    const sessions = join(root.home, ".lia", "sessions");
+    rmSync(sessions, { force: true });
+    if (existsSync(`${sessions}.aside`)) renameSync(`${sessions}.aside`, sessions);
+  };
 
   test(
     "ACP a session/new that fails after a sign-in leaves the connection's model for the next session",
@@ -2236,6 +2242,43 @@ describe("acp: model-independent", () => {
         expect(modelOf(inLaunchFolder)).toBe(connectionModel);
         expectOnlyJsonRpcOnStdout();
       } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP a session/new that fails after a sign-in leaves a running turn running",
+    async () => {
+      const held = deferred<Response>();
+      let turnStarted = false;
+      const { fixture, project, connectionModel } = await signInBesideFolderModels([
+        () => {
+          turnStarted = true;
+          return held.promise;
+        },
+      ]);
+      try {
+        const opened = await client.request("session/new", { cwd: fixture.root.workspace, mcpServers: [] }, 4) as any;
+        expect(modelOf(opened)).toBe(connectionModel);
+        sendPrompt(client, 5, "Hold this turn.");
+        await waitForCondition("the turn's Gateway request", () => turnStarted);
+
+        breakSessionStore(fixture.root);
+        const failed = await client.request("session/new", { cwd: project, mcpServers: [] }, 6) as any;
+        expect(failed.error.code).toBe(-32603);
+        mendSessionStore(fixture.root);
+        // A cancelled turn answers its prompt at once.
+        expect(answerFrames(5)).toHaveLength(0);
+
+        held.resolve(finalText("held turn done"));
+        const prompt = await readResponse(client, 5);
+        expect(prompt.error).toBeUndefined();
+        expect(prompt.result.stopReason).toBe("end_turn");
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        held.resolve(finalText("held turn cleanup"));
         await fixture.stop();
       }
     },
