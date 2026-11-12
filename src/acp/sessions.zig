@@ -141,8 +141,11 @@ pub fn handleNewLibfxSession(
     const session_id = requested orelse try session_store.generateSessionId(alloc);
     var session_id_owned = true;
     defer if (session_id_owned) alloc.free(session_id);
-    // As in `startV2Session`: applied once the session is active.
-    const picked_model = acp_sign_in.modelForSession(state, state.workspace_root);
+    // As in `startV2Session`: applied once the session is active. libfx/new
+    // does not end a running turn, whose thread may still read the
+    // connection's model, so it leaves the pick to the next session.
+    const turn_running = state.active_prompt != null;
+    const picked_model = if (turn_running) null else acp_sign_in.modelForSession(state, state.workspace_root);
     var picked_model_owned = true;
     defer if (picked_model_owned) if (picked_model) |picked| picked.deinit(state.alloc);
     const model = try alloc.dupe(u8, if (picked_model) |picked| picked.selected else state.selected_model);
@@ -179,7 +182,7 @@ pub fn handleNewLibfxSession(
     model_owned = false;
     session_rt_owned = false;
     picked_model_owned = false;
-    acp_sign_in.sessionActivated(state, picked_model);
+    if (!turn_running) acp_sign_in.sessionActivated(state, picked_model);
     try writeNewSessionResponse(state, alloc, msg, session_id, observer_hooks);
 }
 
@@ -3204,6 +3207,60 @@ test "a libfx/new that fails leaves the connection's model and the sign-in's fol
     var msg = jsonrpc.Message{ .id = .{ .integer = 2 }, .method = "libfx/new", .params_raw = "{}" };
     try handleNewLibfxSession(&state, arena, &msg);
     try std.testing.expectEqualStrings("openai/z-libfx-folder", state.selected_model);
+    try std.testing.expect(state.sign_in_root == null);
+}
+
+test "a libfx/new while a turn runs keeps the connection's model strings and the sign-in's folder for the next session" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
+    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
+    const home_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
+    defer alloc.free(home_path);
+    const workspace_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
+    defer alloc.free(workspace_path);
+    const env = try AcpSessionTestHome.install(alloc, home_path);
+    defer env.deinit();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "libfx.jsonl", .{ .read = true });
+    defer capture.close(io_mod.getIo());
+    var arena_state = std.heap.ArenaAllocator.init(alloc);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const settings = try arena.print("{{\"workspaces\":{{\"{s}\":{{\"models\":{{\"gateway\":\"openai/z-libfx-folder\"}}}}}}}}", .{workspace_path});
+    try tmp.dir.writeFile(io_mod.getIo(), .{ .sub_path = "home/.lia/settings.json", .data = settings });
+    var state = try initAcpSessionTestState(arena, workspace_path, capture);
+    defer state.deinit();
+    state.cfg.home_override = home_path;
+    state.provider = .gateway;
+    state.sign_in_root = try arena.dupe(u8, "/the-folder-the-sign-in-read");
+    // libfx/new is served only by the minimal kernel.
+    state.cfg.minimal_kernel = true;
+    const Turn = struct {
+        fn run(release: *const std.atomic.Value(bool)) void {
+            while (!release.load(.seq_cst)) io_mod.sleep(std.time.ns_per_ms);
+        }
+    };
+    var release = std.atomic.Value(bool).init(false);
+    try server.startPromptForTest(&state, Turn.run, .{&release});
+    defer server.cancelAndReapActivePrompt(&state);
+    defer release.store(true, .seq_cst);
+    const selected = state.selected_model;
+    const configured = state.configured_model;
+
+    var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "libfx/new", .params_raw = "{}" };
+    try handleNewLibfxSession(&state, arena, &msg);
+    try std.testing.expectEqual(selected.ptr, state.selected_model.ptr);
+    try std.testing.expectEqual(configured.ptr, state.configured_model.ptr);
+    try std.testing.expectEqualStrings("test/model", state.active_session.?.model);
+    try std.testing.expectEqualStrings("/the-folder-the-sign-in-read", state.sign_in_root orelse "");
+
+    release.store(true, .seq_cst);
+    server.cancelAndReapActivePrompt(&state);
+    msg.id = .{ .integer = 2 };
+    try handleNewLibfxSession(&state, arena, &msg);
+    try std.testing.expectEqualStrings("openai/z-libfx-folder", state.selected_model);
+    try std.testing.expectEqualStrings("openai/z-libfx-folder", state.active_session.?.model);
     try std.testing.expect(state.sign_in_root == null);
 }
 

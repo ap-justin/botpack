@@ -426,9 +426,9 @@ pub fn modelForSession(state: *const ServerState, workspace_root: []const u8) ?S
     return .{ .selected = selected, .configured = configured };
 }
 
-/// Called once a session is active, after the previous one's turn is
-/// reaped: the sign-in's folder is spent, and `picked`, from
-/// `modelForSession`, becomes the connection's model.
+/// Called once a session is active and no turn runs, since a turn's thread
+/// may read the model this frees: the sign-in's folder is spent, and
+/// `picked`, from `modelForSession`, becomes the connection's model.
 pub fn sessionActivated(state: *ServerState, picked: ?SessionModel) void {
     if (state.sign_in_root) |root| state.alloc.free(root);
     state.sign_in_root = null;
