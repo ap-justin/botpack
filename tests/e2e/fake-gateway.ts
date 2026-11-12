@@ -2,6 +2,32 @@ import { existsSync } from "node:fs";
 
 export const FAKE_GATEWAY_MODEL = "openai/gpt-5";
 
+// Nothing listens on loopback port 1.
+export const UNREACHABLE_ISSUER_URL = "http://127.0.0.1:1";
+
+function isLoopbackUrl(value: string): boolean {
+  try {
+    return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(value).hostname);
+  } catch {
+    return false;
+  }
+}
+
+// The environment for any test spawn of `lia acp`, so that no test can reach vercel.com.
+// A sign-in that no test pointed at a fake issuer fails on a refused connection and opens no
+// browser. A loopback issuer a test sets stays; a missing, `undefined` or non-loopback one
+// becomes the unreachable address. `env` overrides `base` (the process environment).
+export function acpSpawnEnv(
+  env: Record<string, string | undefined> = {},
+  base: Record<string, string | undefined> = process.env,
+): Record<string, string | undefined> {
+  const merged = { ...base, ...env };
+  const issuer = merged.LIA_TEST_OAUTH_ISSUER_URL;
+  if (!issuer || !isLoopbackUrl(issuer)) merged.LIA_TEST_OAUTH_ISSUER_URL = UNREACHABLE_ISSUER_URL;
+  if (!merged.LIA_NO_OPEN_BROWSER) merged.LIA_NO_OPEN_BROWSER = "1";
+  return merged;
+}
+
 export function terminalFixtureShell(): string {
   for (const path of ["/bin/zsh", "/bin/bash"]) {
     if (existsSync(path)) return path;

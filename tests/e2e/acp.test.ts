@@ -30,6 +30,8 @@ import { paddedPng, solidPng } from "./fixtures/image-encoding";
 import { copyV1Fixture, logLines, savedSessionIds, savedText, sessionDir } from "./saved-sessions";
 import {
   FAKE_GATEWAY_MODEL,
+  UNREACHABLE_ISSUER_URL,
+  acpSpawnEnv,
   fakeGatewayFinalText as finalText,
   heldFakeGatewayFinalText,
   fakeGatewayPermissionDecision,
@@ -54,8 +56,6 @@ import {
 
 const TIMEOUT = 30_000;
 const LIVE_TIMEOUT = 120_000;
-// Nothing listens on loopback port 1.
-const UNREACHABLE_ISSUER_URL = "http://127.0.0.1:1";
 const SEEDED_GATEWAY_TOKEN = "seeded-access-token";
 const TERMINAL_FIXTURE_SHELL = terminalFixtureShell();
 const MCP_STDIO_FIXTURE = join(
@@ -398,9 +398,6 @@ class AcpClient {
     const args = opts?.args ?? ["acp"];
     const inheritedEnv: Record<string, string | undefined> = { ...process.env };
     if (opts?.omitHome) delete inheritedEnv.HOME;
-    // A sign-in that no test pointed at a fake issuer fails on a refused connection and opens no browser.
-    inheritedEnv.LIA_TEST_OAUTH_ISSUER_URL = UNREACHABLE_ISSUER_URL;
-    inheritedEnv.LIA_NO_OPEN_BROWSER = "1";
     for (const [key, value] of Object.entries(opts?.env ?? {})) {
       if (value === undefined) {
         delete inheritedEnv[key];
@@ -408,11 +405,13 @@ class AcpClient {
         inheritedEnv[key] = value;
       }
     }
+    // A key a test deletes with `undefined` cannot remove the sign-in guard.
+    const guarded = acpSpawnEnv(inheritedEnv, {});
     const proc = nodeSpawn(LIA_BIN, args, {
       env: {
-        ...inheritedEnv,
+        ...guarded,
         NO_COLOR: "1",
-        PATH: inheritedEnv.PATH ?? "",
+        PATH: guarded.PATH ?? "",
       },
       cwd: opts?.cwd ?? REPO_ROOT,
       stdio: ["pipe", "pipe", "pipe"],
@@ -1576,9 +1575,13 @@ describe("acp: model-independent", () => {
     tokenError?: string;
     held?: boolean;
     expiresIn?: number;
+    // Every poll waits, answer unsent, until `release` or `reject`.
+    holdPolls?: boolean;
     teams?: Array<{ id: string; slug: string; name: string }>;
   } = {}) => {
     const requests: string[] = [];
+    let release = () => {};
+    const gate = options.holdPolls ? new Promise<void>(resolve => { release = resolve; }) : undefined;
     let approved = !options.held;
     let tokenError = options.tokenError;
     const teams = options.teams ?? [{ id: "team_123", slug: "vercel-labs", name: "Vercel Labs" }];
@@ -1609,6 +1612,7 @@ describe("acp: model-independent", () => {
           });
         }
         if (url.pathname === "/oauth/token") {
+          await gate;
           if (tokenError) return Response.json({ error: tokenError }, { status: 400 });
           if (!approved) return Response.json({ error: "authorization_pending" }, { status: 400 });
           return Response.json({
@@ -1633,10 +1637,12 @@ describe("acp: model-independent", () => {
       },
       approve() {
         approved = true;
+        release();
       },
       // Answers every following poll with `error`.
       reject(error: string) {
         tokenError = error;
+        release();
       },
       stop() {
         server.stop(true);
@@ -2298,6 +2304,38 @@ describe("acp: model-independent", () => {
   );
 
   test(
+    "ACP lia-login cancelled while its poll fails keeps no failure, so the next lia-login starts a fresh sign-in",
+    async () => {
+      const fixture = await startSignIn({ held: true, holdPolls: true });
+      try {
+        const polls = () => fixture.issuer.requests.filter(path => path === "/oauth/token").length;
+        sendAuthenticate(2);
+        expectSignInCode(await readResponse(client, 2), fixture.issuer.issuerUrl);
+        sendAuthenticate(3);
+        await waitForCondition("the first poll reached the issuer", () => polls() > 0, TIMEOUT);
+        // The poll is answered with a failure as the cancel lands, before the
+        // worker's next look at it: the worker then ends the stopped sign-in
+        // with a failure and nobody waiting.
+        client.send({ jsonrpc: "2.0", method: "$/cancel_request", params: { requestId: 3 } });
+        fixture.issuer.reject("access_denied");
+        expect((await readResponse(client, 3)).error.code).toBe(-32800);
+        expect(answerFrames(3)).toHaveLength(1);
+
+        // A kept denial would be the answer here, with no second device code.
+        sendAuthenticate(4);
+        expectSignInCode(await readResponse(client, 4), fixture.issuer.issuerUrl);
+        expect(fixture.issuer.deviceRequests).toBe(2);
+        expect(existsSync(join(fixture.root.home, ".lia", "auth.json"))).toBe(false);
+        expect(answerFrames(3)).toHaveLength(1);
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "ACP $/cancel_request for another request leaves a waiting lia-login signing in",
     async () => {
       const fixture = await startSignIn({ held: true });
@@ -2535,6 +2573,68 @@ describe("acp: model-independent", () => {
         await client?.close();
         gateway.stop();
         issuer.stop(true);
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP lia-login without an issuer override reaches only the unreachable loopback issuer and saves nothing",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-sign-in-guard-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      try {
+        // A test that names no issuer, as one that forgets to: the guard in create() answers for it.
+        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const failed = await client.request("authenticate", { methodId: "lia-login" }, 2) as any;
+        expect(failed.error.code).toBe(-32600);
+        expect(failed.error.message).toContain("Could not reach Vercel to sign in");
+        expect(existsSync(join(root.home, ".lia", "auth.json"))).toBe(false);
+        expect(client.stderr).not.toContain("vercel.com");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP spawn environment keeps a loopback issuer a test names and never lets undefined or a remote host stand",
+    () => {
+      const loopback = "http://127.0.0.1:43210";
+      expect(acpSpawnEnv({ LIA_TEST_OAUTH_ISSUER_URL: loopback }, {}).LIA_TEST_OAUTH_ISSUER_URL).toBe(loopback);
+      expect(acpSpawnEnv({}, { LIA_TEST_OAUTH_ISSUER_URL: loopback }).LIA_TEST_OAUTH_ISSUER_URL).toBe(loopback);
+      for (const issuer of [undefined, "", "https://vercel.com", "http://example.com:80", "not a url"]) {
+        const guarded = acpSpawnEnv({ LIA_TEST_OAUTH_ISSUER_URL: issuer }, { LIA_TEST_OAUTH_ISSUER_URL: issuer });
+        expect(guarded.LIA_TEST_OAUTH_ISSUER_URL).toBe(UNREACHABLE_ISSUER_URL);
+        expect(guarded.LIA_NO_OPEN_BROWSER).toBe("1");
+      }
+      expect(acpSpawnEnv({ LIA_NO_OPEN_BROWSER: undefined }, {}).LIA_NO_OPEN_BROWSER).toBe("1");
+    },
+  );
+
+  test(
+    "ACP undefined in the client env does not remove the sign-in guard",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-sign-in-undefined-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: { ...noCredentialEnv(root, gateway), LIA_TEST_OAUTH_ISSUER_URL: undefined, LIA_NO_OPEN_BROWSER: undefined },
+        });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const failed = await client.request("authenticate", { methodId: "lia-login" }, 2) as any;
+        expect(failed.error.code).toBe(-32600);
+        expect(failed.error.message).toContain("Could not reach Vercel to sign in");
+        expect(existsSync(join(root.home, ".lia", "auth.json"))).toBe(false);
+      } finally {
+        await client?.close();
+        gateway.stop();
         rmSync(root.root, { recursive: true, force: true });
       }
     },

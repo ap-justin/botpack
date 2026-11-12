@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LIA_BIN, runLia } from "../evals/eval-helpers";
 import {
+  acpSpawnEnv,
   fakeGatewayFinalText,
   fakeGatewaySse,
   fakeGatewayToolCall,
@@ -202,7 +203,7 @@ class AcpClient {
     args: string[] = [],
   ) {
     const processEnv = Object.fromEntries(
-      Object.entries({ ...process.env, NO_COLOR: "1", ...env }).filter(
+      Object.entries(acpSpawnEnv({ NO_COLOR: "1", ...env })).filter(
         (entry): entry is [string, string] => entry[1] !== undefined,
       ),
     );

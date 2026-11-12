@@ -26,7 +26,7 @@ import {
   contentText,
 } from "./conditional-guidance-oracle";
 import { expectPermissionModeContext } from "./permission-mode-context";
-import { fakeGatewayTitleDefault, TITLE_GENERATION_MARKER } from "./fake-gateway";
+import { acpSpawnEnv, fakeGatewayTitleDefault, TITLE_GENERATION_MARKER } from "./fake-gateway";
 
 const TIMEOUT = 15_000;
 const SOURCE_URL = "https://ziglang.org/download/";
@@ -383,7 +383,7 @@ class AcpClient {
 
   static create(cwd: string, env: Record<string, string | undefined>) {
     const definedEnv = Object.fromEntries(
-      Object.entries({ ...process.env, NO_COLOR: "1", ...env }).filter(
+      Object.entries(acpSpawnEnv({ NO_COLOR: "1", ...env })).filter(
         (entry): entry is [string, string] => entry[1] !== undefined,
       ),
     );

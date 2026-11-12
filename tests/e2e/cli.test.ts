@@ -28,6 +28,7 @@ import {
 } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
+  acpSpawnEnv,
   fakeGatewayFinalText,
   fakeGatewaySse,
   startFakeGateway,
@@ -478,7 +479,7 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
     "lia acp help documents accepted options",
     async () => {
       for (const alias of ["--help", "-h"]) {
-        const r = await runLia(["acp", alias]);
+        const r = await runLia(["acp", alias], { env: acpSpawnEnv() });
         expect(r.code).toBe(0);
         expect(r.stderr).toBe("");
         expect(r.stdout).toContain(
@@ -507,7 +508,7 @@ With --prompt-permissions, JSON and quiet requests may prompt on stderr only whe
         [["--add-dir", "/tmp"], "lia acp: unknown flag --add-dir; it goes before the command: lia --add-dir <path> acp\n"],
       ];
       for (const [args, problem] of cases) {
-        const result = await runLia(["acp", ...args]);
+        const result = await runLia(["acp", ...args], { env: acpSpawnEnv() });
         expect(result.code).toBe(2);
         expect(result.stdout).toBe("");
         expect(result.stderr).toBe(

@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { LIA_BIN, runLia } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
+  acpSpawnEnv,
   type FakeGatewayOptions,
   fakeGatewayFinalText,
   fakeGatewaySerializedToolCall,
@@ -994,7 +995,7 @@ class AcpRpc {
       : ["/bin/sh", ["-c", `trap '' XFSZ; ulimit -f ${limitBlocks}; exec "$0" "$@"`, LIA_BIN, "acp"]];
     this.proc = spawn(command, args, {
       cwd: fixture.workspace,
-      env: { ...process.env, ...env(fixture, gateway), ...extraEnv } as Record<string, string>,
+      env: acpSpawnEnv({ ...env(fixture, gateway), ...extraEnv }) as Record<string, string>,
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.exited = new Promise((resolve) => this.proc.on("exit", (code) => resolve(code)));
