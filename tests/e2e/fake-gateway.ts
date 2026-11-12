@@ -2,6 +2,52 @@ import { existsSync } from "node:fs";
 
 export const FAKE_GATEWAY_MODEL = "openai/gpt-5";
 
+// The issuer a sign-in reaches when no test named one: a loopback server that
+// refuses every request and records its paths, so a test can tell this issuer
+// from an unreachable vercel.com. It is unref'd, so it never keeps a process alive.
+const guardIssuerPaths: string[] = [];
+let guardIssuer: ReturnType<typeof Bun.serve> | undefined;
+
+export function guardIssuerUrl(): string {
+  guardIssuer ??= Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      guardIssuerPaths.push(new URL(request.url).pathname);
+      return new Response("sign-in issuer not configured for this test", { status: 503 });
+    },
+  });
+  guardIssuer.unref();
+  return `http://127.0.0.1:${guardIssuer.port}`;
+}
+
+// The paths the guard issuer has been asked for, in order.
+export function guardIssuerRequests(): readonly string[] {
+  return guardIssuerPaths;
+}
+
+// The bare http origin with a port that the product accepts as a test issuer,
+// once it trims a trailing slash (selectIssuerUrl and isLoopbackHttpUrl in
+// src/core/auth/oauth_session.zig).
+function isLoopbackUrl(value: string): boolean {
+  return /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+\/?$/i.test(value);
+}
+
+// The environment for any test spawn of `lia acp`, so that no test can reach vercel.com.
+// A sign-in that no test pointed at a fake issuer fails on the guard issuer's refusal and opens no
+// browser. A loopback issuer a test sets stays; a missing, `undefined` or non-loopback one
+// becomes the guard issuer. `env` overrides `base` (the process environment).
+export function acpSpawnEnv(
+  env: Record<string, string | undefined> = {},
+  base: Record<string, string | undefined> = process.env,
+): Record<string, string | undefined> {
+  const merged = { ...base, ...env };
+  const issuer = merged.LIA_TEST_OAUTH_ISSUER_URL;
+  if (!issuer || !isLoopbackUrl(issuer)) merged.LIA_TEST_OAUTH_ISSUER_URL = guardIssuerUrl();
+  if (!merged.LIA_NO_OPEN_BROWSER) merged.LIA_NO_OPEN_BROWSER = "1";
+  return merged;
+}
+
 export function terminalFixtureShell(): string {
   for (const path of ["/bin/zsh", "/bin/bash"]) {
     if (existsSync(path)) return path;

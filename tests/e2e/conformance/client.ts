@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   FAKE_GATEWAY_MODEL,
+  acpSpawnEnv,
   fakeGatewayFinalText,
   fakeGatewayToolCall,
   startFakeGateway,
@@ -197,7 +198,7 @@ async function askOverAcp() {
   const gateway = startFakeGateway(gatewaySteps());
   const child = Bun.spawn([liaBin, "acp"], {
     cwd: workspace,
-    env: { ...liaEnv, LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl },
+    env: acpSpawnEnv({ ...liaEnv, LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl }) as Record<string, string>,
     stdin: "pipe",
     stdout: "pipe",
     stderr: "inherit",

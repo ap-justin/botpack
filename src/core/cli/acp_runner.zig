@@ -25,6 +25,8 @@ pub const Config = struct {
     provider_set: provider_set.Set,
     process_provider: process_provider.Provider = process_provider.unavailable_provider,
     secret_store: host.SecretStore,
+    /// Opens the sign-in page when `authenticate` runs the browser sign-in.
+    url_opener: host.UrlOpener = host.unavailable_url_opener,
     prompt_policy: prompt_policy.Policy,
     ignored_list_entries: []const []const u8,
     max_list_entries: usize,

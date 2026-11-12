@@ -58,6 +58,7 @@ const libfx_steering = @import("libfx_steering.zig");
 const journal_events = @import("../core/agent/runtime/journal.zig");
 const libfx_journal = @import("libfx_journal.zig");
 const tool_call_identities = @import("tool_call_identities.zig");
+const acp_sign_in = @import("sign_in.zig");
 
 const Allocator = std.mem.Allocator;
 const ErrorCode = jsonrpc.ErrorCode;
@@ -394,6 +395,16 @@ pub const ServerState = struct {
     cache_warming: bool = true,
     active_session: ?ActiveSessionState = null,
     active_prompt: ?*ActivePrompt = null,
+    /// The `lia-login` browser sign-in this connection is running.
+    sign_in: ?*acp_sign_in.Job = null,
+    /// How a sign-in failed after its code was handed out, with no
+    /// `authenticate` waiting; the next `lia-login` answers with it, unless
+    /// `expires_at_ms` has passed.
+    sign_in_failure: ?acp_sign_in.KeptFailure = null,
+    /// The folder whose settings the last sign-in's profile switch read,
+    /// owned, until the next session is active: a `session/new` picks its
+    /// model from the session's own folder, a load or resume keeps its own.
+    sign_in_root: ?[]u8 = null,
     subagent_authority_mutex: std.Io.Mutex = .init,
     skills: skill_runtime.Runtime = .{},
     context_snapshot: context_contract.GatheredContextSnapshot = .{},
@@ -428,6 +439,8 @@ pub const ServerState = struct {
     pending_legacy_urls: std.ArrayList(PendingLegacyUrl) = .empty,
 
     pub fn deinit(self: *ServerState) void {
+        acp_sign_in.stop(self);
+        if (self.sign_in_root) |root| self.alloc.free(root);
         // Terminals end with this process. Ending them first also releases
         // an active prompt waiting on one.
         self.terminal_client.closeOwnedTerminals();
@@ -1595,7 +1608,7 @@ pub fn cancelPermissionRequest(state: *ServerState, id: u64) void {
     cancelOutboundRequest(state, id);
 }
 
-fn dispatchNotification(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
+pub fn dispatchNotification(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
     reapActivePrompt(state, false);
     if (!state.initialized) return;
     switch (AcpMethod.parse(msg.method)) {
@@ -1629,6 +1642,7 @@ pub fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !v
         });
     }
 
+    acp_sign_in.reap(state, false);
     // A sign-in deferred for a turn that has since ended. Failing to adopt it
     // leaves it pending, and this request answers as it would have.
     if (state.auth_adoption_deferred and state.active_prompt == null) {
@@ -1742,12 +1756,13 @@ pub fn authOffer(state: *const ServerState) acp_types.AuthOffer {
     return .{
         .login = .forProvider(state.provider),
         .client_terminal_auth = state.client_terminal_auth,
+        .sign_in_block = if (state.provider == .gateway) acp_sign_in.signInBlock() else null,
     };
 }
 
 /// What a request answers when its provider has no credential. Only Gateway
-/// can be signed in to with the methods on offer, which are Vercel's and
-/// cannot supply a configured provider's key.
+/// can be signed in to; a configured provider reads its key from an
+/// environment variable that no auth method sets.
 pub const CredentialUnavailableAnswer = enum { sign_in, plain_error };
 
 pub const configured_credential_unavailable_message = "Configured provider authentication is unavailable";
@@ -1783,7 +1798,7 @@ pub fn writeAuthRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.Req
 }
 
 /// An `AUTH_REQUIRED` error frame whose `data` lists the auth methods offered.
-fn buildAuthRequired(alloc: Allocator, id: ?jsonrpc.RequestId, auth: prompt_handler.AuthRequired) !jsonrpc.Writer.Built {
+pub fn buildAuthRequired(alloc: Allocator, id: ?jsonrpc.RequestId, auth: prompt_handler.AuthRequired) !jsonrpc.Writer.Built {
     var data: std.Io.Writer.Allocating = .init(alloc);
     defer data.deinit();
     try acp_types.writeAuthRequiredData(&data.writer, auth.offer);
@@ -1841,8 +1856,9 @@ pub fn refreshPendingAuthReplacingTurn(state: *ServerState) !bool {
     }
 }
 
-/// `authenticate`: the person ran the login an advertised method names, so
-/// re-read the credentials. Succeeds once one is available.
+/// `authenticate`: succeeds at once when the credentials, re-read, hold one.
+/// Otherwise `lia-login` on Gateway signs in as `acp_sign_in.authenticate`
+/// says, and `lia-login-api-key` stays unavailable until a key is saved.
 fn handleAuthenticate(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
     const method_id = authenticateMethodId(alloc, msg.params_raw) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
@@ -1858,10 +1874,16 @@ fn handleAuthenticate(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Messa
             .message = "Unknown authentication method",
         });
     }
-    if (try refreshPendingAuth(state) == .unavailable) {
-        return writeCredentialUnavailable(state, alloc, msg.id, state.provider);
+    // The web host runs its own sign-in.
+    if (!host_target.is_wasm and state.provider == .gateway and
+        std.mem.eql(u8, method_id, acp_types.agent_auth_method_id))
+    {
+        return acp_sign_in.authenticate(state, alloc, msg.id);
     }
-    return state.writer.writeResponse(alloc, msg.id, "{}");
+    if (try refreshPendingAuth(state) != .unavailable) {
+        return state.writer.writeResponse(alloc, msg.id, "{}");
+    }
+    return writeCredentialUnavailable(state, alloc, msg.id, state.provider);
 }
 
 /// The `methodId` of an `authenticate` request. The caller owns the result.
@@ -1878,7 +1900,7 @@ fn authenticateMethodId(alloc: Allocator, params: ?[]const u8) ![]u8 {
     return alloc.dupe(u8, id.string);
 }
 
-fn requestIdsEqual(lhs: jsonrpc.RequestId, rhs: jsonrpc.RequestId) bool {
+pub fn requestIdsEqual(lhs: jsonrpc.RequestId, rhs: jsonrpc.RequestId) bool {
     return switch (lhs) {
         .integer => |value| switch (rhs) {
             .integer => |other| value == other,
@@ -1912,6 +1934,7 @@ fn handleRequestCancellation(
     if (parsed.value != .object) return;
     const value = parsed.value.object.get("requestId") orelse return;
     const requested = requestIdFromValue(value) orelse return;
+    if (acp_sign_in.cancelRequest(state, requested)) return;
     const active = state.active_prompt orelse return;
     const active_id = active.msg.id orelse return;
     if (!requestIdsEqual(active_id, requested)) return;
@@ -3236,13 +3259,6 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
         });
     };
     defer startup.deinit(alloc);
-    if (state.cfg.auth_mode == .local and startup.credential == null and
-        !(startup.provider == .gateway and state.cfg.credential_override != null))
-    {
-        if (startup.credential_load_failure) |failure| {
-            if (auth_runtime.preparationError(auth_runtime.classifyCredentialFailure(failure.source, failure.err))) |err| return err;
-        }
-    }
     if (!state.cfg.minimal_kernel) {
         try app_lifecycle.applyWorkspaceLaunch(
             &startup,
@@ -3316,13 +3332,23 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
         } else if (startup_credential_is_final)
             &startup_credential.?
         else routed: {
-            routed_credential = try auth_runtime.prepareCredential(
+            routed_credential = auth_runtime.prepareCredential(
                 alloc,
                 state.cfg.gateway_provider.oauth_transport,
                 state.cfg.secret_store,
                 state.provider,
                 if (state.provider == .gateway) startup.credential_source_preference else null,
-            );
+            ) catch |err| switch (err) {
+                // Unreadable saved credentials, or a HOME that does not exist
+                // as under the registry's auth check: the session calls
+                // report the storage error, and the offer says whether
+                // `lia-login` can still save a sign-in.
+                error.CredentialStorageUnavailable => storage: {
+                    debug_trace.logf("auth", "acp initialize deferred credential err={s}", .{@errorName(err)});
+                    break :storage null;
+                },
+                else => return err,
+            };
             break :routed if (routed_credential != null) &routed_credential.? else null;
         };
         // Without a credential, initialize still succeeds; the calls that need
@@ -4889,6 +4915,13 @@ test "ACP authenticate accepts the agent and terminal method ids" {
 /// Holds `state.active_prompt` as a running turn does until it is reaped. The
 /// worker returns at once, so a reap never waits on it.
 pub fn startIdlePromptForTest(state: *ServerState) !void {
+    try startPromptForTest(state, struct {
+        fn run() void {}
+    }.run, .{});
+}
+
+/// A turn whose thread runs `function`, reaped like any other.
+pub fn startPromptForTest(state: *ServerState, comptime function: anytype, args: anytype) !void {
     const active = try state.alloc.create(ActivePrompt);
     errdefer state.alloc.destroy(active);
     active.* = .{
@@ -4899,9 +4932,7 @@ pub fn startIdlePromptForTest(state: *ServerState) !void {
         .permission_mode = .ask,
     };
     errdefer jsonrpc.freeMessage(state.alloc, &active.msg);
-    active.thread = try std.Thread.spawn(.{}, struct {
-        fn run() void {}
-    }.run, .{});
+    active.thread = try std.Thread.spawn(.{}, function, args);
     state.active_prompt = active;
 }
 

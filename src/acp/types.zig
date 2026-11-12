@@ -307,13 +307,13 @@ pub const AgentCapabilities = struct {
     mcp_sse: bool = true,
 };
 
-/// The `agent` auth method, always advertised: the person runs the login its
-/// text names, then the client calls `authenticate` and lia re-reads the
-/// credentials. The registry's auth check never sends `auth.terminal`, so this
-/// is the entry that keeps `authMethods` non-empty.
+/// The `agent` auth method, always advertised: on Gateway, `authenticate` with
+/// it runs the `lia login` browser sign-in when no credential is stored. The
+/// registry's auth check never sends `auth.terminal`, so this is the entry that
+/// keeps `authMethods` non-empty.
 pub const agent_auth_method_id = "lia-login";
-/// The Terminal Auth method, advertised only to a client that sent
-/// `clientCapabilities.auth.terminal: true`. It runs
+/// The Terminal Auth method, advertised only to a Gateway connection whose
+/// client sent `clientCapabilities.auth.terminal: true`. It runs
 /// `lia login vercel --api-key`.
 pub const terminal_auth_method_id = "lia-login-api-key";
 
@@ -324,13 +324,18 @@ pub fn isAuthMethodId(method_id: []const u8) bool {
         std.mem.eql(u8, method_id, terminal_auth_method_id);
 }
 
-/// The lia login that yields a credential for the selected provider.
+/// What yields a credential for the selected provider.
 pub const AuthLogin = enum {
+    /// A Vercel AI Gateway sign-in or API key.
     vercel,
+    /// The environment variable a provider configured in settings.json reads
+    /// its key from; no auth method can set it.
+    configured,
 
     pub fn forProvider(provider: model_provider.ProviderId) AuthLogin {
         return switch (provider) {
-            .gateway, .configured => .vercel,
+            .gateway => .vercel,
+            .configured => .configured,
         };
     }
 
@@ -338,53 +343,65 @@ pub const AuthLogin = enum {
     pub fn instruction(self: AuthLogin) []const u8 {
         return switch (self) {
             .vercel => credentials.missing_credential_message,
+            .configured => "The selected provider is configured in settings.json and reads its API key from an environment variable. Set it where lia starts, then restart lia.",
         };
     }
 
-    /// The `lia` arguments a terminal client appends to run this login; each
-    /// is a login `cli_surface.zig:parseLoginArgs` accepts.
-    fn terminalArgs(self: AuthLogin) []const []const u8 {
+    fn agentName(self: AuthLogin) []const u8 {
         return switch (self) {
-            .vercel => &.{ "login", "vercel", "--api-key" },
-        };
-    }
-
-    fn terminalName(self: AuthLogin) []const u8 {
-        return switch (self) {
-            .vercel => "Sign in with an AI Gateway API key",
-        };
-    }
-
-    fn terminalDescription(self: AuthLogin) []const u8 {
-        return switch (self) {
-            .vercel => "Paste a Vercel AI Gateway API key in a terminal. lia saves it for later sessions.",
+            .vercel => "Sign in to Vercel AI Gateway",
+            .configured => "Set the configured provider's API key",
         };
     }
 };
+
+/// Why this machine cannot save a `lia login` sign-in.
+pub const SignInBlock = enum {
+    home_unavailable,
+    /// `~/.lia` or its `auth.json` is not private and writable, or the
+    /// keychain cannot be read.
+    storage_unusable,
+
+    pub fn reason(self: SignInBlock) []const u8 {
+        return switch (self) {
+            .home_unavailable => "lia cannot save a sign-in because HOME is not set or does not exist. Set HOME to your home folder, then retry.",
+            .storage_unusable => "lia cannot save a sign-in: ~/.lia or ~/.lia/auth.json is not private to you or not writable (auth.json must be mode 600), or the keychain cannot be read. Fix it, then retry.",
+        };
+    }
+};
+
+const terminal_auth_name = "Use a Vercel AI Gateway API key";
+const terminal_auth_description = "Paste a Vercel AI Gateway API key in a terminal. lia saves it for later sessions.";
+/// The `lia` arguments a terminal client appends; a login
+/// `cli_surface.zig:parseLoginArgs` accepts.
+const terminal_auth_args = [_][]const u8{ "login", "vercel", "--api-key" };
 
 /// What one connection is offered: the login for its provider, and the
 /// terminal method when the client can run one.
 pub const AuthOffer = struct {
     login: AuthLogin = .vercel,
     client_terminal_auth: bool = false,
+    /// Set when the Vercel sign-in cannot be saved here; the agent method
+    /// then says why instead of offering it.
+    sign_in_block: ?SignInBlock = null,
 };
 
 /// The `authMethods` array. `initialize` and `AUTH_REQUIRED` both write it, so
 /// a connection sees one list.
 pub fn writeAuthMethods(w: *std.Io.Writer, offer: AuthOffer) !void {
-    const instruction = offer.login.instruction();
+    const blocked = if (offer.login == .vercel) offer.sign_in_block else null;
     try w.writeAll("[{\"id\":\"" ++ agent_auth_method_id ++ "\",\"name\":");
-    try writeJsonStr(instruction, w);
+    try writeJsonStr(if (blocked != null) "Vercel AI Gateway sign-in unavailable" else offer.login.agentName(), w);
     try w.writeAll(",\"description\":");
-    try writeJsonStr(instruction, w);
+    try writeJsonStr(if (blocked) |block| block.reason() else offer.login.instruction(), w);
     try w.writeByte('}');
-    if (offer.client_terminal_auth) {
+    if (offer.client_terminal_auth and offer.login == .vercel) {
         try w.writeAll(",{\"id\":\"" ++ terminal_auth_method_id ++ "\",\"name\":");
-        try writeJsonStr(offer.login.terminalName(), w);
+        try writeJsonStr(terminal_auth_name, w);
         try w.writeAll(",\"description\":");
-        try writeJsonStr(offer.login.terminalDescription(), w);
+        try writeJsonStr(terminal_auth_description, w);
         try w.writeAll(",\"type\":\"terminal\",\"args\":[");
-        for (offer.login.terminalArgs(), 0..) |arg, i| {
+        for (terminal_auth_args, 0..) |arg, i| {
             if (i > 0) try w.writeByte(',');
             try writeJsonStr(arg, w);
         }
@@ -845,7 +862,7 @@ test "initialize offers only the agent auth method without auth.terminal" {
     defer out.deinit();
     try writeAuthMethods(&out.writer, .{});
     try std.testing.expectEqualStrings(
-        "[{\"id\":\"lia-login\",\"name\":\"" ++ vercel_help ++ "\",\"description\":\"" ++ vercel_help ++ "\"}]",
+        "[{\"id\":\"lia-login\",\"name\":\"Sign in to Vercel AI Gateway\",\"description\":\"" ++ vercel_help ++ "\"}]",
         out.written(),
     );
 
@@ -867,12 +884,23 @@ test "initialize adds the terminal auth method only with auth.terminal" {
     try std.testing.expect(methods[0].object.get("type") == null);
     const terminal = methods[1].object;
     try std.testing.expectEqualStrings("lia-login-api-key", terminal.get("id").?.string);
+    try std.testing.expectEqualStrings("Use a Vercel AI Gateway API key", terminal.get("name").?.string);
     try std.testing.expectEqualStrings("terminal", terminal.get("type").?.string);
     const args = terminal.get("args").?.array.items;
     try std.testing.expectEqual(@as(usize, 3), args.len);
     try std.testing.expectEqualStrings("login", args[0].string);
     try std.testing.expectEqualStrings("vercel", args[1].string);
     try std.testing.expectEqualStrings("--api-key", args[2].string);
+}
+
+test "a configured provider is offered no Vercel sign-in or API key method" {
+    const alloc = std.testing.allocator;
+    const parsed = try initializeAuthMethodsAlloc(alloc, .{ .login = .configured, .client_terminal_auth = true, .sign_in_block = .home_unavailable });
+    defer parsed.deinit();
+    const methods = parsed.value.object.get("authMethods").?.array.items;
+    try std.testing.expectEqual(@as(usize, 1), methods.len);
+    try std.testing.expectEqualStrings("Set the configured provider's API key", methods[0].object.get("name").?.string);
+    try std.testing.expect(std.mem.find(u8, methods[0].object.get("description").?.string, "settings.json") != null);
 }
 
 test "AUTH_REQUIRED data carries the same auth methods" {

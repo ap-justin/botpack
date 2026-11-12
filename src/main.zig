@@ -807,6 +807,7 @@ test {
     _ = @import("gateway/json_depth.zig");
     _ = @import("acp/prompt.zig");
     _ = @import("acp/server.zig");
+    _ = @import("acp/sign_in.zig");
     _ = @import("acp/libfx_hooks.zig");
     _ = @import("acp/types.zig");
     _ = @import("acp/mcp_servers.zig");

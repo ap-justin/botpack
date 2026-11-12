@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LIA_BIN, runLia } from "../evals/eval-helpers";
 import { savedText } from "./saved-sessions";
-import { fakeGatewayTitleDefault, TITLE_GENERATION_MARKER } from "./fake-gateway";
+import { acpSpawnEnv, fakeGatewayTitleDefault, TITLE_GENERATION_MARKER } from "./fake-gateway";
 
 const TIMEOUT = 20_000;
 const FETCH_URL = "https://example.com/docs";
@@ -224,7 +224,7 @@ class AcpClient {
 
   static create(cwd: string, env: Record<string, string | undefined>) {
     const definedEnv = Object.fromEntries(
-      Object.entries({ ...process.env, NO_COLOR: "1", ...env }).filter(
+      Object.entries(acpSpawnEnv({ NO_COLOR: "1", ...env })).filter(
         (entry): entry is [string, string] => entry[1] !== undefined,
       ),
     );

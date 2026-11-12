@@ -78,11 +78,27 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run lia");
     run_step.dependOn(&run_cmd.step);
 
+    const test_filters = b.option(
+        []const []const u8,
+        "test-filter",
+        "Run only the lia unit tests whose names contain this text; fails when none does",
+    ) orelse &.{};
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
+        .filters = test_filters,
+        .test_runner = if (test_filters.len > 0) .{
+            .path = b.path("src/filtered_test_runner.zig"),
+            .mode = .server,
+        } else null,
     });
+    if (test_filters.len > 0) {
+        exe_tests.root_module.addAnonymousImport("zig_test_runner", .{
+            .root_source_file = std.Build.LazyPath.zig_lib.path(b, "compiler/test_runner.zig"),
+        });
+    }
     const run_exe_tests = b.addRunArtifact(exe_tests);
     run_exe_tests.step.dependOn(b.getInstallStep());
+    b.step("test-lia", "Run lia's unit tests, without the session manager's").dependOn(&run_exe_tests.step);
     // Tests launch the installed lia binary, and the session boundary test
     // walks the source tree.
     const test_paths = b.addOptions();
