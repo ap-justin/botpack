@@ -121,8 +121,8 @@ pub fn handleNewLibfxSession(
     alloc: Allocator,
     msg: *jsonrpc.Message,
 ) !void {
-    // Checked before the active session is released, so a bad request
-    // leaves it in place.
+    // Checked before the running turn ends and the active session is
+    // released, so a bad request leaves both in place.
     const requested = requestedLibfxSessionId(alloc, msg.params_raw) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.InvalidSessionId => return state.writer.writeError(alloc, msg.id, .{
@@ -136,16 +136,15 @@ pub fn handleNewLibfxSession(
         error.OutOfMemory => return error.OutOfMemory,
         else => return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.invalid_params, .message = "Invalid hooks" }),
     };
+    // The turn's thread reads the session released below.
+    server.cancelAndReapActivePrompt(state);
     try server.releaseActiveSession(state);
     requested_owned = false;
     const session_id = requested orelse try session_store.generateSessionId(alloc);
     var session_id_owned = true;
     defer if (session_id_owned) alloc.free(session_id);
-    // As in `startV2Session`: applied once the session is active. libfx/new
-    // does not end a running turn, whose thread may still read the
-    // connection's model, so it leaves the pick to the next session.
-    const turn_running = state.active_prompt != null;
-    const picked_model = if (turn_running) null else acp_sign_in.modelForSession(state, state.workspace_root);
+    // As in `startV2Session`: applied once the session is active.
+    const picked_model = acp_sign_in.modelForSession(state, state.workspace_root);
     var picked_model_owned = true;
     defer if (picked_model_owned) if (picked_model) |picked| picked.deinit(state.alloc);
     const model = try alloc.dupe(u8, if (picked_model) |picked| picked.selected else state.selected_model);
@@ -182,7 +181,7 @@ pub fn handleNewLibfxSession(
     model_owned = false;
     session_rt_owned = false;
     picked_model_owned = false;
-    if (!turn_running) acp_sign_in.sessionActivated(state, picked_model);
+    acp_sign_in.sessionActivated(state, picked_model);
     try writeNewSessionResponse(state, alloc, msg, session_id, observer_hooks);
 }
 
@@ -3171,7 +3170,7 @@ test "libfx/new is the first session after a sign-in: it takes its folder's mode
     try std.testing.expect(state.sign_in_root == null);
 }
 
-test "a libfx/new that fails leaves the connection's model and the sign-in's folder for the next session" {
+test "a libfx/new that fails leaves the running turn, the connection's model and the sign-in's folder for the next session" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -3185,32 +3184,76 @@ test "a libfx/new that fails leaves the connection's model and the sign-in's fol
     defer env.deinit();
     var capture = try tmp.dir.createFile(io_mod.getIo(), "libfx.jsonl", .{ .read = true });
     defer capture.close(io_mod.getIo());
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-    const settings = try arena.print("{{\"workspaces\":{{\"{s}\":{{\"models\":{{\"gateway\":\"openai/z-libfx-folder\"}}}}}}}}", .{workspace_path});
+    const settings = try alloc.print("{{\"workspaces\":{{\"{s}\":{{\"models\":{{\"gateway\":\"openai/z-libfx-folder\"}}}}}}}}", .{workspace_path});
+    defer alloc.free(settings);
     try tmp.dir.writeFile(io_mod.getIo(), .{ .sub_path = "home/.lia/settings.json", .data = settings });
-    var state = try initAcpSessionTestState(arena, workspace_path, capture);
+    var state = try initAcpSessionTestState(alloc, workspace_path, capture);
     defer state.deinit();
     state.cfg.home_override = home_path;
     state.provider = .gateway;
-    state.sign_in_root = try arena.dupe(u8, "/the-folder-the-sign-in-read");
+    // libfx/new is served only by the minimal kernel, whose cancel also ends
+    // the session's steering.
+    state.cfg.minimal_kernel = true;
+
+    var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "libfx/new", .params_raw = "{}" };
+    try handleNewLibfxSession(&state, alloc, &msg);
+    // A sign-in made while that session is open.
+    state.sign_in_root = try alloc.dupe(u8, "/the-folder-the-sign-in-read");
+    var turn = SessionReadingTurn.init(&state);
+    try server.startPromptForTest(&state, SessionReadingTurn.run, .{&turn});
+    defer server.cancelAndReapActivePrompt(&state);
 
     for ([_][]const u8{ "{\"sessionId\":\"a/b\"}", "{\"hooks\":42}" }) |params| {
-        var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "libfx/new", .params_raw = params };
-        try handleNewLibfxSession(&state, arena, &msg);
-        try std.testing.expect(state.active_session == null);
+        msg = .{ .id = .{ .integer = 2 }, .method = "libfx/new", .params_raw = params };
+        try handleNewLibfxSession(&state, alloc, &msg);
+        try std.testing.expect(state.active_prompt != null);
+        try std.testing.expect(!state.active_session.?.cancel_flag.load(.seq_cst));
+        try std.testing.expectEqual(turn.session_id.ptr, state.active_session.?.session_id.ptr);
         try std.testing.expectEqualStrings("test/model", state.selected_model);
         try std.testing.expectEqualStrings("test/model", state.configured_model);
         try std.testing.expectEqualStrings("/the-folder-the-sign-in-read", state.sign_in_root orelse "");
     }
-    var msg = jsonrpc.Message{ .id = .{ .integer = 2 }, .method = "libfx/new", .params_raw = "{}" };
-    try handleNewLibfxSession(&state, arena, &msg);
+    msg = .{ .id = .{ .integer = 3 }, .method = "libfx/new", .params_raw = "{}" };
+    try handleNewLibfxSession(&state, alloc, &msg);
+    try std.testing.expect(state.active_prompt == null);
+    try std.testing.expectEqualStrings("test/model", turn.seenModel());
     try std.testing.expectEqualStrings("openai/z-libfx-folder", state.selected_model);
     try std.testing.expect(state.sign_in_root == null);
 }
 
-test "a libfx/new while a turn runs keeps the connection's model strings and the sign-in's folder for the next session" {
+/// A turn that reads its session as a prompt's thread does: the model and
+/// id it borrowed at the start, and `state.active_session` re-read unlocked
+/// until that session is cancelled.
+const SessionReadingTurn = struct {
+    state: *const server.ServerState,
+    session_id: []const u8,
+    model: []const u8,
+    seen_model: [64]u8 = undefined,
+    seen_model_len: usize = 0,
+    ended_in_own_session: bool = false,
+
+    fn init(state: *const server.ServerState) SessionReadingTurn {
+        const session = &state.active_session.?;
+        return .{ .state = state, .session_id = session.session_id, .model = session.model };
+    }
+
+    fn run(self: *SessionReadingTurn) void {
+        while (true) {
+            if (self.state.active_session) |*session| if (session.cancel_flag.load(.seq_cst)) break;
+            io_mod.sleep(std.time.ns_per_ms);
+        }
+        self.seen_model_len = @min(self.model.len, self.seen_model.len);
+        @memcpy(self.seen_model[0..self.seen_model_len], self.model[0..self.seen_model_len]);
+        const session = &self.state.active_session.?;
+        self.ended_in_own_session = std.mem.eql(u8, session.session_id, self.session_id);
+    }
+
+    fn seenModel(self: *const SessionReadingTurn) []const u8 {
+        return self.seen_model[0..self.seen_model_len];
+    }
+};
+
+test "libfx/new ends the running turn before it frees the turn's session, then takes the sign-in folder's model" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -3224,43 +3267,37 @@ test "a libfx/new while a turn runs keeps the connection's model strings and the
     defer env.deinit();
     var capture = try tmp.dir.createFile(io_mod.getIo(), "libfx.jsonl", .{ .read = true });
     defer capture.close(io_mod.getIo());
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-    const settings = try arena.print("{{\"workspaces\":{{\"{s}\":{{\"models\":{{\"gateway\":\"openai/z-libfx-folder\"}}}}}}}}", .{workspace_path});
+    const settings = try alloc.print("{{\"workspaces\":{{\"{s}\":{{\"models\":{{\"gateway\":\"openai/z-libfx-folder\"}}}}}}}}", .{workspace_path});
+    defer alloc.free(settings);
     try tmp.dir.writeFile(io_mod.getIo(), .{ .sub_path = "home/.lia/settings.json", .data = settings });
-    var state = try initAcpSessionTestState(arena, workspace_path, capture);
+    // Not an arena: the session's strings are really freed, so a turn that
+    // reads them after the free sees the allocator's poison.
+    var state = try initAcpSessionTestState(alloc, workspace_path, capture);
     defer state.deinit();
     state.cfg.home_override = home_path;
     state.provider = .gateway;
-    state.sign_in_root = try arena.dupe(u8, "/the-folder-the-sign-in-read");
-    // libfx/new is served only by the minimal kernel.
+    // libfx/new is served only by the minimal kernel, whose cancel also ends
+    // the session's steering.
     state.cfg.minimal_kernel = true;
-    const Turn = struct {
-        fn run(release: *const std.atomic.Value(bool)) void {
-            while (!release.load(.seq_cst)) io_mod.sleep(std.time.ns_per_ms);
-        }
-    };
-    var release = std.atomic.Value(bool).init(false);
-    try server.startPromptForTest(&state, Turn.run, .{&release});
-    defer server.cancelAndReapActivePrompt(&state);
-    defer release.store(true, .seq_cst);
-    const selected = state.selected_model;
-    const configured = state.configured_model;
 
     var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "libfx/new", .params_raw = "{}" };
-    try handleNewLibfxSession(&state, arena, &msg);
-    try std.testing.expectEqual(selected.ptr, state.selected_model.ptr);
-    try std.testing.expectEqual(configured.ptr, state.configured_model.ptr);
-    try std.testing.expectEqualStrings("test/model", state.active_session.?.model);
-    try std.testing.expectEqualStrings("/the-folder-the-sign-in-read", state.sign_in_root orelse "");
+    try handleNewLibfxSession(&state, alloc, &msg);
+    // A sign-in made while that session is open.
+    state.sign_in_root = try alloc.dupe(u8, "/the-folder-the-sign-in-read");
+    var turn = SessionReadingTurn.init(&state);
+    try server.startPromptForTest(&state, SessionReadingTurn.run, .{&turn});
+    defer server.cancelAndReapActivePrompt(&state);
 
-    release.store(true, .seq_cst);
-    server.cancelAndReapActivePrompt(&state);
     msg.id = .{ .integer = 2 };
-    try handleNewLibfxSession(&state, arena, &msg);
-    try std.testing.expectEqualStrings("openai/z-libfx-folder", state.selected_model);
+    try handleNewLibfxSession(&state, alloc, &msg);
+    const turn_ended = state.active_prompt == null;
+    server.cancelAndReapActivePrompt(&state);
+
+    try std.testing.expectEqualStrings("test/model", turn.seenModel());
+    try std.testing.expect(turn.ended_in_own_session);
+    try std.testing.expect(turn_ended);
     try std.testing.expectEqualStrings("openai/z-libfx-folder", state.active_session.?.model);
+    try std.testing.expectEqualStrings("openai/z-libfx-folder", state.selected_model);
     try std.testing.expect(state.sign_in_root == null);
 }
 
