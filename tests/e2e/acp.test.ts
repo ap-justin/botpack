@@ -2712,8 +2712,7 @@ describe("acp: model-independent", () => {
       try {
         sendAuthenticate(2);
         await readResponse(client, 2);
-        // Nothing approves the code; the worker ends the sign-in at its expiry,
-        // and the kept failure then lasts one more lifetime.
+        // Nothing approves the code; the worker ends the sign-in at its expiry.
         const expired = await askUntilSignInFailure(
           3,
           250,
