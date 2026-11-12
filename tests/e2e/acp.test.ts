@@ -3858,8 +3858,8 @@ describe("acp: model-independent", () => {
         };
         expect(bodyText(0)).toContain(modelLine);
         // The second turn replays the first turn's context: one model line. An update note
-        // repeats the whole context, model line included, so a second line means a note. Zero
-        // notes isn't asserted: a date or branch change between the turns legitimately adds one.
+        // repeats the whole context, model line included, so this also asserts the second turn adds
+        // none; a run crossing midnight UTC changes `date_utc`, adds a note and fails here.
         expect(bodyText(2).split(modelLine)).toHaveLength(2);
         expect(client.stderr).toBe("");
       } finally {
