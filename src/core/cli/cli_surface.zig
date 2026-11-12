@@ -1305,6 +1305,7 @@ fn runNonInteractiveWithDeps(
                 .provider_set = cfg.provider_set,
                 .process_provider = cfg.process_provider,
                 .secret_store = cfg.secret_store,
+                .url_opener = cfg.url_opener,
                 .prompt_policy = cfg.prompt_policy,
                 .ignored_list_entries = cfg.ignored_list_entries,
                 .max_list_entries = cfg.max_list_entries,
