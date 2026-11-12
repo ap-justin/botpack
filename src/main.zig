@@ -809,6 +809,7 @@ test {
     _ = @import("acp/server.zig");
     _ = @import("acp/libfx_hooks.zig");
     _ = @import("acp/types.zig");
+    _ = @import("acp/mcp_servers.zig");
     _ = @import("core/mcp_host/model.zig");
     _ = @import("core/agent/agent_runtime.zig");
     _ = @import("core/agent/execution_memory.zig");

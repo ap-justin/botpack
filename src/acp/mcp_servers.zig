@@ -119,6 +119,21 @@ pub fn duplicateNameMessage(alloc: Allocator, configs: *const OwnedServerConfigs
     return null;
 }
 
+/// Gives each client-supplied stdio server without its own working directory
+/// the session's workspace: ACP carries no per-server cwd, and servers such as
+/// doop-mcp find their project from the process cwd.
+pub fn startStdioServersInWorkspace(
+    alloc: Allocator,
+    configs: *OwnedServerConfigs,
+    workspace_root: []const u8,
+) Allocator.Error!void {
+    for (configs.items.items) |*config| {
+        if (config.source != .acp or config.transport != .stdio) continue;
+        if (config.command == null or config.cwd != null) continue;
+        config.cwd = try alloc.dupe(u8, workspace_root);
+    }
+}
+
 /// Starts a host for the session's servers; each server starts when the
 /// model first needs it. A failed result owns its rendered diagnostic.
 pub fn prepare(
@@ -535,6 +550,39 @@ test "ACP MCP servers with one name are named in the refusal" {
     const message = (try duplicateNameMessage(alloc, &repeated)).?;
     defer alloc.free(message);
     try std.testing.expectEqualStrings("MCP server names must be unique: two appears more than once", message);
+}
+
+test "ACP stdio MCP servers without a cwd start in the session workspace" {
+    const alloc = std.testing.allocator;
+    var configs = try parse(alloc,
+        \\{"mcpServers":[
+        \\{"name":"bot","command":"/bin/bot","args":[],"env":[]},
+        \\{"type":"http","name":"remote","url":"https://example.test/mcp","headers":[]},
+        \\{"type":"acp","name":"carried","serverId":"srv-1"}
+        \\]}
+    );
+    defer configs.deinit(alloc);
+    try configs.items.ensureUnusedCapacity(alloc, 2);
+    configs.items.appendAssumeCapacity(.{
+        .name = try alloc.dupe(u8, "explicit"),
+        .source = .acp,
+        .command = try alloc.dupe(u8, "/bin/explicit"),
+        .cwd = try alloc.dupe(u8, "/elsewhere"),
+    });
+    configs.items.appendAssumeCapacity(.{
+        .name = try alloc.dupe(u8, "profile"),
+        .source = .profile,
+        .command = try alloc.dupe(u8, "/bin/profile"),
+    });
+
+    try startStdioServersInWorkspace(alloc, &configs, "/work/bot");
+
+    const items = configs.items.items;
+    try std.testing.expectEqualStrings("/work/bot", items[0].cwd.?);
+    try std.testing.expect(items[1].cwd == null);
+    try std.testing.expect(items[2].cwd == null);
+    try std.testing.expectEqualStrings("/elsewhere", items[3].cwd.?);
+    try std.testing.expect(items[4].cwd == null);
 }
 
 test "ACP MCP parser rejects invalid remote transports" {

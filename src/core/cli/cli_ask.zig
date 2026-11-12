@@ -2296,6 +2296,7 @@ fn appendRuntimeContext(raw_ctx: *anyopaque, arena: Allocator, messages: *std.Ar
         .access_scope = ctx.workspace_access.scope(ctx.workspace_root),
         .interactive = false,
         .permission_mode = ctx.permission_mode,
+        .model = if (ctx.model.len > 0) ctx.model else null,
     }, arena, messages);
 }
 
@@ -4904,6 +4905,53 @@ test "lia ask deps validate malformed registered calls" {
     });
     defer alloc.free(result.failure);
     try std.testing.expectEqualStrings("web_fetch field \"url\" must be a string", result.failure);
+}
+
+const TestTransientModelFixture = struct {
+    var calls: usize = 0;
+    var model: ?[]const u8 = null;
+
+    fn appendTransient(input: context_contract.TransientContextInput, _: Allocator, _: *std.ArrayList(ChatMessage)) context_contract.ProviderError!void {
+        calls += 1;
+        model = input.model;
+    }
+};
+
+const test_transient_model_context_registry = context_contract.Registry{ .default_provider = .{
+    .id = "test.transient_model",
+    .gather_project_context_fn = testNoProjectContext,
+    .select_applicable_project_context_fn = context_contract.selectNoApplicableProjectContext,
+    .append_static_fn = testNoStaticContext,
+    .append_transient_fn = TestTransientModelFixture.appendTransient,
+} };
+
+test "lia ask hands its model to the turn context and leaves an unset model out" {
+    const alloc = std.testing.allocator;
+    var stdout_capture = TestCapture{};
+    defer stdout_capture.deinit(alloc);
+    var stderr_capture = TestCapture{};
+    defer stderr_capture.deinit(alloc);
+    var deps = testPromptRunDeps(&stdout_capture, &stderr_capture, testPresentKeyStartup);
+    deps.context_registry = test_transient_model_context_registry;
+    var ctx = AskContext.init(alloc, testConfig(), deps, "/tmp/workspace");
+    defer ctx.deinit();
+    var arena_state = std.heap.ArenaAllocator.init(alloc);
+    defer arena_state.deinit();
+    var messages: std.ArrayList(ChatMessage) = .empty;
+
+    TestTransientModelFixture.calls = 0;
+    TestTransientModelFixture.model = "stale";
+    // AskContext.init seeds the model from the config default; clear it to
+    // cover the unset case.
+    ctx.model = "";
+    try appendRuntimeContext(&ctx, arena_state.allocator(), &messages);
+    try std.testing.expectEqual(@as(usize, 1), TestTransientModelFixture.calls);
+    try std.testing.expect(TestTransientModelFixture.model == null);
+
+    ctx.model = "anthropic/claude-sonnet-5";
+    try appendRuntimeContext(&ctx, arena_state.allocator(), &messages);
+    try std.testing.expectEqual(@as(usize, 2), TestTransientModelFixture.calls);
+    try std.testing.expectEqualStrings("anthropic/claude-sonnet-5", TestTransientModelFixture.model.?);
 }
 
 test "CLI prompt projection configures web search then blocks native execution" {
