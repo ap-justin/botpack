@@ -32,7 +32,6 @@ import { copyV1Fixture, logLines, savedSessionIds, savedText, sessionDir } from 
 import {
   FAKE_GATEWAY_MODEL,
   guardIssuerRequests,
-  guardIssuerUrl,
   acpSpawnEnv,
   fakeGatewayFinalText as finalText,
   heldFakeGatewayFinalText,
@@ -2852,12 +2851,15 @@ describe("acp: model-independent", () => {
   test(
     "ACP spawn environment keeps a loopback issuer a test names and never lets undefined or a remote host stand",
     () => {
-      const loopback = "http://127.0.0.1:43210";
-      expect(acpSpawnEnv({ LIA_TEST_OAUTH_ISSUER_URL: loopback }, {}).LIA_TEST_OAUTH_ISSUER_URL).toBe(loopback);
-      expect(acpSpawnEnv({}, { LIA_TEST_OAUTH_ISSUER_URL: loopback }).LIA_TEST_OAUTH_ISSUER_URL).toBe(loopback);
+      for (const loopback of ["http://127.0.0.1:43210", "http://localhost:43210", "http://[::1]:43210", "http://LOCALHOST:43210", "http://127.0.0.1:43210/"]) {
+        expect(acpSpawnEnv({ LIA_TEST_OAUTH_ISSUER_URL: loopback }, {}).LIA_TEST_OAUTH_ISSUER_URL).toBe(loopback);
+        expect(acpSpawnEnv({}, { LIA_TEST_OAUTH_ISSUER_URL: loopback }).LIA_TEST_OAUTH_ISSUER_URL).toBe(loopback);
+      }
       for (const issuer of [undefined, "", "https://vercel.com", "http://example.com:80", "not a url", "http://localhost", "https://127.0.0.1:9", "http://127.0.0.1:9/path", "http://user@127.0.0.1:9"]) {
         const guarded = acpSpawnEnv({ LIA_TEST_OAUTH_ISSUER_URL: issuer }, { LIA_TEST_OAUTH_ISSUER_URL: issuer });
-        expect(guarded.LIA_TEST_OAUTH_ISSUER_URL).toBe(guardIssuerUrl());
+        // The guard's port is chosen at run time; what is fixed is a bare loopback origin that is not the issuer asked for.
+        expect(guarded.LIA_TEST_OAUTH_ISSUER_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+        expect(guarded.LIA_TEST_OAUTH_ISSUER_URL).not.toBe(issuer);
         expect(guarded.LIA_NO_OPEN_BROWSER).toBe("1");
       }
       expect(acpSpawnEnv({ LIA_NO_OPEN_BROWSER: undefined }, {}).LIA_NO_OPEN_BROWSER).toBe("1");

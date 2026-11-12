@@ -26,10 +26,11 @@ export function guardIssuerRequests(): readonly string[] {
   return guardIssuerPaths;
 }
 
-// The bare http origin with a port that the product accepts as a test issuer
-// (isLoopbackHttpUrl in src/core/auth/oauth_session.zig).
+// The bare http origin with a port that the product accepts as a test issuer,
+// once it trims a trailing slash (selectIssuerUrl and isLoopbackHttpUrl in
+// src/core/auth/oauth_session.zig).
 function isLoopbackUrl(value: string): boolean {
-  return /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+$/i.test(value);
+  return /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+\/?$/i.test(value);
 }
 
 // The environment for any test spawn of `lia acp`, so that no test can reach vercel.com.
