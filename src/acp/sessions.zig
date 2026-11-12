@@ -867,6 +867,7 @@ fn handleRestoreSession(
             state.subagent_authority_mutex.unlock(io_mod.getIo());
             if (previous_host) |h| h.stop();
             server.enableSubagentHost(state);
+            acp_sign_in.sessionActivated(state, null);
             // One map, so a recovered read can name a call from an earlier turn.
             var sources: runtime_tool_presentation.ReplayedSavedOutputSources = .{};
             defer sources.deinit(alloc);
@@ -982,6 +983,9 @@ fn handleRestoreSession(
     model_owned = false;
     session_rt_owned = false;
     session_host_owned = false;
+    // A restored session keeps its own model, and still counts as the first
+    // session after a sign-in.
+    acp_sign_in.sessionActivated(state, null);
     // One map, so a recovered read can name a call from an earlier turn.
     var sources: runtime_tool_presentation.ReplayedSavedOutputSources = .{};
     defer sources.deinit(alloc);
@@ -3070,6 +3074,56 @@ test "ACP ultrafast new load and resume preserve configured baselines" {
                 const saved = (try resumed.v2.?.currentPreferences(arena)).ultrafast_mode;
                 try std.testing.expectEqual(baseline, saved);
             }
+        }
+    }
+}
+
+test "a loaded or resumed session is the first session after a sign-in: it spends the sign-in's folder and keeps the connection's model" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
+    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
+    const home_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
+    defer alloc.free(home_path);
+    const workspace_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
+    defer alloc.free(workspace_path);
+    const env = try AcpSessionTestHome.install(alloc, home_path);
+    defer env.deinit();
+    var capture = try tmp.dir.createFile(io_mod.getIo(), "restore.jsonl", .{ .read = true });
+    defer capture.close(io_mod.getIo());
+    var arena_state = std.heap.ArenaAllocator.init(alloc);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    // A model this folder would pick, were the connection's model picked again.
+    const settings = try arena.print("{{\"workspaces\":{{\"{s}\":{{\"models\":{{\"gateway\":\"openai/z-loaded-folder\"}}}}}}}}", .{workspace_path});
+    try tmp.dir.writeFile(io_mod.getIo(), .{ .sub_path = "home/.lia/settings.json", .data = settings });
+    var state = try initAcpSessionTestState(arena, workspace_path, capture);
+    defer state.deinit();
+    state.cfg.allow_acp_mcp = false;
+    state.cfg.home_override = home_path;
+    state.provider = .gateway;
+    state.sessions_v2 = try session_adapter.Store.open(arena, home_path);
+    var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "session/new", .params_raw = "{\"mcpServers\":[]}" };
+    try handleNewSession(&state, arena, &msg);
+    try state.active_session.?.v2.?.commitTurn(.{ .assistant = .{
+        .user = .{ .text = @constCast("saved request") },
+        .assistant = @constCast("saved answer"),
+    } }, types.ConversationLanguage.default());
+    const id = try arena.dupe(u8, state.active_session.?.session_id);
+    msg.params_raw = try arena.print("{{\"sessionId\":\"{s}\",\"mcpServers\":[]}}", .{id});
+
+    // Released first, the session is read back from its record; otherwise
+    // the active session is attached again.
+    for ([_]bool{ true, false }) |released| {
+        inline for (.{ handleLoadSession, handleResumeSession }) |restore| {
+            if (released) try server.releaseActiveSession(&state);
+            state.sign_in_root = try arena.dupe(u8, "/the-folder-the-sign-in-read");
+            try restore(&state, arena, &msg);
+            try std.testing.expectEqualStrings(id, state.active_session.?.session_id);
+            try std.testing.expect(state.sign_in_root == null);
+            try std.testing.expectEqualStrings("test/model", state.selected_model);
+            try std.testing.expectEqualStrings("test/model", state.active_session.?.model);
         }
     }
 }

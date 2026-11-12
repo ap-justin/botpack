@@ -402,8 +402,8 @@ pub const ServerState = struct {
     /// `expires_at_ms` has passed.
     sign_in_failure: ?acp_sign_in.KeptFailure = null,
     /// The folder whose settings the last sign-in's profile switch read,
-    /// owned, until the next `session/new` has chosen its model from the
-    /// session's own folder.
+    /// owned, until the next session is active: a `session/new` picks its
+    /// model from the session's own folder, a load or resume keeps its own.
     sign_in_root: ?[]u8 = null,
     subagent_authority_mutex: std.Io.Mutex = .init,
     skills: skill_runtime.Runtime = .{},

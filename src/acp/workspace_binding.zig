@@ -6,7 +6,8 @@
 //! commands, project instructions, project skills, project MCP servers, and
 //! its session record. Connection settings such as model, provider,
 //! credentials, and permission policy stay as resolved at `initialize`, except
-//! that the first session after a sign-in picks its model from this folder.
+//! that a `session/new` that is the first session after a sign-in picks its
+//! model from this folder.
 
 const std = @import("std");
 const server = @import("server.zig");
