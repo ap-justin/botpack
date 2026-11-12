@@ -1586,6 +1586,7 @@ describe("acp: model-independent", () => {
     const gate = options.holdPolls ? new Promise<void>(resolve => { release = resolve; }) : undefined;
     let approved = !options.held;
     let tokenError = options.tokenError;
+    let deviceIssuedAt = 0;
     const teams = options.teams ?? [{ id: "team_123", slug: "vercel-labs", name: "Vercel Labs" }];
     const server = Bun.serve({
       hostname: "127.0.0.1",
@@ -1604,6 +1605,7 @@ describe("acp: model-independent", () => {
           });
         }
         if (url.pathname === "/oauth/device") {
+          deviceIssuedAt = Date.now();
           return Response.json({
             device_code: "fake-device-code",
             user_code: "ABCD-1234",
@@ -1637,6 +1639,10 @@ describe("acp: model-independent", () => {
       requests,
       get deviceRequests() {
         return requests.filter(path => path === "/oauth/device").length;
+      },
+      // Date.now() when the latest device code was served: the code's lifetime starts here.
+      get deviceIssuedAt() {
+        return deviceIssuedAt;
       },
       // Polls whose answer is on its way back to lia, after any hold.
       get answeredPolls() {
@@ -2706,7 +2712,6 @@ describe("acp: model-independent", () => {
       try {
         sendAuthenticate(2);
         await readResponse(client, 2);
-        const codeAnsweredAt = Date.now();
         // Nothing approves the code; the worker ends the sign-in at its expiry,
         // and the kept failure then lasts one more lifetime.
         const expired = await askUntilSignInFailure(
@@ -2714,8 +2719,9 @@ describe("acp: model-independent", () => {
           250,
           "The sign-in code expired before it was approved. Try again.",
         );
-        // An instant failure with the same message must not pass.
-        expect(Date.now() - codeAnsweredAt).toBeGreaterThanOrEqual(lifetimeSeconds * 1000 - 1000);
+        // An instant failure with the same message must not pass; the slack
+        // covers the worker's own tick, the lifetime runs from device issue.
+        expect(Date.now() - fixture.issuer.deviceIssuedAt).toBeGreaterThanOrEqual(lifetimeSeconds * 1000 - 1000);
         expect(expired.error.code).toBe(-32600);
         expect(expired.error.message).not.toContain("Vercel says");
         expect(fixture.issuer.deviceRequests).toBe(1);
