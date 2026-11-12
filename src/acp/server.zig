@@ -5248,6 +5248,89 @@ test "authenticate with lia-login runs the browser sign-in, saves it and adopts 
     const saved = try home.read(".lia/auth.json");
     defer secret.zeroAndFree(alloc, saved);
     try std.testing.expect(std.mem.find(u8, saved, "signed-in-refresh") != null);
+
+    // A later connection finds the saved sign-in and needs no new one.
+    freeSignInStateForTest(&state);
+    var later = LastFrame{};
+    state = signInPendingStateForTest(alloc, &later, &fake);
+    const later_stdout = try authenticateTrappedForTest(&state, home, acp_types.agent_auth_method_id);
+    defer alloc.free(later_stdout);
+    try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}\n", later.bytes());
+    try std.testing.expectEqual(@as(usize, 1), fake.token_polls);
+    try std.testing.expect(!state.auth_pending);
+}
+
+test "authenticate with lia-login answers a denied, expired or cancelled sign-in with an error" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const Case = struct { token_body: []const u8 = "", token_error: ?anyerror = null, message: []const u8 };
+    const cases = [_]Case{
+        .{ .token_body = "{\"error\":\"access_denied\"}", .message = "Sign-in to Vercel AI Gateway was denied." },
+        .{ .token_body = "{\"error\":\"expired_token\"}", .message = "The Vercel AI Gateway sign-in expired before it was approved. Try again." },
+        .{ .token_error = error.Cancelled, .message = "Sign-in to Vercel AI Gateway was cancelled." },
+    };
+    for (cases) |case| {
+        const home = try SignInTestHome.install(alloc, false);
+        defer home.deinit();
+        var fake: FakeVercelSignIn = .{ .token_disposition = .rejected, .token_body = case.token_body, .token_error = case.token_error };
+        defer fake.deinit(alloc);
+        var capture = LastFrame{};
+        var state = signInPendingStateForTest(alloc, &capture, &fake);
+
+        const stdout_bytes = try authenticateTrappedForTest(&state, home, acp_types.agent_auth_method_id);
+        defer alloc.free(stdout_bytes);
+
+        const parsed = try std.json.parseFromSlice(std.json.Value, alloc, capture.bytes(), .{});
+        defer parsed.deinit();
+        const err = parsed.value.object.get("error").?.object;
+        try std.testing.expectEqual(@as(i64, ErrorCode.invalid_request), err.get("code").?.integer);
+        try std.testing.expectEqualStrings(case.message, err.get("message").?.string);
+        try std.testing.expectEqual(@as(usize, 1), fake.token_polls);
+        try std.testing.expect(fake.opened_url == null);
+        try std.testing.expectEqualStrings("", stdout_bytes);
+        try std.testing.expect(state.auth_pending);
+        try std.testing.expectError(error.FileNotFound, home.tmp.dir.statFile(io_mod.getIo(), ".lia/auth.json", .{}));
+    }
+}
+
+test "authenticate with lia-login saves a sign-in with several teams but asks for lia teams" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, false);
+    defer home.deinit();
+    var fake: FakeVercelSignIn = .{ .teams_body = "{\"teams\":[{\"id\":\"team_a\",\"slug\":\"a\",\"name\":\"A\"}," ++
+        "{\"id\":\"team_b\",\"slug\":\"b\",\"name\":\"B\"}]}" };
+    defer fake.deinit(alloc);
+    var capture = LastFrame{};
+    var state = signInPendingStateForTest(alloc, &capture, &fake);
+    defer freeSignInStateForTest(&state);
+
+    const stdout_bytes = try authenticateTrappedForTest(&state, home, acp_types.agent_auth_method_id);
+    defer alloc.free(stdout_bytes);
+
+    try std.testing.expectEqualStrings("", stdout_bytes);
+    try std.testing.expect(std.mem.find(u8, capture.bytes(), sign_in_without_team_message) != null);
+    try std.testing.expect(state.auth_pending);
+    const saved = try home.read(".lia/auth.json");
+    defer secret.zeroAndFree(alloc, saved);
+    try std.testing.expect(std.mem.find(u8, saved, "signed-in-refresh") != null);
+}
+
+test "authenticate with lia-login-api-key runs no sign-in and still asks for a key" {
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, false);
+    defer home.deinit();
+    var fake: FakeVercelSignIn = .{};
+    defer fake.deinit(alloc);
+    var capture = LastFrame{};
+    var state = signInPendingStateForTest(alloc, &capture, &fake);
+
+    const stdout_bytes = try authenticateTrappedForTest(&state, home, acp_types.terminal_auth_method_id);
+    defer alloc.free(stdout_bytes);
+
+    try std.testing.expect(std.mem.find(u8, capture.bytes(), "\"code\":-32000") != null);
+    try std.testing.expectEqual(@as(usize, 0), fake.token_polls);
+    try std.testing.expect(state.auth_pending);
 }
 
 test "ACP AUTH_REQUIRED carries the initialize auth methods for the provider" {
