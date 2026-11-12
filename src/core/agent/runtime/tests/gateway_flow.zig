@@ -10012,10 +10012,12 @@ test "two turns of one session share the prompt prefix and the tool list" {
     // The old turn's history, up to its last request, is replayed unchanged.
     try expectPromptExtends(alloc, gateway.request_bodies.items[2], second_gateway.request_bodies.items[0]);
     // That replay carries the first request's runtime context, which names
-    // the model once: the unchanged model needs no update note.
+    // the model once, and the new turn adds no update note: the model and
+    // the rest of the context are unchanged.
     const model_line = "\\nmodel: anthropic/claude-opus-4.6\\n";
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, gateway.request_bodies.items[0], model_line));
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, second_gateway.request_bodies.items[0], model_line));
+    try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, second_gateway.request_bodies.items[0], "<lia-context-update>"));
 
     // The new turn starts with the list the last request of the old one ended
     // on, byte for byte.
