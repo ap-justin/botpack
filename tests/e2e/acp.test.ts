@@ -2708,6 +2708,42 @@ describe("acp: model-independent", () => {
   );
 
   test(
+    "ACP lia-login keeps the failure of a sign-in code with no lifetime until it is asked for",
+    async () => {
+      const fixture = await startSignIn({ held: true, expiresIn: 0 });
+      try {
+        sendAuthenticate(2);
+        expectSignInCode(await readResponse(client, 2), fixture.issuer.issuerUrl);
+        // The sign-in ends at once, with nobody waiting. Ask until the answer is
+        // the failure rather than the code still being polled.
+        let id = 3;
+        let failure: any;
+        await waitForCondition("the sign-in failure", () => {
+          if (failure) return true;
+          const reply = answerFrames(id - 1)[0];
+          if (id === 3 || reply) {
+            if (reply && !reply.error.message.includes("verify?user_code")) {
+              failure = reply;
+              return true;
+            }
+            sendAuthenticate(id++);
+          }
+          return false;
+        }, TIMEOUT);
+        expect(failure.error.code).toBe(-32600);
+        expect(failure.error.message).toContain("Could not reach Vercel to sign in");
+
+        // The failure was kept until asked for: no second code was issued first.
+        expect(fixture.issuer.deviceRequests).toBe(1);
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "ACP lia-login reports an expired_token answer from the issuer",
     async () => {
       const fixture = await startSignIn({ held: true });
