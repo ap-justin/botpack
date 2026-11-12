@@ -2257,6 +2257,42 @@ describe("acp: model-independent", () => {
   );
 
   test(
+    "ACP session/load after a sign-in keeps the connection's model, and a session/new in another folder keeps it too",
+    async () => {
+      const { fixture, project, other, launchModel, otherModel } = await signInBesideFolderModels();
+      try {
+        // A session saved in the project folder by an earlier connection.
+        const saver = await AcpClient.create({
+          cwd: project,
+          env: { ...fakeGatewayEnv(fixture.root, fixture.gateway), LIA_MODEL: launchModel },
+        });
+        let sessionId = "";
+        try {
+          await saver.request("initialize", { protocolVersion: 1 }, 1);
+          const saved = await saver.request("session/new", { cwd: project, mcpServers: [] }, 2) as any;
+          expect(saved.error).toBeUndefined();
+          sessionId = saved.result.sessionId;
+          const prompted = await saver.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "save this" }] }, 3) as any;
+          expect(prompted.error).toBeUndefined();
+        } finally {
+          await saver.close();
+        }
+
+        const loaded = await client.request("session/load", { sessionId, cwd: project, mcpServers: [] }, 4) as any;
+        expect(loaded.error).toBeUndefined();
+
+        // The load was the first session: the other folder's model is not picked.
+        const created = await client.request("session/new", { cwd: other, mcpServers: [] }, 5) as any;
+        expect(modelOf(created)).not.toBe(otherModel);
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "ACP authenticate lia-login with several teams asks for lia teams, picks none and does not sign in again",
     async () => {
       const fixture = await startSignIn({
