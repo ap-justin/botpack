@@ -6,17 +6,17 @@ lia's first release, based on fx 0.0.16. Linux builds for x86_64 and arm64.
 
 ### Changes from fx
 
-- The command is `lia`. Settings live in `~/.lia`, environment variables start with `LIA_`, and commands run with `AI_AGENT=lia`. Sessions saved by fx still load.
+- The command is `lia`. Settings live in `~/.lia`, environment variables start with `LIA_`, and commands run with `AI_AGENT=lia`. lia doesn't read `~/.fx`: sign-in, settings and MCP servers start fresh, and sessions saved by fx load once copied into `~/.lia`.
 - `lia acp` answers with ACP v1 stop reasons. A content-filtered turn answers `refusal`, and a failed turn answers once, with the notice the user saw.
-- A missing or rejected Vercel AI Gateway key answers `AUTH_REQUIRED` with the sign-in methods. A configured provider with no key gets a plain error instead. `initialize` advertises a terminal sign-in method.
+- A missing Vercel AI Gateway key, or one the gateway rejects during a prompt, answers `AUTH_REQUIRED` with the sign-in methods. A configured provider with no key gets a plain error instead. `initialize` advertises a terminal sign-in method to clients that support terminal auth.
 - MCP servers behind a proxy that drops the newer handshake's headers fall back to the older one, and the error names the real reason when both fail.
 - MCP versions are negotiated with servers that refuse lia's preferred one.
 - An MCP tool called by its server-qualified name, such as `github.create_issue`, runs. `lia mcp call` accepts the same names.
 - An object argument sent as a JSON string is parsed before the MCP tool is called.
-- Context notices stay out of agent replies over ACP. Each MCP server's instructions are sent once, not once per tool.
-- Cached Anthropic requests stay on one provider, and loaded MCP tools carry across turns, so the prompt cache is reused.
+- Context notices stay out of agent replies over ACP. Each MCP server's instructions are sent once per load, not once per tool.
+- Cached Anthropic requests go to Anthropic first unless you set a provider order, and loaded MCP tools carry across turns, so the prompt cache is reused.
 - A bad MCP server environment name is rejected with an error instead of stopping every session.
-- Removed: the terminal UI, ChatGPT and Grok sign-in, the Node and WebAssembly SDKs, the Slack install, fx's own GitHub publishing, and auto-upgrade.
+- Removed: the terminal UI, ChatGPT and Grok sign-in, the Node and WebAssembly SDKs, the Slack install, fx's own GitHub publishing, and `lia upgrade` with auto-upgrade.
 
 # fx
 
