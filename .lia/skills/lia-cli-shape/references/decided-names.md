@@ -13,7 +13,7 @@ Names the maintainers already settled. Reuse them; don't add another spelling. "
 
 | Surface | Name |
 |---|---|
-| Setting | `permission_mode`: `ask`, `auto`, or `full-access` (legacy `yolo` is read until lia 0.0.18, never written) |
+| Setting | `permission_mode`: `ask`, `auto`, or `full-access` (legacy `yolo` is read until lia 0.2.0, never written) |
 | Flag | `--permission-mode <mode>`, with aliases `--ask`, `--auto`, `--full-access`, `--yolo` |
 | Env var | `LIA_PERMISSION_MODE` |
 | Read-only view | `lia permissions` |
@@ -26,7 +26,7 @@ Names the maintainers already settled. Reuse them; don't add another spelling. "
 | `--workspace` | This folder's entry in the profile |
 | `--project` | A committed file in the repo, only for commands that write one (`lia mcp` and `.mcp.json`) |
 
-`lia mcp --profile` still works as `--global`; it warns and stops working in lia 0.0.18, and lia always shows the new word.
+`lia mcp --profile` still works as `--global`; it warns and stops working in lia 0.2.0, and lia always shows the new word.
 
 ## Settings and their surfaces
 
@@ -34,7 +34,7 @@ Names the maintainers already settled. Reuse them; don't add another spelling. "
 |---|---|
 | Settings command | `lia config list\|get\|set\|unset\|schema`; `--global`, `--workspace` (list and get), `--show-origin` |
 | Generic per-run override | `lia ask --config key=value`, with the keys `lia config set` takes |
-| Sound | `sound.turn_end`, `sound.attention_required`, `sound.max` (the older `notifications.*` is read until lia 0.0.18); `LIA_SOUND` is a preset for the group |
+| Sound | `sound.turn_end`, `sound.attention_required`, `sound.max` (the older `notifications.*` is read until lia 0.2.0); `LIA_SOUND` is a preset for the group |
 | Experiments | `experimental.<name>`; none today |
 | Home | `LIA_HOME` (default `~/.lia`) |
 | Test hooks | `LIA_TEST_*` |
@@ -46,7 +46,7 @@ Names the maintainers already settled. Reuse them; don't add another spelling. "
 | Concept | Name |
 |---|---|
 | Sign in, including pasting an AI Gateway key | `lia login [vercel]` |
-| Paste an AI Gateway API key | `lia login vercel --api-key`. `lia setup` warns, stops working in lia 0.0.18, and is hidden from help |
+| Paste an AI Gateway API key | `lia login vercel --api-key`. `lia setup` warns, stops working in lia 0.2.0, and is hidden from help |
 | Choose the active provider | `lia provider <name>` |
 
 ## Other

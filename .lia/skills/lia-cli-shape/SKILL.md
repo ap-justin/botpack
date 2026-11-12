@@ -65,7 +65,7 @@ These are the rules agents most often get wrong. [references/rules.md](reference
 
 **Scopes.** Commands that choose where a setting lives use `--global` and `--workspace`, plus `--project` only when they write a committed file.
 
-**Change over time.** Every control is stable, experimental, deprecated, or internal. Renaming or removing a stable control keeps the old name working with a warning for at least two releases and 30 days. The warning names the release that drops it, `old_spelling_removal` (0.0.18 for the current set), and CI fails once lia reaches it. Help and completion show only the new name.
+**Change over time.** Every control is stable, experimental, deprecated, or internal. Renaming or removing a stable control keeps the old name working with a warning for at least two releases and 30 days. The warning names the release that drops it, `old_spelling_removal` (0.2.0 for the current set), and CI fails once lia reaches it. Help and completion show only the new name.
 
 ## Workflow
 
@@ -102,13 +102,13 @@ Ask before inventing a rule for something these rules don't cover: keyboard shor
 - Run `./zig-out/bin/lia <command> --help` and the command itself after changing a flag.
 - `.lia.json` filtering is structural: only `parseProjectSafeFields` reads project files. Every key also goes in the settings list, `src/core/config/settings_keys.zig`, marked `.profile` or `.project_safe`. That list drives the "ignored in project" warning and `lia doctor`'s unknown-key report, and the CI shape check fails if a parser reads a key it lacks.
 - Every `LIA_*` name in `src/` must be registered, with a job and a stability, in `scripts/cli_shape_registry.json`, or CI fails. Known violations are listed there as exceptions, each with the change that removes it. A new exception needs a maintainer's approval; never add one to make a new control pass.
-- Full access is saved and printed as `full-access`, and `yolo` is read until lia 0.0.18, with `lia doctor` pointing it out. Only ACP's mode `_meta` and the lia-managed `yolo_acknowledged` key keep the old word.
+- Full access is saved and printed as `full-access`, and `yolo` is read until lia 0.2.0, with `lia doctor` pointing it out. Only ACP's mode `_meta` and the lia-managed `yolo_acknowledged` key keep the old word.
 - Build a deprecation warning from `command_specs.deprecated_until`, as the replaced-command warning in `src/core/slash_commands/command_specs.zig` does with `"lia {s} " ++ deprecated_until ++ "; use {s}\n"`. Tests pin the full text, and writing the release by hand breaks when it moves.
 - A warning first ships in the first release tagged after it merges, which can be later than planned: check with `git tag --contains <merge commit>`. A version bump that reaches `old_spelling_removal` before a warning has shipped fails the shape check, so merge the change that removes old spellings only after the last release that warns about them is tagged.
 - Adding or removing a slash command changes the `/help` catalog count, which tests write as literals: `Commands <n>` in unit and E2E tests, `waitForHelpMenu(session, <n>)` in the E2E tests, and the `helpCatalogCount` assertion in `src/core/slash_commands/command_specs.zig`. Search `src` and `tests` for the old count and update every one; a missed one fails a unit test or a TUI test.
 - Remove a slash command that only prints a placeholder rather than hiding it, since a hidden command must be internal or deprecated. Add its name to the router's `parse rejects removed slash commands` test in `src/core/slash_commands/command_router.zig`, which uses the built-in registry, so the name can't come back by accident.
 - An `LIA_*` override listed in `src/core/config/env_settings.zig` shows in `lia config list`, and the shape check fails unless `scripts/cli_shape_registry.json` marks it `stable`.
-- `lia login vercel --api-key` pastes an AI Gateway API key. `lia setup` and `/setup` still work until lia 0.0.18 but warn: `lia setup` points to `lia login vercel --api-key`, and `/setup`, an alias of `/provider`, points to `/login` and `/provider`. Neither appears in help. Don't give "setup" a new meaning.
+- `lia login vercel --api-key` pastes an AI Gateway API key. `lia setup` and `/setup` still work until lia 0.2.0 but warn: `lia setup` points to `lia login vercel --api-key`, and `/setup`, an alias of `/provider`, points to `/login` and `/provider`. Neither appears in help. Don't give "setup" a new meaning.
 - Resume has one kept spelling, `lia ask --resume <last|id>`; never add another form such as `--resume-latest`.
 - Every test hook starts with `LIA_TEST_`; CI rejects a test hook with any other prefix.
 

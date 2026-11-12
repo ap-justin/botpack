@@ -50,7 +50,7 @@ pub fn formatOlderName(alloc: Allocator, twice: settings_keys.OlderName, display
 }
 
 /// `permission_mode yolo in ~/.lia/settings.json is deprecated and stops
-/// working in lia 0.0.18; use full-access`. Caller owns the result.
+/// working in lia 0.2.0; use full-access`. Caller owns the result.
 pub fn formatOldYolo(alloc: Allocator, workspace: ?[]const u8, display_path: []const u8) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(alloc);
     errdefer out.deinit();
@@ -129,10 +129,10 @@ test "an older setting name or a saved yolo names the release that drops it" {
     const alloc = std.testing.allocator;
     const older = try formatOlderName(alloc, .{ .older = "notifications", .current = "sound", .both = false }, "~/.lia/settings.json");
     defer alloc.free(older);
-    try std.testing.expectEqualStrings("notifications in ~/.lia/settings.json is deprecated and stops working in lia 0.0.18; rename it to sound", older);
+    try std.testing.expectEqualStrings("notifications in ~/.lia/settings.json is deprecated and stops working in lia 0.2.0; rename it to sound", older);
     const yolo = try formatOldYolo(alloc, "/w", "~/.lia/settings.json");
     defer alloc.free(yolo);
-    try std.testing.expectEqualStrings("permission_mode yolo in ~/.lia/settings.json for workspace /w is deprecated and stops working in lia 0.0.18; use full-access", yolo);
+    try std.testing.expectEqualStrings("permission_mode yolo in ~/.lia/settings.json for workspace /w is deprecated and stops working in lia 0.2.0; use full-access", yolo);
 }
 
 test "a mistyped key on the command line gets the closest known key" {
