@@ -2913,7 +2913,7 @@ const test_session_mode_registry = mode_registry.Registry{
     .modes = test_session_modes[0..],
 };
 
-fn acpSessionTestConfig() server.Config {
+pub fn acpSessionTestConfig() server.Config {
     return .{
         .default_model = "test/model",
         .default_agent_step_limit = 8,
@@ -3487,7 +3487,7 @@ test "session/new during a turn, after a sign-in, ends the turn and adopts the s
     try std.testing.expectEqual(@as(usize, 1), answers);
 }
 
-test "initialize succeeds and offers sign-in when HOME does not exist" {
+test "initialize succeeds when HOME does not exist and says why sign-in cannot be saved" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -3526,6 +3526,7 @@ test "initialize succeeds and offers sign-in when HOME does not exist" {
     try std.testing.expect(frame.value.object.get("error") == null);
     const methods = frame.value.object.get("result").?.object.get("authMethods").?.array.items;
     try std.testing.expectEqualStrings(acp_types.agent_auth_method_id, methods[0].object.get("id").?.string);
+    try std.testing.expectEqualStrings(acp_types.SignInBlock.home_unavailable.reason(), methods[0].object.get("description").?.string);
 }
 
 test "an unknown session asks for sign-in only while a Gateway default still has no credential" {

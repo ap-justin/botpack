@@ -17,9 +17,6 @@ const compactor = @import("../core/compactor/compactor.zig");
 const builtin_skills = @import("../builtins/skills.zig");
 const builtin_tools = @import("../builtins/tools.zig");
 const credentials = @import("../core/auth/credentials.zig");
-const login_flow = @import("../core/auth/login_flow.zig");
-const oauth_session = @import("../core/auth/oauth_session.zig");
-const oauth_transport = @import("../core/auth/oauth_transport.zig");
 const host_contract = @import("../core/hosts/host.zig");
 const secret = @import("../core/auth/secret.zig");
 const auth_runtime = @import("../core/auth/auth_runtime.zig");
@@ -61,6 +58,7 @@ const libfx_steering = @import("libfx_steering.zig");
 const journal_events = @import("../core/agent/runtime/journal.zig");
 const libfx_journal = @import("libfx_journal.zig");
 const tool_call_identities = @import("tool_call_identities.zig");
+const acp_sign_in = @import("sign_in.zig");
 
 const Allocator = std.mem.Allocator;
 const ErrorCode = jsonrpc.ErrorCode;
@@ -397,6 +395,8 @@ pub const ServerState = struct {
     cache_warming: bool = true,
     active_session: ?ActiveSessionState = null,
     active_prompt: ?*ActivePrompt = null,
+    /// The `lia-login` browser sign-in this connection is running.
+    sign_in: ?*acp_sign_in.Job = null,
     subagent_authority_mutex: std.Io.Mutex = .init,
     skills: skill_runtime.Runtime = .{},
     context_snapshot: context_contract.GatheredContextSnapshot = .{},
@@ -431,6 +431,7 @@ pub const ServerState = struct {
     pending_legacy_urls: std.ArrayList(PendingLegacyUrl) = .empty,
 
     pub fn deinit(self: *ServerState) void {
+        acp_sign_in.stop(self);
         // Terminals end with this process. Ending them first also releases
         // an active prompt waiting on one.
         self.terminal_client.closeOwnedTerminals();
@@ -1598,7 +1599,7 @@ pub fn cancelPermissionRequest(state: *ServerState, id: u64) void {
     cancelOutboundRequest(state, id);
 }
 
-fn dispatchNotification(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
+pub fn dispatchNotification(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
     reapActivePrompt(state, false);
     if (!state.initialized) return;
     switch (AcpMethod.parse(msg.method)) {
@@ -1632,6 +1633,7 @@ pub fn dispatch(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !v
         });
     }
 
+    acp_sign_in.reap(state, false);
     // A sign-in deferred for a turn that has since ended. Failing to adopt it
     // leaves it pending, and this request answers as it would have.
     if (state.auth_adoption_deferred and state.active_prompt == null) {
@@ -1745,12 +1747,13 @@ pub fn authOffer(state: *const ServerState) acp_types.AuthOffer {
     return .{
         .login = .forProvider(state.provider),
         .client_terminal_auth = state.client_terminal_auth,
+        .sign_in_block = if (state.provider == .gateway) acp_sign_in.signInBlock() else null,
     };
 }
 
 /// What a request answers when its provider has no credential. Only Gateway
-/// can be signed in to with the methods on offer, which are Vercel's and
-/// cannot supply a configured provider's key.
+/// can be signed in to; a configured provider reads its key from an
+/// environment variable that no auth method sets.
 pub const CredentialUnavailableAnswer = enum { sign_in, plain_error };
 
 pub const configured_credential_unavailable_message = "Configured provider authentication is unavailable";
@@ -1786,7 +1789,7 @@ pub fn writeAuthRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.Req
 }
 
 /// An `AUTH_REQUIRED` error frame whose `data` lists the auth methods offered.
-fn buildAuthRequired(alloc: Allocator, id: ?jsonrpc.RequestId, auth: prompt_handler.AuthRequired) !jsonrpc.Writer.Built {
+pub fn buildAuthRequired(alloc: Allocator, id: ?jsonrpc.RequestId, auth: prompt_handler.AuthRequired) !jsonrpc.Writer.Built {
     var data: std.Io.Writer.Allocating = .init(alloc);
     defer data.deinit();
     try acp_types.writeAuthRequiredData(&data.writer, auth.offer);
@@ -1845,9 +1848,8 @@ pub fn refreshPendingAuthReplacingTurn(state: *ServerState) !bool {
 }
 
 /// `authenticate`: succeeds at once when the credentials, re-read, hold one.
-/// Otherwise `lia-login` on Gateway runs the `lia login` browser sign-in, or
-/// asks for `lia teams` when the saved sign-in has no team, and
-/// `lia-login-api-key` stays unavailable until a key is saved.
+/// Otherwise `lia-login` on Gateway signs in as `acp_sign_in.authenticate`
+/// says, and `lia-login-api-key` stays unavailable until a key is saved.
 fn handleAuthenticate(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
     const method_id = authenticateMethodId(alloc, msg.params_raw) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
@@ -1863,110 +1865,16 @@ fn handleAuthenticate(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Messa
             .message = "Unknown authentication method",
         });
     }
+    // The web host runs its own sign-in.
+    if (!host_target.is_wasm and state.provider == .gateway and
+        std.mem.eql(u8, method_id, acp_types.agent_auth_method_id))
+    {
+        return acp_sign_in.authenticate(state, alloc, msg.id);
+    }
     if (try refreshPendingAuth(state) != .unavailable) {
         return state.writer.writeResponse(alloc, msg.id, "{}");
     }
-    // The web host runs its own sign-in.
-    const runs_sign_in = !host_target.is_wasm and state.provider == .gateway and
-        std.mem.eql(u8, method_id, acp_types.agent_auth_method_id);
-    if (!runs_sign_in) return writeCredentialUnavailable(state, alloc, msg.id, state.provider);
-    // A new sign-in would not choose a team either.
-    if (try storedSignInLacksTeam(alloc)) return writeTeamRequired(state, alloc, msg.id);
-    signInToGateway(state) catch |err| {
-        if (err == error.OutOfMemory) return error.OutOfMemory;
-        debug_trace.logf("auth", "acp sign-in failed err={s}", .{@errorName(err)});
-        return state.writer.writeError(alloc, msg.id, .{
-            .code = ErrorCode.invalid_request,
-            .message = signInFailureMessage(err),
-        });
-    };
-    // `.deferred`, while a turn runs, confirms the sign-in too.
-    if (try refreshPendingAuth(state) == .unavailable) return writeTeamRequired(state, alloc, msg.id);
-    return state.writer.writeResponse(alloc, msg.id, "{}");
-}
-
-const sign_in_poll_ms: u64 = 100;
-const sign_in_without_team_message = "Signed in to Vercel AI Gateway, but no team is selected. Run lia teams to choose one, then retry.";
-
-/// `AUTH_REQUIRED` for a saved sign-in that has no Gateway team.
-fn writeTeamRequired(state: *ServerState, alloc: Allocator, id: ?jsonrpc.RequestId) !void {
-    return state.writer.send(alloc, try buildAuthRequired(alloc, id, .{
-        .message = sign_in_without_team_message,
-        .offer = authOffer(state),
-    }));
-}
-
-/// Whether a `lia login` session is saved without a team. A session that
-/// cannot be read counts as none; the sign-in then reports the storage error.
-fn storedSignInLacksTeam(alloc: Allocator) Allocator.Error!bool {
-    var session = (oauth_session.load(alloc) catch |err| {
-        if (err == error.OutOfMemory) return error.OutOfMemory;
-        debug_trace.logf("auth", "acp sign-in session check failed err={s}", .{@errorName(err)});
-        return false;
-    }) orelse return false;
-    defer session.deinit(alloc);
-    return session.team_id == null and session.team_slug == null;
-}
-
-/// Runs the `lia login` browser sign-in and saves its session. Blocks until
-/// the person approves or denies it or its code expires, so requests sent
-/// meanwhile, `session/cancel` included, wait unread. Writes to stderr, never
-/// to stdout, which carries JSON-RPC.
-fn signInToGateway(state: *ServerState) !void {
-    var runtime: login_flow.SignInRuntime = .{};
-    defer runtime.deinit(state.alloc);
-    if (!try runtime.start(state.alloc, state.cfg.gateway_provider.oauth_transport)) return error.SignInAlreadyRunning;
-    while (true) {
-        if (runtime.takeBrowserPending()) announceSignIn(state, runtime.snapshot());
-        switch (runtime.pollTransition(state.alloc)) {
-            .none => io_mod.sleep(sign_in_poll_ms * std.time.ns_per_ms),
-            .succeeded => |completion| {
-                var owned = completion;
-                defer owned.deinit(state.alloc);
-                selectOnlyTeam(state.alloc, &owned.vercel);
-                return;
-            },
-            .failed => |err| return err,
-            .cancelled => return error.Cancelled,
-        }
-    }
-}
-
-/// Prints the sign-in page and code to stderr, as `lia login` prints them to
-/// stdout, and opens the page unless `LIA_NO_OPEN_BROWSER` is set.
-fn announceSignIn(state: *ServerState, flow: login_flow.SignInSnapshot) void {
-    const url = flow.verification_uri_complete orelse flow.verification_uri;
-    const text = std.mem.concat(state.alloc, u8, &.{ "Open ", url, "\nCode: ", flow.user_code, "\n" }) catch |err| {
-        debug_trace.logf("auth", "acp sign-in announcement skipped err={s}", .{@errorName(err)});
-        return;
-    };
-    defer state.alloc.free(text);
-    std.Io.File.stderr().writeStreamingAll(io_mod.getIo(), text) catch {};
-    if (io_mod.getenv("LIA_NO_OPEN_BROWSER") != null) return;
-    const opened = state.cfg.url_opener.open(state.alloc, url) catch false;
-    if (!opened) debug_trace.logf("auth", "acp sign-in could not open the browser", .{});
-}
-
-/// Saves the team when the account has exactly one, as `lia login` does
-/// without asking. With several, the session keeps none until `lia teams`.
-fn selectOnlyTeam(alloc: Allocator, selection: *const login_flow.TeamSelection) void {
-    if (selection.teams.items.len != 1) return;
-    var selected = selection.select(alloc, 0) catch |err| {
-        debug_trace.logf("auth", "acp sign-in team selection failed err={s}", .{@errorName(err)});
-        return;
-    };
-    selected.deinit(alloc);
-}
-
-fn signInFailureMessage(err: anyerror) []const u8 {
-    return switch (err) {
-        error.AccessDenied => "Sign-in to Vercel AI Gateway was denied.",
-        error.ExpiredToken, error.LoginTimedOut => "The Vercel AI Gateway sign-in expired before it was approved. Try again.",
-        error.Cancelled => "Sign-in to Vercel AI Gateway was cancelled.",
-        error.CredentialStorageUnavailable => auth_runtime.preparationFailureNotice(err).?,
-        error.CredentialPersistenceFailed => auth_runtime.preparationFailureNotice(error.CredentialRefreshPersistenceUncertain).?,
-        else => "Sign-in to Vercel AI Gateway failed. Set LIA_TRACE_LOG to see the failing step.",
-    };
+    return writeCredentialUnavailable(state, alloc, msg.id, state.provider);
 }
 
 /// The `methodId` of an `authenticate` request. The caller owns the result.
@@ -1983,7 +1891,7 @@ fn authenticateMethodId(alloc: Allocator, params: ?[]const u8) ![]u8 {
     return alloc.dupe(u8, id.string);
 }
 
-fn requestIdsEqual(lhs: jsonrpc.RequestId, rhs: jsonrpc.RequestId) bool {
+pub fn requestIdsEqual(lhs: jsonrpc.RequestId, rhs: jsonrpc.RequestId) bool {
     return switch (lhs) {
         .integer => |value| switch (rhs) {
             .integer => |other| value == other,
@@ -2017,6 +1925,7 @@ fn handleRequestCancellation(
     if (parsed.value != .object) return;
     const value = parsed.value.object.get("requestId") orelse return;
     const requested = requestIdFromValue(value) orelse return;
+    if (acp_sign_in.cancelRequest(state, requested)) return;
     const active = state.active_prompt orelse return;
     const active_id = active.msg.id orelse return;
     if (!requestIdsEqual(active_id, requested)) return;
@@ -3421,8 +3330,10 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
                 state.provider,
                 if (state.provider == .gateway) startup.credential_source_preference else null,
             ) catch |err| switch (err) {
-                // The registry's auth check runs under a HOME that may not
-                // exist; the session calls report the storage error instead.
+                // Unreadable saved credentials, or a HOME that does not exist
+                // as under the registry's auth check: the session calls
+                // report the storage error, and the offer says whether
+                // `lia-login` can still save a sign-in.
                 error.CredentialStorageUnavailable => storage: {
                     debug_trace.logf("auth", "acp initialize deferred credential err={s}", .{@errorName(err)});
                     break :storage null;
@@ -5064,299 +4975,6 @@ test "authenticate during a turn confirms the sign-in and leaves the turn's cred
     try std.testing.expectEqual(borrowed.ptr, state.api_key.ptr);
     // Pending until a request finds the turn over, or a new session or restore
     // replaces it.
-    try std.testing.expect(state.auth_pending);
-}
-
-/// Vercel's issuer, device and token endpoints and team list, answering as
-/// they do when the person approves the device code, or as `token_body` says.
-const FakeVercelSignIn = struct {
-    token_disposition: oauth_transport.Disposition = .accepted,
-    token_body: []const u8 = "{\"access_token\":\"signed-in-access\",\"refresh_token\":\"signed-in-refresh\"," ++
-        "\"expires_in\":3600,\"scope\":\"openid offline_access\",\"token_type\":\"Bearer\"}",
-    /// The token endpoint fails with this instead of answering.
-    token_error: ?anyerror = null,
-    teams_body: []const u8 = "{\"teams\":[{\"id\":\"team_solo\",\"slug\":\"solo\",\"name\":\"Solo\"}]}",
-    token_polls: usize = 0,
-    opened_url: ?[]u8 = null,
-
-    const issuer = "https://vercel.com";
-    const verification_url = issuer ++ "/oauth/device?code=USER-CODE";
-
-    fn transport(self: *FakeVercelSignIn) oauth_transport.Provider {
-        return .{ .context = self, .execute_fn = execute };
-    }
-
-    fn opener(self: *FakeVercelSignIn) host_contract.UrlOpener {
-        return .{ .context = self, .open_fn = open };
-    }
-
-    fn deinit(self: *FakeVercelSignIn, alloc: Allocator) void {
-        if (self.opened_url) |url| alloc.free(url);
-    }
-
-    fn execute(raw: ?*anyopaque, alloc: Allocator, request: oauth_transport.Request) !oauth_transport.Response {
-        const self: *FakeVercelSignIn = @ptrCast(@alignCast(raw.?));
-        var disposition: oauth_transport.Disposition = .accepted;
-        const body: []const u8 = if (std.mem.eql(u8, request.url, issuer ++ "/.well-known/openid-configuration"))
-            "{\"issuer\":\"" ++ issuer ++ "\",\"device_authorization_endpoint\":\"" ++ issuer ++ "/oauth/device\"," ++
-                "\"token_endpoint\":\"" ++ issuer ++ "/oauth/token\"}"
-        else if (std.mem.eql(u8, request.url, issuer ++ "/oauth/device"))
-            "{\"device_code\":\"device\",\"user_code\":\"USER-CODE\",\"verification_uri\":\"" ++ issuer ++ "/oauth/device\"," ++
-                "\"verification_uri_complete\":\"" ++ verification_url ++ "\",\"expires_in\":60,\"interval\":1}"
-        else if (std.mem.eql(u8, request.url, issuer ++ "/oauth/token")) token: {
-            self.token_polls += 1;
-            if (self.token_error) |err| return err;
-            disposition = self.token_disposition;
-            break :token self.token_body;
-        } else if (std.mem.eql(u8, request.url, "https://api.vercel.com/v2/teams"))
-            self.teams_body
-        else
-            return error.UnexpectedOAuthRequest;
-        return .{ .disposition = disposition, .body = try alloc.dupe(u8, body) };
-    }
-
-    fn open(raw: ?*anyopaque, alloc: Allocator, url: []const u8) host_contract.UrlOpenError!bool {
-        const self: *FakeVercelSignIn = @ptrCast(@alignCast(raw.?));
-        self.opened_url = try alloc.dupe(u8, url);
-        return true;
-    }
-};
-
-/// Points fd 1 and fd 2 at files until `end`, so a test can read what a call
-/// wrote to stdout, the JSON-RPC channel, and to stderr.
-const StdStreamTrap = struct {
-    saved_stdout: std.c.fd_t,
-    saved_stderr: std.c.fd_t,
-    stdout_file: std.Io.File,
-    stderr_file: std.Io.File,
-
-    fn begin(dir: std.Io.Dir) !StdStreamTrap {
-        const stdout_file = try dir.createFile(io_mod.getIo(), "stdout.txt", .{ .read = true });
-        errdefer stdout_file.close(io_mod.getIo());
-        const stderr_file = try dir.createFile(io_mod.getIo(), "stderr.txt", .{ .read = true });
-        errdefer stderr_file.close(io_mod.getIo());
-        const saved_stdout = std.c.dup(1);
-        if (saved_stdout < 0) return error.TestStreamTrapFailed;
-        errdefer _ = std.c.close(saved_stdout);
-        const saved_stderr = std.c.dup(2);
-        if (saved_stderr < 0) return error.TestStreamTrapFailed;
-        errdefer _ = std.c.close(saved_stderr);
-        if (std.c.dup2(stdout_file.handle, 1) < 0) return error.TestStreamTrapFailed;
-        if (std.c.dup2(stderr_file.handle, 2) < 0) {
-            _ = std.c.dup2(saved_stdout, 1);
-            return error.TestStreamTrapFailed;
-        }
-        return .{ .saved_stdout = saved_stdout, .saved_stderr = saved_stderr, .stdout_file = stdout_file, .stderr_file = stderr_file };
-    }
-
-    fn end(self: *StdStreamTrap) void {
-        _ = std.c.dup2(self.saved_stdout, 1);
-        _ = std.c.dup2(self.saved_stderr, 2);
-        _ = std.c.close(self.saved_stdout);
-        _ = std.c.close(self.saved_stderr);
-        self.stdout_file.close(io_mod.getIo());
-        self.stderr_file.close(io_mod.getIo());
-    }
-};
-
-/// A temporary HOME without a keychain, named by the process environment
-/// until `deinit`.
-const SignInTestHome = struct {
-    alloc: Allocator,
-    tmp: std.testing.TmpDir,
-    home: []u8,
-    env: std.process.Environ.Map,
-
-    fn install(alloc: Allocator, open_browser: bool) !*SignInTestHome {
-        const self = try alloc.create(SignInTestHome);
-        errdefer alloc.destroy(self);
-        self.alloc = alloc;
-        self.tmp = std.testing.tmpDir(.{});
-        errdefer self.tmp.cleanup();
-        self.home = try io_mod.dirRealpathAlloc(alloc, self.tmp.dir, ".");
-        errdefer alloc.free(self.home);
-        self.env = std.process.Environ.Map.init(alloc);
-        errdefer self.env.deinit();
-        try self.env.put("HOME", self.home);
-        try self.env.put("LIA_DISABLE_KEYCHAIN", "1");
-        if (!open_browser) try self.env.put("LIA_NO_OPEN_BROWSER", "1");
-        io_mod.setEnvironMap(&self.env);
-        return self;
-    }
-
-    fn deinit(self: *SignInTestHome) void {
-        io_mod.resetEnvironForTest();
-        self.env.deinit();
-        self.alloc.free(self.home);
-        self.tmp.cleanup();
-        self.alloc.destroy(self);
-    }
-
-    fn read(self: *SignInTestHome, name: []const u8) ![]u8 {
-        var file = try self.tmp.dir.openFile(io_mod.getIo(), name, .{});
-        defer file.close(io_mod.getIo());
-        return io_mod.readFileToEnd(self.alloc, &file, 64 * 1024);
-    }
-};
-
-/// A Gateway connection awaiting sign-in whose sign-in requests reach `fake`.
-fn signInPendingStateForTest(alloc: Allocator, capture: *LastFrame, fake: *FakeVercelSignIn) ServerState {
-    var state = ServerState{
-        .alloc = alloc,
-        .cfg = undefined,
-        .writer = jsonrpc.Writer.initCallback(capture, LastFrame.write),
-        .initialized = true,
-        .provider = .gateway,
-        .auth_pending = true,
-    };
-    state.cfg.auth_mode = .local;
-    state.cfg.provider_auth_mode = .local;
-    state.cfg.minimal_kernel = false;
-    state.cfg.credential_override = null;
-    state.cfg.secret_store = host_contract.unavailable_secret_store;
-    state.cfg.gateway_provider.oauth_transport = fake.transport();
-    state.cfg.url_opener = fake.opener();
-    return state;
-}
-
-fn freeSignInStateForTest(state: *ServerState) void {
-    secret.zeroAndFree(state.alloc, state.api_key);
-    if (state.account_id) |id| state.alloc.free(id);
-    if (state.gateway_team) |team| state.alloc.free(team);
-}
-
-/// Sends `authenticate` with `method_id` while the trap holds stdout and
-/// stderr, and returns what reached stdout. The caller owns the result.
-fn authenticateTrappedForTest(state: *ServerState, home: *SignInTestHome, method_id: []const u8) ![]u8 {
-    const params = try state.alloc.print("{{\"methodId\":\"{s}\"}}", .{method_id});
-    defer state.alloc.free(params);
-    var msg = jsonrpc.Message{ .id = .{ .integer = 7 }, .method = "authenticate", .params_raw = params };
-    var trap = try StdStreamTrap.begin(home.tmp.dir);
-    const dispatched = dispatch(state, state.alloc, &msg);
-    trap.end();
-    try dispatched;
-    return home.read("stdout.txt");
-}
-
-test "authenticate with lia-login runs the browser sign-in, saves it and adopts it" {
-    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
-    const alloc = std.testing.allocator;
-    const home = try SignInTestHome.install(alloc, true);
-    defer home.deinit();
-    var fake: FakeVercelSignIn = .{};
-    defer fake.deinit(alloc);
-    var capture = LastFrame{};
-    var state = signInPendingStateForTest(alloc, &capture, &fake);
-    defer freeSignInStateForTest(&state);
-
-    const stdout_bytes = try authenticateTrappedForTest(&state, home, acp_types.agent_auth_method_id);
-    defer alloc.free(stdout_bytes);
-
-    try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}\n", capture.bytes());
-    try std.testing.expectEqualStrings("", stdout_bytes);
-    const stderr_bytes = try home.read("stderr.txt");
-    defer alloc.free(stderr_bytes);
-    try std.testing.expect(std.mem.find(u8, stderr_bytes, FakeVercelSignIn.verification_url) != null);
-    try std.testing.expect(std.mem.find(u8, stderr_bytes, "USER-CODE") != null);
-    try std.testing.expectEqualStrings(FakeVercelSignIn.verification_url, fake.opened_url.?);
-
-    try std.testing.expect(!state.auth_pending);
-    try std.testing.expectEqualStrings("signed-in-access", state.api_key);
-    try std.testing.expectEqual(types.CredentialSource.fx_login, state.credential_source.?);
-    try std.testing.expectEqualStrings("team_solo", state.gateway_team.?);
-    const saved = try home.read(".lia/auth.json");
-    defer secret.zeroAndFree(alloc, saved);
-    try std.testing.expect(std.mem.find(u8, saved, "signed-in-refresh") != null);
-
-    // A later connection finds the saved sign-in and needs no new one.
-    freeSignInStateForTest(&state);
-    var later = LastFrame{};
-    state = signInPendingStateForTest(alloc, &later, &fake);
-    const later_stdout = try authenticateTrappedForTest(&state, home, acp_types.agent_auth_method_id);
-    defer alloc.free(later_stdout);
-    try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}\n", later.bytes());
-    try std.testing.expectEqual(@as(usize, 1), fake.token_polls);
-    try std.testing.expect(!state.auth_pending);
-}
-
-test "authenticate with lia-login answers a denied, expired or cancelled sign-in with an error" {
-    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
-    const alloc = std.testing.allocator;
-    const Case = struct { token_body: []const u8 = "", token_error: ?anyerror = null, message: []const u8 };
-    const cases = [_]Case{
-        .{ .token_body = "{\"error\":\"access_denied\"}", .message = "Sign-in to Vercel AI Gateway was denied." },
-        .{ .token_body = "{\"error\":\"expired_token\"}", .message = "The Vercel AI Gateway sign-in expired before it was approved. Try again." },
-        .{ .token_error = error.Cancelled, .message = "Sign-in to Vercel AI Gateway was cancelled." },
-    };
-    for (cases) |case| {
-        const home = try SignInTestHome.install(alloc, false);
-        defer home.deinit();
-        var fake: FakeVercelSignIn = .{ .token_disposition = .rejected, .token_body = case.token_body, .token_error = case.token_error };
-        defer fake.deinit(alloc);
-        var capture = LastFrame{};
-        var state = signInPendingStateForTest(alloc, &capture, &fake);
-
-        const stdout_bytes = try authenticateTrappedForTest(&state, home, acp_types.agent_auth_method_id);
-        defer alloc.free(stdout_bytes);
-
-        const parsed = try std.json.parseFromSlice(std.json.Value, alloc, capture.bytes(), .{});
-        defer parsed.deinit();
-        const err = parsed.value.object.get("error").?.object;
-        try std.testing.expectEqual(@as(i64, ErrorCode.invalid_request), err.get("code").?.integer);
-        try std.testing.expectEqualStrings(case.message, err.get("message").?.string);
-        try std.testing.expectEqual(@as(usize, 1), fake.token_polls);
-        try std.testing.expect(fake.opened_url == null);
-        try std.testing.expectEqualStrings("", stdout_bytes);
-        try std.testing.expect(state.auth_pending);
-        try std.testing.expectError(error.FileNotFound, home.tmp.dir.statFile(io_mod.getIo(), ".lia/auth.json", .{}));
-    }
-}
-
-test "authenticate with lia-login saves a sign-in with several teams but asks for lia teams" {
-    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
-    const alloc = std.testing.allocator;
-    const home = try SignInTestHome.install(alloc, false);
-    defer home.deinit();
-    var fake: FakeVercelSignIn = .{ .teams_body = "{\"teams\":[{\"id\":\"team_a\",\"slug\":\"a\",\"name\":\"A\"}," ++
-        "{\"id\":\"team_b\",\"slug\":\"b\",\"name\":\"B\"}]}" };
-    defer fake.deinit(alloc);
-    var capture = LastFrame{};
-    var state = signInPendingStateForTest(alloc, &capture, &fake);
-    defer freeSignInStateForTest(&state);
-
-    const stdout_bytes = try authenticateTrappedForTest(&state, home, acp_types.agent_auth_method_id);
-    defer alloc.free(stdout_bytes);
-
-    try std.testing.expectEqualStrings("", stdout_bytes);
-    try std.testing.expect(std.mem.find(u8, capture.bytes(), "\"code\":-32000") != null);
-    try std.testing.expect(std.mem.find(u8, capture.bytes(), sign_in_without_team_message) != null);
-    try std.testing.expect(state.auth_pending);
-    const saved = try home.read(".lia/auth.json");
-    defer secret.zeroAndFree(alloc, saved);
-    try std.testing.expect(std.mem.find(u8, saved, "signed-in-refresh") != null);
-
-    // Signing in again would not choose a team, so a retry runs no sign-in.
-    const retry_stdout = try authenticateTrappedForTest(&state, home, acp_types.agent_auth_method_id);
-    defer alloc.free(retry_stdout);
-    try std.testing.expect(std.mem.find(u8, capture.bytes(), "\"code\":-32000") != null);
-    try std.testing.expect(std.mem.find(u8, capture.bytes(), sign_in_without_team_message) != null);
-    try std.testing.expectEqual(@as(usize, 1), fake.token_polls);
-}
-
-test "authenticate with lia-login-api-key runs no sign-in and still asks for a key" {
-    const alloc = std.testing.allocator;
-    const home = try SignInTestHome.install(alloc, false);
-    defer home.deinit();
-    var fake: FakeVercelSignIn = .{};
-    defer fake.deinit(alloc);
-    var capture = LastFrame{};
-    var state = signInPendingStateForTest(alloc, &capture, &fake);
-
-    const stdout_bytes = try authenticateTrappedForTest(&state, home, acp_types.terminal_auth_method_id);
-    defer alloc.free(stdout_bytes);
-
-    try std.testing.expect(std.mem.find(u8, capture.bytes(), "\"code\":-32000") != null);
-    try std.testing.expectEqual(@as(usize, 0), fake.token_polls);
     try std.testing.expect(state.auth_pending);
 }
 
