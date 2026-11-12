@@ -2680,17 +2680,19 @@ describe("acp: model-independent", () => {
   test(
     "ACP lia-login reports a sign-in code that expired with nobody waiting",
     async () => {
-      const lifetimeS = 4;
+      // The kept failure lasts one more lifetime from when the sign-in ends, so
+      // a long lifetime leaves a runner stalled for seconds well inside it.
+      const lifetimeS = 10;
       const fixture = await startSignIn({ held: true, expiresIn: lifetimeS });
       try {
         sendAuthenticate(2);
         await readResponse(client, 2);
         // Nothing approves the code. The worker ends the sign-in within its
-        // 100 ms tick of the code's expiry, and keeps the failure for another
-        // lifetime. Wait until the issuer's clock says the code has expired
-        // and the worker has had a second to end, then authenticate well
-        // inside the kept window.
-        const endedAt = fixture.issuer.deviceIssuedAt + lifetimeS * 1000 + 1000;
+        // 100 ms tick of the code's expiry. Wait until the sign-in has been
+        // polling and the issuer's clock is past the expiry and that tick,
+        // which leaves most of the kept window to authenticate in.
+        await waitForCondition("the sign-in polled the issuer", () => fixture.issuer.answeredPolls > 0, TIMEOUT);
+        const endedAt = fixture.issuer.deviceIssuedAt + lifetimeS * 1000 + 500;
         await waitForCondition("the sign-in code expired", () => Date.now() >= endedAt, TIMEOUT);
         sendAuthenticate(3);
         const expired = await readResponse(client, 3);
