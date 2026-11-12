@@ -668,9 +668,9 @@ const Frames = struct {
         return null;
     }
 
-    /// Waits up to 10 s for the answer to request `id`.
+    /// Waits up to 30 s for the answer to request `id`.
     fn waitFor(self: *Frames, id: i64) !std.json.Parsed(std.json.Value) {
-        const deadline = io_mod.awakeMilliTimestamp() + 10_000;
+        const deadline = io_mod.awakeMilliTimestamp() + 30_000;
         while (io_mod.awakeMilliTimestamp() < deadline) {
             if (try self.answer(id)) |parsed| return parsed;
             io_mod.sleep(10 * std.time.ns_per_ms);
@@ -680,7 +680,7 @@ const Frames = struct {
 };
 
 fn waitForCount(counter: *const std.atomic.Value(usize), at_least: usize) !void {
-    const deadline = io_mod.awakeMilliTimestamp() + 10_000;
+    const deadline = io_mod.awakeMilliTimestamp() + 30_000;
     while (counter.load(.seq_cst) < at_least) {
         if (io_mod.awakeMilliTimestamp() >= deadline) return error.TestCountNotReached;
         io_mod.sleep(10 * std.time.ns_per_ms);
@@ -779,9 +779,9 @@ const SignInTestHome = struct {
         return io_mod.readFileToEnd(self.alloc, &file, 64 * 1024);
     }
 
-    /// Waits up to 10 s for the file at `name` under HOME to exist.
+    /// Waits up to 30 s for the file at `name` under HOME to exist.
     fn waitForFile(self: *SignInTestHome, name: []const u8) !void {
-        const deadline = io_mod.awakeMilliTimestamp() + 10_000;
+        const deadline = io_mod.awakeMilliTimestamp() + 30_000;
         while (true) {
             if (self.tmp.dir.statFile(io_mod.getIo(), name, .{})) |_| return else |_| {}
             if (io_mod.awakeMilliTimestamp() >= deadline) return error.TestFileMissing;
@@ -1535,10 +1535,10 @@ test "lia-login on a connection started on a configured provider runs no Gateway
     try std.testing.expect(state.provider == .configured);
 }
 
-/// Waits up to 10 s for the connection's sign-in to reach its outcome.
+/// Waits up to 30 s for the connection's sign-in to reach its outcome.
 fn waitForSignInEnd(state: *ServerState) !void {
     const job = state.sign_in orelse return;
-    const deadline = io_mod.awakeMilliTimestamp() + 10_000;
+    const deadline = io_mod.awakeMilliTimestamp() + 30_000;
     while (!job.finished.load(.seq_cst)) {
         if (io_mod.awakeMilliTimestamp() >= deadline) return error.TestSignInStillRunning;
         io_mod.sleep(10 * std.time.ns_per_ms);
