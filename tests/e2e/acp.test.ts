@@ -1555,6 +1555,61 @@ describe("acp: model-independent", () => {
     LIA_DISABLE_KEYCHAIN: "1",
   });
 
+  // A loopback issuer that runs the OAuth device flow: it approves the
+  // first poll, or answers `tokenError` to every poll when one is given.
+  const startFakeDeviceIssuer = (tokenError?: string) => {
+    const requests: string[] = [];
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url);
+        const issuer = `http://127.0.0.1:${server.port}`;
+        requests.push(url.pathname);
+        await request.text();
+        if (url.pathname === "/.well-known/openid-configuration") {
+          return Response.json({
+            issuer,
+            device_authorization_endpoint: `${issuer}/oauth/device`,
+            token_endpoint: `${issuer}/oauth/token`,
+            revocation_endpoint: `${issuer}/oauth/revoke`,
+          });
+        }
+        if (url.pathname === "/oauth/device") {
+          return Response.json({
+            device_code: "fake-device-code",
+            user_code: "ABCD-1234",
+            verification_uri: `${issuer}/verify`,
+            verification_uri_complete: `${issuer}/verify?user_code=ABCD-1234`,
+            expires_in: 600,
+            interval: 1,
+          });
+        }
+        if (url.pathname === "/oauth/token") {
+          if (tokenError) return Response.json({ error: tokenError }, { status: 400 });
+          return Response.json({
+            access_token: "device-flow-access-token",
+            refresh_token: "device-flow-refresh-token",
+            expires_in: 3600,
+            scope: "openid offline_access use:ai-gateway",
+            token_type: "Bearer",
+          });
+        }
+        if (url.pathname === "/v2/teams") {
+          return Response.json({ teams: [{ id: "team_123", slug: "vercel-labs", name: "Vercel Labs" }] });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    return {
+      issuerUrl: `http://127.0.0.1:${server.port}`,
+      requests,
+      stop() {
+        server.stop(true);
+      },
+    };
+  };
+
   test(
     "ACP initialize without a credential advertises only the agent auth method",
     async () => {
@@ -1671,7 +1726,7 @@ describe("acp: model-independent", () => {
       try {
         client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
         const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-        const methodId = initialized.result.authMethods[0].id;
+        const methodId = "lia-login-api-key";
 
         const stillPending = await client.request("authenticate", { methodId }, 2) as any;
         expect(stillPending.error.code).toBe(-32000);
@@ -1831,26 +1886,97 @@ describe("acp: model-independent", () => {
     TIMEOUT,
   );
 
-  for (const methodId of ["lia-login", "lia-login-api-key"]) {
-    test(
-      `ACP authenticate accepts the ${methodId} method id and stays AUTH_REQUIRED without a credential`,
-      async () => {
-        const root = createIsolatedRoot("lia-acp-auth-method-ids-");
-        const gateway = startFakeGateway([finalText("unused")]);
-        try {
-          client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
-          await client.request("initialize", { protocolVersion: 1 }, 1);
-          const retry = await client.request("authenticate", { methodId }, 2) as any;
-          expect(retry.error.code).toBe(-32000);
-        } finally {
-          await client?.close();
-          gateway.stop();
-          rmSync(root.root, { recursive: true, force: true });
-        }
-      },
-      TIMEOUT,
-    );
-  }
+  test(
+    "ACP authenticate with lia-login-api-key stays AUTH_REQUIRED without a credential",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-auth-api-key-id-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      try {
+        client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const retry = await client.request("authenticate", { methodId: "lia-login-api-key" }, 2) as any;
+        expect(retry.error.code).toBe(-32000);
+      } finally {
+        await client?.close();
+        gateway.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP authenticate accepts the lia-login method id and starts a sign-in the issuer can deny",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-auth-login-id-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      const issuer = startFakeDeviceIssuer("access_denied");
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: {
+            ...noCredentialEnv(root, gateway),
+            LIA_TEST_OAUTH_ISSUER_URL: issuer.issuerUrl,
+            LIA_NO_OPEN_BROWSER: "1",
+          },
+        });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const denied = await client.request("authenticate", { methodId: "lia-login" }, 2) as any;
+        expect(denied.error.code).toBe(-32600);
+        expect(denied.error.message).toContain("Sign-in to Vercel AI Gateway was denied.");
+        expect(issuer.requests).toContain("/oauth/token");
+        expect(existsSync(join(root.home, ".lia", "auth.json"))).toBe(false);
+      } finally {
+        await client?.close();
+        gateway.stop();
+        issuer.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP authenticate with lia-login signs in without a terminal and session/new then succeeds",
+    async () => {
+      const root = createIsolatedRoot("lia-acp-auth-login-flow-");
+      const gateway = startFakeGateway([finalText("unused")]);
+      const issuer = startFakeDeviceIssuer();
+      try {
+        client = await AcpClient.create({
+          cwd: root.workspace,
+          env: {
+            ...noCredentialEnv(root, gateway),
+            LIA_TEST_OAUTH_ISSUER_URL: issuer.issuerUrl,
+            LIA_NO_OPEN_BROWSER: "1",
+          },
+        });
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+
+        const authenticated = await client.request("authenticate", { methodId: "lia-login" }, 2) as any;
+        expect(authenticated.error).toBeUndefined();
+        expect(authenticated.result).toEqual({});
+        expect(JSON.parse(readFileSync(join(root.home, ".lia", "auth.json"), "utf8")).team_id).toBe("team_123");
+
+        const created = await client.request("session/new", { mcpServers: [] }, 3) as any;
+        expect(created.error).toBeUndefined();
+        expect(typeof created.result.sessionId).toBe("string");
+        expect(gateway.modelRequests).toHaveLength(1);
+        expect(gateway.modelRequests[0]!.headers.get("authorization")).toBe("Bearer device-flow-access-token");
+
+        // stdout carries only JSON-RPC frames; the sign-in code goes to stderr.
+        expect(client.rawLines.length).toBeGreaterThan(0);
+        for (const line of client.rawLines) expect(JSON.parse(line).jsonrpc).toBe("2.0");
+        expect(client.stderr).toContain("ABCD-1234");
+      } finally {
+        await client?.close();
+        gateway.stop();
+        issuer.stop();
+        rmSync(root.root, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
 
   test(
     "ACP authenticate rejects an unknown, missing or non-string methodId with invalid params",
@@ -1876,7 +2002,7 @@ describe("acp: model-independent", () => {
   );
 
   test(
-    "ACP initialize fails when a saved login cannot be loaded",
+    "ACP initialize succeeds when a saved login cannot be loaded and the calls that need it report the storage error",
     async () => {
       const root = createIsolatedRoot("lia-acp-auth-unreadable-");
       const gateway = startFakeGateway([finalText("unused")]);
@@ -1886,9 +2012,19 @@ describe("acp: model-independent", () => {
         writeFileSync(join(liaDir, "auth.json"), "not-json", { mode: 0o600 });
         client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
         const initialized = await client.request("initialize", { protocolVersion: 1 }, 1) as any;
-        expect(initialized.error).toBeDefined();
-        expect(initialized.error.code).not.toBe(-32000);
-        expect(initialized.error.data?.authMethods).toBeUndefined();
+        expect(initialized.error).toBeUndefined();
+        expect(initialized.result.authMethods[0].id).toBe("lia-login");
+
+        for (const [id, method, params] of [
+          [2, "session/new", { mcpServers: [] }],
+          [3, "authenticate", { methodId: "lia-login" }],
+        ] as const) {
+          const failed = await client.request(method, params, id) as any;
+          expect(failed.result).toBeUndefined();
+          expect(failed.error.code).toBe(-32600);
+          expect(failed.error.message).toContain("Saved credential storage is unavailable");
+        }
+        expect(readFileSync(join(root.home, ".lia", "auth.json"), "utf8")).toBe("not-json");
       } finally {
         await client?.close();
         gateway.stop();
