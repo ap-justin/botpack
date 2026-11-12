@@ -1963,9 +1963,10 @@ describe("acp: model-independent", () => {
     prepare?: (root: ReturnType<typeof createIsolatedRoot>) => void,
     extraEnv: Record<string, string | undefined> = {},
     gatewayOptions: Parameters<typeof startFakeGateway>[1] = {},
+    gatewayResponses: Parameters<typeof startFakeGateway>[0] = [finalText("unused")],
   ) => {
     const root = createIsolatedRoot("lia-acp-sign-in-");
-    const gateway = startFakeGateway([finalText("unused")], gatewayOptions);
+    const gateway = startFakeGateway(gatewayResponses, gatewayOptions);
     const issuer = startFakeDeviceIssuer(issuerOptions);
     const stop = async () => {
       await client?.close();
@@ -2161,10 +2162,14 @@ describe("acp: model-independent", () => {
 
   // A sign-in launched in the workspace, whose settings name no model, with
   // two other folders that each name one. Signing in saves the launch model.
-  const signInBesideFolderModels = async () => {
-    const launchModel = "anthropic/a-launch-folder-model";
+  const signInBesideFolderModels = async (responses?: Parameters<typeof startFakeGateway>[0]) => {
     const projectModel = "openai/z-workspace-folder-model";
     const otherModel = "openai/y-other-folder-model";
+    // What a session runs when no folder's model is picked for it: the built-in
+    // default, in the catalog this issuer's gateway serves.
+    const connectionModel = "spacexai/grok-4.7";
+    // A model only a saved session names, so a loaded session shows where its model came from.
+    const savedModel = "openai/x-saved-session-model";
     const entry = (id: string) => ({ id, type: "language", tags: ["tool-use"], context_window: 128_000 });
     let project = "";
     let other = "";
@@ -2185,19 +2190,20 @@ describe("acp: model-independent", () => {
         );
       },
       { LIA_MODEL: undefined },
-      { models: [entry(launchModel), entry(projectModel), entry(otherModel)] },
+      { models: [entry(projectModel), entry(otherModel), entry(savedModel), entry(connectionModel)] },
+      responses,
     );
     try {
       sendAuthenticate(2);
       expectSignInCode(await readResponse(client, 2), fixture.issuer.issuerUrl);
       sendAuthenticate(3);
       expect((await readResponse(client, 3)).result).toEqual({});
-      expect(readSavedSettings(fixture.root).models.gateway).toBe(launchModel);
+      expect(readSavedSettings(fixture.root).models.gateway).toBe(connectionModel);
     } catch (error) {
       await fixture.stop();
       throw error;
     }
-    return { fixture, project, other, launchModel, projectModel, otherModel };
+    return { fixture, project, other, projectModel, otherModel, savedModel, connectionModel };
   };
 
   const modelOf = (created: any) => {
@@ -2217,7 +2223,7 @@ describe("acp: model-independent", () => {
   test(
     "ACP a session/new that fails after a sign-in leaves the connection's model for the next session",
     async () => {
-      const { fixture, project, projectModel } = await signInBesideFolderModels();
+      const { fixture, project, connectionModel } = await signInBesideFolderModels();
       try {
         breakSessionStore(fixture.root);
         const failed = await client.request("session/new", { cwd: project, mcpServers: [] }, 4) as any;
@@ -2227,7 +2233,7 @@ describe("acp: model-independent", () => {
         // The failed session's folder was never entered: a session in the
         // launch folder has the connection's own model, not that folder's.
         const inLaunchFolder = await client.request("session/new", { cwd: fixture.root.workspace, mcpServers: [] }, 5) as any;
-        expect(modelOf(inLaunchFolder)).not.toBe(projectModel);
+        expect(modelOf(inLaunchFolder)).toBe(connectionModel);
         expectOnlyJsonRpcOnStdout();
       } finally {
         await fixture.stop();
@@ -2256,41 +2262,46 @@ describe("acp: model-independent", () => {
     TIMEOUT,
   );
 
-  test(
-    "ACP session/load after a sign-in keeps the connection's model, and a session/new in another folder keeps it too",
-    async () => {
-      const { fixture, project, other, launchModel, otherModel } = await signInBesideFolderModels();
-      try {
-        // A session saved in the project folder by an earlier connection.
-        const saver = await AcpClient.create({
-          cwd: project,
-          env: { ...fakeGatewayEnv(fixture.root, fixture.gateway), LIA_MODEL: launchModel },
-        });
-        let sessionId = "";
+  for (const method of ["session/load", "session/resume"]) {
+    test(
+      `ACP ${method} after a sign-in keeps the saved session's model, and a session/new in another folder keeps the connection's`,
+      async () => {
+        const { fixture, project, other, connectionModel, savedModel } = await signInBesideFolderModels();
         try {
-          await saver.request("initialize", { protocolVersion: 1 }, 1);
-          const saved = await saver.request("session/new", { cwd: project, mcpServers: [] }, 2) as any;
-          expect(saved.error).toBeUndefined();
-          sessionId = saved.result.sessionId;
-          const prompted = await saver.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "save this" }] }, 3) as any;
-          expect(prompted.error).toBeUndefined();
+          // A session saved in the project folder, under a model no folder or sign-in names.
+          const saver = await AcpClient.create({
+            cwd: project,
+            env: { ...fakeGatewayEnv(fixture.root, fixture.gateway), LIA_MODEL: undefined },
+          });
+          let sessionId = "";
+          try {
+            await saver.request("initialize", { protocolVersion: 1 }, 1);
+            const saved = await saver.request("session/new", { cwd: project, mcpServers: [] }, 2) as any;
+            expect(saved.error).toBeUndefined();
+            sessionId = saved.result.sessionId;
+            const picked = await saver.request("session/set_config_option", { sessionId, configId: "model", value: savedModel }, 3) as any;
+            expect(picked.error).toBeUndefined();
+            const prompted = await saver.request("session/prompt", { sessionId, prompt: [{ type: "text", text: "save this" }] }, 4) as any;
+            expect(prompted.error).toBeUndefined();
+          } finally {
+            await saver.close();
+          }
+
+          const restored = await client.request(method, { sessionId, cwd: project, mcpServers: [] }, 4) as any;
+          expect(modelOf(restored)).toBe(savedModel);
+
+          // The restore was the first session: it spent the sign-in's folder, so
+          // another folder's model is not picked and the connection's stays.
+          const created = await client.request("session/new", { cwd: other, mcpServers: [] }, 5) as any;
+          expect(modelOf(created)).toBe(connectionModel);
+          expectOnlyJsonRpcOnStdout();
         } finally {
-          await saver.close();
+          await fixture.stop();
         }
-
-        const loaded = await client.request("session/load", { sessionId, cwd: project, mcpServers: [] }, 4) as any;
-        expect(loaded.error).toBeUndefined();
-
-        // The load was the first session: the other folder's model is not picked.
-        const created = await client.request("session/new", { cwd: other, mcpServers: [] }, 5) as any;
-        expect(modelOf(created)).not.toBe(otherModel);
-        expectOnlyJsonRpcOnStdout();
-      } finally {
-        await fixture.stop();
-      }
-    },
-    TIMEOUT,
-  );
+      },
+      TIMEOUT,
+    );
+  }
 
   test(
     "ACP authenticate lia-login with several teams asks for lia teams, picks none and does not sign in again",
