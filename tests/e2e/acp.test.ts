@@ -30,7 +30,8 @@ import { paddedPng, solidPng } from "./fixtures/image-encoding";
 import { copyV1Fixture, logLines, savedSessionIds, savedText, sessionDir } from "./saved-sessions";
 import {
   FAKE_GATEWAY_MODEL,
-  UNREACHABLE_ISSUER_URL,
+  guardIssuerRequests,
+  guardIssuerUrl,
   acpSpawnEnv,
   fakeGatewayFinalText as finalText,
   heldFakeGatewayFinalText,
@@ -2599,17 +2600,19 @@ describe("acp: model-independent", () => {
   );
 
   test(
-    "ACP lia-login without an issuer override reaches only the unreachable loopback issuer and saves nothing",
+    "ACP lia-login without an issuer override reaches only the guard issuer and saves nothing",
     async () => {
       const root = createIsolatedRoot("lia-acp-sign-in-guard-");
       const gateway = startFakeGateway([finalText("unused")]);
       try {
-        // A test that names no issuer, as one that forgets to: the guard in create() answers for it.
+        // A test that names no issuer, as one that forgets to: the guard issuer answers for it.
+        const before = guardIssuerRequests().length;
         client = await AcpClient.create({ cwd: root.workspace, env: noCredentialEnv(root, gateway) });
         await client.request("initialize", { protocolVersion: 1 }, 1);
         const failed = await client.request("authenticate", { methodId: "lia-login" }, 2) as any;
         expect(failed.error.code).toBe(-32600);
         expect(failed.error.message).toContain("Could not reach Vercel to sign in");
+        expect(guardIssuerRequests().slice(before)).toContain("/.well-known/openid-configuration");
         expect(existsSync(join(root.home, ".lia", "auth.json"))).toBe(false);
         expect(client.stderr).not.toContain("vercel.com");
       } finally {
@@ -2627,9 +2630,9 @@ describe("acp: model-independent", () => {
       const loopback = "http://127.0.0.1:43210";
       expect(acpSpawnEnv({ LIA_TEST_OAUTH_ISSUER_URL: loopback }, {}).LIA_TEST_OAUTH_ISSUER_URL).toBe(loopback);
       expect(acpSpawnEnv({}, { LIA_TEST_OAUTH_ISSUER_URL: loopback }).LIA_TEST_OAUTH_ISSUER_URL).toBe(loopback);
-      for (const issuer of [undefined, "", "https://vercel.com", "http://example.com:80", "not a url"]) {
+      for (const issuer of [undefined, "", "https://vercel.com", "http://example.com:80", "not a url", "http://localhost", "https://127.0.0.1:9", "http://127.0.0.1:9/path", "http://user@127.0.0.1:9"]) {
         const guarded = acpSpawnEnv({ LIA_TEST_OAUTH_ISSUER_URL: issuer }, { LIA_TEST_OAUTH_ISSUER_URL: issuer });
-        expect(guarded.LIA_TEST_OAUTH_ISSUER_URL).toBe(UNREACHABLE_ISSUER_URL);
+        expect(guarded.LIA_TEST_OAUTH_ISSUER_URL).toBe(guardIssuerUrl());
         expect(guarded.LIA_NO_OPEN_BROWSER).toBe("1");
       }
       expect(acpSpawnEnv({ LIA_NO_OPEN_BROWSER: undefined }, {}).LIA_NO_OPEN_BROWSER).toBe("1");
@@ -2642,6 +2645,7 @@ describe("acp: model-independent", () => {
       const root = createIsolatedRoot("lia-acp-sign-in-undefined-");
       const gateway = startFakeGateway([finalText("unused")]);
       try {
+        const before = guardIssuerRequests().length;
         client = await AcpClient.create({
           cwd: root.workspace,
           env: { ...noCredentialEnv(root, gateway), LIA_TEST_OAUTH_ISSUER_URL: undefined, LIA_NO_OPEN_BROWSER: undefined },
@@ -2650,6 +2654,7 @@ describe("acp: model-independent", () => {
         const failed = await client.request("authenticate", { methodId: "lia-login" }, 2) as any;
         expect(failed.error.code).toBe(-32600);
         expect(failed.error.message).toContain("Could not reach Vercel to sign in");
+        expect(guardIssuerRequests().slice(before)).toContain("/.well-known/openid-configuration");
         expect(existsSync(join(root.home, ".lia", "auth.json"))).toBe(false);
       } finally {
         await client?.close();
