@@ -2577,7 +2577,7 @@ describe("cli: setup", () => {
       expect(r.code).toBe(1);
       expect(r.stdout).toBe("");
       expect(r.stderr).toBe(
-        "lia setup is deprecated and stops working in lia 0.0.18; use lia login vercel --api-key\n" +
+        "lia setup is deprecated and stops working in lia 0.2.0; use lia login vercel --api-key\n" +
           "lia setup: stored API keys are disabled by LIA_DISABLE_KEYCHAIN\n",
       );
     },
@@ -2642,7 +2642,7 @@ exit 99
         });
         expect(r.code).toBe(1);
         expect(r.stdout).toBe("");
-        expect(r.stderr).toContain("lia setup is deprecated and stops working in lia 0.0.18; use lia login vercel --api-key\n");
+        expect(r.stderr).toContain("lia setup is deprecated and stops working in lia 0.2.0; use lia login vercel --api-key\n");
         expect(r.stderr).toContain("interactive terminal is required");
         expect(existsSync(invocationLog)).toBe(false);
       } finally {

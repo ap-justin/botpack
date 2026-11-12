@@ -87,7 +87,7 @@ describe("host-managed authentication", () => {
       const result = await runLia(command, { cwd: workspace, env: childEnv });
       expect(result.code).toBe(0);
       // `lia setup` is deprecated and says so even when the host manages authentication.
-      expect(result.stderr).toBe(command[0] === "setup" ? "lia setup is deprecated and stops working in lia 0.0.18; use lia login vercel --api-key\n" : "");
+      expect(result.stderr).toBe(command[0] === "setup" ? "lia setup is deprecated and stops working in lia 0.2.0; use lia login vercel --api-key\n" : "");
       expect(result.stdout).toBe("Authentication is managed by the host.\n");
     }
     expect(existsSync(join(home, ".lia", "auth.json"))).toBe(false);

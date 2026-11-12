@@ -32,7 +32,7 @@ pub const TopLevelKind = enum {
 /// The release that drops every old spelling lia still reads with a warning,
 /// such as `lia setup`, `--sessions-v2`, and `/allowlist user`. The CLI shape
 /// check fails once lia's version reaches it, so they come out on time.
-pub const old_spelling_removal = "0.0.18";
+pub const old_spelling_removal = "0.2.0";
 /// What every warning about an old spelling says.
 pub const deprecated_until = "is deprecated and stops working in lia " ++ old_spelling_removal;
 
@@ -785,7 +785,7 @@ test "a deprecated command warns with its replacement and a current one does not
     const alloc = std.testing.allocator;
     const warning = (try deprecationWarning(alloc, testTopLevelRegistry(), .setup)).?;
     defer alloc.free(warning);
-    try std.testing.expectEqualStrings("lia setup is deprecated and stops working in lia 0.0.18; use lia login vercel --api-key\n", warning);
+    try std.testing.expectEqualStrings("lia setup is deprecated and stops working in lia 0.2.0; use lia login vercel --api-key\n", warning);
     try std.testing.expect((try deprecationWarning(alloc, testTopLevelRegistry(), .login)) == null);
 }
 

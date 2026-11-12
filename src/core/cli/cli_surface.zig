@@ -4794,7 +4794,7 @@ test "setup preserves the disabled secret-store failure" {
     try std.testing.expectEqual(@as(usize, 0), capture.setup_store_calls);
     try std.testing.expectEqual(@as(usize, 0), capture.setup_read_calls);
     try std.testing.expectEqualStrings(
-        "lia setup is deprecated and stops working in lia 0.0.18; use lia login vercel --api-key\n" ++
+        "lia setup is deprecated and stops working in lia 0.2.0; use lia login vercel --api-key\n" ++
             "lia setup: stored API keys are disabled by LIA_DISABLE_KEYCHAIN\n",
         capture.stderr.written(),
     );

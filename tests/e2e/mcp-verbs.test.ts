@@ -294,7 +294,7 @@ describe("lia mcp", () => {
     expect(profile.code).toBe(1);
     // The older --profile still names the profile file, with a warning.
     expect(profile.stderr).toBe(
-      "lia mcp remove: --profile is deprecated and stops working in lia 0.0.18; use --global\nNo MCP server named twin in ~/.lia/mcp.json.\n",
+      "lia mcp remove: --profile is deprecated and stops working in lia 0.2.0; use --global\nNo MCP server named twin in ~/.lia/mcp.json.\n",
     );
   });
 
