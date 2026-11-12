@@ -488,11 +488,15 @@ fn startV2Session(
     var session_host_owned = true;
     defer if (session_host_owned) if (session_host) |h| h.destroy();
     const workspace_root = if (start.workspace) |binding| binding.root else state.workspace_root;
-    acp_sign_in.selectModelForSession(state, workspace_root);
+    // Applied once the session is active: a failed session/new keeps the
+    // connection's model and leaves the sign-in's folder for the next one.
+    const picked_model = acp_sign_in.modelForSession(state, workspace_root);
+    var picked_model_owned = true;
+    defer if (picked_model_owned) if (picked_model) |model| model.deinit(state.alloc);
     const v2 = session_adapter.Session.create(alloc, v2_store, workspace_root, .acp, .{
         .preferences = .{
             .provider = state.provider,
-            .model = state.configured_model,
+            .model = if (picked_model) |model| model.configured else state.configured_model,
             .effort = state.effort,
             .fast_mode = state.fast_mode,
             .ultrafast_mode = state.configured_ultrafast_mode,
@@ -515,7 +519,7 @@ fn startV2Session(
     const session_id = try alloc.dupe(u8, v2.id());
     var session_id_owned = true;
     defer if (session_id_owned) alloc.free(session_id);
-    const model_copy = try alloc.dupe(u8, state.selected_model);
+    const model_copy = try alloc.dupe(u8, if (picked_model) |model| model.selected else state.selected_model);
     var model_owned = true;
     defer if (model_owned) alloc.free(model_copy);
     var session_rt = session_runtime.SessionRuntime.init(state.cfg.max_history_turns);
@@ -546,6 +550,8 @@ fn startV2Session(
     model_owned = false;
     session_rt_owned = false;
     session_host_owned = false;
+    picked_model_owned = false;
+    acp_sign_in.sessionActivated(state, picked_model);
     try writeNewSessionResponse(state, alloc, msg, session_id, start.observer_hooks);
 }
 

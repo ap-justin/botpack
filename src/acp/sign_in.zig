@@ -372,7 +372,7 @@ pub fn reap(state: *ServerState, wait: bool) void {
     };
 }
 
-/// Keeps the folder the profile switch read, for `selectModelForSession`.
+/// Keeps the folder the profile switch read, for `modelForSession`.
 /// Without it the session keeps the model the connection already has.
 fn rememberSwitchRoot(state: *ServerState, root: []const u8) void {
     const owned = state.alloc.dupe(u8, root) catch |err| {
@@ -383,43 +383,60 @@ fn rememberSwitchRoot(state: *ServerState, root: []const u8) void {
     state.sign_in_root = owned;
 }
 
-/// Called by `session/new` with the session's folder. The sign-in's profile
-/// switch read the settings of the folder it started in, which for ACP v1 is
-/// where lia was launched, since `cwd` arrives only here. When the session's
-/// folder is another one, picks the connection's model again from that
-/// folder's settings, on top of what the switch saved. Does nothing when no
-/// sign-in switched the profile since the last session, when its folder is
-/// this one, or when the model is fixed for the process.
-pub fn selectModelForSession(state: *ServerState, workspace_root: []const u8) void {
-    if (comptime host_target.is_wasm) return;
-    const switched_root = state.sign_in_root orelse return;
-    defer {
-        state.alloc.free(switched_root);
-        state.sign_in_root = null;
+/// The connection's next model, picked for a session's folder; both copies
+/// owned by `state.alloc` until `sessionActivated` takes them.
+pub const SessionModel = struct {
+    selected: []u8,
+    configured: []u8,
+
+    pub fn deinit(self: SessionModel, alloc: Allocator) void {
+        alloc.free(self.selected);
+        alloc.free(self.configured);
     }
-    if (std.mem.eql(u8, switched_root, workspace_root)) return;
-    if (state.provider != .gateway or state.process_model_override) return;
+};
+
+/// The model `session/new` gives a session in `workspace_root`, without
+/// changing the connection. The sign-in's profile switch read the settings
+/// of the folder it started in, which for ACP v1 is where lia was launched,
+/// since `cwd` arrives only with the session. When the session's folder is
+/// another one, picks the model again from that folder's settings, on top of
+/// what the switch saved. Null keeps the connection's model: no sign-in
+/// switched the profile since the last session, its folder is this one, the
+/// model is fixed for the process, or the pick is the current model.
+pub fn modelForSession(state: *const ServerState, workspace_root: []const u8) ?SessionModel {
+    if (comptime host_target.is_wasm) return null;
+    const switched_root = state.sign_in_root orelse return null;
+    if (std.mem.eql(u8, switched_root, workspace_root)) return null;
+    if (state.provider != .gateway or state.process_model_override) return null;
     var settings = (if (state.cfg.home_override) |home|
         config_runtime.loadMergedSettingsFromHome(state.alloc, home, workspace_root)
     else
         config_runtime.loadMergedSettings(state.alloc, workspace_root)) catch |err| {
         debug_trace.logf("config", "acp session settings load failed err={s}", .{@errorName(err)});
-        return;
+        return null;
     };
     defer settings.deinit(state.alloc);
-    const selection = config_runtime.selectProviderModel(state.cfg.default_model, &settings, .gateway, null) catch return;
-    if (std.mem.eql(u8, selection.model, state.selected_model)) return;
-    const selected = state.alloc.dupe(u8, selection.model) catch return;
+    const selection = config_runtime.selectProviderModel(state.cfg.default_model, &settings, .gateway, null) catch return null;
+    if (std.mem.eql(u8, selection.model, state.selected_model)) return null;
+    const selected = state.alloc.dupe(u8, selection.model) catch return null;
     const configured = state.alloc.dupe(u8, selection.model) catch {
         state.alloc.free(selected);
-        return;
+        return null;
     };
-    // The turn ends first: a running turn reads these.
-    server.cancelAndReapActivePrompt(state);
+    return .{ .selected = selected, .configured = configured };
+}
+
+/// Called once a session is active, after the previous one's turn is
+/// reaped: the sign-in's folder is spent, and `picked`, from
+/// `modelForSession`, becomes the connection's model.
+pub fn sessionActivated(state: *ServerState, picked: ?SessionModel) void {
+    if (state.sign_in_root) |root| state.alloc.free(root);
+    state.sign_in_root = null;
+    const model = picked orelse return;
     if (state.selected_model.len > 0) state.alloc.free(state.selected_model);
     if (state.configured_model.len > 0) state.alloc.free(state.configured_model);
-    state.selected_model = selected;
-    state.configured_model = configured;
+    state.selected_model = model.selected;
+    state.configured_model = model.configured;
 }
 
 /// Stops the sign-in that would answer `requested` and answers that request
@@ -1226,6 +1243,66 @@ test "a session opened after the sign-in uses its own folder's settings, not the
 
     try std.testing.expect(!state.auth_pending);
     try std.testing.expectEqualStrings(project, state.active_session.?.workspace_root);
+    try std.testing.expectEqualStrings(workspace_model, state.active_session.?.model);
+    try std.testing.expectEqualStrings(workspace_model, state.selected_model);
+    try std.testing.expect(state.sign_in_root == null);
+}
+
+test "a session/new that fails to create its session leaves the model, the running turn and the sign-in's folder for the next one" {
+    if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
+    const alloc = std.testing.allocator;
+    const home = try SignInTestHome.install(alloc, .{});
+    defer home.deinit();
+    try home.tmp.dir.createDirPath(io_mod.getIo(), "project");
+    const project = try io_mod.dirRealpathAlloc(alloc, home.tmp.dir, "project");
+    defer alloc.free(project);
+    const profile = try alloc.print("{{\"workspaces\":{{\"{s}\":{{\"models\":{{\"gateway\":\"{s}\"}}}}}}}}", .{ project, workspace_model });
+    defer alloc.free(profile);
+    try home.writePrivate(".lia/settings.json", profile, 0o600);
+    var fake: FakeVercel = .{};
+    var frames: Frames = .{ .alloc = alloc };
+    defer frames.deinit();
+    var state = try signInTestState(alloc, home, &frames, &fake);
+    defer state.deinit();
+    state.cfg.provider_set = provider_set.gateway_only(.{ .model_catalog = .{ .context = null, .fetch_fn = fetchTwoModels } });
+    state.cfg.allow_acp_mcp = false;
+    state.sessions_v2 = try session_adapter.Store.open(alloc, home.home);
+    state.selected_model = try alloc.dupe(u8, "test/model");
+    state.configured_model = try alloc.dupe(u8, "test/model");
+
+    var trap = try StdStreamTrap.begin(home.tmp.dir);
+    defer trap.end();
+    try authenticateForTest(&state, 7);
+    const answer = try frames.waitFor(7);
+    defer answer.deinit();
+    try expectSignedIn(answer);
+    // Adopts the sign-in before the turn starts, which would defer it.
+    try dispatchForTest(&state, 8, "lia/unknown", "{}");
+    try server.startIdlePromptForTest(&state);
+    defer server.cancelAndReapActivePrompt(&state);
+    // A file where the sessions folder goes: the session cannot be created.
+    try home.writePrivate(".lia/sessions", "", 0o600);
+    const new_params = try alloc.print("{{\"cwd\":\"{s}\",\"mcpServers\":[]}}", .{project});
+    defer alloc.free(new_params);
+    try dispatchForTest(&state, 9, "session/new", new_params);
+    const failed = try frames.waitFor(9);
+    defer failed.deinit();
+    const selected_after_failure = try alloc.dupe(u8, state.selected_model);
+    defer alloc.free(selected_after_failure);
+    const configured_after_failure = try alloc.dupe(u8, state.configured_model);
+    defer alloc.free(configured_after_failure);
+    const turn_kept = state.active_prompt != null;
+    const root_kept = state.sign_in_root != null;
+
+    try home.tmp.dir.deleteFile(io_mod.getIo(), ".lia/sessions");
+    try dispatchForTest(&state, 10, "session/new", new_params);
+    trap.end();
+
+    try expectError(failed, ErrorCode.internal_error, "Failed to create session");
+    try std.testing.expectEqualStrings("test/model", selected_after_failure);
+    try std.testing.expectEqualStrings("test/model", configured_after_failure);
+    try std.testing.expect(turn_kept);
+    try std.testing.expect(root_kept);
     try std.testing.expectEqualStrings(workspace_model, state.active_session.?.model);
     try std.testing.expectEqualStrings(workspace_model, state.selected_model);
     try std.testing.expect(state.sign_in_root == null);
