@@ -273,6 +273,8 @@ const AcpContext = struct {
     /// session/set_mode changes never mutate a running turn.
     captured_mode: ?[]const u8 = null,
     captured_permission_mode: ?PermissionMode = null,
+    /// The model the turn's queued job sends, named in its runtime context.
+    captured_model: ?[]const u8 = null,
     current_prompt_input: ?*ParsedPromptInput = null,
     observer: ?*observation.Observer = null,
     /// The web host's steering as this turn saw it: open at least once, and
@@ -1075,6 +1077,7 @@ pub fn handlePrompt(
         .session_id = session.session_id,
         .captured_mode = captured_mode,
         .captured_permission_mode = captured_permission_mode,
+        .captured_model = session.model,
         .current_prompt_input = &prompt_input,
     };
     defer ctx.deinitPublishedToolCalls();
@@ -2400,6 +2403,7 @@ fn appendRuntimeContext(raw_ctx: *anyopaque, arena: Allocator, messages: *std.Ar
         .access_scope = ctx.state.workspace_access.scope(ctx.state.workspace_root),
         .interactive = false,
         .permission_mode = ctx.captured_permission_mode orelse session.permission_mode,
+        .model = ctx.captured_model orelse session.model,
     }, arena, messages);
 }
 
