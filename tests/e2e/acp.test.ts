@@ -3909,6 +3909,7 @@ describe("acp: model-independent", () => {
         const newLine = `\\nmodel: ${otherModel}\\n`;
         // The default prompt also names the tag in prose, so match the note's own opening.
         const noteOpen = "<lia-context-update>\\nThe runtime context changed";
+        const noteClose = "</lia-context-update>";
         const firstBody = gateway.requests[0]!.body;
         const secondBody = gateway.requests[1]!.body;
         expect(firstBody).toContain(oldLine);
@@ -3921,6 +3922,8 @@ describe("acp: model-independent", () => {
         expect(secondBody.split(noteOpen)).toHaveLength(2);
         expect(secondBody.indexOf(oldLine)).toBeLessThan(secondBody.indexOf(noteOpen));
         expect(secondBody.indexOf(newLine)).toBeGreaterThan(secondBody.indexOf(noteOpen));
+        expect(secondBody.split(noteClose)).toHaveLength(2);
+        expect(secondBody.indexOf(newLine)).toBeLessThan(secondBody.indexOf(noteClose));
         expect(client.stderr).toBe("");
       } finally {
         await client?.close();
