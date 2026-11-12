@@ -2159,6 +2159,103 @@ describe("acp: model-independent", () => {
     TIMEOUT,
   );
 
+  // A sign-in launched in the workspace, whose settings name no model, with
+  // two other folders that each name one. Signing in saves the launch model.
+  const signInBesideFolderModels = async () => {
+    const launchModel = "anthropic/a-launch-folder-model";
+    const projectModel = "openai/z-workspace-folder-model";
+    const otherModel = "openai/y-other-folder-model";
+    const entry = (id: string) => ({ id, type: "language", tags: ["tool-use"], context_window: 128_000 });
+    let project = "";
+    let other = "";
+    const fixture = await startSignIn(
+      {},
+      root => {
+        project = root.external;
+        other = join(root.root, "other");
+        mkdirSync(other);
+        writeFileSync(
+          join(root.home, ".lia", "settings.json"),
+          JSON.stringify({
+            workspaces: {
+              [project]: { models: { gateway: projectModel } },
+              [other]: { models: { gateway: otherModel } },
+            },
+          }),
+        );
+      },
+      { LIA_MODEL: undefined },
+      { models: [entry(launchModel), entry(projectModel), entry(otherModel)] },
+    );
+    try {
+      sendAuthenticate(2);
+      expectSignInCode(await readResponse(client, 2), fixture.issuer.issuerUrl);
+      sendAuthenticate(3);
+      expect((await readResponse(client, 3)).result).toEqual({});
+      expect(readSavedSettings(fixture.root).models.gateway).toBe(launchModel);
+    } catch (error) {
+      await fixture.stop();
+      throw error;
+    }
+    return { fixture, project, other, launchModel, projectModel, otherModel };
+  };
+
+  const modelOf = (created: any) => {
+    expect(created.error).toBeUndefined();
+    return created.result.configOptions.find((option: any) => option.id === "model").currentValue;
+  };
+
+  // A file where the sessions folder goes: session/new fails until it is removed.
+  const breakSessionStore = (root: ReturnType<typeof createIsolatedRoot>) => {
+    rmSync(join(root.home, ".lia", "sessions"), { recursive: true, force: true });
+    writeFileSync(join(root.home, ".lia", "sessions"), "not a directory");
+  };
+
+  const mendSessionStore = (root: ReturnType<typeof createIsolatedRoot>) =>
+    rmSync(join(root.home, ".lia", "sessions"), { force: true });
+
+  test(
+    "ACP a session/new that fails after a sign-in leaves the connection's model for the next session",
+    async () => {
+      const { fixture, project, projectModel } = await signInBesideFolderModels();
+      try {
+        breakSessionStore(fixture.root);
+        const failed = await client.request("session/new", { cwd: project, mcpServers: [] }, 4) as any;
+        expect(failed.error.code).toBe(-32603);
+        mendSessionStore(fixture.root);
+
+        // The failed session's folder was never entered: a session in the
+        // launch folder has the connection's own model, not that folder's.
+        const inLaunchFolder = await client.request("session/new", { cwd: fixture.root.workspace, mcpServers: [] }, 5) as any;
+        expect(modelOf(inLaunchFolder)).not.toBe(projectModel);
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "ACP a session/new that fails after a sign-in does not use up the sign-in's folder model pick",
+    async () => {
+      const { fixture, project, projectModel } = await signInBesideFolderModels();
+      try {
+        breakSessionStore(fixture.root);
+        const failed = await client.request("session/new", { cwd: project, mcpServers: [] }, 4) as any;
+        expect(failed.error.code).toBe(-32603);
+        mendSessionStore(fixture.root);
+
+        const created = await client.request("session/new", { cwd: project, mcpServers: [] }, 5) as any;
+        expect(modelOf(created)).toBe(projectModel);
+        expectOnlyJsonRpcOnStdout();
+      } finally {
+        await fixture.stop();
+      }
+    },
+    TIMEOUT,
+  );
+
   test(
     "ACP authenticate lia-login with several teams asks for lia teams, picks none and does not sign in again",
     async () => {
