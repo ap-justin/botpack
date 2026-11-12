@@ -83,7 +83,7 @@ export function checks(): Check[] {
       label: "bug-view-ignores-day", expect: "CAUGHT", names: "TodayIsToday", config: target(ideal, "TodayIsToday"),
       mutant: { find: "today |-> IF r.todayDay = Day(w) THEN r.todayAt ELSE None", replace: "today |-> r.todayAt" },
     },
-    // Two bugs an earlier fx had, planted back.
+    // Two bugs an earlier lia had, planted back.
     {
       label: "bug-future-stamp-wins", expect: "CAUGHT", names: "SuccessShowsToday", config: target(hostile, "SuccessShowsToday"),
       mutant: { find: "    LET xToday == x.todayAt # None /\\ x.todayAt <= w", replace: "    LET xToday == x.todayAt # None" },
@@ -184,7 +184,7 @@ export async function simulate(outDir: string, label: string, hostile: boolean, 
 if (import.meta.main) {
   const out = process.argv[2] ? resolve(process.argv[2]) : outDir("usage-model-checks");
   mkdirSync(out, { recursive: true, mode: 0o700 });
-  const results = await runChecks(out, process.env.FX_USAGE_MODEL_ONLY ? new RegExp(process.env.FX_USAGE_MODEL_ONLY) : undefined);
+  const results = await runChecks(out, process.env.LIA_USAGE_MODEL_ONLY ? new RegExp(process.env.LIA_USAGE_MODEL_ONLY) : undefined);
   writeFileSync(join(out, "checks.json"), JSON.stringify(results.map(({ config, ...r }) => r), null, 2));
   for (const r of results) console.log(`${r.passed ? "ok  " : "FAIL"} ${r.label.padEnd(30)} ${r.verdict.padEnd(8)} ${r.violated ?? ""} ${r.distinct ?? ""} ${r.seconds.toFixed(1)}s`);
   process.exit(results.every((r) => r.passed) ? 0 : 1);

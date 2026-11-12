@@ -1,4 +1,4 @@
-//! The `fx mcp call` bridge: how a running session takes MCP tool calls from
+//! The `lia mcp call` bridge: how a running session takes MCP tool calls from
 //! the commands its shell runs, so a large result can go to a file instead of
 //! into the model's context.
 //!
@@ -19,7 +19,7 @@
 //! in `tests/tla/drivers/mcp_call/` can build it on its own.
 const std = @import("std");
 
-/// The request protocol this build speaks. A client from another fx build may
+/// The request protocol this build speaks. A client from another lia build may
 /// speak another one, and is refused with a reason rather than misread.
 pub const protocol_version: u32 = 1;
 

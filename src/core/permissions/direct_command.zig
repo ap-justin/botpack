@@ -426,7 +426,7 @@ fn environmentForProfile(
     }
 }
 
-test "direct commands receive fx agent environment" {
+test "direct commands receive lia agent environment" {
     if (builtin.target.os.tag != .macos and builtin.target.os.tag != .linux) return;
 
     const stages = [_]command_effect.DirectStage{.{
@@ -443,7 +443,7 @@ test "direct commands receive fx agent environment" {
     });
     defer std.testing.allocator.free(result.output);
 
-    try std.testing.expect(std.mem.find(u8, result.output, "AI_AGENT=fx") != null);
+    try std.testing.expect(std.mem.find(u8, result.output, "AI_AGENT=lia") != null);
 }
 
 const DirectTerminationCause = enum {
@@ -1354,7 +1354,7 @@ test "direct executor reaps partial spawn and output-limit process groups" {
     };
 
     const sleep_argv = [_][]const u8{ "/bin/sleep", "10" };
-    const missing_argv = [_][]const u8{"/definitely/missing/fx-direct-second-stage"};
+    const missing_argv = [_][]const u8{"/definitely/missing/lia-direct-second-stage"};
     const partial_stages = [_]command_effect.DirectStage{
         .{
             .executable = "/bin/sleep",
@@ -1362,7 +1362,7 @@ test "direct executor reaps partial spawn and output-limit process groups" {
             .environment_profile = .basic_read_only,
         },
         .{
-            .executable = "/definitely/missing/fx-direct-second-stage",
+            .executable = "/definitely/missing/lia-direct-second-stage",
             .argv = &missing_argv,
             .environment_profile = .basic_read_only,
         },
@@ -1736,9 +1736,9 @@ test "direct executor treats downstream pipe closure as normal pipeline completi
 }
 
 test "direct executor fails closed for missing executable" {
-    const missing_argv = [_][]const u8{"/definitely/missing/fx-direct-command"};
+    const missing_argv = [_][]const u8{"/definitely/missing/lia-direct-command"};
     const missing_stages = [_]command_effect.DirectStage{.{
-        .executable = "/definitely/missing/fx-direct-command",
+        .executable = "/definitely/missing/lia-direct-command",
         .argv = &missing_argv,
         .environment_profile = .basic_read_only,
     }};

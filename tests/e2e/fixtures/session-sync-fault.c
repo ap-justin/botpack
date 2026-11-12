@@ -26,10 +26,10 @@ static int real_sync(int fd) {
 }
 
 static int injected_sync(int fd) {
-    const char *target = getenv("FX_TEST_SYNC_TARGET");
-    const char *arm = getenv("FX_TEST_SYNC_ARM");
-    const char *record = getenv("FX_TEST_SYNC_RECORD");
-    const char *match = getenv("FX_TEST_SYNC_MATCH");
+    const char *target = getenv("LIA_TEST_SYNC_TARGET");
+    const char *arm = getenv("LIA_TEST_SYNC_ARM");
+    const char *record = getenv("LIA_TEST_SYNC_RECORD");
+    const char *match = getenv("LIA_TEST_SYNC_MATCH");
     char actual[PATH_MAX], expected[PATH_MAX];
     if (!target || !arm || !record || !match || access(arm, F_OK) || !realpath(target, expected)) return real_sync(fd);
 #ifdef __APPLE__

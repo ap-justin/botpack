@@ -1,10 +1,10 @@
-//! What `fx mcp call list`, `search`, and `help` print: plain text for a
+//! What `lia mcp call list`, `search`, and `help` print: plain text for a
 //! shell command, made from the same search pages and tool schemas the agent's
 //! own `capability_search` uses (`tool_search.zig`, `selected_schema.zig`).
 //!
 //! The pages and schemas carry server text encoded for the model
 //! (`model_context_encoding.writeScalar`), so it is decoded first. It comes
-//! from MCP servers, so it is then written the way fx shows any outside text
+//! from MCP servers, so it is then written the way lia shows any outside text
 //! on a terminal (`text_utils.encodeTerminalSafeInline`: control bytes and
 //! non-printing characters become visible escapes), and every part is
 //! bounded. Pure: it formats bytes it is given.
@@ -280,7 +280,7 @@ fn writeLiteral(arena: Allocator, out: *Writer, literal: std.json.Value) WriteEr
 
 const WriteError = Writer.Error || Allocator.Error;
 
-/// Writes `text` the way fx shows outside text on one terminal line, at most
+/// Writes `text` the way lia shows outside text on one terminal line, at most
 /// `max_bytes` of it.
 fn writeSafe(arena: Allocator, out: *Writer, text: []const u8, max_bytes: usize) WriteError!void {
     const safe = try text_utils.encodeTerminalSafeInline(arena, text, max_bytes);

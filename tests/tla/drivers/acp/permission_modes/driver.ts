@@ -1,4 +1,4 @@
-// Runtime driver: runs the real `fx acp` binary from a worktree through
+// Runtime driver: runs the real `lia acp` binary from a worktree through
 // directed and seeded-random permission-mode plans, records what a client
 // observes (mode option and older modes field, JSON-RPC errors, the
 // profile's saved mode, and how each prompt's shell call was enforced), and
@@ -52,11 +52,11 @@ const DIRECTED: Plan[] = [
     ops: [P, set("ask"), P, R, P, F, P] },
   { name: "d5-legacy-only", profile: "unset",
     ops: [legacy("ask"), P, legacy("auto"), P, legacy("full-access"), P, R, P, F] },
-  // A warm process (like fx-plus's spare) must not start new sessions in a
+  // A warm process (like lia-plus's spare) must not start new sessions in a
   // mode another process has since replaced.
   { name: "d6-other-process", profile: "full-access",
     ops: [P, other("ask"), P, N, P, other("full-access"), P, R, P, set("auto"), N, P] },
-  // fx status reports the next session's mode, which an open session may not share.
+  // lia status reports the next session's mode, which an open session may not share.
   { name: "d7-status", profile: "unset",
     ops: [S, set("full-access"), S, other("ask"), S, P, N, S, legacy("auto"), F, S] },
 ];
@@ -81,7 +81,7 @@ function randomPlans(count: number, steps: number, seed: number): Plan[] {
     () => other(pick(MODES)), () => N, () => S,
     () => P, () => P, () => P, () => R, () => F,
   ];
-  // fx saves a chat at its first turn, so resume only follows a prompt in
+  // lia saves a chat at its first turn, so resume only follows a prompt in
   // the current session (an explicit assumption in the spec).
   return Array.from({ length: count }, (_, index) => {
     const name = `r${String(index + 1).padStart(2, "0")}-seed${seed}`;
@@ -103,7 +103,7 @@ function randomPlans(count: number, steps: number, seed: number): Plan[] {
 async function runPlan(plan: Plan, worktree: string, helpers: Awaited<ReturnType<typeof loadHelpers>>, dir: string) {
   mkdirSync(dir, { recursive: true });
   writeJson(join(dir, "plan.json"), plan);
-  const fixture = new Fixture(worktree, helpers, plan.profile, join(dir, "fx-trace.log"));
+  const fixture = new Fixture(worktree, helpers, plan.profile, join(dir, "lia-trace.log"));
   const observations: Observation[] = [];
   let error: string | null = null;
   const sessionStep = (op: string, response: any) => {
@@ -255,8 +255,8 @@ function git(worktree: string, ...args: string[]): string {
 
 async function main() {
   const worktree = resolve(argValue("--worktree") ?? REPO_ROOT);
-  const fxBin = join(worktree, "zig-out", "bin", "fx");
-  if (!existsSync(fxBin)) throw new Error(`missing ${fxBin}; run zig build first`);
+  const liaBin = join(worktree, "zig-out", "bin", "lia");
+  if (!existsSync(liaBin)) throw new Error(`missing ${liaBin}; run zig build first`);
   const label = argValue("--label") ?? "run";
   const seed = Number(argValue("--seed") ?? "20261007");
   const randomCount = Number(argValue("--random") ?? "20");
@@ -272,7 +272,7 @@ async function main() {
     dirty: status.length > 0,
     status: status.split("\n").filter(Boolean),
     diff_sha256: status ? sha256Text(git(worktree, "diff", "HEAD")) : null,
-    fx_binary_sha256: sha256File(fxBin),
+    lia_binary_sha256: sha256File(liaBin),
     toolchain: tlcToolchain(),
     bun: Bun.version,
     seed,

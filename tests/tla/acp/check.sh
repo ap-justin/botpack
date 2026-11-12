@@ -6,7 +6,7 @@
 # /permissions. AcpSpeed: the per-session Standard, Fast, and Ultrafast speed
 # contract. Both configs must pass.
 #
-# The planted bugs and the runs of the real `fx acp` binary are in
+# The planted bugs and the runs of the real `lia acp` binary are in
 # ../drivers/acp/:
 #   bun ../drivers/acp/permission_modes/check-spec.ts
 #   bun ../drivers/acp/permission_modes/driver.ts

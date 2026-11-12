@@ -1,4 +1,4 @@
-// Shared pieces of the `fx mcp call` bridge drivers: where the model and the
+// Shared pieces of the `lia mcp call` bridge drivers: where the model and the
 // core live, building and running the JSON-lines harness around the real core,
 // the mapping between the model's acts and the core's events, a seeded random
 // source, TLA+ value printing, and TLC runs on the pinned jar.

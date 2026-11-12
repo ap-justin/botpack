@@ -20,7 +20,7 @@ const text_utils = @import("../shared/text_utils.zig");
 
 const Allocator = std.mem.Allocator;
 const Sha256 = std.crypto.hash.sha2.Sha256;
-const magic = "fx-resume-catalog-v6\n";
+const magic = "lia-resume-catalog-v6\n";
 const file_name = ".resume-catalog";
 const max_bytes = 64 * 1024 * 1024;
 const max_records = 100_000;
@@ -386,7 +386,7 @@ const CatalogWorker = struct {
                 else => fallback: {
                     // A legacy upgrade interrupted mid-rename stays listed from
                     // its stable snapshot; opening it refuses it and keeps it
-                    // for `fx session recover` (D70).
+                    // for `lia session recover` (D70).
                     if (self.read.store.readOnlyFencedLegacyCandidate(self.alloc, id, self.read.cancelled)) |value|
                         break :fallback value
                     else |fallback_err| switch (fallback_err) {
@@ -410,7 +410,7 @@ const CatalogWorker = struct {
             const managed = child_state.isDiscoveredManagedChildSession(self.read.store, self.alloc, candidate.summary.id, candidate.subagent_child) catch |err| switch (err) {
                 error.OutOfMemory => return err,
                 // An unverifiable marker or first event stays listed, as
-                // `fx sessions` always did; exact resume still refuses a real
+                // `lia sessions` always did; exact resume still refuses a real
                 // child.
                 else => false,
             };

@@ -71,8 +71,8 @@ pub fn main(c_argc: c_int, c_argv: [*][*:0]c_char, c_envp: [*:null]?[*:0]c_char)
 fn mainC(c_argc: c_int, c_argv: [*][*:0]c_char, c_envp: [*:null]?[*:0]c_char) !void {
     const raw_args = rawArgs(c_argc, c_argv);
     const raw_env: RawEnviron = @ptrCast(c_envp);
-    // Before any mode runs, since terminal helpers write under fx's folder too.
-    try useFxHomeFromEnv(raw_env);
+    // Before any mode runs, since terminal helpers write under lia's folder too.
+    try useLiaHomeFromEnv(raw_env);
 
     if (comptime terminal_native_session.isSupported()) {
         if (terminal_native_session.isControlModeRaw(raw_args)) {
@@ -120,30 +120,30 @@ fn mainC(c_argc: c_int, c_argv: [*][*:0]c_char, c_envp: [*:null]?[*:0]c_char) !v
     try runNonBenchmark(raw_args, raw_env, cli_args);
 }
 
-/// `FX_HOME` replaces `~/.fx` for the whole process. A bad value stops
-/// fx before it reads or writes anything there.
-fn useFxHomeFromEnv(raw_env: RawEnviron) !void {
-    const value = rawEnvValue(raw_env, "FX_HOME") orelse return;
-    profile_paths.useFxHome(value, rawEnvValue(raw_env, "HOME")) catch |err| {
+/// `LIA_HOME` replaces `~/.lia` for the whole process. A bad value stops
+/// lia before it reads or writes anything there.
+fn useLiaHomeFromEnv(raw_env: RawEnviron) !void {
+    const value = rawEnvValue(raw_env, "LIA_HOME") orelse return;
+    profile_paths.useLiaHome(value, rawEnvValue(raw_env, "HOME")) catch |err| {
         try writeStderrFast(switch (err) {
-            error.FxHomeNotAbsolute => "fx: FX_HOME must be an absolute path\n",
-            error.FxHomeIsRoot => "fx: FX_HOME can't be the root folder\n",
-            error.FxHomeIsHome => "fx: FX_HOME can't be your home folder; fx keeps its folder private\n",
+            error.LiaHomeNotAbsolute => "lia: LIA_HOME must be an absolute path\n",
+            error.LiaHomeIsRoot => "lia: LIA_HOME can't be the root folder\n",
+            error.LiaHomeIsHome => "lia: LIA_HOME can't be your home folder; lia keeps its folder private\n",
         });
         exitFast(1);
     };
     if (namesNonFolderRaw(value)) {
-        try writeStderrFast("fx: FX_HOME must name a folder, but it or a folder above it is a file\n");
+        try writeStderrFast("lia: LIA_HOME must name a folder, but it or a folder above it is a file\n");
         exitFast(1);
     }
-    // fx creates its own folder on first use, but opens the folder that holds
+    // lia creates its own folder on first use, but opens the folder that holds
     // it directly, so that one has to exist.
-    if (profile_paths.fxHomeParent()) |parent| createFolderPathRaw(parent);
+    if (profile_paths.liaHomeParent()) |parent| createFolderPathRaw(parent);
 }
 
 /// Whether `path` is a file, or a path through one, rather than a folder or
 /// nothing yet. Asking for `path/` makes the system resolve it as a folder.
-/// This runs before fx's I/O is set up, so it calls libc.
+/// This runs before lia's I/O is set up, so it calls libc.
 fn namesNonFolderRaw(path: []const u8) bool {
     var buffer: [std.Io.Dir.max_path_bytes + 2]u8 = undefined;
     const trimmed = std.mem.trimEnd(u8, path, "/");
@@ -155,7 +155,7 @@ fn namesNonFolderRaw(path: []const u8) bool {
     return rc != 0 and std.posix.errno(rc) == .NOTDIR;
 }
 
-test "FX_HOME is refused only when it is a file or a path through one" {
+test "LIA_HOME is refused only when it is a file or a path through one" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(io_mod.getIo(), .{ .sub_path = "file", .data = "" });
@@ -166,9 +166,9 @@ test "FX_HOME is refused only when it is a file or a path through one" {
     const cases = [_]struct { sub: []const u8, refused: bool }{
         .{ .sub = "file", .refused = true },
         .{ .sub = "file/", .refused = true },
-        .{ .sub = "file/fx", .refused = true },
+        .{ .sub = "file/lia", .refused = true },
         .{ .sub = "folder", .refused = false },
-        .{ .sub = "folder/fx", .refused = false },
+        .{ .sub = "folder/lia", .refused = false },
         .{ .sub = "missing", .refused = false },
     };
     for (cases) |case| {
@@ -179,8 +179,8 @@ test "FX_HOME is refused only when it is a file or a path through one" {
 }
 
 /// Creates `path` and every folder above it that is missing. This runs before
-/// fx's I/O is set up, so it calls libc; a folder that already exists, or
-/// one fx can't create, is left for the first use to report.
+/// lia's I/O is set up, so it calls libc; a folder that already exists, or
+/// one lia can't create, is left for the first use to report.
 fn createFolderPathRaw(path: []const u8) void {
     var buffer: [std.Io.Dir.max_path_bytes + 1]u8 = undefined;
     if (path.len == 0 or path.len >= buffer.len) return;
@@ -212,8 +212,8 @@ fn runNonBenchmark(raw_args: []const [*:0]const u8, raw_env: RawEnviron, cli_arg
     io_mod.setRawEnviron(raw_env);
 
     const alloc = processAllocator();
-    const auth_mode = credentials.parseAuthMode(rawEnvValue(raw_env, "FX_AUTH_MODE")) catch {
-        try writeStderrFast("fx: FX_AUTH_MODE must be local or host-managed\n");
+    const auth_mode = credentials.parseAuthMode(rawEnvValue(raw_env, "LIA_AUTH_MODE")) catch {
+        try writeStderrFast("lia: LIA_AUTH_MODE must be local or host-managed\n");
         exitFast(1);
     };
     const cfg = if (cli_args.len == 0)
@@ -249,8 +249,8 @@ fn argsFromRaw(raw_args: []const [*:0]const u8) std.process.Args {
     return .{ .vector = raw_args };
 }
 
-/// Options for every process Io. fx starts its own tasks with `io.concurrent`,
-/// and they count against the capacity that limits `io.async`. Once fx holds
+/// Options for every process Io. lia starts its own tasks with `io.concurrent`,
+/// and they count against the capacity that limits `io.async`. Once lia holds
 /// that many tasks, std runs each `io.async` call inline, so
 /// `HostName.connect` tries a host's addresses one at a time and waits on an
 /// unreachable address instead of returning the reachable one.
@@ -274,9 +274,9 @@ fn shouldRunBenchmarkNoArgRaw(raw_args: []const [*:0]const u8, raw_env: RawEnvir
 
 fn benchmarkEnvPresent(raw_env: RawEnviron) bool {
     if (comptime builtin.link_libc) {
-        if (std.c.getenv("FX_BENCH") != null) return true;
+        if (std.c.getenv("LIA_BENCH") != null) return true;
     }
-    return rawEnvHas(raw_env, "FX_BENCH");
+    return rawEnvHas(raw_env, "LIA_BENCH");
 }
 
 fn rawEnvHas(raw_env: RawEnviron, comptime key: []const u8) bool {
@@ -548,7 +548,7 @@ test "lightweight local commands do not request early threaded io" {
     }
 }
 
-test "process io connects through a reachable address while fx tasks hold every async slot" {
+test "process io connects through a reachable address while lia tasks hold every async slot" {
     // This test builds the process Io from processIoOptions instead of using
     // std.testing.io, because those options are what it checks. Only name
     // lookup and the unreachable address are faked. std's HostName.connect,
@@ -606,7 +606,7 @@ test "process io connects through a reachable address while fx tasks hold every 
         }
     };
 
-    const argv = [_][*:0]const u8{"fx"};
+    const argv = [_][*:0]const u8{"lia"};
     const environ = [_:null]?[*:0]const u8{};
     var threaded = std.Io.Threaded.init(std.testing.allocator, processIoOptions(.{ .vector = &argv }, .{ .slice = &environ }));
     defer threaded.deinit();
@@ -770,10 +770,10 @@ fn runAcpServer(_: ?*anyopaque, alloc: Allocator, cfg: acp_runner.Config) anyerr
     return acp_server.run(alloc, cfg);
 }
 
-test "raw benchmark preflight matches no-arg FX_BENCH presence" {
-    const no_args = [_][*:0]const u8{"fx"};
-    const help_args = [_][*:0]const u8{ "fx", "help" };
-    const bench_env = [_:null]?[*:0]const u8{"FX_BENCH=1"};
+test "raw benchmark preflight matches no-arg LIA_BENCH presence" {
+    const no_args = [_][*:0]const u8{"lia"};
+    const help_args = [_][*:0]const u8{ "lia", "help" };
+    const bench_env = [_:null]?[*:0]const u8{"LIA_BENCH=1"};
     const empty_env = [_:null]?[*:0]const u8{};
 
     try std.testing.expect(shouldRunBenchmarkNoArgRaw(no_args[0..], @ptrCast(&bench_env)));

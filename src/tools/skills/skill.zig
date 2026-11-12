@@ -290,7 +290,7 @@ test "skill tool does not rebind an advertised location to a renamed skill" {
     defer alloc.free(skills_dir);
     const path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "skills/workflow");
     defer alloc.free(path);
-    const skills = [_]skill_contract.Skill{.{ .name = "original", .description = "original identity", .path = path, .source = .global_fx }};
+    const skills = [_]skill_contract.Skill{.{ .name = "original", .description = "original identity", .path = path, .source = .global_lia }};
     const locations: skill_contract.Locations = .{ .namespace = 1, .roots = &.{skills_dir}, .skills = &skills };
     const decoded = try decode(.{ .allocator = alloc }, "{\"location\":\"skill:0000000000000001:0/workflow\"}");
     const input = decoded.input;
@@ -315,8 +315,8 @@ test "skill preparation binds retained aliases and canonical paths before readin
     defer alloc.free(skills_dir);
     const path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "skills/workflow");
     defer alloc.free(path);
-    const skills = [_]skill_contract.Skill{.{ .name = "original", .description = "", .path = path, .source = .global_fx }};
-    const diagnostics = [_]skill_contract.SkillDiagnostic{.{ .path = "/malformed", .source = .global_fx, .scope = .candidate, .cause = .{ .invalid_metadata = .missing_name } }};
+    const skills = [_]skill_contract.Skill{.{ .name = "original", .description = "", .path = path, .source = .global_lia }};
+    const diagnostics = [_]skill_contract.SkillDiagnostic{.{ .path = "/malformed", .source = .global_lia, .scope = .candidate, .cause = .{ .invalid_metadata = .missing_name } }};
     const locations: skill_contract.Locations = .{ .namespace = 7, .roots = &.{skills_dir}, .skills = &skills, .diagnostics = &diagnostics };
     for ([_][]const u8{ "skill:0000000000000007:0/workflow", path }) |location| {
         const args = try std.json.Stringify.valueAlloc(alloc, .{ .location = location }, .{});

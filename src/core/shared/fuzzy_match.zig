@@ -567,16 +567,16 @@ test "words match across punctuation in names and as typed in text" {
     const id = [_]Field{nameField("anthropic/claude-sonnet-4.5")};
     try expectMatch(.{ .tier = .words, .field = 0 }, "anthropic sonnet", &id);
     try expectMatch(.{ .tier = .words, .field = 0 }, "sonnet45", &id);
-    try expectMatch(.{ .tier = .words, .field = 0 }, "fxcommit", &.{nameField("fx-commit")});
+    try expectMatch(.{ .tier = .words, .field = 0 }, "liacommit", &.{nameField("lia-commit")});
     try expectMatch(.{ .tier = .words, .field = 0 }, "z.ai glm", &.{nameField("zai/glm-4.7")});
 
     // A text word must appear as typed, punctuation included.
-    try expectMatch(null, "fxcommit", &.{textField("fx-commit")});
+    try expectMatch(null, "liacommit", &.{textField("lia-commit")});
     try expectMatch(.{ .tier = .words, .field = 0 }, "renderer fix", &.{textField("Fix the renderer")});
 
     // Each word picks its best field; the item reports the lowest of those.
-    try expectMatch(.{ .tier = .words, .field = 0 }, "commit land", &.{ nameField("fx-commit"), textField("land a change") });
-    try expectMatch(null, "commit nowhere", &.{ nameField("fx-commit"), textField("land a change") });
+    try expectMatch(.{ .tier = .words, .field = 0 }, "commit land", &.{ nameField("lia-commit"), textField("land a change") });
+    try expectMatch(null, "commit nowhere", &.{ nameField("lia-commit"), textField("land a change") });
 }
 
 test "fuzzy letters start at a field word and never match text" {
@@ -843,7 +843,7 @@ test "fuzzy match keeps the model's laws on arbitrary bytes" {
         .corpus = &(@import("fuzz_seed").slices(.{
             "",
             "sonet 4.6\x00anthropic/claude-sonnet-4.6",
-            "fx commit\x00fx-commit\x00\x01Land a change",
+            "lia commit\x00lia-commit\x00\x01Land a change",
             "cs45\x00anthropic/claude-sonnet-4.5\x00\x01Claude Sonnet 4.5",
             "- /\x00model",
             "caf\xc3\xa9 \xc3\x00Caf\xc3\xa9\x00\x01caf\xc3x",

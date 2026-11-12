@@ -1,5 +1,5 @@
 ---- MODULE SharedLogins ----
-\* Several fx processes sharing one saved login for one MCP server
+\* Several lia processes sharing one saved login for one MCP server
 \* (src/core/mcp_host/runtime.zig pickUpLogin, refreshDue and saveCredential,
 \* credentials.zig removeIfSame and tryRefreshLock).
 \*
@@ -34,7 +34,7 @@
 EXTENDS Naturals
 
 CONSTANTS
-    Procs,          \* fx processes sharing the store
+    Procs,          \* lia processes sharing the store
     MaxVer,         \* sign-ins and refreshes per run
     RevokeOnReplay, \* a retired version sent again stops its whole chain
     SaveFaults,     \* a refresh's save may fail

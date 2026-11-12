@@ -1,10 +1,10 @@
-// Walks fx's request-recovery module (src/core/recovery/recovery.zig) along
+// Walks lia's request-recovery module (src/core/recovery/recovery.zig) along
 // its model, tests/tla/recovery/Recovery.tla.
 //
 // TLC writes the model's state graph. The driver walks to every edge of the
 // graph along a shortest path, so every model transition is checked at least
 // once, and then follows seeded random paths. Each model step becomes
-// operations on lab.zig, which runs the real module and plays fx's part
+// operations on lab.zig, which runs the real module and plays lia's part
 // around it. After every step the module's state, its plan, the status it
 // shows, and the saved record must match the model's next state. Steps that
 // belong to the world (the network, the gateway, a fault only the user can

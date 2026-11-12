@@ -2,7 +2,7 @@
 
 ## The end state
 
-fx decides how images reach the model from one catalog fact: whether the model has vision. A model with vision gets every image inline, from the user or from a tool, through the one wire form the gateway documents for images. A model without vision gets the vision tool, or a plain explanation when no vision tool exists. A model fx cannot confirm gets no images, a notice that says so, and one more catalog check in the turn.
+lia decides how images reach the model from one catalog fact: whether the model has vision. A model with vision gets every image inline, from the user or from a tool, through the one wire form the gateway documents for images. A model without vision gets the vision tool, or a plain explanation when no vision tool exists. A model lia cannot confirm gets no images, a notice that says so, and one more catalog check in the turn.
 
 That decision is one pure function, `image_route.step(state, event)`, in `src/core/images/image_route.zig`. It reads no clock, environment, or global and performs no I/O. The orchestrator's turn loop is its shell: it runs the effects `step` returns and feeds their results back as events. A TLA+ model states the laws the function keeps, and Bun drivers check the real function against the model, in both directions, on every change.
 
@@ -15,8 +15,8 @@ That decision is one pure function, `image_route.step(state, event)`, in `src/co
 
 ## What it refuses to be
 
-- **A guess.** fx sends no image to a model the catalog does not confirm, even one whose name suggests vision. Unknown means withheld.
-- **A second catalog.** fx keeps no table of which models take images, and offers no setting to override the gateway. The catalog is the source of truth, and a wrong tag gets fixed there.
+- **A guess.** lia sends no image to a model the catalog does not confirm, even one whose name suggests vision. Unknown means withheld.
+- **A second catalog.** lia keeps no table of which models take images, and offers no setting to override the gateway. The catalog is the source of truth, and a wrong tag gets fixed there.
 - **A retry loop.** The core never repeats a send, a failure, or a notice, and never asks the catalog twice in a turn.
 - **Provider-aware.** The core knows support values, not provider names. Provider quirks stay in the provider code that maps a catalog to support.
 

@@ -1,7 +1,7 @@
 # Session rollout models
 
-Protocol models for the pull requests that moved fx onto the session manager:
-`fx ask`, interactive sessions, running tools, ACP, subagents, commands, the
+Protocol models for the pull requests that moved lia onto the session manager:
+`lia ask`, interactive sessions, running tools, ACP, subagents, commands, the
 test harness, steering, queued input, and blobs, checkpoints, migration,
 records, and terminals. Each folder holds one or more models, a smoke and a
 stress config for each, and the planted bugs in `mutants.json`.
@@ -23,8 +23,8 @@ stress config for each, and the planted bugs in `mutants.json`.
 | `pr-1116/PR1116ChildCheckpoint.tla` | Child turn checkpoint before effects; crash repair distinguishes not-started lost work from interrupted work |
 | `pr-1116/PR1116Records.tla` | Compactor record aliases, durable client settings and fork-owned record blobs |
 
-Models that mention usage markers describe the usage ledger fx had when these
-changes landed; fx no longer records one.
+Models that mention usage markers describe the usage ledger lia had when these
+changes landed; lia no longer records one.
 
 ```sh
 ./run.py list
@@ -33,6 +33,6 @@ changes landed; fx no longer records one.
 ./run.py mutate                # every planted bug must be caught
 ```
 
-`../../drivers/session_manager/runtime.test.ts` runs the real fx binary and
+`../../drivers/session_manager/runtime.test.ts` runs the real lia binary and
 checks its saved sessions and wiring traces against the trace wrappers in
 `../trace/`.

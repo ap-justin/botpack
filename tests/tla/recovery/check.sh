@@ -4,14 +4,14 @@
 #
 # recovery.cfg and recovery-deep.cfg are the correct module and must pass.
 # Each recovery-mutation-*.cfg plants one defect, and the rule it names must
-# catch it. Most are bugs fx has shipped:
+# catch it. Most are bugs lia has shipped:
 #
 #   stall-stop          stops a request after repeated quick failures      NeverGivesUp
 #   no-wake             a wait whose deadline never fires                  Heals
 #   stale-socket        a dead pooled connection shown as a failure        NoFalseAlarm
 #   frozen-status       a retry warning left over a streaming answer       StatusHonest
 #   no-closing          a closed window treated as a crash                 ResumesAfterClose
-#   never-ask           a request that crashes fx resumes forever          CrashLoopAsks
+#   never-ask           a request that crashes lia resumes forever          CrashLoopAsks
 #   hot-retry           resending at once after a failure                  NoHotRetry
 #   send-without-save   a retry sent without saving the record first       SaveBeforeSend
 #

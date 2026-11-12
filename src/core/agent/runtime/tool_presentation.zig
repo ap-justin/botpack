@@ -1258,7 +1258,7 @@ pub fn finishExecutedToolStatus(
             );
             if (std.mem.eql(u8, call.name, "shell")) {
                 if (try tool_result_errors.isTerminalEndedFailure(arena, safe_result)) {
-                    break :blk try arena.print("{s} · ended when fx exited", .{base});
+                    break :blk try arena.print("{s} · ended when lia exited", .{base});
                 }
                 if (try tool_result_errors.inspectTerminalActionFieldCorrection(
                     arena,
@@ -1563,7 +1563,7 @@ fn commandArtifactHandle(
         else => return null,
     };
     const handle = std.Io.Dir.path.basename(output_file);
-    if (!std.mem.startsWith(u8, handle, "fx-command-") or
+    if (!std.mem.startsWith(u8, handle, "lia-command-") or
         !std.mem.endsWith(u8, handle, ".log") or
         std.mem.endsWith(u8, handle, ".stdout.log") or
         std.mem.endsWith(u8, handle, ".stderr.log")) return null;
@@ -2927,7 +2927,7 @@ test "command completion publishes its combined artifact handle" {
         .{
             .model_output = "truncated command preview",
             .command_result_json =
-            \\{"kind":"command","output_file":"/tmp/fx-command-combined.log"}
+            \\{"kind":"command","output_file":"/tmp/lia-command-combined.log"}
             ,
         },
         "truncated command preview",
@@ -2952,7 +2952,7 @@ test "command completion publishes its combined artifact handle" {
                 terminal.result.?,
             );
             try std.testing.expectEqualStrings(
-                "fx-command-combined.log",
+                "lia-command-combined.log",
                 terminal.command_artifact_handle.?,
             );
             const replay = terminal.result_memory.?.command_output_replay.?;

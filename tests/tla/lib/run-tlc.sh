@@ -25,7 +25,7 @@ shift 2
 [ -f "$spec" ] || { echo "run-tlc.sh: spec not found: $spec" >&2; exit 2; }
 [ -f "$cfg" ] || { echo "run-tlc.sh: config not found: $cfg" >&2; exit 2; }
 
-work="$(mktemp -d "${TMPDIR:-/tmp}/fx-tlc.XXXXXX")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/lia-tlc.XXXXXX")"
 mkdir -p "$work/model" "$work/tmp" "$work/states"
 cp "$(dirname "$spec")"/*.tla "$work/model/"
 cp "$cfg" "$work/model/"

@@ -1,6 +1,6 @@
 ------------------------- MODULE AcpPermissionModes -------------------------
 (***************************************************************************)
-(* fx's ACP permission-mode contract, matching the CLI's /permissions.     *)
+(* lia's ACP permission-mode contract, matching the CLI's /permissions.     *)
 (*                                                                         *)
 (*  - ACP lists exactly the CLI's three modes, in this order: auto (the    *)
 (*    default), ask, full-access, named Auto, Ask, Full access. Both the   *)
@@ -8,14 +8,14 @@
 (*    the same current mode.                                               *)
 (*  - A session (new, resumed, or new in a fresh process) starts in the    *)
 (*    profile's saved permission_mode as it is when the session starts;    *)
-(*    an unset profile means auto. Another fx process saving a mode does   *)
+(*    an unset profile means auto. Another lia process saving a mode does   *)
 (*    not change a session that is already open.                           *)
 (*  - An accepted change, through session/set_config_option or the older  *)
 (*    session/set_mode, switches the session and saves the mode as the     *)
 (*    profile's default, as /permissions does in the CLI.                  *)
 (*  - Any other value is rejected and changes nothing.                     *)
 (*  - A prompt is enforced by the mode the client was shown: ask asks the  *)
-(*    client, auto sends the action to fx's automatic reviewer, and full   *)
+(*    client, auto sends the action to lia's automatic reviewer, and full   *)
 (*    access runs it without asking.                                       *)
 (*  - Mode option values carry only ACP's fields (value, name,             *)
 (*    description, _meta).                                                 *)
@@ -23,9 +23,9 @@
 (* `last` is what the client observes for the latest step; `stored` is    *)
 (* the profile's saved mode read back from settings.json after the step.  *)
 (*                                                                         *)
-(* Assumptions: one fx acp process at a time drives one active session;   *)
-(* other fx processes may save a mode between steps (External); resume    *)
-(* follows a prompt (fx saves a chat at its first turn).                   *)
+(* Assumptions: one lia acp process at a time drives one active session;   *)
+(* other lia processes may save a mode between steps (External); resume    *)
+(* follows a prompt (lia saves a chat at its first turn).                   *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences
 
@@ -60,7 +60,7 @@ SessionView(m) == [current |-> m, legacy |-> m, listed |-> ModesCsv,
 \* set_config_option responses carry configOptions only.
 ConfigView(m) == [SessionView(m) EXCEPT !.legacy = "n/a", !.legacyListed = "n/a"]
 
-\* `fx status --json` lists the modes and the one a new session starts in.
+\* `lia status --json` lists the modes and the one a new session starts in.
 StatusView(m) == ConfigView(m)
 
 Obs(op, arg, ok, hasView, view, enforce, stored) ==
@@ -97,7 +97,7 @@ Prompt ==
     /\ last' = Obs("prompt", "none", TRUE, FALSE, NoView, Enforce(cur), profile)
     /\ UNCHANGED <<profile, cur>>
 
-\* A new fx acp process resumes the session.
+\* A new lia acp process resumes the session.
 Resume ==
     /\ saved
     /\ LET resumed == Eff(profile) IN
@@ -105,7 +105,7 @@ Resume ==
            /\ last' = Obs("resume", "none", TRUE, TRUE, SessionView(resumed), "none", profile)
     /\ UNCHANGED <<profile, saved>>
 
-\* A new fx acp process starts a new session.
+\* A new lia acp process starts a new session.
 Fresh ==
     /\ LET started == Eff(profile) IN
            /\ cur' = started
@@ -121,14 +121,14 @@ NewSession ==
     /\ saved' = FALSE
     /\ UNCHANGED profile
 
-\* Another fx process (the CLI's /permissions, or another ACP process)
+\* Another lia process (the CLI's /permissions, or another ACP process)
 \* saves a mode. The open session keeps its own, like a second CLI window.
 External(v) ==
     /\ profile' = v
     /\ last' = Obs("other", v, TRUE, FALSE, NoView, "none", v)
     /\ UNCHANGED <<cur, saved>>
 
-\* `fx status --json` in the workspace, run beside the ACP process.
+\* `lia status --json` in the workspace, run beside the ACP process.
 Status ==
     /\ last' = Obs("status", "none", TRUE, TRUE, StatusView(Eff(profile)), "none", profile)
     /\ UNCHANGED <<profile, cur, saved>>

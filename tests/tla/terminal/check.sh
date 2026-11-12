@@ -5,7 +5,7 @@
 # ShellSnapshot: the in-memory owner of a captured shell environment
 # (src/core/terminal/shell_snapshot.zig), shared by the root agent and every
 # subagent: single-flight capture, leases, refresh, and approval epochs.
-# TerminalLifecycle: hosted terminal processes across fx exits and crashes.
+# TerminalLifecycle: hosted terminal processes across lia exits and crashes.
 #
 # Each design config must pass every invariant and liveness property with
 # deadlock checking on. Each <Model>-<mutation>.cfg enables one broken rule,

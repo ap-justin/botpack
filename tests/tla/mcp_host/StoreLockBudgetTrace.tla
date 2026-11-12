@@ -1,7 +1,7 @@
 ---- MODULE StoreLockBudgetTrace ----
 \* Real runs of the MCP store lock checked against StoreLockBudget.tla's
 \* rules, on the real clock. trace.ts generates TraceObs.tla from what
-\* tests/tla/drivers/mcp_host/store-lock-budget.test.ts saw of real fx
+\* tests/tla/drivers/mcp_host/store-lock-budget.test.ts saw of real lia
 \* processes on the Keychain backend: their "MCP store lock" trace lines
 \* (src/core/mcp_host/credentials.zig) and the harness's own steps. Times are
 \* awake-clock milliseconds from the run's start.
@@ -13,7 +13,7 @@
 \*   freeze {p, at}, thaw {p, at}  the harness stopped or resumed p (ctrl+z)
 \*   kill {p, at}               the harness killed p; the kernel drops its lock
 \*   foreign {p, at}, foreign_release {p, at}  the harness held the lock
-\*                              itself and wrote no stamp, as an older fx does
+\*                              itself and wrote no stamp, as an older lia does
 \*   scribble {p, at}           the harness wrote garbage over the stamp, which
 \*                              the rules read as no stamp
 \* Every record is one step: the trace is complete when each one is taken.

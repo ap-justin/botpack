@@ -1,14 +1,14 @@
 /**
  * Model-backed A/B eval of built-in tool schemas.
  *
- * Each arm is an fx binary plus an optional schema variant. A recording proxy
+ * Each arm is a lia binary plus an optional schema variant. A recording proxy
  * in front of AI Gateway swaps the variant's tool definitions into every
  * agent request, so two arms can share one binary and differ only in the
- * bytes the model sees, while fx's own decoders still judge every call. The
+ * bytes the model sees, while lia's own decoders still judge every call. The
  * proxy refuses any key except AI_GATEWAY_TEST_API_KEY.
  *
  * Every task runs in a fresh repository and profile. Per run it records each
- * tool call, its arguments, whether fx answered with an error, the provider's
+ * tool call, its arguments, whether lia answered with an error, the provider's
  * token usage, and whether the task's oracle passed.
  *
  * It makes billed calls and is not a pull request check. Run it through the
@@ -453,16 +453,16 @@ function seedClone(repo: string, remote: string, files: Record<string, string>, 
   git(repo, "branch", "-q", "--set-upstream-to=origin/main", "main");
 }
 
-let fxClone: string | null = null;
-/** Replaces `repo` with a shallow clone of the real fx repository, cloned once per process. */
-function seedFxClone(repo: string): void {
+let liaClone: string | null = null;
+/** Replaces `repo` with a shallow clone of the real lia repository, cloned once per process. */
+function seedLiaClone(repo: string): void {
   const remote = "https://github.com/vercel-labs/fx.git";
-  if (!fxClone) {
-    fxClone = join(mkdtempSync(join(tmpdir(), "fx-schema-ab-fx-")), "fx");
-    git(tmpdir(), "clone", "-q", "--depth", "20", "--single-branch", remote, fxClone);
+  if (!liaClone) {
+    liaClone = join(mkdtempSync(join(tmpdir(), "lia-schema-ab-lia-")), "lia");
+    git(tmpdir(), "clone", "-q", "--depth", "20", "--single-branch", remote, liaClone);
   }
   rmSync(repo, { recursive: true, force: true });
-  git(tmpdir(), "clone", "-q", fxClone, repo);
+  git(tmpdir(), "clone", "-q", liaClone, repo);
   git(repo, "remote", "set-url", "origin", remote);
 }
 
@@ -495,17 +495,17 @@ export function writeFixture(root: string): { repo: string; home: string; tracke
   git(repo, "-c", "user.email=eval@example.com", "-c", "user.name=eval", "add", "-A");
   git(repo, "-c", "user.email=eval@example.com", "-c", "user.name=eval", "commit", "-q", "-m", "fixture");
 
-  const fx = join(home, ".fx");
-  mkdirSync(join(fx, "skills", "release-notes"), { recursive: true, mode: 0o700 });
-  writeFileSync(join(fx, "settings.json"), JSON.stringify({ permission_mode: "full-access" }) + "\n", { mode: 0o600 });
-  writeFileSync(join(fx, "skills", "release-notes", "SKILL.md"), RELEASE_NOTES_SKILL);
-  writeFileSync(join(fx, "skills", "release-notes", "template.md"), RELEASE_NOTES_TEMPLATE);
+  const lia = join(home, ".lia");
+  mkdirSync(join(lia, "skills", "release-notes"), { recursive: true, mode: 0o700 });
+  writeFileSync(join(lia, "settings.json"), JSON.stringify({ permission_mode: "full-access" }) + "\n", { mode: 0o600 });
+  writeFileSync(join(lia, "skills", "release-notes", "SKILL.md"), RELEASE_NOTES_SKILL);
+  writeFileSync(join(lia, "skills", "release-notes", "template.md"), RELEASE_NOTES_TEMPLATE);
   const trackerScript = join(root, "tracker-mcp.mjs");
   const trackerLog = join(root, "tracker.log");
   writeFileSync(trackerScript, TRACKER_MCP);
   writeFileSync(trackerLog, "");
   writeFileSync(
-    join(fx, "mcp.json"),
+    join(lia, "mcp.json"),
     JSON.stringify({ mcp: { tracker: { type: "local", command: [process.execPath, trackerScript], enabled: true, environment: { TRACKER_LOG: trackerLog } } } }),
   );
   return { repo, home, trackerLog };
@@ -595,9 +595,9 @@ export function rootRequest(requests: RecordedRequest[], taskPrompt: string): Re
 export interface TaskContext {
   output: string;
   calls: ToolCallRecord[];
-  /** The `tool_calls` fx itself reports in its JSON output. */
-  fxToolCalls: Array<{ name: string; status: string }>;
-  /** fx's stderr, which shows progress lines for provider-executed tools. */
+  /** The `tool_calls` lia itself reports in its JSON output. */
+  liaToolCalls: Array<{ name: string; status: string }>;
+  /** lia's stderr, which shows progress lines for provider-executed tools. */
   stderr: string;
   /** Some response in the run ran a provider-executed web search. */
   webSearched: boolean;
@@ -614,7 +614,7 @@ export interface Task {
   prompt: (ctx: { port: number }) => string;
   check: (ctx: TaskContext) => { pass: boolean; reason: string };
   timeoutSec?: number;
-  /** Changes the fresh repository before fx starts. */
+  /** Changes the fresh repository before lia starts. */
   setup?: (repo: string) => void;
   cleanup?: (ctx: { port: number }) => void;
 }
@@ -626,7 +626,7 @@ const file = (ctx: TaskContext, path: string) => (existsSync(join(ctx.repo, path
 /** `n` appears in `text` as a whole number, so 42 matches "42." but not "142", "42.5", or "1.42". */
 export const numberIn = (text: string, n: number) => new RegExp(`(^|[^0-9.])${n}(?![0-9]|\\.[0-9])`).test(text);
 const used = (ctx: TaskContext, name: string) => ctx.calls.filter((c) => c.name === name);
-// Commands fx started that execute `script`: a call fx rejected before running
+// Commands lia started that execute `script`: a call lia rejected before running
 // is not a rerun, and reading the script with cat, head, or wc is not running it.
 const commandsMatching = (ctx: TaskContext, script: string) => {
   const runs = new RegExp(`(^|[;&|(]\\s*|\\s)(python3?|sh|bash|zsh)\\s+(\\./)?scripts/${script.replace(".", "\\.")}|(^|[;&|(]\\s*)\\./scripts/${script.replace(".", "\\.")}`);
@@ -651,8 +651,8 @@ export const TASKS: Task[] = [
   {
     id: "gh-history-local",
     tool: "shell",
-    prompt: () => "look for changes/last commits in the fx",
-    setup: (repo) => seedFxClone(repo),
+    prompt: () => "look for changes/last commits in the lia",
+    setup: (repo) => seedLiaClone(repo),
     check: (c) => {
       const commands = shellCommands(c);
       const usedGh = commands.some((command) => /^gh\s+/.test(command));
@@ -664,7 +664,7 @@ export const TASKS: Task[] = [
     id: "gh-url-metadata",
     tool: "shell",
     prompt: () => "For https://github.com/vercel/next.js, use GitHub metadata to tell me how many open pull requests it currently has. Do not answer from the URL alone.",
-    setup: (repo) => git(repo, "remote", "add", "origin", "https://github.com/vercel-labs/fx.git"),
+    setup: (repo) => git(repo, "remote", "add", "origin", "https://github.com/ap-justin/lia.git"),
     check: (c) => {
       // gh is signed out in the fresh profile, so a fallback after gh is fine; reaching past gh first is not.
       const remote = c.calls.find(isRemoteCall);
@@ -713,7 +713,7 @@ export const TASKS: Task[] = [
     tool: "read_file",
     prompt: () => "Where is the release workflow defined in this repo, and what triggers it?",
     setup: (repo) => {
-      git(repo, "remote", "add", "origin", "https://github.com/vercel-labs/fx.git");
+      git(repo, "remote", "add", "origin", "https://github.com/ap-justin/lia.git");
       mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
       writeFileSync(join(repo, ".github", "workflows", "release.yml"), "name: Release\non:\n  push:\n    tags: ['v*']\njobs:\n  publish:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo publish\n");
     },
@@ -829,7 +829,7 @@ export const TASKS: Task[] = [
       `Start a static file server for this repository with \`python3 -m http.server ${port}\` so that it keeps running after you finish, and confirm it serves README.md.`,
     check: (c) => {
       const probe = spawnSync("curl", ["-sf", "--max-time", "3", `http://127.0.0.1:${c.port}/README.md`], { encoding: "utf8" });
-      return ok(probe.status === 0 && probe.stdout.includes("ledger"), "server still running after fx exits");
+      return ok(probe.status === 0 && probe.stdout.includes("ledger"), "server still running after lia exits");
     },
     cleanup: ({ port }) => killPort(port),
   },
@@ -906,7 +906,7 @@ export const TASKS: Task[] = [
     tool: "install_skill",
     prompt: () => "Install the skill in ./vendor/skills/poem-writer.",
     check: (c) => {
-      const found = spawnSync("sh", ["-c", `find "${c.home}/.fx" -path '*poem-writer*' -name SKILL.md | head -1`], { encoding: "utf8" }).stdout.trim();
+      const found = spawnSync("sh", ["-c", `find "${c.home}/.lia" -path '*poem-writer*' -name SKILL.md | head -1`], { encoding: "utf8" }).stdout.trim();
       return ok(found.length > 0 && used(c, "install_skill").some((s) => !s.error), "skill installed");
     },
   },
@@ -914,7 +914,7 @@ export const TASKS: Task[] = [
     id: "ask-choice",
     tool: "ask_user_question",
     prompt: () => "I want to add a cache layer. Before doing anything, ask me which backend I prefer, Redis, Memcached, or SQLite, as a multiple-choice question.",
-    // fx ask cannot show a question, so the right result is the question in
+    // lia ask cannot show a question, so the right result is the question in
     // the reply. A tool call there costs a step but is not wrong, and reading
     // the workspace first is not acting; changing it is.
     check: (c) => ok(has(c.output, "Redis", "Memcached", "SQLite") && c.calls.every((s) => ["ask_user_question", "read_file", "glob_files", "grep_files"].includes(s.name)), "asked in the reply without changing anything"),
@@ -936,7 +936,7 @@ export const TASKS: Task[] = [
     tool: "web_search",
     prompt: () => "Search the web for the current stable release of the Zig programming language and cite the page you used.",
     // The provider runs the search inside one model step, so it never reaches
-    // the prompt history or fx's tool_calls; fx prints its progress line.
+    // the prompt history or lia's tool_calls; lia prints its progress line.
     check: (c) => ok(searchedWeb(c) && /https?:\/\//.test(c.output), "web search used and cited"),
   },
 ];
@@ -963,7 +963,7 @@ export interface RunResult {
   reason: string;
   output: string;
   calls: ToolCallRecord[];
-  fxToolCalls: Array<{ name: string; status: string }>;
+  liaToolCalls: Array<{ name: string; status: string }>;
   webSearched?: boolean;
   targetCalls: number;
   targetErrors: number;
@@ -982,7 +982,7 @@ export interface RunResult {
 let nextPort = 18700 + Math.floor(Math.random() * 500);
 
 export async function runOne(arm: Arm, model: string, task: Task, trial: number, testKey: string, noSave = false): Promise<RunResult> {
-  const root = mkdtempSync(join(tmpdir(), `fx-schema-ab-${task.id}-`));
+  const root = mkdtempSync(join(tmpdir(), `lia-schema-ab-${task.id}-`));
   const { repo, home, trackerLog } = writeFixture(root);
   const port = nextPort++;
   task.setup?.(repo);
@@ -994,14 +994,14 @@ export async function runOne(arm: Arm, model: string, task: Task, trial: number,
     ...process.env,
     HOME: home,
     NO_COLOR: "1",
-    FX_SOUND: "0",
-    FX_DISABLE_KEYCHAIN: "1",
-    FX_TEST_SKIP_ONBOARDING: "1",
-    FX_AUTO_UPGRADE: "0",
-    FX_MODEL: model,
-    FX_MAX_AGENT_STEPS: "30",
-    FX_GATEWAY_BASE_URL: proxy.url,
-    FX_GATEWAY_CHAT_URL: `${proxy.url}/v4/ai/language-model`,
+    LIA_SOUND: "0",
+    LIA_DISABLE_KEYCHAIN: "1",
+    LIA_TEST_SKIP_ONBOARDING: "1",
+    LIA_AUTO_UPGRADE: "0",
+    LIA_MODEL: model,
+    LIA_MAX_AGENT_STEPS: "30",
+    LIA_GATEWAY_BASE_URL: proxy.url,
+    LIA_GATEWAY_CHAT_URL: `${proxy.url}/v4/ai/language-model`,
   };
   const askArgs = ["ask", "--full-access", "--json", ...(noSave ? ["--no-save"] : []), "--timeout", String(timeoutSec), "--", prompt];
   const child = spawn(arm.bin, askArgs, {
@@ -1024,18 +1024,18 @@ export async function runOne(arm: Arm, model: string, task: Task, trial: number,
   await proxy.stop();
 
   let output = "";
-  let fxToolCalls: Array<{ name: string; status: string }> = [];
+  let liaToolCalls: Array<{ name: string; status: string }> = [];
   try {
     const doc = JSON.parse(stdout.slice(stdout.indexOf("{")));
     output = String(doc.final_output ?? doc.output ?? "");
-    fxToolCalls = (doc.tool_calls ?? []).map((c: { name?: string; status?: string }) => ({ name: String(c.name), status: String(c.status) }));
+    liaToolCalls = (doc.tool_calls ?? []).map((c: { name?: string; status?: string }) => ({ name: String(c.name), status: String(c.status) }));
   } catch {}
   const root_request = rootRequest(proxy.requests, prompt);
   const calls = extractToolCalls(root_request?.prompt ?? []);
   let check = { pass: false, reason: "oracle threw" };
   try {
     const webSearched = proxy.requests.some((r) => r.providerSearch);
-    check = task.check({ output, calls, fxToolCalls, stderr, webSearched, repo, home, trackerLog, port });
+    check = task.check({ output, calls, liaToolCalls, stderr, webSearched, repo, home, trackerLog, port });
   } catch (error) {
     check = { pass: false, reason: `oracle threw: ${error}` };
   }
@@ -1060,7 +1060,7 @@ export async function runOne(arm: Arm, model: string, task: Task, trial: number,
     reason: check.reason,
     output: output.slice(0, 1500),
     calls,
-    fxToolCalls,
+    liaToolCalls,
     webSearched: proxy.requests.some((r) => r.providerSearch),
     targetCalls: targetCalls.length,
     targetErrors: targetCalls.filter((c) => c.error).length,
@@ -1197,7 +1197,7 @@ export async function measureTokens(
 
 // ---------------------------------------------------------------------------
 // Probes: one model step from a captured interactive request, for tools that
-// `fx ask` cannot run, such as ask_user_question.
+// `lia ask` cannot run, such as ask_user_question.
 
 export interface ProbeCall {
   name: string;
@@ -1406,7 +1406,7 @@ async function main(): Promise<void> {
       const verdict = task.check({
         output: r.output,
         calls: r.calls,
-        fxToolCalls: r.fxToolCalls ?? [],
+        liaToolCalls: r.liaToolCalls ?? [],
         stderr: r.stderrTail,
         webSearched: r.webSearched ?? false,
         repo: "/nonexistent",

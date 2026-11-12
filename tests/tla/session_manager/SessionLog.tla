@@ -2,7 +2,7 @@
 (***************************************************************************)
 (* Step: L1 log. One append-only log file.                                *)
 (*                                                                         *)
-(* Models write() into the page cache, fsync at a durability point, an fx *)
+(* Models write() into the page cache, fsync at a durability point, a lia *)
 (* crash (the kernel keeps every written byte), a machine crash (only the *)
 (* fsynced prefix is guaranteed; the rest may be lost and the new last    *)
 (* line may be torn) and the torn-tail cut plus fsync done by open().     *)
@@ -60,7 +60,7 @@ Fsync ==
     /\ acked' = Len(log)
     /\ UNCHANGED <<log, status>>
 
-(* fx dies. The kernel keeps every byte already written. *)
+(* lia dies. The kernel keeps every byte already written. *)
 ProcessCrash ==
     /\ status \in {"open", "writing"}
     /\ status' = "down"

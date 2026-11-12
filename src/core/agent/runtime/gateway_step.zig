@@ -278,7 +278,7 @@ pub fn projectToolImageMessages(
         .none, .attached => return .{ .messages = messages, .stripped = false },
         .withheld_fallback => "[Tool images were retained but not sent: this model receives image input through the vision tool, not inline. Call vision with the image file's local path to inspect it.]\n",
         .withheld_dead_end => "[Tool images were retained but not sent: this model does not accept inline images and no vision fallback is available. Ask the user to attach the image directly or switch to a vision-capable model.]\n",
-        .withheld_unknown => "[Tool images were retained but not sent: fx could not confirm image input support for this model (the model is not listed in the model catalog, or the catalog is unavailable). This can recover later in the session, so a retry may succeed; otherwise ask the user to attach the image directly.]\n",
+        .withheld_unknown => "[Tool images were retained but not sent: lia could not confirm image input support for this model (the model is not listed in the model catalog, or the catalog is unavailable). This can recover later in the session, so a retry may succeed; otherwise ask the user to attach the image directly.]\n",
     };
     var projected: ?[]types.ChatMessage = null;
     for (messages, 0..) |message, index| {

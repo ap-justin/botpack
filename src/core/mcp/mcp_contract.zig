@@ -172,7 +172,7 @@ pub const McpServerConfig = struct {
     transport: McpTransport = .stdio,
     command: ?[]const u8 = null,
     args: []const []const u8 = &.{},
-    /// Working directory for a stdio server; null inherits fx's own.
+    /// Working directory for a stdio server; null inherits lia's own.
     cwd: ?[]const u8 = null,
     url: ?[]const u8 = null,
     env: []McpEnvVar = &.{},

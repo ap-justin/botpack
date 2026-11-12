@@ -29,9 +29,9 @@ const inside_query: Query = .{ .subcommand = .rev_parse, .args = &.{"--is-inside
 /// Every git command the snapshot runs.
 const queries = [_]Query{ branch_query, status_query, log_query, staged_query, unstaged_query, inside_query };
 
-/// Captures the working directory's git state through safe git. When fx
+/// Captures the working directory's git state through safe git. When lia
 /// cannot run git safely there, every section reads as unavailable and the
-/// snapshot does not claim the directory is outside a repository, so `fx pr`
+/// snapshot does not claim the directory is outside a repository, so `lia pr`
 /// still starts and its agent can inspect the files directly.
 pub fn snapshot(alloc: Allocator) !Snapshot {
     var arena_state = std.heap.ArenaAllocator.init(alloc);

@@ -1,6 +1,6 @@
 //! The libfx journal: one session as the ordered events a host stores.
 //!
-//! A host passes a `persistence` store to `createFxEngine`; fx appends an
+//! A host passes a `persistence` store to `createLiaEngine`; lia appends an
 //! event for each state change and rebuilds the session from the stored
 //! events. This file
 //! only encodes and folds events. Sending them is the ACP layer's job.
@@ -11,7 +11,7 @@
 //!
 //! `seq` counts from 1 with no gaps. `turn` is the turn the event belongs to:
 //! one more than the number of turns committed before it. `data` uses the
-//! session codecs fx already persists, so its shape is fx's to change.
+//! session codecs lia already persists, so its shape is lia's to change.
 //!
 //! - `turn_committed`: a finished turn, as one history entry
 //! - `turn_progress`: the open turn so far, before each model request
@@ -34,10 +34,10 @@
 //! while `steps` counts all of the turn's tool steps. The first progress of a
 //! turn carries everything, and so does one after anything earlier changed,
 //! such as a compaction during the turn. Events that use `base` or are a
-//! `tool_result` are version 2; every other event stays version 1, so an fx
+//! `tool_result` are version 2; every other event stays version 1, so a lia
 //! that reads only version 1 still loads a journal without them.
 //! An event that names an image instead of holding its bytes, one the host
-//! stored or one the session dropped, is version 3, so an fx that reads only
+//! stored or one the session dropped, is version 3, so a lia that reads only
 //! up to version 2 refuses it as newer.
 //!
 //! A `turn_progress` event lists the inputs its model request carries for
@@ -56,7 +56,7 @@ const compactor = @import("../../compactor/compactor.zig");
 
 const Allocator = std.mem.Allocator;
 
-/// The newest event version this fx reads and writes.
+/// The newest event version this lia reads and writes.
 pub const version: u8 = 4;
 /// The version of an event that needs none of the later additions.
 const plain_version: u8 = 1;
@@ -64,11 +64,11 @@ const plain_version: u8 = 1;
 const delta_version: u8 = 2;
 /// The version of an event that names an image instead of holding its
 /// bytes, one the host stored (`inline_ref`) or one the session dropped, so an
-/// fx that reads only up to version 2 reports a newer journal instead of an
+/// lia that reads only up to version 2 reports a newer journal instead of an
 /// invalid one.
 const naming_version: u8 = 3;
 /// The version of an event that holds a turn with context notes or a saved
-/// runtime context (D93, D94), whatever else it holds, so an fx that reads
+/// runtime context (D93, D94), whatever else it holds, so a lia that reads
 /// only up to version 3 reports a newer journal instead of an invalid one.
 const notes_version: u8 = 4;
 /// The most event bytes one load accepts, and the most bytes one snapshot
@@ -311,7 +311,7 @@ fn eventNamesImages(event: Event, stored: ?*const session_codec.StoredImages) bo
 /// checkpoint of the history. Version 2, a snapshot taken where a turn
 /// yielded, adds the open turn before the checkpoint: a little-endian u32
 /// length, then the JSON `writeOpenTurn` writes. A quiet snapshot stays
-/// version 1, so an fx that reads only version 1 still loads it. Hosts store
+/// version 1, so a lia that reads only version 1 still loads it. Hosts store
 /// it as opaque bytes.
 const snapshot_magic = "FXSN";
 const snapshot_version_quiet: u8 = 1;
@@ -484,7 +484,7 @@ fn writeOpenTurnWith(
 pub const LoadError = Allocator.Error || error{
     /// An event is not the shape this version writes.
     InvalidJournal,
-    /// An event was written by a newer fx.
+    /// An event was written by a newer lia.
     UnsupportedJournalVersion,
     /// A `seq` or `turn` is missing, repeated, or out of order.
     OutOfOrderJournalEvent,
@@ -1442,7 +1442,7 @@ test "a journal with a gap, a repeat, or a wrong turn is rejected" {
     for (cases) |bytes| try std.testing.expectError(error.OutOfOrderJournalEvent, fold(alloc, bytes));
 }
 
-test "a journal from a newer fx or with a malformed event is rejected" {
+test "a journal from a newer lia or with a malformed event is rejected" {
     const alloc = std.testing.allocator;
     try std.testing.expectError(
         error.UnsupportedJournalVersion,
@@ -1816,7 +1816,7 @@ test "a snapshot past the positions a JavaScript host can hold is refused" {
     _ = try parseSnapshot(edge);
 }
 
-test "a snapshot that is not one, or comes from a newer fx, is refused" {
+test "a snapshot that is not one, or comes from a newer lia, is refused" {
     const alloc = std.testing.allocator;
     try std.testing.expectError(error.InvalidJournal, parseSnapshot("FXCP"));
     try std.testing.expectError(error.InvalidJournal, parseSnapshot("FXSN"));
@@ -1939,7 +1939,7 @@ test "an event that names no image is version 1, byte for byte" {
     try std.testing.expect(std.mem.startsWith(u8, named.written(), "{\"v\":1,"));
 }
 
-test "a turn with context notes or a saved runtime context is a version 4 event an older fx reports as newer (D93, D94)" {
+test "a turn with context notes or a saved runtime context is a version 4 event an older lia reports as newer (D93, D94)" {
     const alloc = std.testing.allocator;
     const plain_turn = try testTurn(alloc, "prompt", "answer");
     defer types.freeHistoryTurn(alloc, plain_turn);
@@ -1964,7 +1964,7 @@ test "a turn with context notes or a saved runtime context is a version 4 event 
         try out.writer.writeByte('[');
         _ = try (Cursor{}).write(&out.writer, .{ .turn_committed = turn });
         try out.writer.writeByte(']');
-        // An fx that reads up to version 3 returns UnsupportedJournalVersion
+        // A lia that reads up to version 3 returns UnsupportedJournalVersion
         // for it, which libfx reports as FxJournalVersionError.
         try std.testing.expect(std.mem.startsWith(u8, out.written(), "[{\"v\":4,"));
         var folded = try fold(alloc, out.written());

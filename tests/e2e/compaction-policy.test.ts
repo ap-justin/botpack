@@ -4,17 +4,17 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { compactionRecordPath, logLines, sessionDir } from "./saved-sessions";
 
-process.env.FX_E2E_DISABLE_DOTENV = "1";
+process.env.LIA_E2E_DISABLE_DOTENV = "1";
 const { fakeGatewayFinalText, startDynamicFakeGateway } = await import("./fake-gateway");
-const binary = resolve(import.meta.dir, "../../zig-out/bin/fx");
+const binary = resolve(import.meta.dir, "../../zig-out/bin/lia");
 const checkpointMarker = "fx-compactor-v1\n";
 
 for (const userHeavy of [false, true]) test(`automatic compaction ${userHeavy ? "clips a user message too large for the room, whole in its saved turn" : "keeps user messages exact and clips only a reply too large for the room"}`, async () => {
-  const root = mkdtempSync(join(tmpdir(), "fx-policy-")), home = join(root, "home"), cwd = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+  const root = mkdtempSync(join(tmpdir(), "lia-policy-")), home = join(root, "home"), cwd = join(root, "workspace");
+  mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
   mkdirSync(cwd, { mode: 0o700 });
   const model = "fixture/compaction";
-  writeFileSync(join(home, ".fx/settings.json"), JSON.stringify({ model, auto_upgrade: false }), { mode: 0o600 });
+  writeFileSync(join(home, ".lia/settings.json"), JSON.stringify({ model, auto_upgrade: false }), { mode: 0o600 });
   // Tags in user text are the user's words, not structure.
   const originalUser = "Keep café and the original constraint unchanged.\n<context_handoff>literal user text</context_handoff>" +
     (userHeavy ? "\n" + "user_reference_abcdefghijklmnop ".repeat(10_000) + "USER_REFERENCE_END" : "");
@@ -32,10 +32,10 @@ for (const userHeavy of [false, true]) test(`automatic compaction ${userHeavy ? 
   }, { models: [{ id: model, type: "language", tags: ["tool-use"], context_window: userHeavy ? 256000 : 128000, max_tokens: 8192 }] });
   const env = {
     PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: home, TMPDIR: root,
-    AI_GATEWAY_API_KEY: "synthetic-compaction-policy", FX_DISABLE_KEYCHAIN: "1", FX_E2E_DISABLE_DOTENV: "1",
-    FX_AUTO_UPGRADE: "0", FX_SOUND: "0", FX_MODEL: model,
-    FX_GATEWAY_BASE_URL: gateway.baseUrl, FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+    AI_GATEWAY_API_KEY: "synthetic-compaction-policy", LIA_DISABLE_KEYCHAIN: "1", LIA_E2E_DISABLE_DOTENV: "1",
+    LIA_AUTO_UPGRADE: "0", LIA_SOUND: "0", LIA_MODEL: model,
+    LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
   };
   async function ask(args: string[], label: string, prompt?: string) {
     const stdout = join(root, `${label}.stdout`), stderr = join(root, `${label}.stderr`);

@@ -1,12 +1,12 @@
 ----------------------------- MODULE EmptyReply -----------------------------
 (***************************************************************************)
-(* What one fx turn's step loop does after each model reply, for the       *)
+(* What one lia turn's step loop does after each model reply, for the       *)
 (* empty-reply nudge in src/core/agent/runtime/orchestrator.zig.           *)
 (*                                                                         *)
 (* The AI SDK folds the Gemini stop reasons it does not list, such as      *)
 (* UNEXPECTED_TOOL_CALL, into the finish reason `other`. A reply that      *)
 (* stops that way with no text and no tool call used to end the turn with  *)
-(* the placeholder "Done.". Now fx asks the model once to continue, and a  *)
+(* the placeholder "Done.". Now lia asks the model once to continue, and a  *)
 (* second empty reply in a row, or one with no step left, ends the turn    *)
 (* as failed with a message that names the provider's reason.              *)
 (*                                                                         *)
@@ -22,7 +22,7 @@
 (*   "nudge"        the empty-reply nudge                                  *)
 (*   "summarize"    the older continuation, "Summarize what you just did." *)
 (*                                                                         *)
-(* limit is the step limit (FX_MAX_AGENT_STEPS), 0 for none: fx may send   *)
+(* limit is the step limit (LIA_MAX_AGENT_STEPS), 0 for none: lia may send   *)
 (* request n + 1 only when limit = 0 or n < limit                          *)
 (* (src/core/config/agent_steps.zig allowsStep).                           *)
 (*                                                                         *)
@@ -71,7 +71,7 @@ Reset(l) ==
     /\ replies' = <<>>
     /\ outcome' = "none"
 
-\* fx may send request n + 1.
+\* lia may send request n + 1.
 Allows(n) == limit = 0 \/ n < limit
 
 \* nudge_text: a reply with text that stops for `other` is treated as empty.
@@ -85,7 +85,7 @@ Finish(o) == /\ phase' = "done"
              /\ outcome' = o
              /\ UNCHANGED sent
 
-\* The older continuation goes first: summarize_first, and fx before the
+\* The older continuation goes first: summarize_first, and lia before the
 \* change ("today").
 SummarizeFirst ==
     Bug \in {"summarize_first", "today"} /\ silent >= 2 /\ ~summarized /\ Allows(Len(sent))

@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { FX_BIN, runFx } from "../evals/eval-helpers";
+import { LIA_BIN, runLia } from "../evals/eval-helpers";
 import { startIdleDropProxy } from "./fixtures/idle-drop-proxy";
 import { startLegacyStreamableHttpFixture } from "./fixtures/mcp-legacy-remote";
 import { startModernMcpHttpFixture } from "./fixtures/mcp-modern-http";
@@ -29,8 +29,8 @@ const ACCESS_INITIAL = "mcp-access-initial-secret";
 const ACCESS_REFRESHED = "mcp-access-refreshed-secret";
 const REFRESH_INITIAL = "mcp-refresh-initial-secret";
 const REFRESH_ROTATED = "mcp-refresh-rotated-secret";
-const FX_SLACK_CLIENT_ID = "12364000946.12017137861236";
-const inheritedKeychainDisable = process.env.FX_DISABLE_KEYCHAIN;
+const LIA_SLACK_CLIENT_ID = "12364000946.12017137861236";
+const inheritedKeychainDisable = process.env.LIA_DISABLE_KEYCHAIN;
 
 type AuthFixture = ReturnType<typeof startAuthFixture>;
 
@@ -44,14 +44,14 @@ let gateway: ReturnType<typeof startFakeGateway> | null = null;
 let tokenProxy: Awaited<ReturnType<typeof startIdleDropProxy>> | null = null;
 
 beforeAll(() => {
-  process.env.FX_DISABLE_KEYCHAIN = "1";
+  process.env.LIA_DISABLE_KEYCHAIN = "1";
 });
 
 afterAll(() => {
   if (inheritedKeychainDisable === undefined) {
-    delete process.env.FX_DISABLE_KEYCHAIN;
+    delete process.env.LIA_DISABLE_KEYCHAIN;
   } else {
-    process.env.FX_DISABLE_KEYCHAIN = inheritedKeychainDisable;
+    process.env.LIA_DISABLE_KEYCHAIN = inheritedKeychainDisable;
   }
 });
 
@@ -127,7 +127,7 @@ function startAuthFixture(
     /** The metadata's token endpoint, in place of its own. */
     tokenEndpoint?: string;
     slackBridgeClientId?: string;
-    /** fx's Slack app signs in with `http://localhost:<port>/callback`, as fx does now, not fx.sh's redirect. */
+    /** lia's Slack app signs in with `http://localhost:<port>/callback`, as lia does now, not fx.sh's redirect. */
     slackLocalhostRedirect?: boolean;
     /** Answer every refresh with this status and body, such as Slack's HTTP-200 `ok:false`. */
     refreshAnswer?: { status: number; body: unknown };
@@ -355,8 +355,8 @@ function startAuthFixture(
           }
         }
         // Only a server playing Slack's bridge gets fx.sh's redirect; another
-        // server that names fx's Slack app signs in on its own.
-        if (options.slackBridgeClientId && form.get("client_id") === FX_SLACK_CLIENT_ID) {
+        // server that names lia's Slack app signs in on its own.
+        if (options.slackBridgeClientId && form.get("client_id") === LIA_SLACK_CLIENT_ID) {
           if (options.slackLocalhostRedirect) expect(form.get("redirect_uri")).toMatch(/^http:\/\/localhost:\d+\/callback$/);
           else expect(form.get("redirect_uri")).toBe("https://fx.sh/api/slack/oauth/callback");
           expect(form.get("client_secret")).toBeNull();
@@ -389,7 +389,7 @@ function startAuthFixture(
       if (url.pathname === "/register" && options.registration && request.method === "POST") {
         registrations += 1;
         const asked = JSON.parse(body) as { redirect_uris?: string[] };
-        return Response.json({ client_id: "fx-mcp-auth-test", token_endpoint_auth_method: "none", redirect_uris: asked.redirect_uris ?? [] }, { status: 201 });
+        return Response.json({ client_id: "lia-mcp-auth-test", token_endpoint_auth_method: "none", redirect_uris: asked.redirect_uris ?? [] }, { status: 201 });
       }
       return new Response("not found", { status: 404 });
     },
@@ -438,9 +438,9 @@ function createRoot(
   transport: "http" | "sse" = "http",
   serverUrl = activeAuth.url,
   followAuthorization = true,
-  clientId = "fx-mcp-auth-test",
+  clientId = "lia-mcp-auth-test",
 ) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-mcp-auth-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-mcp-auth-")));
   cleanupRoot = root;
   const home = join(root, "home");
   const workspace = join(root, "workspace");
@@ -449,15 +449,15 @@ function createRoot(
   const openLog = join(root, "open.log");
   const callbackLog = join(root, "callback.html");
   const stderr = join(root, "stderr.log");
-  mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+  mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
   mkdirSync(workspace, { recursive: true });
   mkdirSync(bin, { recursive: true });
   writeFileSync(
-    join(home, ".fx", "settings.json"),
+    join(home, ".lia", "settings.json"),
     JSON.stringify({}),
   );
   writeFileSync(
-    join(home, ".fx", "mcp.json"),
+    join(home, ".lia", "mcp.json"),
     JSON.stringify({
       mcp: {
         fixture: {
@@ -490,7 +490,7 @@ function createRoot(
 }
 
 function moveAuthFixtureToWorkspace(root: ReturnType<typeof createRoot>): void {
-  const profilePath = join(root.home, ".fx", "mcp.json");
+  const profilePath = join(root.home, ".lia", "mcp.json");
   const profile = JSON.parse(readFileSync(profilePath, "utf8"));
   writeFileSync(
     join(root.workspace, ".mcp.json"),
@@ -506,15 +506,15 @@ function baseEnv(root: ReturnType<typeof createRoot>) {
     PATH: `${root.bin}${delimiter}${process.env.PATH ?? ""}`,
     AI_GATEWAY_API_KEY: "fake-mcp-auth-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_AUTO_UPGRADE: "0",
-    FX_PERMISSION_MODE: "auto",
-    FX_MODEL: MODEL,
-    FX_TRACE_LOG: root.trace,
-    FX_TRACE_SCOPES: "mcp,core",
+    LIA_AUTO_UPGRADE: "0",
+    LIA_PERMISSION_MODE: "auto",
+    LIA_MODEL: MODEL,
+    LIA_TRACE_LOG: root.trace,
+    LIA_TRACE_SCOPES: "mcp,core",
   };
 }
 
-/** fx exited 0. When it didn't, the failure shows what it printed. */
+/** lia exited 0. When it didn't, the failure shows what it printed. */
 function expectExit0(result: { code: number; stdout: string; stderr: string }): void {
   expect({ code: result.code, stdout: result.stdout, stderr: result.stderr }).toMatchObject({ code: 0 });
 }
@@ -526,7 +526,7 @@ function seedExpiredCredentials(
 ) {
   const endpoint = activeAuth.url;
   const origin = new URL(endpoint).origin;
-  const directory = join(root.home, ".fx", "mcp-credentials");
+  const directory = join(root.home, ".lia", "mcp-credentials");
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const path = join(directory, "credentials.json");
   writeFileSync(
@@ -538,7 +538,7 @@ function seedExpiredCredentials(
         endpoint,
         resource: new URL(activeAuth.resource).href,
         issuer: origin,
-        client_id: "fx-mcp-auth-test",
+        client_id: "lia-mcp-auth-test",
         client_secret: null,
         access_token: ACCESS_INITIAL,
         refresh_token: REFRESH_INITIAL,
@@ -558,11 +558,11 @@ function seedExpiredCredentials(
 }
 
 /**
- * Holds fx's MCP credential store lock from another process, as a busy fx would, for
+ * Holds lia's MCP credential store lock from another process, as a busy lia would, for
  * `seconds`; resolves once it is held.
  */
 async function holdStoreLock(root: ReturnType<typeof createRoot>, seconds: number) {
-  const path = join(root.home, ".fx", "mcp-credentials", "credentials-v3.lock");
+  const path = join(root.home, ".lia", "mcp-credentials", "credentials-v3.lock");
   const holder = Bun.spawn(["perl", "-e", 'use Fcntl qw(:flock); open(my $f, ">>", $ARGV[0]) or die; flock($f, LOCK_EX) or die; $| = 1; print "held\n"; sleep $ARGV[1];', path, String(seconds)], { stdout: "pipe" });
   const reader = holder.stdout.getReader();
   const { value } = await reader.read();
@@ -570,15 +570,15 @@ async function holdStoreLock(root: ReturnType<typeof createRoot>, seconds: numbe
   return holder;
 }
 
-/** A login in fx's MCP credential store (FX_DISABLE_KEYCHAIN), as fx saves it. */
+/** A login in lia's MCP credential store (LIA_DISABLE_KEYCHAIN), as lia saves it. */
 function seedV2Credential(root: ReturnType<typeof createRoot>, activeAuth: AuthFixture, fields: Record<string, unknown> = {}) {
   const origin = new URL(activeAuth.url).origin;
-  const directory = join(root.home, ".fx", "mcp-credentials");
+  const directory = join(root.home, ".lia", "mcp-credentials");
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const credential = JSON.stringify({
     access: ACCESS_INITIAL, refresh: REFRESH_INITIAL, expires_at_ms: null, skew_ms: 30_000,
     token_endpoint: `${origin}/token`, revocation_endpoint: `${origin}/revoke`,
-    resource: new URL(activeAuth.resource).href, client_id: "fx-mcp-auth-test", client_secret: null, method: "none", ...fields,
+    resource: new URL(activeAuth.resource).href, client_id: "lia-mcp-auth-test", client_secret: null, method: "none", ...fields,
   });
   const path = join(directory, "credentials-v3.json");
   writeFileSync(path, JSON.stringify({ version: 1, servers: [{ name: "fixture", url: activeAuth.url, credential }] }), { mode: 0o600 });
@@ -634,13 +634,13 @@ function toolResultText(
 
 describe("MCP login", () => {
   test(
-    "fx ask isolates failed-server authentication from healthy tool search",
+    "lia ask isolates failed-server authentication from healthy tool search",
     async () => {
       upstream = startModernMcpHttpFixture("json");
       auth = startAuthFixture(upstream.url);
       const root = createRoot(auth);
       writeFileSync(
-        join(root.home, ".fx", "mcp.json"),
+        join(root.home, ".lia", "mcp.json"),
         JSON.stringify({
           mcp: {
             linear: {
@@ -653,7 +653,7 @@ describe("MCP login", () => {
               type: "http",
               url: auth.url,
               oauth: {
-                client_id: "fx-mcp-auth-test",
+                client_id: "lia-mcp-auth-test",
                 scopes: ["tools.read"],
               },
               startup_timeout_ms: 5_000,
@@ -683,14 +683,14 @@ describe("MCP login", () => {
         models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
       });
 
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--json", "--auto", "--no-save", "Exercise mixed MCP search."],
         {
           cwd: root.workspace,
           env: {
             ...baseEnv(root),
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
+            LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+            LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
           },
           timeoutMs: 20_000,
         },
@@ -720,17 +720,17 @@ describe("MCP login", () => {
   );
 
   // Without a display (Linux with no DISPLAY, an SSH session, or
-  // FX_NO_OPEN_BROWSER) fx offers paste-back instead of opening a browser.
+  // LIA_NO_OPEN_BROWSER) lia offers paste-back instead of opening a browser.
   // These tests drive the fake browser, so they declare one everywhere.
   const v2Env = (root: ReturnType<typeof createRoot>) => ({
     ...baseEnv(root),
-    FX_DISABLE_KEYCHAIN: "1",
+    LIA_DISABLE_KEYCHAIN: "1",
     DISPLAY: ":0",
     SSH_CONNECTION: undefined,
-    FX_NO_OPEN_BROWSER: undefined,
+    LIA_NO_OPEN_BROWSER: undefined,
   });
   const statusOf = async (root: ReturnType<typeof createRoot>) => {
-    const list = await runFx(["mcp", "list", "--json"], { cwd: root.workspace, env: v2Env(root) });
+    const list = await runLia(["mcp", "list", "--json"], { cwd: root.workspace, env: v2Env(root) });
     expect(list.code).toBe(0);
     return JSON.parse(list.stdout).servers[0].status;
   };
@@ -740,18 +740,18 @@ describe("MCP login", () => {
     fakeGatewayFinalText("Sign in first."),
   ], { models: [{ id: MODEL, type: "language", tags: ["tool-use"] }] });
 
-  test("fx ask tells the model the user signs in with fx mcp login in a terminal", async () => {
+  test("lia ask tells the model the user signs in with lia mcp login in a terminal", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
     const root = createRoot(auth);
     gateway = searchNeedingLogin();
-    const result = await runFx(["ask", "--json", "--auto", "--no-save", "Find the protected MCP tool."], {
+    const result = await runLia(["ask", "--json", "--auto", "--no-save", "Find the protected MCP tool."], {
       cwd: root.workspace,
-      env: { ...v2Env(root), FX_GATEWAY_BASE_URL: gateway.baseUrl, FX_GATEWAY_CHAT_URL: gateway.chatUrl },
+      env: { ...v2Env(root), LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl },
       timeoutMs: 20_000,
     });
     expect(result.code).toBe(0);
-    expect(gateway.requests[1]?.body).toContain("Run fx mcp login fixture in a terminal, then search again.");
+    expect(gateway.requests[1]?.body).toContain("Run lia mcp login fixture in a terminal, then search again.");
     expect(auth.authorizationRequests).toBe(0);
   }, 30_000);
 
@@ -759,7 +759,7 @@ describe("MCP login", () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
     const root = createRoot(auth);
-    const profile = join(root.home, ".fx", "mcp.json");
+    const profile = join(root.home, ".lia", "mcp.json");
     const config = JSON.parse(readFileSync(profile, "utf8"));
     config.mcp.broken = { type: "local", command: ["false"], startup_timeout_ms: 5_000 };
     writeFileSync(profile, JSON.stringify(config));
@@ -767,28 +767,28 @@ describe("MCP login", () => {
       fakeGatewayToolCall("search_open", "capability_search", { query: "weather forecast" }),
       fakeGatewayFinalText("Nothing found."),
     ], { models: [{ id: MODEL, type: "language", tags: ["tool-use"] }] });
-    const result = await runFx(["ask", "--json", "--auto", "--no-save", "What's the weather?"], {
+    const result = await runLia(["ask", "--json", "--auto", "--no-save", "What's the weather?"], {
       cwd: root.workspace,
-      env: { ...v2Env(root), FX_GATEWAY_BASE_URL: gateway.baseUrl, FX_GATEWAY_CHAT_URL: gateway.chatUrl },
+      env: { ...v2Env(root), LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl },
       timeoutMs: 30_000,
     });
     expect(result.code).toBe(0);
     const told = toolResultText(gateway.requests[1]?.body ?? "", "search_open");
     expect(told).toContain('"state":"no_match"');
     expect(told).toContain('"mcp_unavailable":[');
-    expect(told).toContain("\"MCP server 'fixture' needs a login. Ask the user to run fx mcp login fixture in a terminal, then try again.\"");
+    expect(told).toContain("\"MCP server 'fixture' needs a login. Ask the user to run lia mcp login fixture in a terminal, then try again.\"");
     expect(told).toContain("\"MCP server 'broken' is unavailable: ");
     expect(auth.authorizationRequests).toBe(0);
   }, 45_000);
 
-  test("fx mcp login signs in through the browser, and logout signs out", async () => {
+  test("lia mcp login signs in through the browser, and logout signs out", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url, { revokeDelayMs: 500 });
     const root = createRoot(auth);
     const env = v2Env(root);
     expect(await statusOf(root)).toBe("not_started");
 
-    const login = await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const login = await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(login.stderr).toBe("");
     expectExit0(login);
     expect(login.stdout).toContain("Approve in your browser.");
@@ -800,29 +800,29 @@ describe("MCP login", () => {
     expect(login.stdout).not.toContain(ACCESS_INITIAL);
     expect(await statusOf(root)).toBe("signed_in");
 
-    const show = await runFx(["mcp", "show", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const show = await runLia(["mcp", "show", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(show.stderr).toBe("");
     expectExit0(show);
     expect(show.stdout).toMatch(/status +ready/);
     expect(show.stdout).not.toContain(ACCESS_INITIAL);
 
     const logoutStart = Date.now();
-    const logout = await runFx(["mcp", "logout", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const logout = await runLia(["mcp", "logout", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     const logoutMs = Date.now() - logoutStart;
     expect(logout.code).toBe(0);
     expect(logout.stdout).toBe("Signed out of fixture.\n");
-    // The refresh token is revoked, and fx waits for the answer before it
+    // The refresh token is revoked, and lia waits for the answer before it
     // exits: hanging up loses the revocation on a real network.
     expect(auth.revocations).toBe(1);
     expect(logoutMs).toBeGreaterThanOrEqual(500);
     expect(await statusOf(root)).toBe("not_started");
   }, 60_000);
 
-  test("fx mcp login says why the server refused the sign-in, in its words", async () => {
+  test("lia mcp login says why the server refused the sign-in, in its words", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url, { rejectCodeExchange: true });
     const root = createRoot(auth);
-    const login = await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
+    const login = await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
     expect(login.code).toBe(1);
     // The token endpoint's own error, not the stage's name.
     expect(login.stderr).toBe("Couldn't sign in to fixture: it didn't accept the sign-in (invalid_grant).\n");
@@ -831,11 +831,11 @@ describe("MCP login", () => {
     expect(await statusOf(root)).not.toBe("signed_in");
   }, 30_000);
 
-  test("fx mcp login --no-browser takes the address pasted back", async () => {
+  test("lia mcp login --no-browser takes the address pasted back", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
     const root = createRoot(auth, true, "http", auth.url, false);
-    const child = Bun.spawn([FX_BIN, "mcp", "login", "--no-browser", "fixture"], {
+    const child = Bun.spawn([LIA_BIN, "mcp", "login", "--no-browser", "fixture"], {
       cwd: root.workspace,
       env: Object.fromEntries(Object.entries({ ...process.env, ...v2Env(root) }).filter(([, v]) => v !== undefined)) as Record<string, string>,
       stdin: "pipe",
@@ -873,11 +873,11 @@ describe("MCP login", () => {
     expect(auth.tokenExchanges).toBe(1);
   }, 40_000);
 
-  test("fx mcp login takes only its own return: a stray return and a silent connection don't end or hold up the sign-in", async () => {
+  test("lia mcp login takes only its own return: a stray return and a silent connection don't end or hold up the sign-in", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
     const root = createRoot(auth, true, "http", auth.url, false);
-    const child = Bun.spawn([FX_BIN, "mcp", "login", "--no-browser", "fixture"], {
+    const child = Bun.spawn([LIA_BIN, "mcp", "login", "--no-browser", "fixture"], {
       cwd: root.workspace,
       env: Object.fromEntries(Object.entries({ ...process.env, ...v2Env(root) }).filter(([, v]) => v !== undefined)) as Record<string, string>,
       stdin: "pipe",
@@ -898,9 +898,9 @@ describe("MCP login", () => {
       const address = stdout.split("\n").map((line) => line.trim()).find((line) => line.includes("/authorize?"));
       expect(address).toBeDefined();
       const port = Number(new URL(new URL(address!).searchParams.get("redirect_uri")!).port);
-      // A return with a state fx never made, from anything that can reach the
+      // A return with a state lia never made, from anything that can reach the
       // port: a 404, and the sign-in goes on.
-      const stray = await fetch(`http://127.0.0.1:${port}/callback?code=stray&state=not-the-state-fx-made`, { signal: AbortSignal.timeout(5_000) });
+      const stray = await fetch(`http://127.0.0.1:${port}/callback?code=stray&state=not-the-state-lia-made`, { signal: AbortSignal.timeout(5_000) });
       expect(stray.status).toBe(404);
       // A connection that sends nothing, as a browser's spare one does.
       silent = await Bun.connect({ hostname: "127.0.0.1", port, socket: { data() {} } });
@@ -924,15 +924,15 @@ describe("MCP login", () => {
     }
   }, 40_000);
 
-  test("fx mcp login asks for the oauth.scopes in the config when the server names none", async () => {
+  test("lia mcp login asks for the oauth.scopes in the config when the server names none", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url, { omitScopes: true });
     const root = createRoot(auth, true, "http", auth.url, false);
-    const profile = join(root.home, ".fx", "mcp.json");
+    const profile = join(root.home, ".lia", "mcp.json");
     const config = JSON.parse(readFileSync(profile, "utf8"));
     config.mcp.fixture.oauth.scopes = ["custom.scope", "other.scope"];
     writeFileSync(profile, JSON.stringify(config));
-    const child = Bun.spawn([FX_BIN, "mcp", "login", "--no-browser", "fixture"], {
+    const child = Bun.spawn([LIA_BIN, "mcp", "login", "--no-browser", "fixture"], {
       cwd: root.workspace,
       env: Object.fromEntries(Object.entries({ ...process.env, ...v2Env(root) }).filter(([, v]) => v !== undefined)) as Record<string, string>,
       stdin: "pipe",
@@ -962,26 +962,26 @@ describe("MCP login", () => {
   }, 40_000);
 
   // A listener on this machine that counts connections. 0.0.0.0 reaches it,
-  // as a sign-in server's metadata could point fx at it.
+  // as a sign-in server's metadata could point lia at it.
   const internalListener = () => {
     const seen = { connections: 0 };
     const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { open() { seen.connections++; }, data() {}, close() {} } });
     return { seen, url: `https://0.0.0.0:${listener.port}/token`, stop: () => listener.stop(true) };
   };
 
-  test("fx mcp login refuses a sign-in server whose token endpoint is an internal address, and contacts nothing there", async () => {
+  test("lia mcp login refuses a sign-in server whose token endpoint is an internal address, and contacts nothing there", async () => {
     const internal = internalListener();
     try {
       upstream = startModernMcpHttpFixture("json");
       auth = startAuthFixture(upstream.url, { tokenEndpoint: internal.url });
       const root = createRoot(auth);
-      const result = await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
+      const result = await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
       // Refused before the browser: nothing at the address, and no sign-in page.
       expect(internal.seen.connections).toBe(0);
       expect(auth.authorizationRequests).toBe(0);
       expect(existsSync(root.openLog)).toBe(false);
       expect(result.code).not.toBe(0);
-      expect(result.stderr).toContain("Couldn't sign in to fixture: its sign-in server points at an internal address fx won't contact.");
+      expect(result.stderr).toContain("Couldn't sign in to fixture: its sign-in server points at an internal address lia won't contact.");
     } finally {
       internal.stop();
     }
@@ -993,12 +993,12 @@ describe("MCP login", () => {
     const root = createRoot(auth);
     const env = v2Env(root);
     // A login for the profile's fixture, which then moves to the workspace.
-    expectExit0(await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 }));
+    expectExit0(await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 }));
     const before = auth.requests.length;
     moveAuthFixtureToWorkspace(root);
-    const approved = await runFx(["mcp", "approve", "fixture"], { cwd: root.workspace, env });
+    const approved = await runLia(["mcp", "approve", "fixture"], { cwd: root.workspace, env });
     expect(approved.code).toBe(0);
-    const shown = await runFx(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const shown = await runLia(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(shown.signal).toBeNull();
     expect(JSON.parse(shown.stdout).status).toBe("needs_login");
     expect(auth.requests.slice(before).some((r) => (r.authorization ?? "").includes(ACCESS_INITIAL))).toBe(false);
@@ -1015,18 +1015,18 @@ describe("MCP login", () => {
     writeFileSync(join(other, ".mcp.json"), readFileSync(join(root.workspace, ".mcp.json")));
     const env = v2Env(root);
     for (const cwd of [root.workspace, other]) {
-      expect((await runFx(["mcp", "approve", "fixture"], { cwd, env })).code).toBe(0);
+      expect((await runLia(["mcp", "approve", "fixture"], { cwd, env })).code).toBe(0);
     }
-    const login = await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const login = await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expectExit0(login);
     expect(login.stdout).toContain("Signed in to fixture.");
     const status = async (cwd: string) =>
-      JSON.parse((await runFx(["mcp", "show", "fixture", "--json"], { cwd, env, timeoutMs: 20_000 })).stdout).status;
+      JSON.parse((await runLia(["mcp", "show", "fixture", "--json"], { cwd, env, timeoutMs: 20_000 })).stdout).status;
     expect(await status(root.workspace)).toBe("ready");
     expect(await status(other)).toBe("needs_login");
     expect(auth.tokenExchanges).toBe(1);
     // Removing it from the workspace deletes that workspace's login.
-    const removed = await runFx(["mcp", "remove", "fixture", "--project"], { cwd: root.workspace, env });
+    const removed = await runLia(["mcp", "remove", "fixture", "--project"], { cwd: root.workspace, env });
     expect(removed.code).toBe(0);
     expect(removed.stdout).toContain("and deleted its login");
   }, 60_000);
@@ -1039,7 +1039,7 @@ describe("MCP login", () => {
       const root = createRoot(auth);
       // Expired, so its next use refreshes it at the saved endpoint.
       seedV2Credential(root, auth, { expires_at_ms: 0, token_endpoint: internal.url });
-      const shown = await runFx(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
+      const shown = await runLia(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
       expect(internal.seen.connections).toBe(0);
       expect(shown.signal).toBeNull();
       expect(JSON.parse(shown.stdout).status).toBe("needs_login");
@@ -1048,11 +1048,11 @@ describe("MCP login", () => {
     }
   }, 30_000);
 
-  test("fx mcp login says why the sign-in page refused, in its words", async () => {
+  test("lia mcp login says why the sign-in page refused, in its words", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
     const root = createRoot(auth, true, "http", auth.url, false);
-    const child = Bun.spawn([FX_BIN, "mcp", "login", "--no-browser", "fixture"], {
+    const child = Bun.spawn([LIA_BIN, "mcp", "login", "--no-browser", "fixture"], {
       cwd: root.workspace,
       env: Object.fromEntries(Object.entries({ ...process.env, ...v2Env(root) }).filter(([, v]) => v !== undefined)) as Record<string, string>,
       stdin: "pipe",
@@ -1086,36 +1086,36 @@ describe("MCP login", () => {
     expect(auth.tokenExchanges).toBe(0);
   }, 40_000);
 
-  test("fx mcp add signs in to a new server that needs a login, --no-login skips it, and without a browser it names the command", async () => {
+  test("lia mcp add signs in to a new server that needs a login, --no-login skips it, and without a browser it names the command", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url, { registration: true });
     const root = createRoot(auth);
-    writeFileSync(join(root.home, ".fx", "mcp.json"), JSON.stringify({ mcp: {} }));
+    writeFileSync(join(root.home, ".lia", "mcp.json"), JSON.stringify({ mcp: {} }));
     const env = v2Env(root);
 
-    const added = await runFx(["mcp", "add", "web", auth.url], { cwd: root.workspace, env, timeoutMs: 30_000 });
+    const added = await runLia(["mcp", "add", "web", auth.url], { cwd: root.workspace, env, timeoutMs: 30_000 });
     expect(added.stderr).toBe("");
     expectExit0(added);
-    expect(added.stdout).toStartWith("Added web to ~/.fx/mcp.json.\nweb needs a login.\nApprove in your browser.");
+    expect(added.stdout).toStartWith("Added web to ~/.lia/mcp.json.\nweb needs a login.\nApprove in your browser.");
     expect(added.stdout).toEndWith("Signed in to web.\n");
     expect(added.stdout).not.toContain(ACCESS_INITIAL);
     expect(new URL(readFileSync(root.openLog, "utf8").trim()).pathname).toBe("/authorize");
     expect(auth.registrations).toBe(1);
     expect(auth.tokenExchanges).toBe(1);
 
-    const skipped = await runFx(["mcp", "add", "--no-login", "quiet", auth.url], { cwd: root.workspace, env, timeoutMs: 30_000 });
+    const skipped = await runLia(["mcp", "add", "--no-login", "quiet", auth.url], { cwd: root.workspace, env, timeoutMs: 30_000 });
     expectExit0(skipped);
-    expect(skipped.stdout).toBe("Added quiet to ~/.fx/mcp.json.\n");
-    // Without a browser, taking the address pasted back is `fx mcp login`'s.
-    const headless = await runFx(["mcp", "add", "later", auth.url], { cwd: root.workspace, env: { ...env, FX_NO_OPEN_BROWSER: "1" }, timeoutMs: 30_000 });
+    expect(skipped.stdout).toBe("Added quiet to ~/.lia/mcp.json.\n");
+    // Without a browser, taking the address pasted back is `lia mcp login`'s.
+    const headless = await runLia(["mcp", "add", "later", auth.url], { cwd: root.workspace, env: { ...env, LIA_NO_OPEN_BROWSER: "1" }, timeoutMs: 30_000 });
     expectExit0(headless);
-    expect(headless.stdout).toBe("Added later to ~/.fx/mcp.json.\nlater needs a login. Sign in with: fx mcp login later\n");
+    expect(headless.stdout).toBe("Added later to ~/.lia/mcp.json.\nlater needs a login. Sign in with: lia mcp login later\n");
     expect(auth.tokenExchanges).toBe(1);
   }, 90_000);
 
-  // A v1 login taken over would be refreshed by an older fx and this one
+  // A v1 login taken over would be refreshed by an older lia and this one
   // apart, neither seeing the other's saves, so a server that takes each
-  // refresh token once signs both out. fx signs in on its own instead.
+  // refresh token once signs both out. lia signs in on its own instead.
   test("a v1 login isn't carried over: the server needs its own login, and v1's store stays as it is", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
@@ -1123,55 +1123,55 @@ describe("MCP login", () => {
     const v1Store = seedExpiredCredentials(root, auth, Date.now() + 3_600_000);
     const v1Before = readFileSync(v1Store, "utf8");
     const env = v2Env(root);
-    const show = await runFx(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const show = await runLia(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(show.signal).toBeNull();
     expect(JSON.parse(show.stdout).status).toBe("needs_login");
     expect(auth.requests.some((r) => (r.authorization ?? "").includes(ACCESS_INITIAL))).toBe(false);
     expect(auth.refreshes).toBe(0);
     expect(readFileSync(v1Store, "utf8")).toBe(v1Before);
-    expect(existsSync(join(root.home, ".fx", "mcp-credentials", "credentials-v3.json"))).toBe(false);
+    expect(existsSync(join(root.home, ".lia", "mcp-credentials", "credentials-v3.json"))).toBe(false);
   }, 60_000);
 
   // Older builds keep their logins in credentials-v2.json. Those from before
   // version 2 of it read a version-2 document as empty and write it back with
-  // only their own login, and every older fx still running refreshes the
+  // only their own login, and every older lia still running refreshes the
   // logins it holds apart from this one. So nothing there is carried over,
-  // the server signs in once, and an older fx's writes never reach it.
-  test("an older fx's credentials-v2.json is never read or written: the server signs in once, and that fx's rewrites never reach the login", async () => {
+  // the server signs in once, and an older lia's writes never reach it.
+  test("an older lia's credentials-v2.json is never read or written: the server signs in once, and that lia's rewrites never reach the login", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
     const root = createRoot(auth);
     const env = v2Env(root);
-    const directory = join(root.home, ".fx", "mcp-credentials");
+    const directory = join(root.home, ".lia", "mcp-credentials");
     const older = join(directory, "credentials-v2.json");
     const own = join(directory, "credentials-v3.json");
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const olderCredential = JSON.stringify({
-      access: "older-fx-access", refresh: "older-fx-refresh", expires_at_ms: null, skew_ms: 30_000,
+      access: "older-lia-access", refresh: "older-lia-refresh", expires_at_ms: null, skew_ms: 30_000,
       token_endpoint: `${new URL(auth.url).origin}/token`, revocation_endpoint: null,
-      resource: new URL(auth.resource).href, client_id: "older-fx", client_secret: null, method: "none",
+      resource: new URL(auth.resource).href, client_id: "older-lia", client_secret: null, method: "none",
     });
     let olderText = JSON.stringify({ version: 2, servers: [{ name: "fixture", url: auth.url, credential: olderCredential }] });
     writeFileSync(older, olderText, { mode: 0o600 });
 
     // The older login isn't taken: the server needs one of its own.
-    const before = await runFx(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const before = await runLia(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(JSON.parse(before.stdout).status).toBe("needs_login");
-    expect(auth.requests.some((r) => (r.authorization ?? "").includes("older-fx-access"))).toBe(false);
+    expect(auth.requests.some((r) => (r.authorization ?? "").includes("older-lia-access"))).toBe(false);
     expect(auth.refreshes).toBe(0);
     expect(readFileSync(older, "utf8")).toBe(olderText);
     expect(existsSync(own)).toBe(false);
 
-    // One sign-in, saved in this fx's own store.
-    expectExit0(await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 }));
+    // One sign-in, saved in this lia's own store.
+    expectExit0(await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 }));
     expect(readFileSync(older, "utf8")).toBe(olderText);
     const signedIn = readFileSync(own, "utf8");
     expect(JSON.parse(signedIn).servers.map((s: { name: string }) => s.name)).toEqual(["fixture"]);
 
-    // An older fx reads its version-2 store as empty and writes it back.
+    // An older lia reads its version-2 store as empty and writes it back.
     olderText = JSON.stringify({ version: 1, imported_v1: true, servers: [] });
     writeFileSync(older, olderText, { mode: 0o600 });
-    const after = await runFx(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const after = await runLia(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(after.stderr).toBe("");
     expect(JSON.parse(after.stdout).status).toBe("ready");
     expect(readFileSync(own, "utf8")).toBe(signedIn);
@@ -1186,25 +1186,25 @@ describe("MCP login", () => {
     seedV2Credential(root, auth, { expires_at_ms: 0 });
     const env = v2Env(root);
     const started = Date.now();
-    const show = await runFx(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const show = await runLia(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(show.signal).toBeNull();
     expect(Date.now() - started).toBeLessThan(10_000);
     expect(JSON.parse(show.stdout).status).toBe("needs_login");
     expect(auth.refreshes).toBe(1);
     // The dead refresh token is dropped, so the next run doesn't send it.
-    const again = await runFx(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const again = await runLia(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(JSON.parse(again.stdout).status).toBe("needs_login");
     expect(auth.refreshes).toBe(1);
   }, 60_000);
 
-  test("a refresh that fails for now (503) ends fx mcp show as retrying, keeps the login, and asks for no new one", async () => {
+  test("a refresh that fails for now (503) ends lia mcp show as retrying, keeps the login, and asks for no new one", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url, { refreshAnswer: { status: 503, body: { error: "temporarily_unavailable" } } });
     const root = createRoot(auth);
     const store = seedV2Credential(root, auth, { expires_at_ms: 0 });
     const env = v2Env(root);
     const started = Date.now();
-    const show = await runFx(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const show = await runLia(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(show.signal).toBeNull();
     expect(Date.now() - started).toBeLessThan(10_000);
     // A sign-in server that didn't answer says nothing about the login.
@@ -1215,14 +1215,14 @@ describe("MCP login", () => {
     expect(readFileSync(store, "utf8")).toContain(REFRESH_INITIAL);
   }, 60_000);
 
-  test("a refresh Slack answers with a temporary error at HTTP 200 keeps the login, and fx mcp show says it's retrying", async () => {
+  test("a refresh Slack answers with a temporary error at HTTP 200 keeps the login, and lia mcp show says it's retrying", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url, { refreshAnswer: { status: 200, body: { ok: false, error: "internal_error" } } });
     const root = createRoot(auth);
     const store = seedV2Credential(root, auth, { expires_at_ms: 0 });
     const env = v2Env(root);
     const started = Date.now();
-    const show = await runFx(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const show = await runLia(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(show.signal).toBeNull();
     expect(Date.now() - started).toBeLessThan(10_000);
     // Only a refusal ends the login; a temporary error leaves it for the next try.
@@ -1234,24 +1234,24 @@ describe("MCP login", () => {
   }, 60_000);
 
   // Slack refreshes a PKCE app's tokens without its secret only for a
-  // localhost redirect, so fx's Slack app signs in with one.
-  test("Slack signs in as fx's Slack app at Slack's own page, with a localhost redirect on its port and the app's scopes, and refreshes without a secret", async () => {
+  // localhost redirect, so lia's Slack app signs in with one.
+  test("Slack signs in as lia's Slack app at Slack's own page, with a localhost redirect on its port and the app's scopes, and refreshes without a secret", async () => {
     upstream = startModernMcpHttpFixture("json");
     // Slack's 401 names one of its own scopes; the login asks for it with
     // the app's, so it adds nothing here.
-    auth = startAuthFixture(upstream.url, { slackBridgeClientId: FX_SLACK_CLIENT_ID, slackLocalhostRedirect: true, challengeScope: "chat:write" });
-    const root = createRoot(auth, true, "http", auth.url, true, FX_SLACK_CLIENT_ID);
-    // fx's Slack app with no scopes of the config's own, on a free port.
+    auth = startAuthFixture(upstream.url, { slackBridgeClientId: LIA_SLACK_CLIENT_ID, slackLocalhostRedirect: true, challengeScope: "chat:write" });
+    const root = createRoot(auth, true, "http", auth.url, true, LIA_SLACK_CLIENT_ID);
+    // lia's Slack app with no scopes of the config's own, on a free port.
     const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
     const port = probe.port;
     probe.stop(true);
-    const profilePath = join(root.home, ".fx", "mcp.json");
+    const profilePath = join(root.home, ".lia", "mcp.json");
     const profile = JSON.parse(readFileSync(profilePath, "utf8"));
-    profile.mcp.fixture.oauth = { client_id: FX_SLACK_CLIENT_ID, callback_port: port };
+    profile.mcp.fixture.oauth = { client_id: LIA_SLACK_CLIENT_ID, callback_port: port };
     writeFileSync(profilePath, JSON.stringify(profile));
     const standIn = new URL(auth.url).origin;
-    const env = { ...v2Env(root), FX_TEST_SLACK_ORIGIN: standIn };
-    const login = await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const env = { ...v2Env(root), LIA_TEST_SLACK_ORIGIN: standIn };
+    const login = await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(login.stderr).toBe("");
     expectExit0(login);
     expect(login.stdout).toContain("Signed in to fixture.");
@@ -1259,9 +1259,9 @@ describe("MCP login", () => {
     const opened = new URL(readFileSync(root.openLog, "utf8").trim());
     expect(opened.origin).toBe(standIn);
     expect(opened.pathname).toBe("/authorize");
-    expect(opened.searchParams.get("client_id")).toBe(FX_SLACK_CLIENT_ID);
+    expect(opened.searchParams.get("client_id")).toBe(LIA_SLACK_CLIENT_ID);
     expect(opened.searchParams.get("redirect_uri")).toBe(`http://localhost:${port}/callback`);
-    // fx adds offline_access when the authorization server lists it, as
+    // lia adds offline_access when the authorization server lists it, as
     // the stand-in does; Slack doesn't list it.
     expect(opened.searchParams.get("scope")!.split(" ").filter((x) => x !== "offline_access").sort()).toEqual([
       "channels:history", "channels:read", "channels:write", "chat:write", "emoji:read", "files:write",
@@ -1271,13 +1271,13 @@ describe("MCP login", () => {
     expect(auth.requests.some((r) => r.path.startsWith("/api/slack/"))).toBe(false);
     expect(auth.tokenExchanges).toBe(1);
     // Its token runs out: the refresh goes without a secret, and the server is ready.
-    const storePath = join(root.home, ".fx", "mcp-credentials", "credentials-v3.json");
+    const storePath = join(root.home, ".lia", "mcp-credentials", "credentials-v3.json");
     const store = JSON.parse(readFileSync(storePath, "utf8"));
     const credential = JSON.parse(store.servers[0].credential);
     expect(credential.client_secret).toBeNull();
     store.servers[0].credential = JSON.stringify({ ...credential, expires_at_ms: 0 });
     writeFileSync(storePath, JSON.stringify(store), { mode: 0o600 });
-    const show = await runFx(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const show = await runLia(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(show.stderr).toBe("");
     expect(JSON.parse(show.stdout).status).toBe("ready");
     expect(auth.refreshes).toBe(1);
@@ -1291,11 +1291,11 @@ describe("MCP login", () => {
     const root = createRoot(auth);
     const taken = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("taken") });
     try {
-      const profilePath = join(root.home, ".fx", "mcp.json");
+      const profilePath = join(root.home, ".lia", "mcp.json");
       const profile = JSON.parse(readFileSync(profilePath, "utf8"));
       profile.mcp.fixture.oauth.callback_port = taken.port;
       writeFileSync(profilePath, JSON.stringify(profile));
-      const login = await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
+      const login = await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
       expect(login.code).toBe(1);
       expect(login.stderr).toBe(`Couldn't sign in to fixture: port ${taken.port} is in use, maybe by another app signing in. Try again once it's free.\n`);
       expect(existsSync(root.openLog)).toBe(false);
@@ -1305,7 +1305,7 @@ describe("MCP login", () => {
     }
   }, 60_000);
 
-  test("a server that only names fx's Slack app signs in on its own, never as fx's Slack app", async () => {
+  test("a server that only names lia's Slack app signs in on its own, never as lia's Slack app", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
     // A stand-in for Slack at another origin, which must never be asked.
@@ -1319,16 +1319,16 @@ describe("MCP login", () => {
       },
     });
     try {
-      const root = createRoot(auth, true, "http", auth.url, true, FX_SLACK_CLIENT_ID);
-      const env = { ...v2Env(root), FX_TEST_SLACK_ORIGIN: `http://127.0.0.1:${bridge.port}` };
-      const login = await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+      const root = createRoot(auth, true, "http", auth.url, true, LIA_SLACK_CLIENT_ID);
+      const env = { ...v2Env(root), LIA_TEST_SLACK_ORIGIN: `http://127.0.0.1:${bridge.port}` };
+      const login = await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
       expect(bridgeRequests).toEqual([]);
-      // The browser goes to the server's own page, with fx's own loopback redirect.
+      // The browser goes to the server's own page, with lia's own loopback redirect.
       const opened = new URL(readFileSync(root.openLog, "utf8").trim());
       expect(opened.origin).toBe(new URL(auth.url).origin);
       expect(opened.pathname).toBe("/authorize");
       expect(opened.searchParams.get("redirect_uri")).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/callback$/);
-      // The code comes back to fx on 127.0.0.1 and is redeemed with that redirect.
+      // The code comes back to lia on 127.0.0.1 and is redeemed with that redirect.
       const token = auth.requests.find(r => r.path === "/token");
       expect(new URLSearchParams(token!.body).get("redirect_uri")).toBe(opened.searchParams.get("redirect_uri"));
       expect(login.stderr).toBe("");
@@ -1345,74 +1345,74 @@ describe("MCP login", () => {
     auth = startAuthFixture(upstream.url, { accessTokenSuffix: "\r\nX-Injected: 1" });
     const root = createRoot(auth);
     const env = v2Env(root);
-    const login = await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const login = await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(login.signal).toBeNull();
     expect(login.code).toBe(1);
     expect(login.stderr).toBe("Couldn't sign in to fixture: it didn't accept the sign-in (its token has characters OAuth doesn't allow).\n");
     expect(auth.tokenExchanges).toBe(1);
     expect(await statusOf(root)).not.toBe("signed_in");
-    const show = await runFx(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const show = await runLia(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(show.signal).toBeNull();
     expect(JSON.parse(show.stdout).status).toBe("needs_login");
     expect(auth.requests.some(r => (r.authorization ?? "").includes(ACCESS_INITIAL))).toBe(false);
   }, 60_000);
 
-  test("a saved login whose token has a CR LF doesn't crash fx; the server needs a login again", async () => {
+  test("a saved login whose token has a CR LF doesn't crash lia; the server needs a login again", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
     const root = createRoot(auth);
     const env = v2Env(root);
-    expectExit0(await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 }));
-    // The saved token gains a CR LF, as an older fx could have saved it.
-    const storePath = join(root.home, ".fx", "mcp-credentials", "credentials-v3.json");
+    expectExit0(await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 }));
+    // The saved token gains a CR LF, as an older lia could have saved it.
+    const storePath = join(root.home, ".lia", "mcp-credentials", "credentials-v3.json");
     const store = JSON.parse(readFileSync(storePath, "utf8"));
     const saved = JSON.parse(store.servers[0].credential);
     saved.access += "\r\nX-Injected: 1";
     store.servers[0].credential = JSON.stringify(saved);
     writeFileSync(storePath, JSON.stringify(store));
-    const show = await runFx(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const show = await runLia(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(show.signal).toBeNull();
     expect(show.code).toBe(1);
     expect(JSON.parse(show.stdout).status).toBe("needs_login");
     expect(auth.requests.some(r => (r.authorization ?? "").includes("X-Injected"))).toBe(false);
   }, 60_000);
 
-  test("a login store a newer fx saved is never written over, and login and logout say why they can't", async () => {
+  test("a login store a newer lia saved is never written over, and login and logout say why they can't", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
     const root = createRoot(auth);
     const env = v2Env(root);
-    expectExit0(await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 }));
-    // A newer fx saves the same store as version 2.
-    const storePath = join(root.home, ".fx", "mcp-credentials", "credentials-v3.json");
+    expectExit0(await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 }));
+    // A newer lia saves the same store as version 2.
+    const storePath = join(root.home, ".lia", "mcp-credentials", "credentials-v3.json");
     writeFileSync(storePath, JSON.stringify({ ...JSON.parse(readFileSync(storePath, "utf8")), version: 3 }));
     const before = readFileSync(storePath, "utf8");
-    const unreadable = "fx can't read the saved MCP sign-ins in ~/.fx/mcp-credentials/credentials-v3.json. A newer fx saved them, or they're damaged; fix or delete them, then try again.\n";
+    const unreadable = "lia can't read the saved MCP sign-ins in ~/.lia/mcp-credentials/credentials-v3.json. A newer lia saved them, or they're damaged; fix or delete them, then try again.\n";
 
-    expect((await runFx(["mcp", "list", "--json"], { cwd: root.workspace, env })).code).toBe(0);
-    const logout = await runFx(["mcp", "logout", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    expect((await runLia(["mcp", "list", "--json"], { cwd: root.workspace, env })).code).toBe(0);
+    const logout = await runLia(["mcp", "logout", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(logout.stderr).toBe(`Can't sign out of fixture: ${unreadable}`);
     expect(logout.code).toBe(1);
-    const login = await runFx(["mcp", "login", "--no-browser", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const login = await runLia(["mcp", "login", "--no-browser", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(login.stderr).toBe(`Can't sign in to fixture: ${unreadable}`);
     expect(login.code).toBe(1);
     expect(readFileSync(storePath, "utf8")).toBe(before);
     expect(auth.tokenExchanges).toBe(1);
   }, 60_000);
 
-  // One fx refreshes a login at a time. Another that needs it meanwhile
+  // One lia refreshes a login at a time. Another that needs it meanwhile
   // waits for as long as the refresh is still going, here a token endpoint
   // that takes 15 s to answer, and then takes the login it saved: refreshing
   // with the token the first already sent would be refused. Both are
-  // connected before the token runs out, as fx windows in use are.
-  test("an fx waits for another's refresh that takes 15 s, and takes the login it saved", async () => {
+  // connected before the token runs out, as lia windows in use are.
+  test("a lia waits for another's refresh that takes 15 s, and takes the login it saved", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url, { singleUseRefresh: { graceMs: 0 }, refreshDelayMs: 15_000 });
     const activeAuth = auth;
     const root = createRoot(auth);
     const env = v2Env(root);
-    const storePath = join(root.home, ".fx", "mcp-credentials", "credentials-v3.json");
-    expectExit0(await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 }));
+    const storePath = join(root.home, ".lia", "mcp-credentials", "credentials-v3.json");
+    expectExit0(await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 }));
     const until = async (what: string, done: () => boolean) => {
       const deadline = Date.now() + 30_000;
       while (!done()) {
@@ -1421,13 +1421,13 @@ describe("MCP login", () => {
       }
     };
     const models = { models: [{ id: MODEL, type: "language" as const, tags: ["tool-use"] }] };
-    // The first fx calls once the second is connected, and finds the token
+    // The first lia calls once the second is connected, and finds the token
     // withdrawn; the second calls once the first's refresh is out.
     let second: ReturnType<typeof startFakeGateway> | null = null;
     gateway = startFakeGateway([
       fakeGatewayToolCall("select_first", "mcp_select_tool", { name: TOOL_NAME }),
       async () => {
-        await until("the second fx to connect", () => (second?.requests.length ?? 0) >= 2);
+        await until("the second lia to connect", () => (second?.requests.length ?? 0) >= 2);
         activeAuth.validTokens.delete(ACCESS_INITIAL);
         return fakeGatewayToolCall("first", TOOL_NAME, { text: "first" });
       },
@@ -1437,16 +1437,16 @@ describe("MCP login", () => {
     second = startFakeGateway([
       fakeGatewayToolCall("select_second", "mcp_select_tool", { name: TOOL_NAME }),
       async () => {
-        await until("the first fx's refresh", () => activeAuth.refreshes >= 1);
+        await until("the first lia's refresh", () => activeAuth.refreshes >= 1);
         return fakeGatewayToolCall("second", TOOL_NAME, { text: "second" });
       },
       fakeGatewayFinalText("Second call done."),
     ], models);
     const other = second;
     try {
-      const ask = (g: ReturnType<typeof startFakeGateway>) => runFx(["ask", "--json", "--auto", "--no-save", "Call the protected fixture."], {
+      const ask = (g: ReturnType<typeof startFakeGateway>) => runLia(["ask", "--json", "--auto", "--no-save", "Call the protected fixture."], {
         cwd: root.workspace,
-        env: { ...env, FX_GATEWAY_BASE_URL: g.baseUrl, FX_GATEWAY_CHAT_URL: g.chatUrl },
+        env: { ...env, LIA_GATEWAY_BASE_URL: g.baseUrl, LIA_GATEWAY_CHAT_URL: g.chatUrl },
         timeoutMs: 60_000,
       });
       const [a, b] = await Promise.all([ask(first), ask(other)]);
@@ -1467,8 +1467,8 @@ describe("MCP login", () => {
   }, 90_000);
 
   // A load balancer resets the token endpoint's keep-alive connection once it
-  // sits idle. fx keeps it for the next renewal, which must find it gone and
-  // go out on a new connection instead of failing every renewal until fx
+  // sits idle. lia keeps it for the next renewal, which must find it gone and
+  // go out on a new connection instead of failing every renewal until lia
   // restarts.
   test("a renewal after the token endpoint reset its idle connection still goes through", async () => {
     upstream = startModernMcpHttpFixture("json");
@@ -1477,7 +1477,7 @@ describe("MCP login", () => {
     const root = createRoot(auth);
     seedV2Credential(root, auth, { token_endpoint: `${tokenProxy.origin}/token` });
     const activeAuth = auth;
-    // Each call finds its access token withdrawn, so fx renews the login
+    // Each call finds its access token withdrawn, so lia renews the login
     // first. The second comes after the proxy reset the first one's
     // connection.
     const renewed = (withdrawn: string, id: string, waitMs: number) => async () => {
@@ -1491,9 +1491,9 @@ describe("MCP login", () => {
       renewed(`${ACCESS_REFRESHED}-1`, "second", 600),
       fakeGatewayFinalText("Renewed twice."),
     ], { models: [{ id: MODEL, type: "language", tags: ["tool-use"] }] });
-    const result = await runFx(["ask", "--json", "--auto", "--no-save", "Call the protected fixture twice."], {
+    const result = await runLia(["ask", "--json", "--auto", "--no-save", "Call the protected fixture twice."], {
       cwd: root.workspace,
-      env: { ...v2Env(root), FX_GATEWAY_BASE_URL: gateway.baseUrl, FX_GATEWAY_CHAT_URL: gateway.chatUrl },
+      env: { ...v2Env(root), LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl },
       timeoutMs: 30_000,
     });
     expectExit0(result);
@@ -1507,55 +1507,55 @@ describe("MCP login", () => {
     expect(tokenProxy.connections).toBe(2);
   }, 40_000);
 
-  // A login that can't be saved works only where it was made, so fx says so.
-  test("a login that can't be saved says so, and fx mcp login fails", async () => {
+  // A login that can't be saved works only where it was made, so lia says so.
+  test("a login that can't be saved says so, and lia mcp login fails", async () => {
     upstream = startModernMcpHttpFixture("json");
-    const barrier = mkdtempSync(join(tmpdir(), "fx-mcp-code-barrier-"));
+    const barrier = mkdtempSync(join(tmpdir(), "lia-mcp-code-barrier-"));
     const started = join(barrier, "started");
     const release = join(barrier, "release");
     auth = startAuthFixture(upstream.url, { codeBarrierStartedPath: started, codeBarrierReleasePath: release });
     const root = createRoot(auth);
     const env = v2Env(root);
-    const login = runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
-    // Once the browser came back, another fx keeps the saved logins busy.
+    const login = runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    // Once the browser came back, another lia keeps the saved logins busy.
     expect(await waitForFile(started, 10_000)).toBe(true);
     const holder = await holdStoreLock(root, 6);
     writeFileSync(release, "go");
     const done = await login;
     holder.kill();
-    expect(done.stderr).toBe("Signed in to fixture, but couldn't save the login: ~/.fx/mcp-credentials/credentials-v3.json couldn't be written: another fx kept it busy. Sign in again once that's fixed.\n");
+    expect(done.stderr).toBe("Signed in to fixture, but couldn't save the login: ~/.lia/mcp-credentials/credentials-v3.json couldn't be written: another lia kept it busy. Sign in again once that's fixed.\n");
     expect(done.code).toBe(1);
     expect(auth.tokenExchanges).toBe(1);
-    expect(existsSync(join(root.home, ".fx", "mcp-credentials", "credentials-v3.json"))).toBe(false);
+    expect(existsSync(join(root.home, ".lia", "mcp-credentials", "credentials-v3.json"))).toBe(false);
   }, 60_000);
 
-  // A logout that can't remove the saved login says so: every other fx, and
+  // A logout that can't remove the saved login says so: every other lia, and
   // the next one, would still sign in with it.
-  test("a logout that can't remove the saved login says so, and fx mcp logout fails", async () => {
+  test("a logout that can't remove the saved login says so, and lia mcp logout fails", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
     const root = createRoot(auth);
     const storePath = seedV2Credential(root, auth);
-    // Readable, but fx won't replace a file it isn't allowed to write.
+    // Readable, but lia won't replace a file it isn't allowed to write.
     chmodSync(storePath, 0o400);
-    const done = await runFx(["mcp", "logout", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
+    const done = await runLia(["mcp", "logout", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
     expect(done.stdout).toBe("");
-    expect(done.stderr).toBe("Signed out of fixture here, but couldn't remove its saved login: ~/.fx/mcp-credentials/credentials-v3.json couldn't be written: fx isn't allowed to write it. Sign out again once that's fixed.\n");
+    expect(done.stderr).toBe("Signed out of fixture here, but couldn't remove its saved login: ~/.lia/mcp-credentials/credentials-v3.json couldn't be written: lia isn't allowed to write it. Sign out again once that's fixed.\n");
     expect(done.code).toBe(1);
     expect(readFileSync(storePath, "utf8")).toContain(ACCESS_INITIAL);
   }, 60_000);
 
-  test("removing a server whose saved login can't be deleted says so, and fx mcp remove fails", async () => {
+  test("removing a server whose saved login can't be deleted says so, and lia mcp remove fails", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
     const root = createRoot(auth);
     const storePath = seedV2Credential(root, auth);
     chmodSync(storePath, 0o400);
-    const done = await runFx(["mcp", "remove", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
+    const done = await runLia(["mcp", "remove", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
     expect(done.stdout).toBe("");
-    expect(done.stderr).toBe("Removed fixture from ~/.fx/mcp.json, but couldn't delete its saved login: ~/.fx/mcp-credentials/credentials-v3.json couldn't be written: fx isn't allowed to write it. Once that's fixed, add it back and run fx mcp logout fixture to delete it.\n");
+    expect(done.stderr).toBe("Removed fixture from ~/.lia/mcp.json, but couldn't delete its saved login: ~/.lia/mcp-credentials/credentials-v3.json couldn't be written: lia isn't allowed to write it. Once that's fixed, add it back and run lia mcp logout fixture to delete it.\n");
     expect(done.code).toBe(1);
-    expect(readFileSync(join(root.home, ".fx", "mcp.json"), "utf8")).not.toContain("fixture");
+    expect(readFileSync(join(root.home, ".lia", "mcp.json"), "utf8")).not.toContain("fixture");
     expect(readFileSync(storePath, "utf8")).toContain(ACCESS_INITIAL);
   }, 60_000);
 
@@ -1571,25 +1571,25 @@ describe("MCP login", () => {
     doc.servers[0].workspace = root.workspace;
     writeFileSync(storePath, JSON.stringify(doc));
     chmodSync(storePath, 0o400);
-    const done = await runFx(["mcp", "logout", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
+    const done = await runLia(["mcp", "logout", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
     expect(done.stdout).toBe("");
-    expect(done.stderr).toBe("Couldn't sign out of fixture: ~/.fx/mcp-credentials/credentials-v3.json couldn't be written: fx isn't allowed to write it. Try again once that's fixed.\n");
+    expect(done.stderr).toBe("Couldn't sign out of fixture: ~/.lia/mcp-credentials/credentials-v3.json couldn't be written: lia isn't allowed to write it. Try again once that's fixed.\n");
     expect(done.code).toBe(1);
     expect(readFileSync(storePath, "utf8")).toContain(ACCESS_INITIAL);
   }, 60_000);
 
-  test("a logout while another fx keeps the saved logins busy changes nothing and says so", async () => {
+  test("a logout while another lia keeps the saved logins busy changes nothing and says so", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
     const root = createRoot(auth);
     const storePath = seedV2Credential(root, auth);
-    // Private, as fx makes it.
-    writeFileSync(join(root.home, ".fx", "mcp-credentials", "credentials-v3.lock"), "", { mode: 0o600 });
+    // Private, as lia makes it.
+    writeFileSync(join(root.home, ".lia", "mcp-credentials", "credentials-v3.lock"), "", { mode: 0o600 });
     const holder = await holdStoreLock(root, 8);
-    const done = await runFx(["mcp", "logout", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
+    const done = await runLia(["mcp", "logout", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
     holder.kill();
     expect(done.stdout).toBe("");
-    expect(done.stderr).toBe("Couldn't sign out of fixture: ~/.fx/mcp-credentials/credentials-v3.json couldn't be written: another fx kept it busy. Try again once that's fixed.\n");
+    expect(done.stderr).toBe("Couldn't sign out of fixture: ~/.lia/mcp-credentials/credentials-v3.json couldn't be written: another lia kept it busy. Try again once that's fixed.\n");
     expect(done.code).toBe(1);
     expect(readFileSync(storePath, "utf8")).toContain(ACCESS_INITIAL);
   }, 60_000);
@@ -1597,16 +1597,16 @@ describe("MCP login", () => {
   test("a configured oauth.resource reaches the authorization server as written", async () => {
     upstream = startModernMcpHttpFixture("json");
     // The fixture advertises its origin as the resource and checks it on
-    // /authorize and /token; fx's own address is .../mcp.
+    // /authorize and /token; lia's own address is .../mcp.
     auth = startAuthFixture(upstream.url, { resourceAtOrigin: true });
     const root = createRoot(auth);
-    const configPath = join(root.home, ".fx", "mcp.json");
+    const configPath = join(root.home, ".lia", "mcp.json");
     const config = JSON.parse(readFileSync(configPath, "utf8"));
     config.mcp.fixture.oauth.resource = `${new URL(auth.url).origin}/`;
     writeFileSync(configPath, JSON.stringify(config));
-    // Freed memory reads as 0x55, so a resource fx failed to copy is garbled.
+    // Freed memory reads as 0x55, so a resource lia failed to copy is garbled.
     const env = { ...v2Env(root), MallocScribble: "1", MALLOC_PERTURB_: "85" };
-    const login = await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+    const login = await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
     expect(login.signal).toBeNull();
     expect(login.stderr).toBe("");
     expectExit0(login);
@@ -1614,18 +1614,18 @@ describe("MCP login", () => {
     expect(await statusOf(root)).toBe("signed_in");
   }, 60_000);
 
-  test("fx mcp login explains servers it can't sign in to", async () => {
+  test("lia mcp login explains servers it can't sign in to", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
     const root = createRoot(auth);
     const env = v2Env(root);
-    const unknown = await runFx(["mcp", "login", "nope"], { cwd: root.workspace, env });
+    const unknown = await runLia(["mcp", "login", "nope"], { cwd: root.workspace, env });
     expect(unknown.code).toBe(1);
-    expect(unknown.stderr).toBe("No MCP server named nope. fx mcp list shows them.\n");
+    expect(unknown.stderr).toBe("No MCP server named nope. lia mcp list shows them.\n");
     moveAuthFixtureToWorkspace(root);
-    const waiting = await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env });
+    const waiting = await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env });
     expect(waiting.code).toBe(1);
-    expect(waiting.stderr).toBe("fixture is waiting for approval: fx mcp approve fixture.\n");
+    expect(waiting.stderr).toBe("fixture is waiting for approval: lia mcp approve fixture.\n");
     expect(existsSync(root.openLog)).toBe(false);
     expect(auth.authorizationRequests).toBe(0);
   }, 30_000);
@@ -1633,7 +1633,7 @@ describe("MCP login", () => {
   // A saved login is renewed before it's sent once it's expired, or within
   // its renewal window (skew_ms before it expires), whatever the server's era.
   for (const era of ["2026-07-28", "2025-11-25"] as const) {
-    test(`an expired saved login is renewed before fx first talks to a ${era} server`, async () => {
+    test(`an expired saved login is renewed before lia first talks to a ${era} server`, async () => {
       const target = era === "2026-07-28"
         ? (upstream = startModernMcpHttpFixture("json"))
         : (legacyStreamable = startLegacyStreamableHttpFixture(era));
@@ -1641,9 +1641,9 @@ describe("MCP login", () => {
       const root = createRoot(auth);
       seedV2Credential(root, auth, { expires_at_ms: 0 });
       gateway = startToolGateway();
-      const result = await runFx(["ask", "--json", "--auto", "--no-save", "Call the protected fixture."], {
+      const result = await runLia(["ask", "--json", "--auto", "--no-save", "Call the protected fixture."], {
         cwd: root.workspace,
-        env: { ...v2Env(root), FX_GATEWAY_BASE_URL: gateway.baseUrl, FX_GATEWAY_CHAT_URL: gateway.chatUrl },
+        env: { ...v2Env(root), LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl },
         timeoutMs: 20_000,
       });
       expect(result.code).toBe(0);
@@ -1657,19 +1657,19 @@ describe("MCP login", () => {
     }, 30_000);
   }
 
-  test("a login that comes within its renewal window while fx runs is renewed before the next call", async () => {
+  test("a login that comes within its renewal window while lia runs is renewed before the next call", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url);
     const root = createRoot(auth);
     // Renewed 6 s before it expires, 21 s from now: the first use is well
-    // before that window, even when fx starts slowly on a busy machine, and
+    // before that window, even when lia starts slowly on a busy machine, and
     // the call, held until 16 s from now, inside it.
     const savedAt = Date.now();
     seedV2Credential(root, auth, { expires_at_ms: savedAt + 21_000, skew_ms: 6_000 });
     gateway = startDelayedToolGateway(savedAt + 16_000, "Renewed call complete.");
-    const result = await runFx(["ask", "--json", "--auto", "--no-save", "Call the protected fixture."], {
+    const result = await runLia(["ask", "--json", "--auto", "--no-save", "Call the protected fixture."], {
       cwd: root.workspace,
-      env: { ...v2Env(root), FX_GATEWAY_BASE_URL: gateway.baseUrl, FX_GATEWAY_CHAT_URL: gateway.chatUrl },
+      env: { ...v2Env(root), LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl },
       timeoutMs: 45_000,
     });
     expect(result.code).toBe(0);
@@ -1677,24 +1677,24 @@ describe("MCP login", () => {
     const sent = auth.requests.filter((request) => request.path === "/mcp");
     expect(sent[0]?.authorization).toBe(`Bearer ${ACCESS_INITIAL}`);
     // The fixture takes both tokens, so the call carries the new one only
-    // because fx renewed it first.
+    // because lia renewed it first.
     const call = sent.find((request) => request.body.includes('"tools/call"'));
     expect(call?.authorization).toBe(`Bearer ${ACCESS_REFRESHED}`);
     expect(auth.protectedToolCalls).toBe(1);
   }, 60_000);
 
   // RFC 8414 section 3.2: the metadata is an application/json response.
-  test("fx mcp login refuses sign-in metadata that isn't JSON before opening the browser", async () => {
+  test("lia mcp login refuses sign-in metadata that isn't JSON before opening the browser", async () => {
     upstream = startModernMcpHttpFixture("json");
     auth = startAuthFixture(upstream.url, { authorizationMetadataContentType: "text/plain" });
     const root = createRoot(auth);
-    const login = await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
+    const login = await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env: v2Env(root), timeoutMs: 20_000 });
     expect(login.code).not.toBe(0);
     expect(`${login.stdout}${login.stderr}`).toContain("text/plain");
     expect(existsSync(root.openLog)).toBe(false);
     expect(auth.authorizationRequests).toBe(0);
     expect(auth.tokenExchanges).toBe(0);
-    expect(existsSync(join(root.home, ".fx", "mcp-credentials", "credentials-v3.json"))).toBe(false);
+    expect(existsSync(join(root.home, ".lia", "mcp-credentials", "credentials-v3.json"))).toBe(false);
   }, 30_000);
 
   // MongoDB's deployed server answers server/discover with a session error
@@ -1705,10 +1705,10 @@ describe("MCP login", () => {
       auth = startAuthFixture(upstream.url);
       const root = createRoot(auth);
       const env = v2Env(root);
-      const login = await runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+      const login = await runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
       expectExit0(login);
       expect(login.stdout).toContain("Signed in to fixture.");
-      const show = await runFx(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+      const show = await runLia(["mcp", "show", "fixture", "--json"], { cwd: root.workspace, env, timeoutMs: 20_000 });
       expectExit0(show);
       expect(show.stderr).toBe("");
       const status = JSON.parse(show.stdout);
@@ -1731,7 +1731,7 @@ describe("MCP login", () => {
     // This test plays the browser itself.
     const root = createRoot(auth, true, "http", auth.url, false);
     const callbackPort = unusedCallbackPort();
-    const profilePath = join(root.home, ".fx", "mcp.json");
+    const profilePath = join(root.home, ".lia", "mcp.json");
     const profile = JSON.parse(readFileSync(profilePath, "utf8"));
     profile.mcp.fixture.oauth.callback_port = callbackPort;
     writeFileSync(profilePath, JSON.stringify(profile));
@@ -1739,7 +1739,7 @@ describe("MCP login", () => {
     const attempts = 8;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       rmSync(root.openLog, { force: true });
-      const login = runFx(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+      const login = runLia(["mcp", "login", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
       expect(await waitForFileText(root.openLog, "http", 10_000)).toBe(true);
       const authorization = await fetch(readFileSync(root.openLog, "utf8").trim(), { redirect: "manual" });
       const callback = authorization.headers.get("location");
@@ -1749,7 +1749,7 @@ describe("MCP login", () => {
       const done = await login;
       expect({ attempt, code: done.code, stderr: done.stderr }).toEqual({ attempt, code: 0, stderr: "" });
       expect(done.stdout).toContain("Signed in to fixture.");
-      const logout = await runFx(["mcp", "logout", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
+      const logout = await runLia(["mcp", "logout", "fixture"], { cwd: root.workspace, env, timeoutMs: 20_000 });
       expect({ attempt, code: logout.code, stderr: logout.stderr }).toEqual({ attempt, code: 0, stderr: "" });
     }
     expect(auth.authorizationRequests).toBe(attempts);

@@ -51,9 +51,9 @@ pub const Phase = enum { idle, running, awaiting_approval, interrupted, finished
 /// v2 parent's reopen repair records it (D33).
 pub const Outcome = enum { completed, failed, cancelled, interrupted, lost };
 
-/// Why a work ended cancelled, when fx knows: the user stopped its turn,
-/// fx quit while it ran, or the user closed the child from the agent list.
-pub const Cause = enum { user_stop, fx_quit, user_close };
+/// Why a work ended cancelled, when lia knows: the user stopped its turn,
+/// lia quit while it ran, or the user closed the child from the agent list.
+pub const Cause = enum { user_stop, lia_quit, user_close };
 
 /// Who started a finished work and why it was cancelled. A finish that
 /// owes a report saves them, so a report posted after a restart still
@@ -157,7 +157,7 @@ pub const Child = struct {
     /// When the child reports back on its own. Set by its parent's
     /// messages, and recorded on each spawn line.
     report_rule: reports.Rule = .final,
-    /// The agent profile the child started in, or null for fx's `agent`.
+    /// The agent profile the child started in, or null for lia's `agent`.
     /// Fixed when the child is created. Owned.
     profile: ?[]u8 = null,
 
@@ -730,23 +730,23 @@ pub const TestParent = struct {
     }
 };
 
-/// fx's data on a `child_spawned` line: who the child is and which request
+/// lia's data on a `child_spawned` line: who the child is and which request
 /// started the work. Every spawn repeats it, since the fold keeps the newest.
 const SpawnData = struct {
     /// A named child's name; null for a one-off.
     agent: ?[]const u8 = null,
     fingerprint: []const u8,
-    /// The agent profile the child started in. fx writes `main` when the
-    /// parent named none; older fx wrote null there.
+    /// The agent profile the child started in. lia writes `main` when the
+    /// parent named none; older lia wrote null there.
     profile: ?[]const u8 = null,
-    /// Its report rule. This fx writes it on every spawn, which also marks
+    /// Its report rule. This lia writes it on every spawn, which also marks
     /// the work as one whose end owes its parent a report, so a crash that
     /// repair closes as interrupted still reports (`spawnNamesRule`). Older
-    /// fx and converted v1 sessions never write it; a name this fx does not
+    /// lia and converted v1 sessions never write it; a name this lia does not
     /// know reads as `final`.
     report: ?[]const u8 = null,
     /// Who started a work its parent didn't: `user` or `child`. Crash
-    /// repair's finish carries no fx data, so its report reads this.
+    /// repair's finish carries no lia data, so its report reads this.
     by: ?[]const u8 = null,
 };
 
@@ -764,7 +764,7 @@ fn spawnData(arena: Allocator, agent: ?[]const u8, fingerprint: []const u8, prof
 }
 
 /// Pure: who started the work a `child_spawned` line's `data` opens. A
-/// line without `by`, or one this fx can't read, is the parent's.
+/// line without `by`, or one this lia can't read, is the parent's.
 pub fn spawnStartedBy(data: ?[]const u8) reports.StartedBy {
     const bytes = data orelse return .parent;
     var buf: [256]u8 = undefined;
@@ -775,7 +775,7 @@ pub fn spawnStartedBy(data: ?[]const u8) reports.StartedBy {
 }
 
 /// Whether a `child_spawned` line's data names a report rule: the work was
-/// started by fx that owes reports. Unreadable data names none.
+/// started by lia that owes reports. Unreadable data names none.
 pub fn spawnNamesRule(data: ?[]const u8) bool {
     const bytes = data orelse return false;
     var buf: [256]u8 = undefined;
@@ -787,7 +787,7 @@ pub fn spawnNamesRule(data: ?[]const u8) bool {
 
 /// A `child_finished` line's `report` flag: true when its work owes a
 /// report, false when the line says it owes none, and null when the line
-/// carries no fx data, as a finish the manager's crash repair writes.
+/// carries no lia data, as a finish the manager's crash repair writes.
 pub fn finishOwesFlag(data: ?[]const u8) ?bool {
     const bytes = data orelse return null;
     var buf: [256]u8 = undefined;
@@ -797,7 +797,7 @@ pub fn finishOwesFlag(data: ?[]const u8) ?bool {
     return wire.report orelse false;
 }
 
-/// fx's data on a `child_finished` line. Older fx skips `report`, and a
+/// lia's data on a `child_finished` line. Older lia skips `report`, and a
 /// line without it owes nothing, so an upgrade wakes no parent. `by` names
 /// who started a work the parent didn't, and `cause` why it was
 /// cancelled; a line that owes no report has neither.
@@ -806,12 +806,12 @@ const FinishData = struct {
     report: ?bool = null,
     by: ?[]const u8 = null,
     cause: ?[]const u8 = null,
-    /// The child is closed for good (`closeLines`). Older fx ignores it.
+    /// The child is closed for good (`closeLines`). Older lia ignores it.
     closed: ?bool = null,
 };
 
 /// Pure: whether folded child `entry`'s newest line closed it for good.
-/// Data this fx can't read closes nothing.
+/// Data this lia can't read closes nothing.
 fn foldedClosed(entry: session_adapter.Child) bool {
     if (entry.open) return false;
     const bytes = entry.finish_data orelse return false;
@@ -824,7 +824,7 @@ fn foldedClosed(entry: session_adapter.Child) bool {
 
 /// Pure: the batch that closes idle child `child` for good in its parent's
 /// log, under work id `work_id`. Its spawn reads as an ordinary one, with
-/// no report rule, so it starts no report and an older fx lists the child
+/// no report rule, so it starts no report and an older lia lists the child
 /// idle; its finish says it closed. The lines borrow `child` and `arena`.
 fn closeLines(arena: Allocator, child: Child, work_id: []const u8) ![2]session_adapter.ChildLine {
     const fingerprint = try arena.dupe(u8, &std.fmt.bytesToHex(@as([32]u8, @splat(0)), .lower));
@@ -838,7 +838,7 @@ fn closeLines(arena: Allocator, child: Child, work_id: []const u8) ![2]session_a
     };
 }
 
-/// Pure: the facts a finish line's `by` and `cause` name. A value this fx
+/// Pure: the facts a finish line's `by` and `cause` name. A value this lia
 /// doesn't know reads as the default.
 fn endFactsOf(by: ?[]const u8, cause: ?[]const u8) EndFacts {
     return .{
@@ -880,14 +880,14 @@ test "a finish that owes a report saves who started its work and why it was canc
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    const end: EndFacts = .{ .started_by = .user, .cause = .fx_quit };
+    const end: EndFacts = .{ .started_by = .user, .cause = .lia_quit };
     try std.testing.expectEqual(end, finishEndFacts((try finishData(arena, null, true, end)).?));
     // A finish that owes nothing is written as before, and saves neither.
     try std.testing.expect((try finishData(arena, null, false, end)) == null);
     try std.testing.expectEqual(EndFacts{}, finishEndFacts((try finishData(arena, "boom", false, end)).?));
     // The parent's own work writes no `by`.
     try std.testing.expect(std.mem.find(u8, (try finishData(arena, null, true, .{})).?, "by") == null);
-    // An older fx's line, a value this fx doesn't know, and no data read as unknown.
+    // An older lia's line, a value this lia doesn't know, and no data read as unknown.
     try std.testing.expectEqual(EndFacts{}, finishEndFacts("{\"report\":true}"));
     try std.testing.expectEqual(EndFacts{}, finishEndFacts("{\"report\":true,\"by\":\"robot\",\"cause\":\"meteor\"}"));
     try std.testing.expectEqual(EndFacts{}, finishEndFacts(null));
@@ -902,7 +902,7 @@ test "a spawn saves who started a work its parent didn't" {
     }
     // The parent's own work names no one in `by`.
     try std.testing.expect(std.mem.find(u8, try spawnData(arena, "reviewer", "ab", null, .final, .parent), "\"by\":\"") == null);
-    // An older fx's line, a value this fx doesn't know, and no data read as the parent's.
+    // An older lia's line, a value this lia doesn't know, and no data read as the parent's.
     try std.testing.expectEqual(reports.StartedBy.parent, spawnStartedBy("{\"fingerprint\":\"ab\",\"report\":\"final\"}"));
     try std.testing.expectEqual(reports.StartedBy.parent, spawnStartedBy("{\"by\":\"robot\"}"));
     try std.testing.expectEqual(reports.StartedBy.parent, spawnStartedBy(null));
@@ -952,7 +952,7 @@ fn childFromFolded(alloc: Allocator, entry: session_adapter.Child) !Child {
         json_decode.parseFromSliceLeaky(FinishData, sa, raw, options) catch return error.InvalidState
     else
         FinishData{};
-    const last_outcome = fxOutcome(outcome);
+    const last_outcome = liaOutcome(outcome);
     if (finish.failure != null and last_outcome != .failed) return error.InvalidState;
     const fingerprint = try parseFingerprint(spawn.fingerprint);
 
@@ -1085,7 +1085,7 @@ fn stringifyAlloc(arena: Allocator, value: anytype) ![]const u8 {
     return out.written();
 }
 
-pub fn fxOutcome(outcome: session_adapter.ChildOutcome) Outcome {
+pub fn liaOutcome(outcome: session_adapter.ChildOutcome) Outcome {
     return switch (outcome) {
         .ok => .completed,
         .failed => .failed,
@@ -1732,7 +1732,7 @@ test "a finish that owes a report says so on its line, and the fold reads it bac
         advance(alloc, &old, next);
     }
 
-    // The fold reads the flag back; a line older fx wrote owes nothing.
+    // The fold reads the flag back; a line older lia wrote owes nothing.
     const fingerprint = text_utils.repeat("ab", 32);
     const spawn = "{\"agent\":\"reviewer\",\"fingerprint\":\"" ++ fingerprint ++ "\"}";
     const folds = [_]struct { outcome: session_adapter.ChildOutcome, data: ?[]const u8, owed: bool }{
@@ -1866,7 +1866,7 @@ test "v2 children live in the parent's log and come back after a reopen (D22)" {
     try std.testing.expectEqual(@as([32]u8, @splat(0x11)), child.last_request_fingerprint.?);
 }
 
-test "a closed v2 child is gone for good, and an older fx still reads its log" {
+test "a closed v2 child is gone for good, and an older lia still reads its log" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -1932,7 +1932,7 @@ test "a closed v2 child is gone for good, and an older fx still reads its log" {
     try std.testing.expectEqual(@as(usize, 1), registry.children.len);
     try std.testing.expectEqualStrings("tester", registry.children[0].agentName().?);
 
-    // An older fx folds the closed child from the same lines, as idle.
+    // An older lia folds the closed child from the same lines, as idle.
     const folded = try reopened.children(alloc);
     defer session_adapter.freeChildren(alloc, folded);
     try std.testing.expectEqual(@as(usize, 2), folded.len);

@@ -1,7 +1,7 @@
 //! Asks a model once for text: one system message and one user message, no
 //! tools, or one more user message after a conversation sent exactly as the
 //! agent was about to send it. Also offers a conversation's connection to
-//! fx-compactor as its model caller.
+//! lia-compactor as its model caller.
 
 const std = @import("std");
 const observation = @import("observation.zig");
@@ -209,7 +209,7 @@ fn onEvent(raw: *anyopaque, event: agent_stream_provider.Event) void {
     }
 }
 
-/// A conversation's connection to its model, offered to fx-compactor. Its own
+/// A conversation's connection to its model, offered to lia-compactor. Its own
 /// options and output limit apply to its own model; another model keeps the
 /// provider routing and prompt caching but gets only the reasoning asked for
 /// and its own output limit. A request after the conversation keeps the

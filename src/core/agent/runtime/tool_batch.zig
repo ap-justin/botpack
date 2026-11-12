@@ -304,7 +304,7 @@ pub fn assembleParallelToolResults(
             .{
                 .increment_error = execution.status == .failure or tool_result_errors.isToolOutputError(safe_tool_output),
                 .record_completion = execution.status == .success,
-                .status = runtime_execution_memory.persistedStatusForCurrentFxLocalResult(
+                .status = runtime_execution_memory.persistedStatusForCurrentLiaLocalResult(
                     execution.status,
                     safe_tool_output,
                 ),
@@ -382,7 +382,7 @@ pub fn processCommittedFileResult(
         .content = model_output,
         .tool_call_id = tool_call.id,
         .tool_name = tool_call.name,
-        .tool_result_status = runtime_execution_memory.persistedStatusForCurrentFxLocalResult(
+        .tool_result_status = runtime_execution_memory.persistedStatusForCurrentLiaLocalResult(
             execution.status,
             model_output,
         ),
@@ -392,7 +392,7 @@ pub fn processCommittedFileResult(
     if (batch.observer) |observer| observer.emit(.{ .tool_result = .{
         .call = tool_call,
         .output = model_output,
-        .status = runtime_execution_memory.persistedStatusForCurrentFxLocalResult(execution.status, model_output),
+        .status = runtime_execution_memory.persistedStatusForCurrentLiaLocalResult(execution.status, model_output),
     } });
     debug_trace.eventf(
         "tool",
@@ -526,7 +526,7 @@ pub fn appendOrdinaryExecutedResult(
             .increment_error = failed,
             .record_completion = true,
             .mark_write = is_write,
-            .status = runtime_execution_memory.persistedStatusForCurrentFxLocalResult(
+            .status = runtime_execution_memory.persistedStatusForCurrentLiaLocalResult(
                 execution.status,
                 model_output,
             ),

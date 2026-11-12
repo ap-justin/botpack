@@ -7,7 +7,7 @@
 # git-admission.cfg must pass; git-admission-mutation.cfg plants a bug that
 # HoldSafety must catch.
 #
-# ShellContract: one model turn through the shell tool, for the design fx
+# ShellContract: one model turn through the shell tool, for the design lia
 # implements ("current") and a redesign ("proposed"). proposed.cfg and
 # current-holds.cfg must pass. Each current-*.cfg shows a property the current
 # design breaks, and each mutant-*.cfg plants a bug that its property must
@@ -15,7 +15,7 @@
 #
 # FailureStreak (src/core/agent/runtime/tool_admission.zig
 # ShellExecutionFailureRetryState): when repeated shell failures end a turn.
-# failure-streak.cfg must pass. failure-streak-current.cfg is fx before the
+# failure-streak.cfg must pass. failure-streak-current.cfg is lia before the
 # streak restarted on a file change, which breaks EditedRetryContinues, and
 # each failure-streak-mutant-*.cfg plants a bug that its property must catch.
 #

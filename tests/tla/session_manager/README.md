@@ -62,7 +62,7 @@ to report the matching invariant or action property as violated. The first
 
 | Spec | Step (level) | What it proves | Invariants |
 |---|---|---|---|
-| `SessionLog.tla` | Log append, fsync, fx crash, machine crash, torn tail (L1) | Acknowledged lines survive a machine crash; only the final line can be torn; open() leaves no torn line | `SeqContiguous`, `OnlyTailTorn`, `AckedSurvive`, `OpenIsClean` |
+| `SessionLog.tla` | Log append, fsync, lia crash, machine crash, torn tail (L1) | Acknowledged lines survive a machine crash; only the final line can be torn; open() leaves no torn line | `SeqContiguous`, `OnlyTailTorn`, `AckedSurvive`, `OpenIsClean` |
 | `TurnLifecycle.tla` | Turn rules, close, crash, reopen (L2) | The manager only writes valid turn transitions; close and reopen never leave a stale open turn; the log is only ever extended | `StartsWithCreated`, `AtMostOneOpenTurn`, `ItemsInsideTurns`, `EndsCloseATurn`, `ClosedOnlyBetweenTurns`, `NoStaleTurnAfterReopen`, property `AppendOnly` |
 | `WriterLock.tla` | flock across processes, Session mutex across threads (L0, L2) | One writing process; file order equals seq order across threads and after takeover | `OneWriter`, `OnlyHolderOpen`, `MutexInsideOpenSession`, `SeqIsPosition` |
 | `ResumeSnapshot.tla` | Fold and resume from a snapshot (L2) | Resuming from the newest snapshot equals a full replay; snapshots can be dropped | `ResumeEqualsFullReplay`, `SnapshotsAreIgnorable` |
@@ -109,8 +109,8 @@ The models above check the design. To check that the Zig code actually
 behaves like them, the code writes a trace of its steps in test builds, and
 TLC validates that trace against the same specs. See
 [trace/README.md](trace/README.md).
-fx's build compiles that hook out, so in this repository the trace tooling
-runs on its self-tests, on logs fx saved, and on fx's `wiring` debug traces.
+lia's build compiles that hook out, so in this repository the trace tooling
+runs on its self-tests, on logs lia saved, and on lia's `wiring` debug traces.
 
 ```sh
 ./trace/validate.sh SessionLog run.ndjson  # ACCEPTED, or REJECTED at step N
@@ -119,19 +119,19 @@ runs on its self-tests, on logs fx saved, and on fx's `wiring` debug traces.
 
 The Bun drivers in `../drivers/session_manager/` run the real binary and have
 TLC judge each run's saved logs and `wiring` trace: `runtime.test.ts` through
-`fx ask`, and `fork.test.ts` through `/fork` in a terminal, including a fork's
+`lia ask`, and `fork.test.ts` through `/fork` in a terminal, including a fork's
 log against `trace/ForkLog.tla` and planted faults that must be rejected.
-`conversion/` opens, converts and salvages v1 sessions through every way fx
+`conversion/` opens, converts and salvages v1 sessions through every way lia
 opens one, and `trace/check_conversion.py` judges each run against
 `V1Conversion.tla`. Its v1 sessions come from built v1 writers: the last
 commit with v1, older releases for older formats, and a scrubbed real session
 in `conversion/fixtures/`. An older release builds only with its own Zig, which
-`FX_RELEASE_ZIG` names; `FX_TLA_V1_WRITER` picks another release of the
+`LIA_RELEASE_ZIG` names; `LIA_TLA_V1_WRITER` picks another release of the
 current format, such as `v0.0.14`.
 
 ```sh
 bun test ../drivers/session_manager/       # from this folder; needs tmux
-FX_RELEASE_ZIG=/path/to/zig-0.16 bun test ../drivers/session_manager/conversion/
+LIA_RELEASE_ZIG=/path/to/zig-0.16 bun test ../drivers/session_manager/conversion/
 ```
 
 ## What the models do not cover
@@ -150,8 +150,8 @@ FX_RELEASE_ZIG=/path/to/zig-0.16 bun test ../drivers/session_manager/conversion/
   runs we execute.
 - Performance. That is the benchmark in `system-design.md` Performance
   And Capacity.
-- The fx adapter and host policy, such as when to offer "continue". Those are
-  covered by fx E2E tests.
+- The lia adapter and host policy, such as when to offer "continue". Those are
+  covered by lia E2E tests.
 - Liveness (for example "every child eventually finishes"). The models check
   safety only. Liveness would need fairness assumptions about the model
   provider, which the manager does not control.

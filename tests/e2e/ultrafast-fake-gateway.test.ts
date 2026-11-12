@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FX_BIN, runFx } from "../evals/eval-helpers";
+import { LIA_BIN, runLia } from "../evals/eval-helpers";
 import {
   fakeGatewayFinalText,
   fakeGatewaySse,
@@ -72,17 +72,17 @@ function solCatalogModel() {
 
 function writeProfileSettings(root: IsolatedRoot, settings: Record<string, unknown>) {
   writeFileSync(
-    join(root.home, ".fx", "settings.json"),
+    join(root.home, ".lia", "settings.json"),
     `${JSON.stringify({ session_titles: false, ...settings })}\n`,
     { mode: 0o600 },
   );
 }
 
 function createIsolatedRoot(settings: Record<string, unknown> = {}): IsolatedRoot {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-ultrafast-e2e-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-ultrafast-e2e-")));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+  mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
   mkdirSync(workspace, { recursive: true, mode: 0o700 });
   const isolated = { root, home, workspace: realpathSync(workspace) };
   writeProfileSettings(isolated, settings);
@@ -98,20 +98,20 @@ function fakeGatewayEnv(
     HOME: root.home,
     AI_GATEWAY_API_KEY: "ultrafast-fake-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_DISABLE_KEYCHAIN: "1",
-    FX_TEST_SKIP_ONBOARDING: "1",
-    FX_AUTO_UPGRADE: "0",
-    FX_SOUND: "0",
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
-    FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_PROVIDER: "gateway",
-    FX_MODEL: ULTRA_MODEL,
-    FX_FAST: undefined,
-    FX_ULTRAFAST: undefined,
-    FX_PERMISSION_MODE: undefined,
-    FX_FIRST_CALL_TOOL_CHOICE: undefined,
+    LIA_DISABLE_KEYCHAIN: "1",
+    LIA_TEST_SKIP_ONBOARDING: "1",
+    LIA_AUTO_UPGRADE: "0",
+    LIA_SOUND: "0",
+    LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+    LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+    LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_PROVIDER: "gateway",
+    LIA_MODEL: ULTRA_MODEL,
+    LIA_FAST: undefined,
+    LIA_ULTRAFAST: undefined,
+    LIA_PERMISSION_MODE: undefined,
+    LIA_FIRST_CALL_TOOL_CHOICE: undefined,
     ...extra,
   };
 }
@@ -141,7 +141,7 @@ function expectStandardRequest(body: string) {
   expect(request.providerOptions?.openai?.serviceTier).toBeUndefined();
 }
 
-function expectAskJsonError(result: Awaited<ReturnType<typeof runFx>>) {
+function expectAskJsonError(result: Awaited<ReturnType<typeof runLia>>) {
   expect(result.code).toBe(1);
   expect(result.stderr).toBe("");
   const payload = JSON.parse(result.stdout) as { error?: string };
@@ -206,7 +206,7 @@ class AcpClient {
         (entry): entry is [string, string] => entry[1] !== undefined,
       ),
     );
-    return new AcpClient(nodeSpawn(FX_BIN, ["acp", ...args], {
+    return new AcpClient(nodeSpawn(LIA_BIN, ["acp", ...args], {
       cwd,
       env: processEnv,
       stdio: ["pipe", "pipe", "pipe"],
@@ -309,25 +309,25 @@ describe("ultrafast fake Gateway", () => {
           args: [],
           ultrafast: true,
         },
-        { name: "environment on", settings: {}, extraEnv: { FX_ULTRAFAST: "1" }, args: [], ultrafast: true },
+        { name: "environment on", settings: {}, extraEnv: { LIA_ULTRAFAST: "1" }, args: [], ultrafast: true },
         {
           name: "environment off",
           settings: { ultrafast_mode: true },
-          extraEnv: { FX_ULTRAFAST: "0" },
+          extraEnv: { LIA_ULTRAFAST: "0" },
           args: [],
           ultrafast: false,
         },
         {
           name: "CLI on overrides environment off",
           settings: { ultrafast_mode: false },
-          extraEnv: { FX_ULTRAFAST: "0" },
+          extraEnv: { LIA_ULTRAFAST: "0" },
           args: ["--ultrafast"],
           ultrafast: true,
         },
         {
           name: "CLI off overrides environment and profile on",
           settings: { ultrafast_mode: true },
-          extraEnv: { FX_ULTRAFAST: "1" },
+          extraEnv: { LIA_ULTRAFAST: "1" },
           args: ["--no-ultrafast"],
           ultrafast: false,
         },
@@ -347,7 +347,7 @@ describe("ultrafast fake Gateway", () => {
         },
         { name: "workspace on", settings: { ultrafast_mode: false }, workspace: true, extraEnv: {}, args: [], ultrafast: true },
         { name: "workspace off", settings: { ultrafast_mode: true }, workspace: false, extraEnv: {}, args: [], ultrafast: false },
-        { name: "environment overrides workspace", settings: { ultrafast_mode: false }, workspace: true, extraEnv: { FX_ULTRAFAST: "0" }, args: [], ultrafast: false },
+        { name: "environment overrides workspace", settings: { ultrafast_mode: false }, workspace: true, extraEnv: { LIA_ULTRAFAST: "0" }, args: [], ultrafast: false },
       ];
 
       for (const scenario of cases) {
@@ -358,14 +358,14 @@ describe("ultrafast fake Gateway", () => {
             workspaces: { [root.workspace]: { ultrafast_mode: scenario.workspace } },
           });
         }
-        const settingsPath = join(root.home, ".fx", "settings.json");
+        const settingsPath = join(root.home, ".lia", "settings.json");
         const settingsBefore = readFileSync(settingsPath, "utf8");
         const gateway = startFakeGateway(
           [finishWithServiceTier(`response for ${scenario.name}`, scenario.ultrafast ? "ultrafast" : "standard")],
           { models: [ultrafastCatalogModel()] },
         );
         try {
-          const result = await runFx(
+          const result = await runLia(
             ["ask", "--auto", "--json", "--no-save", ...scenario.args, `Test ${scenario.name}.`],
             {
               cwd: root.workspace,
@@ -390,16 +390,16 @@ describe("ultrafast fake Gateway", () => {
   );
 
   test(
-    "rejects an invalid FX_ULTRAFAST value before any completion POST",
+    "rejects an invalid LIA_ULTRAFAST value before any completion POST",
     async () => {
       const root = createIsolatedRoot({ ultrafast_mode: true });
       const gateway = startFakeGateway([], { models: [ultrafastCatalogModel()] });
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "--json", "--no-save", "Invalid overrides must not spend."],
           {
             cwd: root.workspace,
-            env: fakeGatewayEnv(root, gateway, { FX_ULTRAFAST: "paid" }),
+            env: fakeGatewayEnv(root, gateway, { LIA_ULTRAFAST: "paid" }),
             timeoutMs: TIMEOUT,
           },
         );
@@ -418,7 +418,7 @@ describe("ultrafast fake Gateway", () => {
     async () => {
       const root = createIsolatedRoot();
       writeFileSync(
-        join(root.workspace, ".fx.json"),
+        join(root.workspace, ".lia.json"),
         `${JSON.stringify({ ultrafast_mode: true })}\n`,
         { mode: 0o600 },
       );
@@ -428,7 +428,7 @@ describe("ultrafast fake Gateway", () => {
       );
       try {
         const env = fakeGatewayEnv(root, gateway);
-        const defaultResult = await runFx(
+        const defaultResult = await runLia(
           ["ask", "--auto", "--json", "--no-save", "Project defaults must not enable Ultra."],
           { cwd: root.workspace, env, timeoutMs: TIMEOUT },
         );
@@ -436,7 +436,7 @@ describe("ultrafast fake Gateway", () => {
         expect(gateway.requests).toHaveLength(1);
         expectStandardRequest(gateway.requests[0]!.body);
 
-        const fastResult = await runFx(
+        const fastResult = await runLia(
           ["ask", "--auto", "--json", "--no-save", "--fast", "Fast remains independent."],
           { cwd: root.workspace, env, timeoutMs: TIMEOUT },
         );
@@ -469,8 +469,8 @@ describe("ultrafast fake Gateway", () => {
         { models: [ultrafastCatalogModel()] },
       );
       try {
-        const env = fakeGatewayEnv(root, gateway, { FX_MODEL: undefined });
-        const saved = await runFx(
+        const env = fakeGatewayEnv(root, gateway, { LIA_MODEL: undefined });
+        const saved = await runLia(
           ["ask", "--auto", "--json", "Save the paid-tier preference."],
           { cwd: root.workspace, env, timeoutMs: TIMEOUT },
         );
@@ -485,7 +485,7 @@ describe("ultrafast fake Gateway", () => {
           ultrafast_mode: false,
           models: { gateway: ULTRA_MODEL },
         });
-        const durableResume = await runFx(
+        const durableResume = await runLia(
           ["ask", "--auto", "--json", "--resume", sessionId, "Resume the saved paid preference."],
           { cwd: root.workspace, env, timeoutMs: TIMEOUT },
         );
@@ -494,7 +494,7 @@ describe("ultrafast fake Gateway", () => {
         expect(gateway.requests).toHaveLength(2);
         expectUltrafastRequest(gateway.requests[1]!.body);
 
-        const disabledResume = await runFx(
+        const disabledResume = await runLia(
           ["ask", "--auto", "--json", "--resume", sessionId, "--no-ultrafast", "Resume without the paid tier."],
           { cwd: root.workspace, env, timeoutMs: TIMEOUT },
         );
@@ -502,7 +502,7 @@ describe("ultrafast fake Gateway", () => {
         expect(disabledResume.stderr).toBe("");
         expect(gateway.requests).toHaveLength(3);
         expectStandardRequest(gateway.requests[2]!.body);
-        expect(JSON.parse(readFileSync(join(root.home, ".fx", "settings.json"), "utf8")))
+        expect(JSON.parse(readFileSync(join(root.home, ".lia", "settings.json"), "utf8")))
           .toMatchObject({ ultrafast_mode: false, models: { gateway: ULTRA_MODEL } });
       } finally {
         gateway.stop();
@@ -517,7 +517,7 @@ describe("ultrafast fake Gateway", () => {
     async () => {
       for (const scenario of [
         { name: "CLI", args: ["--ultrafast"], env: {} },
-        { name: "environment", args: [], env: { FX_ULTRAFAST: "1" } },
+        { name: "environment", args: [], env: { LIA_ULTRAFAST: "1" } },
       ]) {
         const root = createIsolatedRoot({
           ultrafast_mode: false,
@@ -531,11 +531,11 @@ describe("ultrafast fake Gateway", () => {
           { models: [ultrafastCatalogModel()] },
         );
         try {
-          const initial = await runFx(
+          const initial = await runLia(
             ["ask", "--auto", "--json", ...scenario.args, "Use a process-only Ultra override."],
             {
               cwd: root.workspace,
-              env: fakeGatewayEnv(root, gateway, { FX_MODEL: undefined, ...scenario.env }),
+              env: fakeGatewayEnv(root, gateway, { LIA_MODEL: undefined, ...scenario.env }),
               timeoutMs: TIMEOUT,
             },
           );
@@ -545,11 +545,11 @@ describe("ultrafast fake Gateway", () => {
           const sessionId = JSON.parse(initial.stdout).session_id as string;
           expectUltrafastRequest(gateway.requests[0]!.body);
 
-          const resumed = await runFx(
+          const resumed = await runLia(
             ["ask", "--auto", "--json", "--resume", sessionId, "Resume without process overrides."],
             {
               cwd: root.workspace,
-              env: fakeGatewayEnv(root, gateway, { FX_MODEL: undefined }),
+              env: fakeGatewayEnv(root, gateway, { LIA_MODEL: undefined }),
               timeoutMs: TIMEOUT,
             },
           );
@@ -557,7 +557,7 @@ describe("ultrafast fake Gateway", () => {
           expect(resumed.stderr).toBe("");
           expect(gateway.requests).toHaveLength(2);
           expectStandardRequest(gateway.requests[1]!.body);
-          expect(JSON.parse(readFileSync(join(root.home, ".fx", "settings.json"), "utf8")))
+          expect(JSON.parse(readFileSync(join(root.home, ".lia", "settings.json"), "utf8")))
             .toMatchObject({ ultrafast_mode: false, models: { gateway: ULTRA_MODEL } });
         } finally {
           gateway.stop();
@@ -577,11 +577,11 @@ describe("ultrafast fake Gateway", () => {
         { models: [{ ...ultrafastCatalogModel(), id: SOL_MODEL }] },
       );
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "--json", "--no-save", "--ultrafast", "Use eligible Sol."],
           {
             cwd: root.workspace,
-            env: fakeGatewayEnv(root, gateway, { FX_MODEL: SOL_MODEL }),
+            env: fakeGatewayEnv(root, gateway, { LIA_MODEL: SOL_MODEL }),
             timeoutMs: TIMEOUT,
           },
         );
@@ -618,8 +618,8 @@ describe("ultrafast fake Gateway", () => {
         const root = createIsolatedRoot();
         const gateway = startFakeGateway([], { models: scenario.models });
         try {
-          const env = fakeGatewayEnv(root, gateway, { FX_MODEL: scenario.model });
-          const result = await runFx(
+          const env = fakeGatewayEnv(root, gateway, { LIA_MODEL: scenario.model });
+          const result = await runLia(
             ["ask", "--auto", "--json", "--no-save", "--ultrafast", "Attempt premium routing."],
             { cwd: root.workspace, env, timeoutMs: TIMEOUT },
           );
@@ -644,7 +644,7 @@ describe("ultrafast fake Gateway", () => {
       const root = createIsolatedRoot();
       const gateway = startFakeGateway([], { models: [ultrafastCatalogModel()] });
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--auto",
@@ -675,7 +675,7 @@ describe("ultrafast fake Gateway", () => {
       const gateway = startFakeGateway([], { models: [solCatalogModel()] });
       const client = AcpClient.create(
         root.workspace,
-        fakeGatewayEnv(root, gateway, { FX_MODEL: SOL_MODEL }),
+        fakeGatewayEnv(root, gateway, { LIA_MODEL: SOL_MODEL }),
       );
       try {
         const sessionId = await startAcpSession(client);
@@ -746,9 +746,9 @@ describe("ultrafast fake Gateway", () => {
     async () => {
       for (const scenario of [
         { name: "profile", settings: { ultrafast_mode: true }, env: {}, args: [], ultrafast: true },
-        { name: "environment", settings: { ultrafast_mode: false }, env: { FX_ULTRAFAST: "1" }, args: [], ultrafast: true },
-        { name: "CLI enable", settings: { ultrafast_mode: false }, env: { FX_ULTRAFAST: "0" }, args: ["--ultrafast"], ultrafast: true },
-        { name: "CLI disable", settings: { ultrafast_mode: true }, env: { FX_ULTRAFAST: "1" }, args: ["--no-ultrafast"], ultrafast: false },
+        { name: "environment", settings: { ultrafast_mode: false }, env: { LIA_ULTRAFAST: "1" }, args: [], ultrafast: true },
+        { name: "CLI enable", settings: { ultrafast_mode: false }, env: { LIA_ULTRAFAST: "0" }, args: ["--ultrafast"], ultrafast: true },
+        { name: "CLI disable", settings: { ultrafast_mode: true }, env: { LIA_ULTRAFAST: "1" }, args: ["--no-ultrafast"], ultrafast: false },
       ]) {
         const root = createIsolatedRoot(scenario.settings);
         const gateway = startFakeGateway(
@@ -768,7 +768,7 @@ describe("ultrafast fake Gateway", () => {
           expect(gateway.requests).toHaveLength(1);
           if (scenario.ultrafast) expectUltrafastRequest(gateway.requests[0]!.body);
           else expectStandardRequest(gateway.requests[0]!.body);
-          expect(JSON.parse(readFileSync(join(root.home, ".fx", "settings.json"), "utf8")))
+          expect(JSON.parse(readFileSync(join(root.home, ".lia", "settings.json"), "utf8")))
             .toMatchObject(scenario.settings);
         } finally {
           try {
@@ -795,7 +795,7 @@ describe("ultrafast fake Gateway", () => {
         ],
         { models: [ultrafastCatalogModel()] },
       );
-      const env = fakeGatewayEnv(root, gateway, { FX_MODEL: undefined });
+      const env = fakeGatewayEnv(root, gateway, { LIA_MODEL: undefined });
       let client = AcpClient.create(root.workspace, env);
       try {
         const sessionId = await startAcpSession(client);
@@ -841,7 +841,7 @@ describe("ultrafast fake Gateway", () => {
         expect(JSON.stringify(standard)).toContain("ACP resumed standard");
         expect(gateway.requests).toHaveLength(3);
         expectStandardRequest(gateway.requests[2]!.body);
-        expect(JSON.parse(readFileSync(join(root.home, ".fx", "settings.json"), "utf8")))
+        expect(JSON.parse(readFileSync(join(root.home, ".lia", "settings.json"), "utf8")))
           .toMatchObject({ ultrafast_mode: true });
       } finally {
         try {
@@ -870,7 +870,7 @@ describe("ultrafast fake Gateway", () => {
         );
       }, { models: [ultrafastCatalogModel()] });
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--full-access", "--json", "--ultrafast", "Delegate one task."],
           { cwd: root.workspace, env: fakeGatewayEnv(root, gateway), timeoutMs: TIMEOUT },
         );
@@ -925,11 +925,11 @@ describe("ultrafast fake Gateway", () => {
         return finishWithServiceTier(`ULTRA_PARENT_${round}`, tier);
       }, { models: [ultrafastCatalogModel()] });
       try {
-        const env = fakeGatewayEnv(root, gateway, { FX_MODEL: undefined });
+        const env = fakeGatewayEnv(root, gateway, { LIA_MODEL: undefined });
         let sessionId: string | undefined;
         for (const current of [1, 2, 3]) {
           round = current;
-          const result = await runFx(
+          const result = await runLia(
             [
               "ask", "--full-access", "--json",
               ...(sessionId ? ["--resume", sessionId] : []),
@@ -959,12 +959,12 @@ describe("ultrafast fake Gateway", () => {
           expect(body).toContain("ULTRA_CHILD_1");
         }
         expect(childBodies[2]).toContain("ULTRA_CHILD_2");
-        const log = readFileSync(join(root.home, ".fx", "sessions", "v2", sessionId!, "log.jsonl"), "utf8")
+        const log = readFileSync(join(root.home, ".lia", "sessions", "v2", sessionId!, "log.jsonl"), "utf8")
           .trimEnd().split("\n").map((line) => JSON.parse(line));
         const spawned = log.filter((line) => line.kind === "child_spawned");
         expect(spawned).toHaveLength(3);
         expect(new Set(spawned.map((line) => line.child)).size).toBe(1);
-        expect(JSON.parse(readFileSync(join(root.home, ".fx", "settings.json"), "utf8")))
+        expect(JSON.parse(readFileSync(join(root.home, ".lia", "settings.json"), "utf8")))
           .toMatchObject({ ultrafast_mode: true });
       } finally {
         gateway.stop();
@@ -1064,7 +1064,7 @@ describe("ACP speed options", () => {
     async () => {
       const root = createIsolatedRoot();
       const gateway = startFakeGateway([fakeGatewayFinalText("standard answer")], { models: speedCatalog() });
-      const client = AcpClient.create(root.workspace, fakeGatewayEnv(root, gateway, { FX_MODEL: PLAIN_MODEL }));
+      const client = AcpClient.create(root.workspace, fakeGatewayEnv(root, gateway, { LIA_MODEL: PLAIN_MODEL }));
       try {
         const sessionId = await startAcpSession(client);
         const fast = await client.request("session/set_config_option", { sessionId, configId: "fast", value: "true" }, 3);
@@ -1128,7 +1128,7 @@ describe("ACP speed options", () => {
         [fakeGatewayFinalText("saved fast"), fakeGatewayFinalText("resumed fast"), fakeGatewayFinalText("resumed standard")],
         { models: speedCatalog() },
       );
-      const env = fakeGatewayEnv(root, gateway, { FX_MODEL: undefined });
+      const env = fakeGatewayEnv(root, gateway, { LIA_MODEL: undefined });
       let client = AcpClient.create(root.workspace, env);
       try {
         const sessionId = await startAcpSession(client);

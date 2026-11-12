@@ -1,10 +1,10 @@
-//! Sign-in credentials the engine hands fx to keep (AUTH-21): one opaque blob per
+//! Sign-in credentials the engine hands lia to keep (AUTH-21): one opaque blob per
 //! server name and URL, so a changed URL never gets an old token. They live in
-//! the macOS Keychain, or in a private file under `~/.fx/mcp-credentials/`.
+//! the macOS Keychain, or in a private file under `~/.lia/mcp-credentials/`.
 //! Either way the directory's advisory lock is held while the store is read
-//! and rewritten, so two fx processes don't overwrite each other's entries.
-//! A store this fx can't read, damaged or saved by a newer fx, is never
-//! written over. One fx refreshes a login at a time, under that login's
+//! and rewritten, so two lia processes don't overwrite each other's entries.
+//! A store this lia can't read, damaged or saved by a newer lia, is never
+//! written over. One lia refreshes a login at a time, under that login's
 //! refresh lock.
 //!
 //! Older stores are never read or taken over: v1's `credentials.json`, and
@@ -20,7 +20,7 @@
 //! processes, `tests/tla/mcp_host/SharedLogins.tla`; for processes running
 //! older builds beside this one, `tests/tla/mcp_host/MixedBuilds.tla`; for how
 //! long the Keychain store's lock is held and waited for,
-//! `tests/tla/mcp_host/StoreLockBudget.tla`; and for how long another fx waits
+//! `tests/tla/mcp_host/StoreLockBudget.tla`; and for how long another lia waits
 //! for a login's refresh, `tests/tla/mcp_host/RefreshLease.tla`.
 
 const std = @import("std");
@@ -44,7 +44,7 @@ const lock_file_name = "credentials-v3.lock";
 const lock_deadline_ms: u64 = 2_000;
 /// The Keychain store's lock is leased (`Store.lock`): its holder stamps it
 /// before each Keychain call, and the call ends within `call_budget_ms`, its
-/// own timeout; a waiting fx gives up only `hold_slack_ms` after that.
+/// own timeout; a waiting lia gives up only `hold_slack_ms` after that.
 const call_budget_ms: i64 = native_keychain.keychain_call_ms;
 const hold_slack_ms: i64 = leased_lock.slack_ms;
 const max_store_bytes: usize = 1024 * 1024;
@@ -89,11 +89,11 @@ pub const Store = struct {
     /// written: <why>", held in `buffer`.
     pub fn writeFailure(s: Store, buffer: []u8, err: anyerror) []const u8 {
         const why: []const u8 = switch (err) {
-            // A store over fx's size limit is one fx can't read either.
-            error.CredentialStoreUnreadable, error.StreamTooLong => "a newer fx saved it, or it's damaged",
-            error.LockBusy => "another fx kept it busy",
-            error.AccessDenied => "fx isn't allowed to write it",
-            error.PrivateStatePermissionsUnsupported => "its permissions let others read it, or fx can't make them private",
+            // A store over lia's size limit is one lia can't read either.
+            error.CredentialStoreUnreadable, error.StreamTooLong => "a newer lia saved it, or it's damaged",
+            error.LockBusy => "another lia kept it busy",
+            error.AccessDenied => "lia isn't allowed to write it",
+            error.PrivateStatePermissionsUnsupported => "its permissions let others read it, or lia can't make them private",
             error.DurablePathUnsafe => "it isn't a plain file",
             error.NoSpaceLeft, error.DiskQuota => "the disk is full",
             error.ReadOnlyFileSystem => "its disk is read-only",
@@ -175,7 +175,7 @@ pub const Store = struct {
     }
 
     /// Deletes the credential saved under `key` only if it is `own`, the
-    /// digest of the one this process had, so one another fx saved since
+    /// digest of the one this process had, so one another lia saved since
     /// stays. False when none was deleted.
     pub fn removeIfSame(s: Store, alloc: Allocator, key: Key, own: [32]u8) !bool {
         var locked = try s.lock();
@@ -191,7 +191,7 @@ pub const Store = struct {
     }
 
     /// The refresh lock of the login saved under `key`, or null while another
-    /// fx holds it: one fx refreshes a login at a time, and the others take
+    /// lia holds it: one lia refreshes a login at a time, and the others take
     /// what it saved. The lock goes with `release`, or with the process. It
     /// is leased: its holder stamps it now, and again with `restamp` before
     /// each step of the refresh (`refreshHolderStopped`).
@@ -212,7 +212,7 @@ pub const Store = struct {
         return .{ .dir = dir, .lock = advisory, .lease = .{ .kind = .refresh, .stamp_ms = now } };
     }
 
-    /// Whether an fx that began waiting at `started_ms` for the refresh lock
+    /// Whether a lia that began waiting at `started_ms` for the refresh lock
     /// of the login under `key` goes ahead without it: `hold_slack_ms` after
     /// both the holder's step, at most `step_ms` from its stamp, and the
     /// store's lease ran out. A holder waiting its turn for the store, or in
@@ -266,14 +266,14 @@ pub const Store = struct {
     /// The file store's lock waits `lock_deadline_ms`. The Keychain store's
     /// work under its lock is two calls to `osascript` that can each take
     /// seconds, so that lock is leased (`leased_lock`, `tests/tla/mcp_host/StoreLockBudget.tla`):
-    /// the fx that takes it writes the time, on the awake clock, into the lock
+    /// the lia that takes it writes the time, on the awake clock, into the lock
     /// file, and again before each Keychain call (`read`, `write`), and each
-    /// call ends within `call_budget_ms` of its stamp. A waiting fx gives up
+    /// call ends within `call_budget_ms` of its stamp. A waiting lia gives up
     /// only when the stamp, or its own start if later, is
     /// `call_budget_ms + hold_slack_ms` old, so a live holder is never given
-    /// up on however many calls it makes or fx take the lock in turn; one
+    /// up on however many calls it makes or lia take the lock in turn; one
     /// frozen holding it (ctrl+z) costs a waiter 12 s. A stamp from the
-    /// future, a damaged one, or none, as from an older fx, counts as the
+    /// future, a damaged one, or none, as from an older lia, counts as the
     /// waiter's start.
     fn lock(s: Store) !Locked {
         var dir = try s.openDir();
@@ -443,7 +443,7 @@ const Doc = struct {
     }
 
     fn parse(alloc: Allocator, bytes: []const u8) !Doc {
-        // An older fx's `imported_v1` flag is ignored.
+        // An older lia's `imported_v1` flag is ignored.
         const Saved = struct {
             version: u32,
             servers: []const struct { name: []const u8, url: []const u8, workspace: ?[]const u8 = null, credential: []const u8 },
@@ -494,10 +494,10 @@ test "one snapshot holds every server's credential" {
 test "a store that can't be written says where and why in words" {
     var buffer: [320]u8 = undefined;
     const file: Store = .{ .home = "/home/example", .backend = .file };
-    try testing.expectEqualStrings("~/.fx/mcp-credentials/credentials-v3.json couldn't be written: another fx kept it busy", file.writeFailure(&buffer, error.LockBusy));
-    try testing.expectEqualStrings("~/.fx/mcp-credentials/credentials-v3.json couldn't be written: fx isn't allowed to write it", file.writeFailure(&buffer, error.AccessDenied));
-    try testing.expectEqualStrings("~/.fx/mcp-credentials/credentials-v3.json couldn't be written: a newer fx saved it, or it's damaged", file.writeFailure(&buffer, error.StreamTooLong));
-    try testing.expectEqualStrings("~/.fx/mcp-credentials/credentials-v3.json couldn't be written: the disk is full", file.writeFailure(&buffer, error.NoSpaceLeft));
+    try testing.expectEqualStrings("~/.lia/mcp-credentials/credentials-v3.json couldn't be written: another lia kept it busy", file.writeFailure(&buffer, error.LockBusy));
+    try testing.expectEqualStrings("~/.lia/mcp-credentials/credentials-v3.json couldn't be written: lia isn't allowed to write it", file.writeFailure(&buffer, error.AccessDenied));
+    try testing.expectEqualStrings("~/.lia/mcp-credentials/credentials-v3.json couldn't be written: a newer lia saved it, or it's damaged", file.writeFailure(&buffer, error.StreamTooLong));
+    try testing.expectEqualStrings("~/.lia/mcp-credentials/credentials-v3.json couldn't be written: the disk is full", file.writeFailure(&buffer, error.NoSpaceLeft));
     const keychain: Store = .{ .home = "/home/example", .backend = .keychain };
     try testing.expectEqualStrings("the Keychain item " ++ native_keychain.mcp_host_credentials_service_name ++ " couldn't be written: the Keychain refused it or didn't answer", keychain.writeFailure(&buffer, error.KeychainWriteFailed));
 }
@@ -584,7 +584,7 @@ fn writeV1(home: []const u8) !void {
         "{\"server_identity\":\"bound\",\"token_type\":\"DPoP\"," ++ entry ++ "}]}");
 }
 
-test "v1's logins aren't taken over, and an older fx's store with its flag is read as before" {
+test "v1's logins aren't taken over, and an older lia's store with its flag is read as before" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     const home = try testHome(&tmp);
@@ -594,7 +594,7 @@ test "v1's logins aren't taken over, and an older fx's store with its flag is re
     const linear: Key = .{ .name = "linear", .url = "https://mcp.linear.app/mcp" };
     try testing.expectEqual(@as(?[]u8, null), try store.get(testing.allocator, linear));
     try testing.expectError(error.FileNotFound, tmp.dir.statFile(testing.io, test_path, .{}));
-    // An older fx wrote its flag; the login is found, and the flag goes.
+    // An older lia wrote its flag; the login is found, and the flag goes.
     try tmp.dir.writeFile(testing.io, .{ .sub_path = test_path, .data = "{\"version\":1,\"imported_v1\":true,\"servers\":[{\"name\":\"linear\",\"url\":\"https://mcp.linear.app/mcp\",\"credential\":\"{}\"}]}" });
     const got = (try store.get(testing.allocator, linear)) orelse return error.TestUnexpectedResult;
     defer secret.zeroAndFree(testing.allocator, got);
@@ -605,15 +605,15 @@ test "v1's logins aren't taken over, and an older fx's store with its flag is re
     try testing.expect(std.mem.find(u8, bytes, "imported_v1") == null);
 }
 
-test "credentials-v2.json's logins aren't taken over, and an older fx rewriting it never reaches this store" {
+test "credentials-v2.json's logins aren't taken over, and an older lia rewriting it never reaches this store" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     const home = try testHome(&tmp);
     defer testing.allocator.free(home);
     const store: Store = .{ .home = home, .backend = .file };
     const plain: Key = .{ .name = "plain", .url = "https://mcp.plain.com/mcp" };
-    const v2_path = ".fx/" ++ profile_paths.mcp_credentials_dir_name ++ "/credentials-v2.json";
-    try tmp.dir.createDirPath(testing.io, ".fx/" ++ profile_paths.mcp_credentials_dir_name);
+    const v2_path = ".lia/" ++ profile_paths.mcp_credentials_dir_name ++ "/credentials-v2.json";
+    try tmp.dir.createDirPath(testing.io, ".lia/" ++ profile_paths.mcp_credentials_dir_name);
     const v2 = "{\"version\":2,\"servers\":[{\"name\":\"plain\",\"url\":\"https://mcp.plain.com/mcp\",\"credential\":\"{\\\"access\\\":\\\"v2\\\"}\"}]}";
     try tmp.dir.writeFile(testing.io, .{ .sub_path = v2_path, .data = v2 });
 
@@ -621,7 +621,7 @@ test "credentials-v2.json's logins aren't taken over, and an older fx rewriting 
     try testing.expectEqual(@as(?[]u8, null), try store.get(testing.allocator, plain));
     try store.put(testing.allocator, plain, "{\"access\":\"v3\"}");
 
-    // An older fx reads version 2 as empty and writes its own store back.
+    // An older lia reads version 2 as empty and writes its own store back.
     try tmp.dir.writeFile(testing.io, .{ .sub_path = v2_path, .data = "{\"version\":1,\"imported_v1\":true,\"servers\":[]}" });
     const kept = (try store.get(testing.allocator, plain)) orelse return error.TestUnexpectedResult;
     defer secret.zeroAndFree(testing.allocator, kept);
@@ -630,22 +630,22 @@ test "credentials-v2.json's logins aren't taken over, and an older fx rewriting 
     defer testing.allocator.free(old);
     try testing.expectEqualStrings("{\"version\":1,\"imported_v1\":true,\"servers\":[]}", old);
 
-    // Its refresh lock is apart from the one an older fx takes for its own copy.
+    // Its refresh lock is apart from the one an older lia takes for its own copy.
     const lock_name = refreshLockName(plain);
     try testing.expect(std.mem.startsWith(u8, &lock_name, "refresh-v3-"));
     try testing.expect(std.mem.endsWith(u8, &lock_name, ".lock"));
 }
 
-test "the store is the one no older fx opens" {
+test "the store is the one no older lia opens" {
     try testing.expectEqualStrings("credentials-v3.json", file_name);
     try testing.expectEqualStrings("credentials-v3.lock", lock_file_name);
-    try testing.expectEqualStrings("FX_MCP_OAUTH_CREDENTIALS_V3", native_keychain.mcp_host_credentials_service_name);
-    try testing.expectEqualStrings("the Keychain item FX_MCP_OAUTH_CREDENTIALS_V3", (Store{ .home = "/Users/example", .backend = .keychain }).place());
-    try testing.expectEqualStrings("~/.fx/mcp-credentials/credentials-v3.json", (Store{ .home = "/Users/example", .backend = .file }).place());
+    try testing.expectEqualStrings("LIA_MCP_OAUTH_CREDENTIALS_V3", native_keychain.mcp_host_credentials_service_name);
+    try testing.expectEqualStrings("the Keychain item LIA_MCP_OAUTH_CREDENTIALS_V3", (Store{ .home = "/Users/example", .backend = .keychain }).place());
+    try testing.expectEqualStrings("~/.lia/mcp-credentials/credentials-v3.json", (Store{ .home = "/Users/example", .backend = .file }).place());
 }
 
 /// A document that parses is saved as version 2 and reads back the same, so
-/// a write never leaves a store this fx can't read.
+/// a write never leaves a store this lia can't read.
 fn fuzzStoreDocument(_: void, smith: *std.testing.Smith) !void {
     var buffer: [2048]u8 = undefined;
     const len = smith.sliceWeightedBytes(&buffer, &.{
@@ -693,7 +693,7 @@ test "a store document that parses always saves back readable" {
     });
 }
 
-test "one fx holds a login's refresh lock at a time, and each login has its own" {
+test "one lia holds a login's refresh lock at a time, and each login has its own" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     const home = try testHome(&tmp);
@@ -862,7 +862,7 @@ test "a refresh lock's waiter goes ahead 2 s after both the holder's step and th
     const started: i64 = 1_000_000;
     const step: i64 = 30_000;
     const lease = call_budget_ms + hold_slack_ms;
-    // No stamps, as with an older fx: 32 s from its own start.
+    // No stamps, as with an older lia: 32 s from its own start.
     try testing.expect(!refreshWaitExpired(null, null, started, started + step + hold_slack_ms - 1, step));
     try testing.expect(refreshWaitExpired(null, null, started, started + step + hold_slack_ms, step));
     // A refresh sent after it started gets its whole step.
@@ -879,9 +879,9 @@ test "a refresh lock's waiter goes ahead 2 s after both the holder's step and th
     try testing.expect(!refreshWaitExpired(started + 90_000, null, started, started + step + hold_slack_ms - 1, step));
 }
 
-const test_path = ".fx/" ++ profile_paths.mcp_credentials_dir_name ++ "/" ++ file_name;
+const test_path = ".lia/" ++ profile_paths.mcp_credentials_dir_name ++ "/" ++ file_name;
 
-test "the credential file is private, and one this fx can't read is never written over" {
+test "the credential file is private, and one this lia can't read is never written over" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     const home = try testHome(&tmp);
@@ -897,7 +897,7 @@ test "the credential file is private, and one this fx can't read is never writte
     try testing.expectEqualStrings("{\"access\":\"p1\"}", found);
     try testing.expectEqual(@as(?[]u8, null), try store.lookup(testing.allocator, .{ .name = "linear", .url = url }));
 
-    // A damaged file, then one a newer fx saved: no login is found, though
+    // A damaged file, then one a newer lia saved: no login is found, though
     // `lookup` says it can't tell, a sign-in or sign-out fails, and the
     // file stays as it was.
     for ([_][]const u8{
@@ -932,7 +932,7 @@ test "the credential file is private, and one this fx can't read is never writte
 
 extern "c" fn mkfifo(path: [*:0]const u8, mode: std.c.mode_t) c_int;
 
-test "a refused login removes only its own: one another fx saved since stays" {
+test "a refused login removes only its own: one another lia saved since stays" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     const home = try testHome(&tmp);
@@ -942,7 +942,7 @@ test "a refused login removes only its own: one another fx saved since stays" {
 
     try store.put(testing.allocator, .{ .name = "linear", .url = url }, "{\"access\":\"mine\"}");
     const mine = digest("{\"access\":\"mine\"}");
-    // Another fx signs in and saves its own.
+    // Another lia signs in and saves its own.
     try store.put(testing.allocator, .{ .name = "linear", .url = url }, "{\"access\":\"theirs\"}");
     try testing.expect(!try store.removeIfSame(testing.allocator, .{ .name = "linear", .url = url }, mine));
     const kept = (try store.get(testing.allocator, .{ .name = "linear", .url = url })).?;

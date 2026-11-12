@@ -13,7 +13,7 @@ import {
 import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { runFx } from "../evals/eval-helpers";
+import { runLia } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText,
@@ -21,8 +21,8 @@ import {
 } from "./fake-gateway";
 
 const TIMEOUT = 30_000;
-const OAUTH_SERVICE = "FX_OAUTH_SESSION_V1";
-const TEST_ACCOUNT_PREFIX = "fx-e2e-oauth-";
+const OAUTH_SERVICE = "LIA_OAUTH_SESSION_V1";
+const TEST_ACCOUNT_PREFIX = "lia-e2e-oauth-";
 const activeCleanups = new Set<() => void>();
 const KEYCHAIN_PROBE_SCRIPT = `
 ObjC.import("Security");
@@ -143,10 +143,10 @@ function startOAuthIssuer() {
 }
 
 function writeLogin(home: string, issuer: string, tokenSuffix: string): void {
-  const fxDir = join(home, ".fx");
-  mkdirSync(fxDir, { recursive: true, mode: 0o700 });
-  chmodSync(fxDir, 0o700);
-  const authPath = join(fxDir, "auth.json");
+  const liaDir = join(home, ".lia");
+  mkdirSync(liaDir, { recursive: true, mode: 0o700 });
+  chmodSync(liaDir, 0o700);
+  const authPath = join(liaDir, "auth.json");
   writeFileSync(
     authPath,
     JSON.stringify({
@@ -184,12 +184,12 @@ function keychainEnv(home: string, account: string, issuer: string) {
     USER: account,
     AI_GATEWAY_API_KEY: undefined,
     VERCEL_OIDC_TOKEN: undefined,
-    FX_DISABLE_KEYCHAIN: undefined,
-    FX_TEST_SKIP_ONBOARDING: "1",
-    FX_AUTO_UPGRADE: "0",
-    FX_TEST_OAUTH_ISSUER_URL: issuer,
-    FX_TRACE_LOG: join(home, "oauth-keychain-trace.log"),
-    FX_TRACE_SCOPES: "auth,keychain",
+    LIA_DISABLE_KEYCHAIN: undefined,
+    LIA_TEST_SKIP_ONBOARDING: "1",
+    LIA_AUTO_UPGRADE: "0",
+    LIA_TEST_OAUTH_ISSUER_URL: issuer,
+    LIA_TRACE_LOG: join(home, "oauth-keychain-trace.log"),
+    LIA_TRACE_SCOPES: "auth,keychain",
   };
 }
 
@@ -199,19 +199,19 @@ keychainTest(
   "Vercel sign-in checks a read-only legacy file before OAuth with Keychain enabled",
   async () => {
     const account = isolatedAccount();
-    const home = mkdtempSync(join(tmpdir(), "fx-oauth-keychain-readonly-"));
+    const home = mkdtempSync(join(tmpdir(), "lia-oauth-keychain-readonly-"));
     attachSystemKeychain(home);
     const issuer = startOAuthIssuer();
     const cleanup = () => deleteKeychainItem(account);
     activeCleanups.add(cleanup);
     cleanup();
     writeLogin(home, issuer.issuer, account);
-    const path = join(home, ".fx", "auth.json");
+    const path = join(home, ".lia", "auth.json");
     const original = readFileSync(path, "utf8");
     chmodSync(path, 0o400);
     try {
-      const result = await runFx(["login"], {
-        env: { ...keychainEnv(home, account, issuer.issuer), FX_NO_OPEN_BROWSER: "1", FX_SOUND: "0" },
+      const result = await runLia(["login"], {
+        env: { ...keychainEnv(home, account, issuer.issuer), LIA_NO_OPEN_BROWSER: "1", LIA_SOUND: "0" },
         timeoutMs: 3000,
       });
       expect(result.timedOut).toBe(false);
@@ -234,7 +234,7 @@ keychainTest(
   async () => {
     const account = isolatedAccount();
     const before = productionMetadata();
-    const home = mkdtempSync(join(tmpdir(), "fx-oauth-keychain-migration-"));
+    const home = mkdtempSync(join(tmpdir(), "lia-oauth-keychain-migration-"));
     attachSystemKeychain(home);
     const issuer = startOAuthIssuer();
     const gateway = startFakeGateway([
@@ -246,17 +246,17 @@ keychainTest(
     writeLogin(home, issuer.issuer, account);
     const env = {
       ...keychainEnv(home, account, issuer.issuer),
-      FX_GATEWAY_BASE_URL: gateway.baseUrl,
-      FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-      FX_MODEL: FAKE_GATEWAY_MODEL,
+      LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+      LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+      LIA_MODEL: FAKE_GATEWAY_MODEL,
     };
 
     try {
-      const first = await runFx(["status", "--json"], { env, timeoutMs: TIMEOUT });
+      const first = await runLia(["status", "--json"], { env, timeoutMs: TIMEOUT });
       expect(first.code, `stdout: ${first.stdout}\nstderr: ${first.stderr}`).toBe(0);
-      expect(JSON.parse(first.stdout).auth).toBe("fx login");
+      expect(JSON.parse(first.stdout).auth).toBe("lia login");
       expect(
-        existsSync(join(home, ".fx", "auth.json")),
+        existsSync(join(home, ".lia", "auth.json")),
         readFileSync(join(home, "oauth-keychain-trace.log"), "utf8"),
       ).toBe(false);
 
@@ -264,7 +264,7 @@ keychainTest(
       expect(stored).not.toBeNull();
       expect(JSON.parse(stored!).access_token).toBe(`keychain-access-${account}`);
 
-      const refreshed = await runFx(
+      const refreshed = await runLia(
         ["ask", "--json", "--no-save", "Refresh the saved login."],
         { env, timeoutMs: TIMEOUT },
       );
@@ -275,7 +275,7 @@ keychainTest(
       expect(JSON.parse(refreshed.stdout).output).toContain(
         "Keychain refresh complete",
       );
-      expect(existsSync(join(home, ".fx", "auth.json"))).toBe(false);
+      expect(existsSync(join(home, ".lia", "auth.json"))).toBe(false);
       expect(JSON.parse(loadKeychainItem(account, home)!).access_token).toBe(
         "keychain-refreshed-access",
       );
@@ -283,15 +283,15 @@ keychainTest(
         issuer.requests.filter((request) => request.path === "/oauth/token"),
       ).toHaveLength(1);
 
-      rmSync(join(home, ".fx"), { recursive: true, force: true });
-      const restarted = await runFx(["status", "--json"], { env, timeoutMs: TIMEOUT });
+      rmSync(join(home, ".lia"), { recursive: true, force: true });
+      const restarted = await runLia(["status", "--json"], { env, timeoutMs: TIMEOUT });
       expect(restarted.code).toBe(0);
-      expect(JSON.parse(restarted.stdout).auth).toBe("fx login");
-      expect(existsSync(join(home, ".fx"))).toBe(false);
+      expect(JSON.parse(restarted.stdout).auth).toBe("lia login");
+      expect(existsSync(join(home, ".lia"))).toBe(false);
 
-      const logout = await runFx(["logout"], { env, timeoutMs: TIMEOUT });
+      const logout = await runLia(["logout"], { env, timeoutMs: TIMEOUT });
       expect(logout.code, `stdout: ${logout.stdout}\nstderr: ${logout.stderr}`).toBe(0);
-      expect(logout.stdout).toBe("Signed out of fx.\n");
+      expect(logout.stdout).toBe("Signed out of lia.\n");
       expect(loadKeychainItem(account, home)).toBeNull();
       expect(issuer.requests.filter((request) => request.path === "/oauth/revoke")).toHaveLength(2);
     } finally {
@@ -312,7 +312,7 @@ keychainTest(
   async () => {
     const account = isolatedAccount();
     const before = productionMetadata();
-    const home = mkdtempSync(join(tmpdir(), "fx-oauth-keychain-failure-"));
+    const home = mkdtempSync(join(tmpdir(), "lia-oauth-keychain-failure-"));
     attachSystemKeychain(home);
     const issuer = startOAuthIssuer();
     const cleanup = () => deleteKeychainItem(account);
@@ -322,7 +322,7 @@ keychainTest(
 
     let injectedFailureObserved = false;
     try {
-      const status = await runFx(["status", "--json"], {
+      const status = await runLia(["status", "--json"], {
         env: keychainEnv(home, account, issuer.issuer),
         timeoutMs: TIMEOUT,
       });

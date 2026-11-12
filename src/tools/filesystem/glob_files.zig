@@ -604,7 +604,7 @@ test "glob_files resolver error for missing path returns failure result" {
 test "glob_files permission denied directory returns structured recovery" {
     if (comptime builtin.target.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
-    const root = try alloc.print("/tmp/fx-glob-files-access-{d}", .{io_mod.nanoTimestamp()});
+    const root = try alloc.print("/tmp/lia-glob-files-access-{d}", .{io_mod.nanoTimestamp()});
     defer alloc.free(root);
     defer std.Io.Dir.cwd().deleteTree(io_mod.getIo(), root) catch {};
     try std.Io.Dir.cwd().createDirPath(io_mod.getIo(), root);
@@ -833,7 +833,7 @@ test "glob_files finds match beyond former traversal cap" {
 }
 
 test "glob_files keeps only its result in the turn's allocator" {
-    // fx passes the turn's arena as `allocator`, so a scan left there stays
+    // lia passes the turn's arena as `allocator`, so a scan left there stays
     // until the turn ends and every search adds another.
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
@@ -876,7 +876,7 @@ test "glob_files allows external absolute path search roots" {
     const alloc = std.testing.allocator;
     // Keep the external root out of std.testing.tmpDir(), whose generated path
     // may contain ignored component names and invalidate this absolute-path case.
-    const root = try alloc.print("/tmp/fx-glob-external-{d}", .{io_mod.nanoTimestamp()});
+    const root = try alloc.print("/tmp/lia-glob-external-{d}", .{io_mod.nanoTimestamp()});
     defer alloc.free(root);
     defer std.Io.Dir.cwd().deleteTree(io_mod.getIo(), root) catch {};
     const workspace_dir = try std.Io.Dir.path.join(alloc, &.{ root, "workspace" });

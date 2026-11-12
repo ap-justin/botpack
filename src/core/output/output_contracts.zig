@@ -95,10 +95,10 @@ pub const UsageSnapshot = struct {
             .ready, .fetching => {},
             .failed => |f| try writeUsageFailure(&out.writer, f, "AI Gateway"),
             .unavailable => |u| try out.writer.print("{s}\n", .{switch (u) {
-                .no_gateway_sign_in => "Usage needs an AI Gateway sign-in: run fx login or set an API key.",
-                .no_team => "Usage needs a team: run fx login and pick one.",
+                .no_gateway_sign_in => "Usage needs an AI Gateway sign-in: run lia login or set an API key.",
+                .no_team => "Usage needs a team: run lia login and pick one.",
                 .unsupported_provider => "Usage isn't shown for this provider yet; it reads AI Gateway.",
-                .refresh_needed => "The sign-in needs a refresh: send a message in fx, then run fx usage again.",
+                .refresh_needed => "The sign-in needs a refresh: send a message in lia, then run lia usage again.",
             }}),
         }
         if (v.budget) |b| {
@@ -253,22 +253,22 @@ pub fn workspaceErrorMessage(err: anyerror) ?[]const u8 {
 
 pub const ConfigUnknownSetting = struct {
     key: settings_keys.UnknownKey,
-    /// Where the key is: `~/.fx/settings.json` or `.fx.json`.
+    /// Where the key is: `~/.lia/settings.json` or `.lia.json`.
     file: []const u8,
     suggestion: ?[]const u8 = null,
 };
 
-/// `fx config list` and `fx config get` in git's format: one `key=value`
+/// `lia config list` and `lia config get` in git's format: one `key=value`
 /// per line, lowest precedence first, with the origin first and a tab when
 /// asked.
 pub const ConfigSnapshot = struct {
     entries: []const settings_entries.Entry,
-    /// Keys fx doesn't know. The JSON form lists them; the text form leaves
+    /// Keys lia doesn't know. The JSON form lists them; the text form leaves
     /// them to the warnings on stderr.
     unknown: []const ConfigUnknownSetting = &.{},
     workspace_root: []const u8,
     show_origin: bool = false,
-    /// `fx config get` of one plain key prints the value alone.
+    /// `lia config get` of one plain key prints the value alone.
     value_only: bool = false,
 
     pub fn render(self: ConfigSnapshot, alloc: Allocator, format: OutputFormat) ![]u8 {
@@ -284,8 +284,8 @@ pub const ConfigSnapshot = struct {
         for (self.entries) |entry| {
             if (self.show_origin) {
                 switch (entry.origin) {
-                    .project => try out.writer.writeAll("file:.fx.json"),
-                    .global => try out.writer.writeAll(profile_paths.displayText("file:~/.fx/settings.json")),
+                    .project => try out.writer.writeAll("file:.lia.json"),
+                    .global => try out.writer.writeAll(profile_paths.displayText("file:~/.lia/settings.json")),
                     .workspace => {
                         try out.writer.writeAll("workspace:");
                         try writeTerminalSafe(&out.writer, alloc, self.workspace_root);
@@ -321,7 +321,7 @@ pub const ConfigSnapshot = struct {
                 try std.json.Stringify.value(entry.variable.?, .{}, &out.writer);
             } else if (entry.origin != .default) {
                 try out.writer.writeAll(",\"file\":");
-                try std.json.Stringify.value(if (entry.origin == .project) ".fx.json" else profile_paths.displayText("~/.fx/settings.json"), .{}, &out.writer);
+                try std.json.Stringify.value(if (entry.origin == .project) ".lia.json" else profile_paths.displayText("~/.lia/settings.json"), .{}, &out.writer);
             }
             if (entry.origin == .workspace) {
                 try out.writer.writeAll(",\"workspace\":");
@@ -349,7 +349,7 @@ pub const ConfigSnapshot = struct {
     }
 };
 
-/// What `fx config set` or `fx config unset` did to the profile settings, as
+/// What `lia config set` or `lia config unset` did to the profile settings, as
 /// one line naming the key, the value, and the file, like other setters.
 pub const ConfigChangeSnapshot = struct {
     unset: bool,
@@ -365,11 +365,11 @@ pub const ConfigChangeSnapshot = struct {
             .text => {
                 try writeTerminalSafe(&out.writer, alloc, self.key);
                 if (self.unset) {
-                    try out.writer.writeAll(if (self.changed) profile_paths.displayText(" removed from ~/.fx/settings.json.\n") else profile_paths.displayText(" isn't set in ~/.fx/settings.json.\n"));
+                    try out.writer.writeAll(if (self.changed) profile_paths.displayText(" removed from ~/.lia/settings.json.\n") else profile_paths.displayText(" isn't set in ~/.lia/settings.json.\n"));
                 } else {
                     try out.writer.writeAll(if (self.changed) " set to " else " is already ");
                     try writeConfigValue(&out.writer, alloc, self.value orelse .null);
-                    try out.writer.writeAll(if (self.changed) profile_paths.displayText(" in ~/.fx/settings.json.\n") else ".\n");
+                    try out.writer.writeAll(if (self.changed) profile_paths.displayText(" in ~/.lia/settings.json.\n") else ".\n");
                 }
             },
             .json => {
@@ -378,7 +378,7 @@ pub const ConfigChangeSnapshot = struct {
                 try out.writer.writeAll(",\"value\":");
                 try std.json.Stringify.value(self.value orelse .null, .{}, &out.writer);
                 try out.writer.print(",\"changed\":{},\"file\":", .{self.changed});
-                try std.json.Stringify.value(profile_paths.displayText("~/.fx/settings.json"), .{}, &out.writer);
+                try std.json.Stringify.value(profile_paths.displayText("~/.lia/settings.json"), .{}, &out.writer);
                 try out.writer.writeByte('}');
             },
         }
@@ -386,7 +386,7 @@ pub const ConfigChangeSnapshot = struct {
     }
 };
 
-/// A settings value as `fx config` prints it: text and numbers as they are,
+/// A settings value as `lia config` prints it: text and numbers as they are,
 /// lists and objects as compact JSON.
 fn writeConfigValue(writer: *std.Io.Writer, alloc: Allocator, value: std.json.Value) !void {
     switch (value) {
@@ -645,7 +645,7 @@ pub const McpLocalSnapshot = struct {
 
 pub const StatusSnapshot = struct {
     model: []const u8,
-    /// Where startup found `model`: FX_MODEL, settings, or default.
+    /// Where startup found `model`: LIA_MODEL, settings, or default.
     model_origin: ?[]const u8 = null,
     /// The reasoning effort a new session starts with, when the caller resolved one.
     effort: ?types.ReasoningEffort = null,
@@ -666,13 +666,13 @@ pub const StatusSnapshot = struct {
     modes: ?SessionModes = null,
     workspace_root: []const u8,
     /// The interactive shell's session, which only the `/status` panel
-    /// shows. `fx status` runs outside any session and leaves it null.
+    /// shows. `lia status` runs outside any session and leaves it null.
     session: ?ShellSession = null,
     /// Why the profile settings could not be read, for the `/status` panel.
     /// The credential they select is then unknown, so no auth row is shown.
     settings_error: ?[]const u8 = null,
-    /// fx's folder: `$FX_HOME`, or `~/.fx` expanded. Shown when set.
-    fx_home: ?[]const u8 = null,
+    /// lia's folder: `$LIA_HOME`, or `~/.lia` expanded. Shown when set.
+    lia_home: ?[]const u8 = null,
     history_turns: usize,
     session_permission_grants: usize,
     agent_step_limit: usize,
@@ -689,7 +689,7 @@ pub const StatusSnapshot = struct {
         unavailable,
         open: struct {
             id: []const u8,
-            /// `fx --resume <id>` opens it now: its log is on disk (D90).
+            /// `lia --resume <id>` opens it now: its log is on disk (D90).
             saved: bool,
         },
     };
@@ -799,7 +799,7 @@ pub const StatusSnapshot = struct {
         }
         try out.writer.print("[status] permission_mode={s}\n", .{permissions.permissionModeDisplayLabel(self.permission_mode)});
         try out.writer.print("[status] workspace={s}\n", .{self.workspace_root});
-        if (self.fx_home) |path| try out.writer.print("[status] fx_home={s}\n", .{path});
+        if (self.lia_home) |path| try out.writer.print("[status] lia_home={s}\n", .{path});
         try out.writer.print("[status] history_turns={d}\n", .{self.history_turns});
         try out.writer.print("[status] session_permission_grants={d}\n", .{self.session_permission_grants});
         try out.writer.print("[status] agent_step_limit={d}\n", .{self.agent_step_limit});
@@ -914,8 +914,8 @@ pub const StatusSnapshot = struct {
         }
         try writer.writeAll(",\"workspace\":");
         try std.json.Stringify.value(self.workspace_root, .{}, writer);
-        if (self.fx_home) |path| {
-            try writer.writeAll(",\"fx_home\":");
+        if (self.lia_home) |path| {
+            try writer.writeAll(",\"lia_home\":");
             try std.json.Stringify.value(path, .{}, writer);
         }
         try writer.print(",\"history_turns\":{d}", .{self.history_turns});
@@ -948,7 +948,7 @@ pub const PermissionsSnapshot = struct {
     rules: types.PermissionRuleSet = .{},
     runtime_grants_available: bool = true,
     /// The open saved session's remembered rules, which only the
-    /// `/permissions` panel shows. `fx permissions` leaves it null.
+    /// `/permissions` panel shows. `lia permissions` leaves it null.
     saved_rules: ?[]const SavedRule = null,
 
     pub const SavedRule = struct {
@@ -1049,7 +1049,7 @@ pub const PermissionsSnapshot = struct {
     }
 };
 
-/// What fx offers for one listed model: the same efforts and speed lanes a session on that model
+/// What lia offers for one listed model: the same efforts and speed lanes a session on that model
 /// exposes. `efforts` excludes `auto`, which every model accepts.
 pub const ModelDetail = struct {
     name: ?[]const u8 = null,
@@ -1191,8 +1191,8 @@ pub const ModelListSnapshot = struct {
         const reason = self.public_only_reason orelse return "Using the public model catalog.";
         return switch (reason) {
             .no_credential => "Using the public model catalog; sign in with Vercel or use an AI Gateway API key for team-private models.",
-            .fx_login_team_required => "Choose a Vercel team to load its private models.",
-            .fx_login_refresh_required => "Vercel sign-in must refresh before team-private models can load.",
+            .lia_login_team_required => "Choose a Vercel team to load its private models.",
+            .lia_login_refresh_required => "Vercel sign-in must refresh before team-private models can load.",
             .credential_refresh_required => "The selected sign-in must refresh before authenticated models can load.",
             .credential_refresh_failed => "Vercel sign-in refresh failed; using the public model catalog.",
             .authenticated_credential_rejected => "Your Gateway credential was rejected; using the public model catalog.",
@@ -1239,13 +1239,13 @@ pub const SessionListSnapshot = struct {
         }
         if (self.has_more) {
             try out.writer.print(
-                "[sessions] more saved sessions; continue with `fx sessions {s}--cursor {s}`\n",
+                "[sessions] more saved sessions; continue with `lia sessions {s}--cursor {s}`\n",
                 .{ if (self.all_workspaces) "--all " else "", self.next_cursor orelse "" },
             );
         }
         if (self.skipped_invalid > 0) {
             try out.writer.print(
-                "[sessions] warning: skipped {d} unreadable saved session{s}; run `fx doctor` for recovery guidance\n",
+                "[sessions] warning: skipped {d} unreadable saved session{s}; run `lia doctor` for recovery guidance\n",
                 .{ self.skipped_invalid, if (self.skipped_invalid == 1) "" else "s" },
             );
         }
@@ -1508,7 +1508,7 @@ pub const SessionRecoverySnapshot = struct {
         if (result.permission_rules_dropped) {
             try out.writer.writeAll("warning: saved permission rules could not be read and were not copied\n");
         }
-        try out.writer.print("resume: fx --resume {s}\n", .{result.recovered_session_id});
+        try out.writer.print("resume: lia --resume {s}\n", .{result.recovered_session_id});
         return try out.toOwnedSlice();
     }
 
@@ -1547,7 +1547,7 @@ pub const SessionRecoverySnapshot = struct {
     }
 };
 
-/// What `fx sessions convert` did (D61): counts, then one line per session
+/// What `lia sessions convert` did (D61): counts, then one line per session
 /// it skipped.
 pub const SessionConvertSnapshot = struct {
     converted: usize,
@@ -1557,8 +1557,8 @@ pub const SessionConvertSnapshot = struct {
     /// Each file a converted session was converted without, which its
     /// earlier folder keeps.
     left_out: []const LeftOut = &.{},
-    /// Each subagent an older fx saved that no conversion takes, kept as it
-    /// is, with why no fx opens it.
+    /// Each subagent an older lia saved that no conversion takes, kept as it
+    /// is, with why no lia opens it.
     kept: []const Kept = &.{},
 
     pub const Kept = struct {
@@ -1605,13 +1605,13 @@ pub const SessionConvertSnapshot = struct {
             if (skipped.reason) |reason| {
                 try out.writer.print("{s}: unreadable: {s}\n", .{ skipped.id, reason });
             } else if (std.mem.eql(u8, skipped.code, "SessionBusy")) {
-                try out.writer.print("{s}: busy, open in another fx\n", .{skipped.id});
+                try out.writer.print("{s}: busy, open in another lia\n", .{skipped.id});
             } else try out.writer.print("{s}: unreadable\n", .{skipped.id});
         }
         for (self.left_out) |left| {
             try out.writer.print("{s}: converted without {s}", .{ left.id, left.file });
             if (!std.mem.eql(u8, left.member, left.id)) try out.writer.print(" of its subagent {s}", .{left.member});
-            try out.writer.print(" because {s}; ~/.fx/sessions/{s} keeps it\n", .{ left.reason, left.member });
+            try out.writer.print(" because {s}; ~/.lia/sessions/{s} keeps it\n", .{ left.reason, left.member });
         }
         for (self.kept) |kept| try out.writer.print("{s}: kept as it is: {s}\n", .{ kept.id, kept.reason });
         return out.toOwnedSlice();
@@ -1651,7 +1651,7 @@ pub const SessionConvertSnapshot = struct {
     }
 };
 
-test "fx sessions convert names each file it left out, in text and JSON" {
+test "lia sessions convert names each file it left out, in text and JSON" {
     const alloc = std.testing.allocator;
     const snapshot: SessionConvertSnapshot = .{ .converted = 1, .busy = 0, .unreadable = 0, .skipped = &.{}, .left_out = &.{
         .{ .id = "root", .member = "root", .file = "logs/commands/replay.bin", .cause = "too_large", .reason = "it is 600 bytes, more than the 512 the new store keeps in one file", .bytes = 600, .limit = 512 },
@@ -1662,9 +1662,9 @@ test "fx sessions convert names each file it left out, in text and JSON" {
     defer alloc.free(text);
     try std.testing.expectEqualStrings(
         "converted 1, busy 0, unreadable 0\n" ++
-            "root: converted without logs/commands/replay.bin because it is 600 bytes, more than the 512 the new store keeps in one file; ~/.fx/sessions/root keeps it\n" ++
-            "root: converted without tool-results/big.txt of its subagent kid because it is 700 bytes, more than the 512 the new store keeps in one file; ~/.fx/sessions/kid keeps it\n" ++
-            "root: converted without terminal/state/link because it is not a file or folder; ~/.fx/sessions/root keeps it\n",
+            "root: converted without logs/commands/replay.bin because it is 600 bytes, more than the 512 the new store keeps in one file; ~/.lia/sessions/root keeps it\n" ++
+            "root: converted without tool-results/big.txt of its subagent kid because it is 700 bytes, more than the 512 the new store keeps in one file; ~/.lia/sessions/kid keeps it\n" ++
+            "root: converted without terminal/state/link because it is not a file or folder; ~/.lia/sessions/root keeps it\n",
         text,
     );
     const json = try snapshot.render(alloc, .json);
@@ -1678,7 +1678,7 @@ test "fx sessions convert names each file it left out, in text and JSON" {
     );
 }
 
-test "fx sessions convert renders its counts and each skip as text and JSON from one snapshot" {
+test "lia sessions convert renders its counts and each skip as text and JSON from one snapshot" {
     const alloc = std.testing.allocator;
     const snapshot: SessionConvertSnapshot = .{ .converted = 2, .busy = 1, .unreadable = 1, .skipped = &.{
         .{ .id = "held", .code = "SessionBusy", .reason = null },
@@ -1687,7 +1687,7 @@ test "fx sessions convert renders its counts and each skip as text and JSON from
     const text = try snapshot.render(alloc, .text);
     defer alloc.free(text);
     try std.testing.expectEqualStrings(
-        "converted 2, busy 1, unreadable 1\nheld: busy, open in another fx\ntorn: unreadable: events.jsonl line 3 is not valid JSON\n",
+        "converted 2, busy 1, unreadable 1\nheld: busy, open in another lia\ntorn: unreadable: events.jsonl line 3 is not valid JSON\n",
         text,
     );
     const json = try snapshot.render(alloc, .json);
@@ -1698,23 +1698,23 @@ test "fx sessions convert renders its counts and each skip as text and JSON from
     );
 }
 
-test "fx sessions convert names each subagent it keeps as it is, in text and JSON (D88)" {
+test "lia sessions convert names each subagent it keeps as it is, in text and JSON (D88)" {
     const alloc = std.testing.allocator;
     const snapshot: SessionConvertSnapshot = .{ .converted = 1, .busy = 0, .unreadable = 0, .skipped = &.{}, .kept = &.{
-        .{ .id = "grandchild", .reason = "it is a subagent of the earlier subagent child, which no fx opens" },
+        .{ .id = "grandchild", .reason = "it is a subagent of the earlier subagent child, which no lia opens" },
     } };
     const text = try snapshot.render(alloc, .text);
     defer alloc.free(text);
     try std.testing.expectEqualStrings(
         "converted 1, busy 0, unreadable 0\n" ++
-            "grandchild: kept as it is: it is a subagent of the earlier subagent child, which no fx opens\n",
+            "grandchild: kept as it is: it is a subagent of the earlier subagent child, which no lia opens\n",
         text,
     );
     const json = try snapshot.render(alloc, .json);
     defer alloc.free(json);
     try std.testing.expectEqualStrings(
         "{\"kind\":\"sessions_convert\",\"converted\":1,\"busy\":0,\"unreadable\":0,\"skipped\":[],\"left_out\":[]," ++
-            "\"kept\":[{\"id\":\"grandchild\",\"reason\":\"it is a subagent of the earlier subagent child, which no fx opens\"}]}",
+            "\"kept\":[{\"id\":\"grandchild\",\"reason\":\"it is a subagent of the earlier subagent child, which no lia opens\"}]}",
         json,
     );
 }
@@ -2194,9 +2194,9 @@ test "command failure snapshot renders stable escaped json" {
 test "core status snapshot text and json stay stable" {
     const snapshot = StatusSnapshot{
         .model = "alpha",
-        .auth_help = "fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.",
+        .auth_help = "lia needs access to Vercel AI Gateway. Run lia login to sign in, lia login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.",
         .permission_mode = .ask,
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/lia",
         .history_turns = 3,
         .session_permission_grants = 1,
         .agent_step_limit = 24,
@@ -2205,14 +2205,14 @@ test "core status snapshot text and json stay stable" {
     const text = try snapshot.renderText(std.testing.allocator);
     defer std.testing.allocator.free(text);
     try std.testing.expectEqualStrings(
-        "[status] model=alpha\n[status] auth=missing\n[status] auth_refreshable=false\n[status] auth_help=fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\n[status] permission_mode=ask\n[status] workspace=/tmp/fx\n[status] history_turns=3\n[status] session_permission_grants=1\n[status] agent_step_limit=24\n[status] ultrafast_requested=false\n",
+        "[status] model=alpha\n[status] auth=missing\n[status] auth_refreshable=false\n[status] auth_help=lia needs access to Vercel AI Gateway. Run lia login to sign in, lia login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\n[status] permission_mode=ask\n[status] workspace=/tmp/lia\n[status] history_turns=3\n[status] session_permission_grants=1\n[status] agent_step_limit=24\n[status] ultrafast_requested=false\n",
         text,
     );
 
     const json = try snapshot.renderJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"status\",\"model\":\"alpha\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/fx\",\"history_turns\":3,\"session_permission_grants\":1,\"agent_step_limit\":24,\"ultrafast_requested\":false}",
+        "{\"kind\":\"status\",\"model\":\"alpha\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"missing\",\"auth_refreshable\":false,\"auth_help\":\"lia needs access to Vercel AI Gateway. Run lia login to sign in, lia login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/lia\",\"history_turns\":3,\"session_permission_grants\":1,\"agent_step_limit\":24,\"ultrafast_requested\":false}",
         json,
     );
 }
@@ -2222,7 +2222,7 @@ test "core status snapshot includes selected team when present" {
         .model = "alpha",
         .auth = .{ .active_source = .fx_login, .team = "example-team" },
         .permission_mode = .ask,
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/lia",
         .history_turns = 0,
         .session_permission_grants = 0,
         .agent_step_limit = 24,
@@ -2231,14 +2231,14 @@ test "core status snapshot includes selected team when present" {
     const text = try snapshot.renderText(std.testing.allocator);
     defer std.testing.allocator.free(text);
     try std.testing.expectEqualStrings(
-        "[status] model=alpha\n[status] auth=fx login\n[status] auth_refreshable=true\n[status] team=example-team\n[status] permission_mode=ask\n[status] workspace=/tmp/fx\n[status] history_turns=0\n[status] session_permission_grants=0\n[status] agent_step_limit=24\n[status] ultrafast_requested=false\n",
+        "[status] model=alpha\n[status] auth=lia login\n[status] auth_refreshable=true\n[status] team=example-team\n[status] permission_mode=ask\n[status] workspace=/tmp/lia\n[status] history_turns=0\n[status] session_permission_grants=0\n[status] agent_step_limit=24\n[status] ultrafast_requested=false\n",
         text,
     );
 
     const json = try snapshot.renderJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"status\",\"model\":\"alpha\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"fx login\",\"auth_refreshable\":true,\"team\":\"example-team\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/fx\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":24,\"ultrafast_requested\":false}",
+        "{\"kind\":\"status\",\"model\":\"alpha\",\"update_channel\":\"stable\",\"build_channel\":\"stable\",\"build_revision\":\"\",\"auth\":\"lia login\",\"auth_refreshable\":true,\"team\":\"example-team\",\"permission_mode\":\"ask\",\"workspace\":\"/tmp/lia\",\"history_turns\":0,\"session_permission_grants\":0,\"agent_step_limit\":24,\"ultrafast_requested\":false}",
         json,
     );
 }
@@ -2250,7 +2250,7 @@ test "status json keeps the update and build channel fields scripts read" {
         .build_channel = "dev",
         .build_revision = "abc123",
         .permission_mode = .ask,
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/lia",
         .history_turns = 0,
         .session_permission_grants = 0,
         .agent_step_limit = 24,
@@ -2266,7 +2266,7 @@ test "status reports the effort a new session starts with after the model" {
         .model_origin = "settings",
         .effort = types.ReasoningEffort.literal("xhigh"),
         .permission_mode = .auto,
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/lia",
         .history_turns = 0,
         .session_permission_grants = 0,
         .agent_step_limit = 24,
@@ -2295,7 +2295,7 @@ test "status JSON lists the session modes after the permission mode" {
         .model = "provider/model",
         .permission_mode = .yolo,
         .modes = .{ .current = "open", .all = modes[0..] },
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/lia",
         .history_turns = 0,
         .session_permission_grants = 0,
         .agent_step_limit = 24,
@@ -2322,23 +2322,23 @@ test "config entries from the environment name their variable" {
     const alloc = std.testing.allocator;
     const entries = [_]settings_entries.Entry{
         .{ .key = "max_agent_steps", .value = .{ .integer = 5 }, .origin = .global },
-        .{ .key = "max_agent_steps", .value = .{ .integer = 20 }, .origin = .env, .variable = "FX_MAX_AGENT_STEPS" },
+        .{ .key = "max_agent_steps", .value = .{ .integer = 20 }, .origin = .env, .variable = "LIA_MAX_AGENT_STEPS" },
     };
     const snapshot: ConfigSnapshot = .{ .entries = &entries, .workspace_root = "/w", .show_origin = true };
     const text = try snapshot.render(alloc, .text);
     defer alloc.free(text);
-    try std.testing.expectEqualStrings("file:~/.fx/settings.json\tmax_agent_steps=5\nenv:FX_MAX_AGENT_STEPS\tmax_agent_steps=20\n", text);
+    try std.testing.expectEqualStrings("file:~/.lia/settings.json\tmax_agent_steps=5\nenv:LIA_MAX_AGENT_STEPS\tmax_agent_steps=20\n", text);
     const json = try snapshot.render(alloc, .json);
     defer alloc.free(json);
-    try std.testing.expect(std.mem.find(u8, json, "{\"key\":\"max_agent_steps\",\"value\":20,\"origin\":\"env\",\"variable\":\"FX_MAX_AGENT_STEPS\"}") != null);
-    try std.testing.expect(std.mem.find(u8, json, "\"origin\":\"global\",\"file\":\"~/.fx/settings.json\"") != null);
+    try std.testing.expect(std.mem.find(u8, json, "{\"key\":\"max_agent_steps\",\"value\":20,\"origin\":\"env\",\"variable\":\"LIA_MAX_AGENT_STEPS\"}") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"origin\":\"global\",\"file\":\"~/.lia/settings.json\"") != null);
 }
 
 test "MCP config diagnostic renders in status text and JSON but not interactive body" {
     const snapshot = StatusSnapshot{
         .model = "alpha",
         .permission_mode = .ask,
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/lia",
         .history_turns = 0,
         .session_permission_grants = 0,
         .agent_step_limit = 24,
@@ -2415,7 +2415,7 @@ test "status and doctor share a side-effect-free MCP inspection contract" {
     const status = StatusSnapshot{
         .model = "alpha",
         .permission_mode = .auto,
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/lia",
         .history_turns = 0,
         .session_permission_grants = 0,
         .agent_step_limit = 24,
@@ -2439,7 +2439,7 @@ test "status and doctor share a side-effect-free MCP inspection contract" {
     try std.testing.expect(std.mem.find(u8, status_json, "broken entry was ignored") != null);
 
     const doctor = DoctorSnapshot{
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/lia",
         .model = "alpha",
         .permission_mode = .auto,
         .agent_step_limit = 24,
@@ -2583,7 +2583,7 @@ test "core session list snapshot text and json stay stable" {
     defer std.testing.allocator.free(paged_text);
     try std.testing.expectEqualStrings(
         "[sessions] 1 saved\n - Session title\n   id=abc | 3 turns | Spanish | updated 1970-01-01 00:00:00.002 UTC\n" ++
-            "[sessions] more saved sessions; continue with `fx sessions --cursor v1:2:abc`\n",
+            "[sessions] more saved sessions; continue with `lia sessions --cursor v1:2:abc`\n",
         paged_text,
     );
 
@@ -2768,7 +2768,7 @@ test "core empty session detail snapshot text and json stay stable" {
     const detail = session_store.ReadOnlyDetail{
         .summary = .{
             .id = @constCast("sess-empty"),
-            .workspace_root = @constCast("/tmp/fx"),
+            .workspace_root = @constCast("/tmp/lia"),
             .created_at_ms = 1,
             .updated_at_ms = 2,
             .conversation_language = types.ConversationLanguage.literal("en"),
@@ -2776,8 +2776,8 @@ test "core empty session detail snapshot text and json stay stable" {
         },
         .state = .{
             .id = @constCast("sess-empty"),
-            .origin_workspace_root = @constCast("/tmp/fx"),
-            .workspace_root = @constCast("/tmp/fx"),
+            .origin_workspace_root = @constCast("/tmp/lia"),
+            .workspace_root = @constCast("/tmp/lia"),
             .created_at_ms = 1,
             .updated_at_ms = 2,
             .conversation_language = types.ConversationLanguage.literal("en"),
@@ -2843,7 +2843,7 @@ test "core session detail snapshot preserves history variant shapes" {
     const detail = session_store.ReadOnlyDetail{
         .summary = .{
             .id = @constCast("sess-history"),
-            .workspace_root = @constCast("/tmp/fx"),
+            .workspace_root = @constCast("/tmp/lia"),
             .created_at_ms = 1,
             .updated_at_ms = 2,
             .conversation_language = types.ConversationLanguage.literal("es"),
@@ -2851,8 +2851,8 @@ test "core session detail snapshot preserves history variant shapes" {
         },
         .state = .{
             .id = @constCast("sess-history"),
-            .origin_workspace_root = @constCast("/tmp/fx"),
-            .workspace_root = @constCast("/tmp/fx"),
+            .origin_workspace_root = @constCast("/tmp/lia"),
+            .workspace_root = @constCast("/tmp/lia"),
             .created_at_ms = 1,
             .updated_at_ms = 2,
             .conversation_language = types.ConversationLanguage.literal("es"),
@@ -2928,7 +2928,7 @@ test "core session detail JSON includes assistant execution memory" {
     const detail = session_store.ReadOnlyDetail{
         .summary = .{
             .id = @constCast("sess-exec"),
-            .workspace_root = @constCast("/tmp/fx"),
+            .workspace_root = @constCast("/tmp/lia"),
             .created_at_ms = 1,
             .updated_at_ms = 2,
             .conversation_language = types.ConversationLanguage.literal("en"),
@@ -2936,8 +2936,8 @@ test "core session detail JSON includes assistant execution memory" {
         },
         .state = .{
             .id = @constCast("sess-exec"),
-            .origin_workspace_root = @constCast("/tmp/fx"),
-            .workspace_root = @constCast("/tmp/fx"),
+            .origin_workspace_root = @constCast("/tmp/lia"),
+            .workspace_root = @constCast("/tmp/lia"),
             .created_at_ms = 1,
             .updated_at_ms = 2,
             .conversation_language = types.ConversationLanguage.literal("en"),
@@ -2981,7 +2981,7 @@ test "core session recovery snapshot text and json stay stable" {
     );
     defer std.testing.allocator.free(text);
     try std.testing.expectEqualStrings(
-        "[session recovery] copied source-session to recovered-session\nhistory_turns: 4\nresume: fx --resume recovered-session\n",
+        "[session recovery] copied source-session to recovered-session\nhistory_turns: 4\nresume: lia --resume recovered-session\n",
         text,
     );
 
@@ -3005,7 +3005,7 @@ test "core session recovery snapshot text and json stay stable" {
     }).renderText(std.testing.allocator);
     defer std.testing.allocator.free(partial_text);
     try std.testing.expectEqualStrings(
-        "[session recovery] copied source-session to partial-session\nhistory_turns: 4\nwarning: legacy command artifacts could not be authenticated\nresume: fx --resume partial-session\n",
+        "[session recovery] copied source-session to partial-session\nhistory_turns: 4\nwarning: legacy command artifacts could not be authenticated\nresume: lia --resume partial-session\n",
         partial_text,
     );
     const partial_json = try (SessionRecoverySnapshot{
@@ -3028,7 +3028,7 @@ test "core session recovery snapshot text and json stay stable" {
     }).renderText(std.testing.allocator);
     defer std.testing.allocator.free(without_rules_text);
     try std.testing.expectEqualStrings(
-        "[session recovery] copied source-session to ruleless-session\nhistory_turns: 4\nwarning: saved permission rules could not be read and were not copied\nresume: fx --resume ruleless-session\n",
+        "[session recovery] copied source-session to ruleless-session\nhistory_turns: 4\nwarning: saved permission rules could not be read and were not copied\nresume: lia --resume ruleless-session\n",
         without_rules_text,
     );
     const without_rules_json = try (SessionRecoverySnapshot{
@@ -3047,7 +3047,7 @@ test "core doctor snapshot text and json stay stable" {
         .{ .name = @constCast("git"), .status = .warn, .detail = @constCast("not a git repository; pr/issue workflows will be limited") },
     };
     const snapshot = DoctorSnapshot{
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/lia",
         .model = "alpha",
         .auth = .{ .active_source = .ai_gateway_api_key },
         .permission_mode = .ask,
@@ -3058,14 +3058,14 @@ test "core doctor snapshot text and json stay stable" {
     const text = try snapshot.renderText(std.testing.allocator);
     defer std.testing.allocator.free(text);
     try std.testing.expectEqualStrings(
-        "[doctor] ok=1 warn=1 fail=0\n[doctor] workspace=/tmp/fx\n[doctor] model=alpha\n[doctor] auth=AI_GATEWAY_API_KEY\n[doctor] auth_refreshable=false\n[doctor] permission_mode=ask\n[doctor] agent_step_limit=24\n[ok] auth: AI_GATEWAY_API_KEY is configured\n[warn] git: not a git repository; pr/issue workflows will be limited\n",
+        "[doctor] ok=1 warn=1 fail=0\n[doctor] workspace=/tmp/lia\n[doctor] model=alpha\n[doctor] auth=AI_GATEWAY_API_KEY\n[doctor] auth_refreshable=false\n[doctor] permission_mode=ask\n[doctor] agent_step_limit=24\n[ok] auth: AI_GATEWAY_API_KEY is configured\n[warn] git: not a git repository; pr/issue workflows will be limited\n",
         text,
     );
 
     const json = try snapshot.renderJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
     try std.testing.expectEqualStrings(
-        "{\"kind\":\"doctor\",\"ok_count\":1,\"warn_count\":1,\"fail_count\":0,\"workspace\":\"/tmp/fx\",\"model\":\"alpha\",\"auth\":\"AI_GATEWAY_API_KEY\",\"auth_refreshable\":false,\"permission_mode\":\"ask\",\"agent_step_limit\":24,\"checks\":[{\"name\":\"auth\",\"status\":\"ok\",\"detail\":\"AI_GATEWAY_API_KEY is configured\"},{\"name\":\"git\",\"status\":\"warn\",\"detail\":\"not a git repository; pr/issue workflows will be limited\"}]}",
+        "{\"kind\":\"doctor\",\"ok_count\":1,\"warn_count\":1,\"fail_count\":0,\"workspace\":\"/tmp/lia\",\"model\":\"alpha\",\"auth\":\"AI_GATEWAY_API_KEY\",\"auth_refreshable\":false,\"permission_mode\":\"ask\",\"agent_step_limit\":24,\"checks\":[{\"name\":\"auth\",\"status\":\"ok\",\"detail\":\"AI_GATEWAY_API_KEY is configured\"},{\"name\":\"git\",\"status\":\"warn\",\"detail\":\"not a git repository; pr/issue workflows will be limited\"}]}",
         json,
     );
 }
@@ -3077,7 +3077,7 @@ test "doctor text escapes hostile check details while json preserves data" {
         .detail = "warning key=bad\n\x1b]0;pwn\x07",
     }};
     const snapshot = DoctorSnapshot{
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/lia",
         .model = "alpha",
         .permission_mode = .ask,
         .agent_step_limit = 24,
@@ -3312,12 +3312,12 @@ pub const SlackSnapshot = struct {
         if (format == .json) {
             try std.json.Stringify.value(self, .{}, &out.writer);
         } else if (!self.installed) {
-            try out.writer.writeAll("No local Slack bot installation. Run fx slack install.\n");
+            try out.writer.writeAll("No local Slack bot installation. Run lia slack install.\n");
         } else {
             try out.writer.writeAll(if (std.mem.eql(u8, self.action, "install"))
-                "fx is now installed in your Slack workspace.\n"
+                "lia is now installed in your Slack workspace.\n"
             else
-                "Your fx Slack bot credentials are saved on this computer.\n");
+                "Your lia Slack bot credentials are saved on this computer.\n");
             if (self.expires_at_ms) |expiry| {
                 if (local_time.local(expiry)) |reading| {
                     var date_buf: [24]u8 = undefined;
@@ -3327,7 +3327,7 @@ pub const SlackSnapshot = struct {
                 } else {
                     try out.writer.writeAll("Access expiration time is unavailable.\n");
                 }
-                try out.writer.writeAll("Run fx slack refresh to renew locally.\n");
+                try out.writer.writeAll("Run lia slack refresh to renew locally.\n");
             }
         }
         return out.toOwnedSlice();
@@ -3365,20 +3365,20 @@ test "slack text reads the access expiry in the local zone" {
 test "status reports where the model came from alongside the model" {
     const snapshot = StatusSnapshot{
         .model = "gpt-5.4",
-        .model_origin = "FX_MODEL",
+        .model_origin = "LIA_MODEL",
         .permission_mode = .auto,
-        .workspace_root = "/tmp/fx",
+        .workspace_root = "/tmp/lia",
         .history_turns = 0,
         .session_permission_grants = 0,
         .agent_step_limit = 24,
     };
     const text = try snapshot.renderText(std.testing.allocator);
     defer std.testing.allocator.free(text);
-    try std.testing.expect(std.mem.startsWith(u8, text, "[status] model=gpt-5.4\n[status] model_origin=FX_MODEL\n"));
+    try std.testing.expect(std.mem.startsWith(u8, text, "[status] model=gpt-5.4\n[status] model_origin=LIA_MODEL\n"));
 
     const json = try snapshot.renderJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
-    try std.testing.expect(std.mem.startsWith(u8, json, "{\"kind\":\"status\",\"model\":\"gpt-5.4\",\"model_origin\":\"FX_MODEL\","));
+    try std.testing.expect(std.mem.startsWith(u8, json, "{\"kind\":\"status\",\"model\":\"gpt-5.4\",\"model_origin\":\"LIA_MODEL\","));
 }
 
 test "model list explains public-only and rejected-credential catalogs" {

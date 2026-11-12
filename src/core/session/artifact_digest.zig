@@ -94,13 +94,13 @@ test "content addressed artifact handles authenticate exact bytes" {
     Sha256.hash("saved output", &digest, .{});
     const handle = try contentAddressedHandle(
         alloc,
-        "fx-command-123.log",
+        "lia-command-123.log",
         ".log",
         digest,
     );
     defer alloc.free(handle);
     try std.testing.expectEqualStrings(
-        "fx-command-123-1b2a9cb5a0298dcb.log",
+        "lia-command-123-1b2a9cb5a0298dcb.log",
         handle,
     );
     try std.testing.expect(handleMatchesContentDigest(

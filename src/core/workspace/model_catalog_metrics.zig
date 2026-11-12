@@ -1,7 +1,7 @@
 //! Bounded, always-on model-catalog breadcrumbs for the user-initiated
 //! /trace report. Records catalog load outcomes, capability lookup misses, and
-//! image gate rejections so a shared trace explains why fx could not verify a
-//! model's capabilities even when FX_TRACE is off. Callers supply model slugs,
+//! image gate rejections so a shared trace explains why lia could not verify a
+//! model's capabilities even when LIA_TRACE is off. Callers supply model slugs,
 //! enum names, and internal counters only, never credentials or user prompts.
 const std = @import("std");
 const io_mod = @import("../shared/io.zig");

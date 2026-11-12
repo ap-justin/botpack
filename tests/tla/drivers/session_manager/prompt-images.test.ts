@@ -1,5 +1,5 @@
 // Prompt images as blobs of a v2 session (D89) through the real binary,
-// judged by TLC. Each scenario runs `fx ask` against a fake gateway, then
+// judged by TLC. Each scenario runs `lia ask` against a fake gateway, then
 // writes what it observed, every turn's first request and saved user item
 // and the session's blobs folder, as one line per step of
 // tests/tla/session_manager/PromptImages.tla, and has TLC check the lines
@@ -40,10 +40,10 @@ function sseText(text: string) {
 function fixture(name: string) {
   const root = mkdtempSync(join(artifacts, `prompt-images-${name}-`));
   const home = join(root, "home"), workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+  mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
   mkdirSync(workspace, { mode: 0o700 });
-  writeFileSync(join(home, ".fx", "settings.json"), JSON.stringify({ permission: {} }));
-  const sessionsRoot = join(home, ".fx", "sessions", "v2");
+  writeFileSync(join(home, ".lia", "settings.json"), JSON.stringify({ permission: {} }));
+  const sessionsRoot = join(home, ".lia", "sessions", "v2");
   const requests: string[] = [];
   const server = Bun.serve({
     port: 0,
@@ -59,10 +59,10 @@ function fixture(name: string) {
     },
   });
   const env = testEnvironment({
-    HOME: home, AI_GATEWAY_API_KEY: "synthetic-prompt-images-fixture", FX_TEST_SKIP_ONBOARDING: "1",
-    FX_GATEWAY_BASE_URL: `http://127.0.0.1:${server.port}`,
-    FX_GATEWAY_CHAT_URL: `http://127.0.0.1:${server.port}/v4/ai/language-model`,
-    FX_MODEL: MODEL, NO_COLOR: "1",
+    HOME: home, AI_GATEWAY_API_KEY: "synthetic-prompt-images-fixture", LIA_TEST_SKIP_ONBOARDING: "1",
+    LIA_GATEWAY_BASE_URL: `http://127.0.0.1:${server.port}`,
+    LIA_GATEWAY_CHAT_URL: `http://127.0.0.1:${server.port}/v4/ai/language-model`,
+    LIA_MODEL: MODEL, NO_COLOR: "1",
   });
   // Each distinct image gets the next label, d1, d2, ..., in the order seen.
   const labels = new Map<string, string>();
@@ -78,7 +78,7 @@ function fixture(name: string) {
       writeFileSync(path, solidPng(width, height));
       return path;
     },
-    /// One `fx ask` turn; its first request and its user item become lines.
+    /// One `lia ask` turn; its first request and its user item become lines.
     async ask(session: "source" | "fork", images: string[], resume?: string): Promise<string> {
       const before = requests.length;
       const args = ["ask", "--json", ...(resume ? ["--resume", resume] : [])];
@@ -215,7 +215,7 @@ test("a converted v1 session's prompt images become blobs its next request names
   try {
     // v0.0.14 saved one turn with twenty attachments of one image.
     const [id] = copyV1Fixture(f.home, "many-images");
-    const v1Images = join(f.home, ".fx", "sessions", id, "images");
+    const v1Images = join(f.home, ".lia", "sessions", id, "images");
     for (const name of readdirSync(v1Images)) f.label(sha256File(join(v1Images, name)));
     // Resuming converts the session, then sends a new image with the old.
     await f.ask("source", [f.image("b.png", 10, 20)], id);

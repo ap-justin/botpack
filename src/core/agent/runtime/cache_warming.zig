@@ -1,4 +1,4 @@
-//! When to ping a Claude prompt cache entry so it stays alive while fx waits
+//! When to ping a Claude prompt cache entry so it stays alive while lia waits
 //! for the user or for a long tool run. Anthropic keeps an entry for five
 //! minutes after the start of the newest request that read or wrote it; a
 //! ping resends the last real request with a one-token reply just before
@@ -40,7 +40,7 @@ pub const Timing = struct {
 
 /// Why warming stopped.
 pub const Stop = enum {
-    /// A real request went out, the session changed, or fx is closing.
+    /// A real request went out, the session changed, or lia is closing.
     disarmed,
     /// The next ping would start past `Timing.cap_ms`.
     cap,
@@ -171,7 +171,7 @@ fn stop(state: *State, reason: Stop) Plan {
 
 /// What the agent loop knows about a request it might keep warm.
 pub const Candidate = struct {
-    /// The request went through AI Gateway with fx's own credential.
+    /// The request went through AI Gateway with lia's own credential.
     gateway_with_direct_credential: bool,
     model: []const u8,
     /// The request was a root turn's, not a subagent's.
@@ -289,7 +289,7 @@ test "nothing pings without an arm" {
     try testing.expectEqual(Plan.idle, step(&state, claude, .{ .disarmed = .{ .now_ms = 270_000 } }));
 }
 
-test "only Claude requests through AI Gateway with fx's credential are kept warm" {
+test "only Claude requests through AI Gateway with lia's credential are kept warm" {
     const base: Candidate = .{
         .gateway_with_direct_credential = true,
         .model = "anthropic/claude-opus-5.5",

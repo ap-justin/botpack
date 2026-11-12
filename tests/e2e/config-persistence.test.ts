@@ -10,24 +10,24 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runFx } from "../evals/eval-helpers";
+import { runLia } from "../evals/eval-helpers";
 
 const serialTest = test.serial;
 
 describe("config persistence", () => {
   serialTest("config diagnostics preserve invalid, oversized, and unsafe primaries", async () => {
-    const root = mkdtempSync(join(tmpdir(), "fx-config-diagnostics-"));
+    const root = mkdtempSync(join(tmpdir(), "lia-config-diagnostics-"));
     try {
       const home = join(root, "home");
       const workspace = join(root, "workspace");
-      mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+      mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
       mkdirSync(workspace);
       const workspaceRoot = realpathSync(workspace);
-      const settingsPath = join(home, ".fx", "settings.json");
+      const settingsPath = join(home, ".lia", "settings.json");
 
       const malformed = "{bad\n";
       writeFileSync(settingsPath, malformed, { mode: 0o600 });
-      const malformedStatus = await runFx(["status", "--json"], {
+      const malformedStatus = await runLia(["status", "--json"], {
         cwd: workspaceRoot,
         env: { HOME: home },
       });
@@ -38,7 +38,7 @@ describe("config persistence", () => {
       // statusLine is retired, so a value of any type loads without a warning.
       const retiredStatusLine = "{\"statusLine\":{\"context\":1}}\n";
       writeFileSync(settingsPath, retiredStatusLine, { mode: 0o600 });
-      const retiredStatusLineStatus = await runFx(["status", "--json"], {
+      const retiredStatusLineStatus = await runLia(["status", "--json"], {
         cwd: workspaceRoot,
         env: { HOME: home },
       });
@@ -56,13 +56,13 @@ describe("config persistence", () => {
           },
         }) + "\n";
       writeFileSync(settingsPath, inertOutputSettings, { mode: 0o600 });
-      const inertStatus = await runFx(["status", "--json"], {
+      const inertStatus = await runLia(["status", "--json"], {
         cwd: workspaceRoot,
         env: { HOME: home },
       });
       expect(inertStatus.code).toBe(0);
       expect(inertStatus.stderr).not.toContain("legacy_workspace_preferences");
-      const inertDoctor = await runFx(["doctor", "--json"], {
+      const inertDoctor = await runLia(["doctor", "--json"], {
         cwd: workspaceRoot,
         env: { HOME: home },
       });
@@ -73,7 +73,7 @@ describe("config persistence", () => {
 
       const oversized = JSON.stringify({ padding: "x".repeat(65 * 1024) }) + "\n";
       writeFileSync(settingsPath, oversized, { mode: 0o600 });
-      const oversizedDoctor = await runFx(["doctor", "--json"], {
+      const oversizedDoctor = await runLia(["doctor", "--json"], {
         cwd: workspaceRoot,
         env: { HOME: home },
       });
@@ -85,7 +85,7 @@ describe("config persistence", () => {
       writeFileSync(external, "{\"model\":\"external\"}\n", { mode: 0o600 });
       rmSync(settingsPath);
       symlinkSync(external, settingsPath);
-      const unsafeStatus = await runFx(["status", "--json"], {
+      const unsafeStatus = await runLia(["status", "--json"], {
         cwd: workspaceRoot,
         env: { HOME: home },
       });

@@ -1,15 +1,15 @@
-// Runs the real fx binary through turns of failing shell commands and file
-// changes, then has TLC replay what fx did through the failure-streak model
+// Runs the real lia binary through turns of failing shell commands and file
+// changes, then has TLC replay what lia did through the failure-streak model
 // (tests/tla/shell_command/FailureStreak.tla, FailureStreakTrace.tla). No model
 // calls: a local fake Gateway serves each step's tool calls.
 //
 // Each step runs `sh a.sh` and `sh b.sh` or not, each made to fail or pass by
-// a result file the driver writes before fx runs the step, and may write a new
+// a result file the driver writes before lia runs the step, and may write a new
 // file, try an edit that cannot apply, or read a file. The calls come in a
 // random order within the step. The named turns cover the edge cases; the rest
-// come from a seeded generator (FX_TLA_SEED, logged).
+// come from a seeded generator (LIA_TLA_SEED, logged).
 //
-// 1. The binary must conform to the fixed design and not to the design fx had
+// 1. The binary must conform to the fixed design and not to the design lia had
 //    before (GuardLimit 2, no restart on a file change).
 // 2. Controls: a tampered or empty observation must not be accepted.
 import { test } from "bun:test";
@@ -92,7 +92,7 @@ function stepCalls(turn: number, index: number, planned: PlannedStep): Call[] {
 async function runTurn(turn: number, name: string, plan: PlannedStep[]): Promise<ObservedTurn> {
   const root = mkdtempSync(join(artifacts, `turn-${turn}-`));
   const home = join(root, "home"), cwd = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+  mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
   mkdirSync(cwd);
   for (const cmd of ["a", "b"]) writeFileSync(join(cwd, `${cmd}.sh`), `test "$(cat ${cmd}.result)" = pass\n`);
   const sent: Call[][] = [];
@@ -113,18 +113,18 @@ async function runTurn(turn: number, name: string, plan: PlannedStep[]): Promise
       cwd,
       stdin: "ignore", stdout: "pipe", stderr: "pipe",
       env: testEnvironment({
-        HOME: home, TMPDIR: root, AI_GATEWAY_API_KEY: "synthetic-failure-streak", FX_TEST_SKIP_ONBOARDING: "1",
-        FX_MODEL: helpers.FAKE_GATEWAY_MODEL, FX_GATEWAY_BASE_URL: gateway.baseUrl, FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-        FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+        HOME: home, TMPDIR: root, AI_GATEWAY_API_KEY: "synthetic-failure-streak", LIA_TEST_SKIP_ONBOARDING: "1",
+        LIA_MODEL: helpers.FAKE_GATEWAY_MODEL, LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+        LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
       }),
     });
     const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
     writeFileSync(join(root, "stdout.json"), stdout);
     writeFileSync(join(root, "stderr.txt"), stderr);
-    assert.ok(!/panic/i.test(stderr), `${name}: fx panicked\n${stderr}`);
+    assert.ok(!/panic/i.test(stderr), `${name}: lia panicked\n${stderr}`);
     const records: Array<{ name: string; status: string }> = JSON.parse(stdout.trim()).tool_calls;
     const ran = sent.flat();
-    assert.equal(records.length, ran.length, `${name}: fx reported ${records.length} tool calls for ${ran.length} sent (exit ${code})`);
+    assert.equal(records.length, ran.length, `${name}: lia reported ${records.length} tool calls for ${ran.length} sent (exit ${code})`);
     let next = 0;
     const steps = sent.map((calls): ObservedStep => {
       const fail: Array<"a" | "b"> = [];
@@ -145,7 +145,7 @@ async function runTurn(turn: number, name: string, plan: PlannedStep[]): Promise
       assert.equal(observedStep.write, planned.write, `${name}: step ${i + 1} write`);
     });
     const ended = stderr.includes(STOP_NOTICE);
-    assert.ok(ended || sent.length === plan.length, `${name}: fx ended after ${sent.length} of ${plan.length} steps without the notice`);
+    assert.ok(ended || sent.length === plan.length, `${name}: lia ended after ${sent.length} of ${plan.length} steps without the notice`);
     return { name, steps, ended };
   } finally {
     gateway.stop();
@@ -185,7 +185,7 @@ async function replay(turns: ObservedTurn[], design: Design, label: string): Pro
   return "REJECTED";
 }
 
-const seed = Number(process.env.FX_TLA_SEED ?? "20261103");
+const seed = Number(process.env.LIA_TLA_SEED ?? "20261103");
 let observed: Promise<ObservedTurn[]> | undefined;
 function observations(): Promise<ObservedTurn[]> {
   observed ??= (async () => {
@@ -199,12 +199,12 @@ function observations(): Promise<ObservedTurn[]> {
   return observed;
 }
 
-test("real fx conforms to the failure-streak design", async () => {
+test("real lia conforms to the failure-streak design", async () => {
   const turns = await observations();
   const fixed = await replay(turns, FIXED, "observed");
   const before = await replay(turns, BEFORE, "observed");
   const verdicts = `fixed=${fixed} before=${before}; ${artifacts}`;
-  assert.equal(fixed, "ACCEPTED", `fx does not match the fixed design: ${verdicts}`);
+  assert.equal(fixed, "ACCEPTED", `lia does not match the fixed design: ${verdicts}`);
   assert.equal(before, "REJECTED", verdicts);
   // Coverage: the stop, a continued rerun after an edit, and a failed edit.
   assert.ok(turns.some((t) => t.ended), "no turn ended by the guard");

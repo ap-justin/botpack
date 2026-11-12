@@ -1,5 +1,5 @@
 ---- MODULE GitAdmission ----
-\* fx's route for an agent git command, from planning through admission to
+\* lia's route for an agent git command, from planning through admission to
 \* execution, over every permission mode, shell environment, command form and
 \* repository state (src/core/shell_command/safe_git.zig).
 \*

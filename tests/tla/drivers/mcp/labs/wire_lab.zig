@@ -1,6 +1,6 @@
 //! U01 lab: decodes each line of an input file with the real wire decoder and
 //! prints what it found, one JSON line per input line, for the u01 Bun
-//! scenarios. Empty lines are skipped. Dev only; never moves into fx.
+//! scenarios. Empty lines are skipped. Dev only; never moves into lia.
 //!
 //! Output per line, by message kind:
 //!   {"kind":"response","id":7,"result":"complete"}    or "code":-32602 for errors

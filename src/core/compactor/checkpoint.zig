@@ -22,6 +22,7 @@ const json_decode = @import("../shared/json_decode.zig");
 
 const Allocator = std.mem.Allocator;
 
+/// Stored data: saved compactions begin with it, so the fx name stays.
 pub const marker = "fx-compactor-v1\n";
 /// How checkpoints written by the previous compactor begin.
 const legacy_handoff_open = "<context_handoff>";

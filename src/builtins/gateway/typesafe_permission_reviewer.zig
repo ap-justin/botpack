@@ -1,6 +1,6 @@
 //! Optional automatic permission review backed by TypeSafe's System One API.
 //!
-//! Selected with the review_model setting (or FX_REVIEW_MODEL) set to
+//! Selected with the review_model setting (or LIA_REVIEW_MODEL) set to
 //! typesafeai/jev. The review request carries the same composed policy,
 //! context, and exact pending action as the default reviewer; the typed answer
 //! is mapped into one `permission_decision` tool call so parsing and every

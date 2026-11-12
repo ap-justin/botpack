@@ -1,4 +1,4 @@
-//! A JSON-lines shell around the real `fx mcp call` bridge core, for the Bun
+//! A JSON-lines shell around the real `lia mcp call` bridge core, for the Bun
 //! drivers.
 //!
 //! Built from `src/core/mcp_host/mcp_call.zig` (or a planted-bug copy of it)

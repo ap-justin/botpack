@@ -10,7 +10,7 @@ const Controls = struct {
     release_path: []const u8,
 };
 
-// Only the fx binary's ACP tests set these controls
+// Only the lia binary's ACP tests set these controls
 // (`tests/e2e/acp.test.ts`), so the libfx artifacts leave them out.
 pub fn pauseAfterTerminalWrite() void {
     if (comptime build_options.libfx) return;
@@ -29,9 +29,9 @@ pub fn noteReapBeforeJoin() void {
 
 fn controls() ?Controls {
     return controlsFromPaths(
-        io_mod.getenv("FX_TEST_ACP_PROMPT_TERMINAL_READY"),
-        io_mod.getenv("FX_TEST_ACP_PROMPT_REAP_READY"),
-        io_mod.getenv("FX_TEST_ACP_PROMPT_RELEASE"),
+        io_mod.getenv("LIA_TEST_ACP_PROMPT_TERMINAL_READY"),
+        io_mod.getenv("LIA_TEST_ACP_PROMPT_REAP_READY"),
+        io_mod.getenv("LIA_TEST_ACP_PROMPT_RELEASE"),
     );
 }
 

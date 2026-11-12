@@ -1,10 +1,10 @@
-// StoreLockBudget: real fx processes take the MCP credential store's lock on
+// StoreLockBudget: real lia processes take the MCP credential store's lock on
 // the macOS Keychain backend while the harness slows their Keychain calls,
 // lets one hang past its budget or stop reading its stdin, freezes or kills
-// a holder, holds the lock itself with no stamp as an older fx does, or
-// writes garbage into the lock file. Most processes are `fx mcp list --json`,
+// a holder, holds the lock itself with no stamp as an older lia does, or
+// writes garbage into the lock file. Most processes are `lia mcp list --json`,
 // which reads the store once under the lock and contacts no server; the
-// others are `fx mcp logout web`, which also writes it. Their "MCP store
+// others are `lia mcp logout web`, which also writes it. Their "MCP store
 // lock" trace lines, a stamp when taken and before each Keychain call, and
 // the harness's steps are checked by TLC against StoreLockBudgetTrace.tla,
 // the rules of StoreLockBudget.tla on the real clock, and each run asserts
@@ -14,7 +14,7 @@
 // ~/Library/Keychains and a throwaway USER, so no real account is read or
 // written; the logouts write only that account's item.
 //
-// FX_TLA_REPEAT repeats the turns schedule with fresh seeds.
+// LIA_TLA_REPEAT repeats the turns schedule with fresh seeds.
 import { expect, test } from "bun:test";
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import { randomUUID } from "node:crypto";
@@ -26,8 +26,8 @@ import { artifacts, binary, repetitions } from "../lib/context";
 import { fixture, save, writeProfile, type Fixture } from "./driver";
 import { checkTrace, type TraceRecord, type Verdict } from "./trace";
 
-const SERVICE = "FX_MCP_OAUTH_CREDENTIALS_V3";
-const ACCOUNT_PREFIX = "fx-tla-mcp-lock-";
+const SERVICE = "LIA_MCP_OAUTH_CREDENTIALS_V3";
+const ACCOUNT_PREFIX = "lia-tla-mcp-lock-";
 /** credentials.zig hold_budget_ms and hold_slack_ms. */
 const BUDGET = 10_000;
 const SLACK = 2_000;
@@ -35,9 +35,9 @@ const SLACK = 2_000;
 const TOLERANCE = 600;
 const darwin = process.platform === "darwin";
 
-// fx's stamps are on Zig's awake clock, CLOCK_UPTIME_RAW on macOS, which
+// lia's stamps are on Zig's awake clock, CLOCK_UPTIME_RAW on macOS, which
 // stops while the machine sleeps; Bun's hrtime doesn't. libproc finds each
-// fx's Keychain calls among its children within a millisecond, before a
+// lia's Keychain calls among its children within a millisecond, before a
 // ~100 ms call ends.
 const libSystem = darwin
   ? dlopen("/usr/lib/libSystem.B.dylib", {
@@ -69,20 +69,20 @@ function scene(name: string): Scene {
   mkdirSync(join(f.home, "Library"), { recursive: true });
   symlinkSync(join(homedir(), "Library", "Keychains"), join(f.home, "Library", "Keychains"), "dir");
   const account = `${ACCOUNT_PREFIX}${process.pid}-${randomUUID()}`;
-  return { f, account, lock: join(f.home, ".fx", "mcp-credentials", "credentials-v3.lock"), t0: awakeMs(), records: [], procs: [], paused: new Set(), timers: [] };
+  return { f, account, lock: join(f.home, ".lia", "mcp-credentials", "credentials-v3.lock"), t0: awakeMs(), records: [], procs: [], paused: new Set(), timers: [] };
 }
 
 function note(s: Scene, event: string, data: Record<string, string | number>) {
   s.records.push({ event, data: { ...data, at: (data.at as number | undefined) ?? awakeMs() - s.t0 }, at: (data.at as number | undefined) ?? awakeMs() - s.t0 });
 }
 
-/** One `fx mcp list --json` (or `args`) against the scene's store, traced to its own file. */
+/** One `lia mcp list --json` (or `args`) against the scene's store, traced to its own file. */
 function start(s: Scene, label: string, args = ["mcp", "list", "--json"]): Proc {
   const trace = join(s.f.base, `${label}.trace`);
   const env = {
     PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: s.f.home, USER: s.account, TMPDIR: process.env.TMPDIR ?? "/tmp",
-    FX_NO_OPEN_BROWSER: "1", FX_AUTO_UPGRADE: "0", FX_SOUND: "0", FX_TEST_SKIP_ONBOARDING: "1", FX_E2E_DISABLE_DOTENV: "1",
-    FX_TRACE_LOG: trace, FX_TRACE_SCOPES: "mcp,keychain", AI_GATEWAY_API_KEY: "fake-store-lock-key",
+    LIA_NO_OPEN_BROWSER: "1", LIA_AUTO_UPGRADE: "0", LIA_SOUND: "0", LIA_TEST_SKIP_ONBOARDING: "1", LIA_E2E_DISABLE_DOTENV: "1",
+    LIA_TRACE_LOG: trace, LIA_TRACE_SCOPES: "mcp,keychain", AI_GATEWAY_API_KEY: "fake-store-lock-key",
   };
   const started = awakeMs();
   const child = Bun.spawn([binary, ...args], { cwd: s.f.workspace, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
@@ -94,12 +94,12 @@ function start(s: Scene, label: string, args = ["mcp", "list", "--json"]): Proc 
 }
 
 /**
- * Slows each Keychain call the scene's fx processes make, each an
+ * Slows each Keychain call the scene's lia processes make, each an
  * `osascript` child, by `pauseFor(n)` ms, n counting calls from 0, until
  * `stop`; with `only`, just the calls of that kind ("load" or "store"), the
- * others let go at once. `fx mcp list` makes one read per hold of the store
+ * others let go at once. `lia mcp list` makes one read per hold of the store
  * lock; other children, such as `security`'s Keychain check, go untouched.
- * Resolves `first` with the first slowed call's pid and its fx parent.
+ * Resolves `first` with the first slowed call's pid and its lia parent.
  */
 function slowReads(s: Scene, pauseFor: (n: number) => number, only?: "load" | "store") {
   const seen = new Set<number>();
@@ -113,8 +113,8 @@ function slowReads(s: Scene, pauseFor: (n: number) => number, only?: "load" | "s
         for (const pid of children(p.child.pid)) {
           if (seen.has(pid)) continue;
           const exe = executable(pid);
-          // Forked but not yet exec'd: still fx; look again next time.
-          if (exe === null || exe === binary || exe.endsWith("/fx")) continue;
+          // Forked but not yet exec'd: still lia; look again next time.
+          if (exe === null || exe === binary || exe.endsWith("/lia")) continue;
           seen.add(pid);
           if (exe !== "/usr/bin/osascript") continue;
           if (only) {
@@ -142,7 +142,7 @@ function slowReads(s: Scene, pauseFor: (n: number) => number, only?: "load" | "s
   return { first, stop: () => { stopped = true; } };
 }
 
-// The same Security calls fx's osascript helper makes, for the throwaway account.
+// The same Security calls lia's osascript helper makes, for the throwaway account.
 const KEYCHAIN_SCRIPT = `
 ObjC.import("Security");
 ObjC.import("Foundation");
@@ -196,9 +196,9 @@ function seedLogin(s: Scene, big = false) {
 }
 const webSaved = (s: Scene) => keychainItem(s, "load").includes('"name":"web"');
 
-/** Holds the lock from another process with no stamp, as an older fx does, for `seconds`. */
+/** Holds the lock from another process with no stamp, as an older lia does, for `seconds`. */
 async function holdWithoutStamp(s: Scene, seconds: number) {
-  mkdirSync(join(s.f.home, ".fx", "mcp-credentials"), { recursive: true, mode: 0o700 });
+  mkdirSync(join(s.f.home, ".lia", "mcp-credentials"), { recursive: true, mode: 0o700 });
   const holder = Bun.spawn(["perl", "-e", 'use Fcntl qw(:flock); open(my $f, ">>", $ARGV[0]) or die; flock($f, LOCK_EX) or die; $| = 1; print "held\\n"; sleep $ARGV[1];', s.lock, String(seconds)], { stdout: "pipe" });
   const { value } = await holder.stdout.getReader().read();
   expect(new TextDecoder().decode(value)).toBe("held\n");
@@ -355,7 +355,7 @@ test.skipIf(!darwin)("eight waiters behind slowed reads all get the lock", async
   } finally { cleanup(s); }
 }, 120_000);
 
-test.skipIf(!darwin)("a hundred fx reading the store at once all get the lock", async () => {
+test.skipIf(!darwin)("a hundred lia reading the store at once all get the lock", async () => {
   const s = scene("slb-hundred");
   try {
     // As many windows refreshing their logins together; none is slowed.
@@ -402,7 +402,7 @@ test.skipIf(!darwin)("a holder killed mid-hold: the next waiter takes the lock a
     for (const k of [1, 2]) start(s, `waiter${k}`);
     await Bun.sleep(2_000);
     // Its Keychain child stays behind, still paused, as after a crash: the
-    // lock must go with fx itself, not wait for the child.
+    // lock must go with lia itself, not wait for the child.
     holder.child.kill("SIGKILL");
     note(s, "kill", { p: "holder" });
     const killedAt = awakeMs() - s.t0;
@@ -422,7 +422,7 @@ test.skipIf(!darwin)("a holder killed mid-hold: the next waiter takes the lock a
   }
 }, 90_000);
 
-test.skipIf(!darwin)("an older fx holds the lock with no stamp: waiters give up 12 s after their own start", async () => {
+test.skipIf(!darwin)("an older lia holds the lock with no stamp: waiters give up 12 s after their own start", async () => {
   const s = scene("slb-older");
   try {
     // A stamp from earlier, before the waiters start.
@@ -443,7 +443,7 @@ test.skipIf(!darwin)("an older fx holds the lock with no stamp: waiters give up 
 test.skipIf(!darwin)("garbage in the lock file counts as no stamp", async () => {
   const s = scene("slb-garbage");
   try {
-    mkdirSync(join(s.f.home, ".fx", "mcp-credentials"), { recursive: true, mode: 0o700 });
+    mkdirSync(join(s.f.home, ".lia", "mcp-credentials"), { recursive: true, mode: 0o700 });
     // Read as a stamp, these bytes lie far in the future.
     writeFileSync(s.lock, "garbage!", { mode: 0o600 });
     note(s, "scribble", { p: "harness" });
@@ -461,7 +461,7 @@ test.skipIf(!darwin)("garbage in the lock file counts as no stamp", async () => 
   } finally { cleanup(s); }
 }, 90_000);
 
-test.skipIf(!darwin)("a lone fx whose Keychain read and write take 6 s each signs out", async () => {
+test.skipIf(!darwin)("a lone lia whose Keychain read and write take 6 s each signs out", async () => {
   const s = scene("slb-lone");
   try {
     // web's login is saved, so signing out reads the store and writes it back.

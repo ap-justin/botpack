@@ -691,7 +691,7 @@ test "a framed line checks, and its body comes back" {
 test "flipping any single bit of a line is detected" {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(testing.allocator);
-    try frameOne(&out, 9, .set, ",\"key\":\"title\",\"value\":\"fx\"");
+    try frameOne(&out, 9, .set, ",\"key\":\"title\",\"value\":\"lia\"");
     const line = try testing.allocator.dupe(u8, out.items);
     defer testing.allocator.free(line);
     for (0..line.len) |i| {

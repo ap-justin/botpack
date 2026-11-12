@@ -33,7 +33,7 @@ pub const Config = struct {
     initial_dynamic_tools: []const stream_provider.DynamicFunctionTool = &.{},
     provider_capabilities: provider_set.Bundle.Capabilities = .{
         .gateway_prompt_caching = true,
-        .fx_search = true,
+        .lia_search = true,
         .vision_fallback = true,
     },
     custom_tool_guidance: []const u8 = "",

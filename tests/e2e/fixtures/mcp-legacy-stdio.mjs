@@ -1,20 +1,20 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
-const wireLogPath = process.env.FX_MCP_WIRE_LOG;
-const pidPath = process.env.FX_MCP_PID_PATH;
-const resultText = process.env.FX_MCP_RESULT_TEXT ?? "LEGACY_MCP_TOOL_RESULT";
-const mode = process.env.FX_MCP_MODE ?? "normal";
-const invalidationReleasePath = process.env.FX_MCP_INVALIDATION_RELEASE_PATH;
+const wireLogPath = process.env.LIA_MCP_WIRE_LOG;
+const pidPath = process.env.LIA_MCP_PID_PATH;
+const resultText = process.env.LIA_MCP_RESULT_TEXT ?? "LEGACY_MCP_TOOL_RESULT";
+const mode = process.env.LIA_MCP_MODE ?? "normal";
+const invalidationReleasePath = process.env.LIA_MCP_INVALIDATION_RELEASE_PATH;
 // By default an old server that never heard of server/discover, at the
-// oldest version fx speaks.
-const legacyVersion = process.env.FX_MCP_LEGACY_VERSION ?? "2025-03-26";
-const discoveryVersions = process.env.FX_MCP_LEGACY_DISCOVERY_VERSIONS?.split(",");
-const discoveryMethodNotFound = process.env.FX_MCP_LEGACY_DISCOVERY_METHOD_NOT_FOUND === "1";
-const discoveryInvalidParams = process.env.FX_MCP_LEGACY_DISCOVERY_INVALID_PARAMS === "1";
-const rejectNewerInitialize = process.env.FX_MCP_LEGACY_REJECT_NEWER_INITIALIZE === "1";
-const draft7Pattern = process.env.FX_MCP_DRAFT7_PATTERN;
-const elicitationUrl = process.env.FX_MCP_ELICITATION_URL ?? "https://example.test/authorize";
-const urlRequiredOperation = process.env.FX_MCP_URL_REQUIRED_OPERATION ?? "tools";
+// oldest version lia speaks.
+const legacyVersion = process.env.LIA_MCP_LEGACY_VERSION ?? "2025-03-26";
+const discoveryVersions = process.env.LIA_MCP_LEGACY_DISCOVERY_VERSIONS?.split(",");
+const discoveryMethodNotFound = process.env.LIA_MCP_LEGACY_DISCOVERY_METHOD_NOT_FOUND === "1";
+const discoveryInvalidParams = process.env.LIA_MCP_LEGACY_DISCOVERY_INVALID_PARAMS === "1";
+const rejectNewerInitialize = process.env.LIA_MCP_LEGACY_REJECT_NEWER_INITIALIZE === "1";
+const draft7Pattern = process.env.LIA_MCP_DRAFT7_PATTERN;
+const elicitationUrl = process.env.LIA_MCP_ELICITATION_URL ?? "https://example.test/authorize";
+const urlRequiredOperation = process.env.LIA_MCP_URL_REQUIRED_OPERATION ?? "tools";
 let buffer = Buffer.alloc(0);
 let messageCount = 0;
 // `initialize` is the first message, or the second after a discovery probe.
@@ -22,7 +22,7 @@ let sawDiscovery = false;
 let toolsListCalls = 0;
 let currentToolName = "echo";
 let pendingToolCall = null;
-// FX_MCP_MODE=ping_before_initialize: the initialize answer, held until the
+// LIA_MCP_MODE=ping_before_initialize: the initialize answer, held until the
 // client answers this server's ping, as a server that blocks on it would.
 let pendingInitialize = null;
 let urlRequiredSent = false;
@@ -208,7 +208,7 @@ function handle(message) {
 
   if (message.method === "server/discover") {
     sawDiscovery = true;
-    if (process.env.FX_MCP_IGNORE_DISCOVERY === "1") return;
+    if (process.env.LIA_MCP_IGNORE_DISCOVERY === "1") return;
     if (discoveryInvalidParams) {
       send({
         jsonrpc: "2.0",
@@ -230,7 +230,7 @@ function handle(message) {
       return;
     }
     if (
-      process.env.FX_MCP_LEGACY_VERSION !== undefined &&
+      process.env.LIA_MCP_LEGACY_VERSION !== undefined &&
       legacyVersion !== "2024-11-05" &&
       !discoveryMethodNotFound
     ) {
@@ -254,7 +254,7 @@ function handle(message) {
   }
   if (message.method === "initialize") {
     if (startupFailure) return;
-    // Answer with output fx must reject; the process itself stays up.
+    // Answer with output lia must reject; the process itself stays up.
     if (mode === "startup_garbage") {
       process.stdout.write("not json\n");
       return;

@@ -625,7 +625,7 @@ pub fn namesImages(user: session.UserTurn, stored: ?*const StoredImages) bool {
 }
 
 /// Whether `execution` is written as schema 11 or 12, with context notes
-/// (D93) or a saved runtime context (D94), which an fx from before them
+/// (D93) or a saved runtime context (D94), which a lia from before them
 /// rejects. A journal event, checkpoint, or snapshot that holds one says so
 /// in its own version, so an older reader reports a newer format instead of
 /// a corrupt one. Matches the choice in `writeExecutionMemoryJsonFrom`.
@@ -873,7 +873,7 @@ fn formatLegacyBackgroundAssistant(
         }
     }
     try out.writer.writeAll(
-        "[Historical command record: fx no longer owns or controls this process",
+        "[Historical command record: lia no longer owns or controls this process",
     );
     if (log_path.len != 0) try out.writer.print("; former log={s}", .{log_path});
     if (url) |value| try out.writer.print("; recorded url={s}", .{value});
@@ -1706,8 +1706,8 @@ fn checkpointUsesRemovedSignIn(object: std.json.ObjectMap) bool {
     return source == .string and types.isRemovedCredentialSource(source.string);
 }
 
-/// Checkpoints from before fx stopped closing connections when the Mac wakes
-/// can name the cause `system_resumed`. fx recovered from it exactly like a
+/// Checkpoints from before lia stopped closing connections when the Mac wakes
+/// can name the cause `system_resumed`. lia recovered from it exactly like a
 /// lost connection, so it loads as one.
 fn recoveryCauseFromText(text: []const u8) ?types.ModelRecoveryCause {
     if (std.mem.eql(u8, text, "system_resumed")) return .connectivity_lost;
@@ -1918,7 +1918,7 @@ fn writeExecutionMemoryJsonFrom(
     std.debug.assert(from.tool_steps <= execution.tool_steps.len and from.files <= execution.files.len and from.steering <= execution.steering.len);
     // Version 11 adds `context_notes` (D93) and version 12 `runtime_context`
     // (D94). Only an execution that has them uses them, so one without keeps
-    // version 10 and its exact bytes; an older fx rejects either version as it
+    // version 10 and its exact bytes; an older lia rejects either version as it
     // rejects every newer version.
     const with_runtime_context = format == .durable and execution.runtime_context != null;
     try writer.writeAll(if (with_runtime_context)
@@ -5023,7 +5023,7 @@ test "execution memory codec writes context notes only for a turn that has them 
         try std.testing.expect(std.mem.find(u8, shown.written(), "context_notes") == null);
     }
 
-    // Data an fx without notes wrote parses; notes need version 11, and notes
+    // Data a lia without notes wrote parses; notes need version 11, and notes
     // past the turn's steps do not parse.
     for ([_]struct { json: []const u8, valid: bool }{
         .{ .json = "{\"schema_version\":10,\"tool_steps\":[],\"files\":[],\"steering\":[],\"turn_summary\":null}", .valid = true },
@@ -5049,7 +5049,7 @@ test "execution memory codec writes context notes only for a turn that has them 
 
 test "execution memory codec writes the runtime context only for the turn that captured it (D94)" {
     const alloc = std.testing.allocator;
-    var captured = [_][]u8{ @constCast("<fx-turn-context>\ngit_branch: main\n</fx-turn-context>"), @constCast("Runtime context: permission mode is ask.") };
+    var captured = [_][]u8{ @constCast("<lia-turn-context>\ngit_branch: main\n</lia-turn-context>"), @constCast("Runtime context: permission mode is ask.") };
     var notes = [_]types.PersistedContextNote{.{ .text = @constCast("rules at start"), .after_tool_step_count = 0 }};
     const Case = struct { runtime: bool, notes: bool, version: []const u8 };
     for ([_]Case{
@@ -5117,7 +5117,7 @@ test "execution memory codec writes the runtime context only for the turn that c
 test "committed file presentation codec reads shipped and spilled shapes" {
     const alloc = std.testing.allocator;
 
-    // Shipped shape: every record written by released fx has exactly these
+    // Shipped shape: every record written by released lia has exactly these
     // nine keys, with the snapshots inline and no content_handle key.
     const shipped =
         "{\"path\":\"note.txt\",\"kind\":\"added\",\"lines\":[{\"kind\":\"addition\",\"old_line\":null,\"new_line\":1,\"text\":\"line\"}],\"additions\":1,\"deletions\":0,\"truncated\":false,\"previous_content\":null,\"after_content\":\"line\\n\",\"lifecycle_id\":{\"turn_id\":9,\"call_id\":\"call_write\"}}";
@@ -5670,7 +5670,7 @@ test "interrupted command presentation is strict and round trips" {
                 .handle = "fx-command-replay.bin",
                 .framed_bytes = 42,
             } },
-            .command_artifact_handle = "fx-command.log",
+            .command_artifact_handle = "lia-command.log",
         },
     } };
     var encoded: std.Io.Writer.Allocating = .init(alloc);
@@ -5687,7 +5687,7 @@ test "interrupted command presentation is strict and round trips" {
     };
     try std.testing.expectEqualStrings("fx-command-replay.bin", descriptor.handle);
     try std.testing.expectEqual(@as(usize, 42), descriptor.framed_bytes);
-    try std.testing.expectEqualStrings("fx-command.log", presentation.command_artifact_handle.?);
+    try std.testing.expectEqualStrings("lia-command.log", presentation.command_artifact_handle.?);
     try std.testing.expectEqual(types.InterruptedTerminalReason.cancelled, decoded.interrupted.terminal_reason);
 
     const failed_turn: session.HistoryTurn = .{ .interrupted = .{
@@ -5894,7 +5894,7 @@ test "durable image snapshots serialize as session-relative locators" {
         .id = 1,
         .path = @constCast("/Users/private/source.png"),
         .media_type = @constCast("image/png"),
-        .snapshot_path = @constCast("/tmp/fx/sessions/session-id/images/image-1-deadbeef.bin"),
+        .snapshot_path = @constCast("/tmp/lia/sessions/session-id/images/image-1-deadbeef.bin"),
         .snapshot_sha256 = @constCast("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
     }};
     const turn: session.HistoryTurn = .{ .assistant = .{
@@ -5909,7 +5909,7 @@ test "durable image snapshots serialize as session-relative locators" {
     try std.testing.expect(std.mem.find(
         u8,
         encoded.written(),
-        "/tmp/fx/sessions/session-id/images",
+        "/tmp/lia/sessions/session-id/images",
     ) == null);
     try std.testing.expect(std.mem.find(
         u8,
@@ -6536,7 +6536,7 @@ test "per-turn work provenance parser handles fuzzed ownership paths" {
         "{\"kind\":\"assistant\",\"user\":{\"text\":\"prompt\",\"images\":[]},\"assistant\":\"reply\",\"execution\":{\"schema_version\":3,\"tool_steps\":[],\"files\":[]}}",
         "{\"kind\":\"assistant\",\"user\":{\"text\":\"prompt\",\"images\":[],\"work_id\":\"\"}}",
         "{\"kind\":\"assistant\",\"user\":{\"text\":\"prompt\",\"images\":[]},\"assistant\":\"reply\",\"execution\":{\"schema_version\":11,\"tool_steps\":[],\"files\":[],\"steering\":[],\"context_notes\":[{\"text\":\"<scoped-rules from=\\\"sub/AGENTS.md\\\" scope=\\\"sub\\\">\\nR\\n</scoped-rules>\",\"after_tool_step_count\":0,\"sources\":[{\"path\":\"/w/sub/AGENTS.md\",\"stamp\":7}]}],\"turn_summary\":null}}",
-        "{\"kind\":\"assistant\",\"user\":{\"text\":\"prompt\",\"images\":[]},\"assistant\":\"reply\",\"execution\":{\"schema_version\":12,\"tool_steps\":[],\"files\":[],\"steering\":[],\"context_notes\":[{\"text\":\"<fx-skill-used>\\nnote\\n</fx-skill-used>\",\"after_tool_step_count\":0}],\"runtime_context\":[\"<fx-turn-context>\\ngit_branch: main\\n</fx-turn-context>\",\"Runtime context: permission mode is auto.\"],\"turn_summary\":null}}",
+        "{\"kind\":\"assistant\",\"user\":{\"text\":\"prompt\",\"images\":[]},\"assistant\":\"reply\",\"execution\":{\"schema_version\":12,\"tool_steps\":[],\"files\":[],\"steering\":[],\"context_notes\":[{\"text\":\"<lia-skill-used>\\nnote\\n</lia-skill-used>\",\"after_tool_step_count\":0}],\"runtime_context\":[\"<lia-turn-context>\\ngit_branch: main\\n</lia-turn-context>\",\"Runtime context: permission mode is auto.\"],\"turn_summary\":null}}",
         "{\"kind\":\"interrupted\",\"user\":{\"text\":\"prompt\",\"images\":[]},\"execution\":{\"schema_version\":12,\"tool_steps\":[],\"files\":[],\"steering\":[],\"context_notes\":[{\"text\":\"n\",\"after_tool_step_count\":1,\"sources\":[{\"path\":\"\",\"stamp\":0}]}],\"runtime_context\":[],\"turn_summary\":null}}",
         "",
         "{}",

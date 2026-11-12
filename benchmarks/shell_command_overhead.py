@@ -49,10 +49,10 @@ def startup_file(kind, marker, delay):
 
 
 def write_home(home, marker, delay):
-    (home / ".fx").mkdir(parents=True, mode=0o700)
+    (home / ".lia").mkdir(parents=True, mode=0o700)
     # Background title generation would consume one fixture response and shift
     # the call accounting, so the fixture profile keeps titles off.
-    (home / ".fx/settings.json").write_text(json.dumps({"provider": "gateway", "model": "openai/gpt-5.5", "max_agent_steps": 0, "session_titles": False}))
+    (home / ".lia/settings.json").write_text(json.dumps({"provider": "gateway", "model": "openai/gpt-5.5", "max_agent_steps": 0, "session_titles": False}))
     for index in range(PATH_EDITS):
         (home / f"bench-path/d{index:02d}").mkdir(parents=True)
     (home / marker).mkdir()
@@ -103,7 +103,7 @@ def summarize(values):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", default="./zig-out/bin/fx")
+    parser.add_argument("--binary", default="./zig-out/bin/lia")
     parser.add_argument("--output", required=True)
     parser.add_argument("--calls", type=int, default=100)
     parser.add_argument("--rc-delay", type=float, default=0.2, help="seconds each startup-file load sleeps")
@@ -118,7 +118,7 @@ def main():
     root = Path(args.output).resolve()
     root.mkdir(mode=0o700, parents=True, exist_ok=False)
     home, workspace = root / "home", root / "workspace"
-    marker = f"fx-bench-marker-{secrets.token_hex(4)}"
+    marker = f"lia-bench-marker-{secrets.token_hex(4)}"
     marker_dir = str(home / marker)
     write_home(home, marker, args.rc_delay)
     workspace.mkdir()
@@ -172,12 +172,12 @@ def main():
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("FX_", "OPENAI_", "AI_GATEWAY_", "VERCEL_"))}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("LIA_", "OPENAI_", "AI_GATEWAY_", "VERCEL_"))}
     # These would redirect or add startup files outside the isolated HOME.
     for key in ("ZDOTDIR", "BASH_ENV", "ENV"):
         env.pop(key, None)
     base_url = f"http://127.0.0.1:{server.server_port}"
-    env.update(HOME=str(home), AI_GATEWAY_API_KEY="fixture-key", FX_GATEWAY_BASE_URL=base_url, FX_TEST_GATEWAY_CHAT_URL=base_url + "/chat", FX_TEST_GATEWAY_MODELS_URL=base_url + "/coding-agent/v1/models", FX_MODEL="openai/gpt-5.5", FX_MAX_AGENT_STEPS="0")
+    env.update(HOME=str(home), AI_GATEWAY_API_KEY="fixture-key", LIA_GATEWAY_BASE_URL=base_url, LIA_TEST_GATEWAY_CHAT_URL=base_url + "/chat", LIA_TEST_GATEWAY_MODELS_URL=base_url + "/coding-agent/v1/models", LIA_MODEL="openai/gpt-5.5", LIA_MAX_AGENT_STEPS="0")
 
     timed_out = False
     with (root / "stdout.json").open("w") as out, (root / "stderr.log").open("w") as err:

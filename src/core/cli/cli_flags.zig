@@ -1,4 +1,4 @@
-//! The one parser for fx's command-line flags. It reads arguments against a
+//! The one parser for lia's command-line flags. It reads arguments against a
 //! command's `OptionDoc` list, the same list the command's help is rendered
 //! from, so a flag can't be accepted without being documented.
 //!
@@ -263,7 +263,7 @@ fn editDistance(a: []const u8, b: []const u8) ?usize {
 }
 
 /// The candidate closest to a mistyped `word` among those offered so far, at
-/// most `max_edits` edits away. Every "did you mean" suggestion fx prints uses
+/// most `max_edits` edits away. Every "did you mean" suggestion lia prints uses
 /// this rule; on a tie the first candidate offered wins.
 pub const Nearest = struct {
     word: []const u8,
@@ -314,7 +314,7 @@ test "the flag parser keeps its laws on fuzzed command lines" {
 }
 
 /// The input splits at zero bytes into up to 16 arguments, which parse
-/// against `fx ask`'s options. The parser must stop on its own, return only
+/// against `lia ask`'s options. The parser must stop on its own, return only
 /// documented options with values borrowed from the arguments, agree with
 /// `firstFailure`, give the same answer twice, and describe every failure,
 /// and every value outside a flag's range, in terminal-safe text.

@@ -1,15 +1,15 @@
-// Faults on exact paths, while the file FX_PATH_FAULT_ARM exists.
-// FX_PATH_FAULT_TARGETS holds absolute paths, separated by ':'.
+// Faults on exact paths, while the file LIA_PATH_FAULT_ARM exists.
+// LIA_PATH_FAULT_TARGETS holds absolute paths, separated by ':'.
 //
-//   FX_PATH_FAULT_MODE=refuse  every rename, unlink and rmdir that would move
+//   LIA_PATH_FAULT_MODE=refuse  every rename, unlink and rmdir that would move
 //                              or remove a target, or anything inside one,
 //                              fails with EACCES.
-//   FX_PATH_FAULT_MODE=pause   a rename of exactly a target blocks until the
+//   LIA_PATH_FAULT_MODE=pause   a rename of exactly a target blocks until the
 //                              arm file is gone, so a driver can kill the
 //                              process at that point, or for
-//                              FX_PATH_FAULT_PAUSE_MS milliseconds when set.
+//                              LIA_PATH_FAULT_PAUSE_MS milliseconds when set.
 //
-// Each hit appends a line to FX_PATH_FAULT_RECORD, the evidence that the
+// Each hit appends a line to LIA_PATH_FAULT_RECORD, the evidence that the
 // boundary was reached. Every other call passes through untouched.
 #include <errno.h>
 #include <fcntl.h>
@@ -41,7 +41,7 @@ static int absolute(int dirfd, const char *path, char out[PATH_MAX]) {
 }
 
 static void record(const char *what, const char *path) {
-    const char *file = getenv("FX_PATH_FAULT_RECORD");
+    const char *file = getenv("LIA_PATH_FAULT_RECORD");
     if (!file) return;
     int log = open(file, O_WRONLY | O_CREAT | O_APPEND, 0600);
     if (log < 0) return;
@@ -53,9 +53,9 @@ static void record(const char *what, const char *path) {
 // compared after resolving its parent folder. A rename may pause; any call
 // may be refused.
 static enum hit check(int dirfd, const char *path, int is_rename) {
-    const char *targets = getenv("FX_PATH_FAULT_TARGETS");
-    const char *arm = getenv("FX_PATH_FAULT_ARM");
-    const char *mode = getenv("FX_PATH_FAULT_MODE");
+    const char *targets = getenv("LIA_PATH_FAULT_TARGETS");
+    const char *arm = getenv("LIA_PATH_FAULT_ARM");
+    const char *mode = getenv("LIA_PATH_FAULT_MODE");
     if (!targets || !arm || !mode || access(arm, F_OK) != 0) return MISS;
     int pause = strcmp(mode, "pause") == 0;
     if (pause && !is_rename) return MISS;
@@ -91,10 +91,10 @@ static long long now_ms(void) {
 }
 
 // Blocks a paused rename until the driver disarms or kills the process, or
-// until FX_PATH_FAULT_PAUSE_MS has passed.
+// until LIA_PATH_FAULT_PAUSE_MS has passed.
 static void hold(void) {
-    const char *arm = getenv("FX_PATH_FAULT_ARM");
-    const char *limit = getenv("FX_PATH_FAULT_PAUSE_MS");
+    const char *arm = getenv("LIA_PATH_FAULT_ARM");
+    const char *limit = getenv("LIA_PATH_FAULT_PAUSE_MS");
     long long until = limit ? now_ms() + atoll(limit) : -1;
     while (arm && access(arm, F_OK) == 0 && (until < 0 || now_ms() < until)) usleep(10000);
 }

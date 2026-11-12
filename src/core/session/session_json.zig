@@ -461,7 +461,7 @@ fn formatLegacyBackgroundAssistant(
         }
     }
     try out.writer.writeAll(
-        "[Historical command record: fx no longer owns or controls this process",
+        "[Historical command record: lia no longer owns or controls this process",
     );
     if (log_path.len != 0) try out.writer.print("; former log={s}", .{log_path});
     if (url) |value| try out.writer.print("; recorded url={s}", .{value});
@@ -2079,7 +2079,7 @@ test "schema v2 legacy exact reader migrates background ownership to inert histo
     try std.testing.expect(std.mem.find(
         u8,
         loaded.history[1].assistant.assistant,
-        "fx no longer owns or controls this process",
+        "lia no longer owns or controls this process",
     ) != null);
     try std.testing.expect(std.mem.find(
         u8,

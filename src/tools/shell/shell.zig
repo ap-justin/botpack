@@ -652,7 +652,7 @@ fn callRun(
     const execution_id = runtime.generatedId(&execution_id_buffer) catch |err|
         return runtimeFailure(ctx, err);
     // While this call runs, its command can reach the session's MCP tools
-    // with `fx mcp call`, as this agent (`mcp_call_bridge.zig`).
+    // with `lia mcp call`, as this agent (`mcp_call_bridge.zig`).
     const bridge_registration: ?*mcp_call_bridge.Registration = if (comptime mcp_call_bridge.supported) registration: {
         const capability = ctx.mcp_call_capability orelse break :registration null;
         break :registration mcp_call_bridge.register(capability) catch |err| {
@@ -1389,7 +1389,7 @@ fn ensureOwnedTtyIndexed(
     return terminal_managed_observer.syncOwned(observer, session_id);
 }
 
-/// Terminals end with the fx process that starts them and are never
+/// Terminals end with the lia process that starts them and are never
 /// reattached, so the agent is told to start a new one.
 fn terminalEndedWithOwner(
     ctx: tool_dispatch.DispatchContext,
@@ -1401,7 +1401,7 @@ fn terminalEndedWithOwner(
         .tool = "shell",
         .code = tool_result_errors.terminal_ended_error_code,
         .session_id = session_id,
-        .message = "This terminal ended when the fx process that started it exited. It cannot be resumed. Start a new terminal with shell action run and tty true.",
+        .message = "This terminal ended when the lia process that started it exited. It cannot be resumed. Start a new terminal with shell action run and tty true.",
         .retryable = false,
     } }, .{}, &out.writer) catch return error.OutOfMemory;
     return .{ .failure = try out.toOwnedSlice() };
@@ -1780,7 +1780,7 @@ fn shellParseRetryGuidance(output: []const u8, whole_output: bool) ?[]const u8 {
     return null;
 }
 
-// Shell error prefixes may carry an absolute argv[0] path (fx spawns the
+// Shell error prefixes may carry an absolute argv[0] path (lia spawns the
 // resolved login shell as /bin/bash, /bin/zsh, ...), so match the basename
 // of the token before the first colon rather than a raw line prefix.
 // Snapshot and terminal runs pass the command to `eval`, so zsh names the
@@ -2740,7 +2740,7 @@ test "failure guidance detectors match only their signatures" {
         zsh_parse_retry_guidance,
         failureRetryGuidance(1, "zsh:1: unmatched '\n", true),
     );
-    // fx spawns the resolved login shell with an absolute argv[0], so bash
+    // lia spawns the resolved login shell with an absolute argv[0], so bash
     // errors carry a /bin/bash prefix; bare-basename forms also occur when a
     // command spawns a shell subprocess itself.
     try std.testing.expectEqual(

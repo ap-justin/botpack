@@ -1,4 +1,4 @@
-//! The `fx mcp call` wire format between the client a shell command runs
+//! The `lia mcp call` wire format between the client a shell command runs
 //! and the session's bridge (`mcp_call_bridge.zig`), over one Unix socket
 //! connection per call.
 //!
@@ -23,9 +23,9 @@ const mcp_call = @import("mcp_call.zig");
 const Allocator = std.mem.Allocator;
 
 /// The bridge's socket, for commands the session's shell tool runs.
-pub const socket_env = "FX_MCP_CALL_SOCKET";
+pub const socket_env = "LIA_MCP_CALL_SOCKET";
 /// The token of the shell call that ran the command.
-pub const token_env = "FX_MCP_CALL_TOKEN";
+pub const token_env = "LIA_MCP_CALL_TOKEN";
 
 /// The longest request line the bridge reads.
 pub const max_request_bytes: usize = 1024 * 1024;

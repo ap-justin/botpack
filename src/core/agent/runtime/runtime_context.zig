@@ -5,7 +5,7 @@
 //! cached history stays intact. The turn that captures the copy saves it
 //! with its execution memory. When the current runtime context differs from
 //! what the model last saw, an update note with the whole current context
-//! joins the conversation at the step boundary where fx noticed it: on that
+//! joins the conversation at the step boundary where lia noticed it: on that
 //! turn's user message, or on the tool result of the step that changed it
 //! (D94, `tests/tla/prompt_context/PromptCache.tla` "outside" and "switch").
 
@@ -168,7 +168,7 @@ test "a session without a saved runtime context captures the current one and sen
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    const current = systemMessages(&.{ "<fx-turn-context>\ngit_branch: main\n</fx-turn-context>", "Runtime context: permission mode is ask." });
+    const current = systemMessages(&.{ "<lia-turn-context>\ngit_branch: main\n</lia-turn-context>", "Runtime context: permission mode is ask." });
 
     var state = try State.init(arena, &.{}, null);
     try std.testing.expect(state.frozen == null);
@@ -186,9 +186,9 @@ test "a later turn sends the saved runtime context and notes a change once" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    var saved = [_][]u8{ @constCast("<fx-turn-context>\ngit_branch: main\n</fx-turn-context>"), @constCast("Runtime context: permission mode is ask.") };
+    var saved = [_][]u8{ @constCast("<lia-turn-context>\ngit_branch: main\n</lia-turn-context>"), @constCast("Runtime context: permission mode is ask.") };
     const history = [_]types.HistoryTurn{assistantTurn(.{ .runtime_context = &saved })};
-    const current = systemMessages(&.{ "<fx-turn-context>\ngit_branch: feature\n</fx-turn-context>", "Runtime context: permission mode is ask." });
+    const current = systemMessages(&.{ "<lia-turn-context>\ngit_branch: feature\n</lia-turn-context>", "Runtime context: permission mode is ask." });
 
     var state = try State.init(arena, &history, null);
     try std.testing.expect(state.captured == null);
@@ -196,8 +196,8 @@ test "a later turn sends the saved runtime context and notes a change once" {
 
     const note = (try state.refresh(arena, arena, &current)).?;
     try std.testing.expectEqualStrings(
-        "<fx-context-update>\nThe runtime context changed during this session. These blocks replace the turn context and runtime notes in the instructions above, and any earlier update:\n" ++
-            "\n<fx-turn-context>\ngit_branch: feature\n</fx-turn-context>\n\nRuntime context: permission mode is ask.\n</fx-context-update>",
+        "<lia-context-update>\nThe runtime context changed during this session. These blocks replace the turn context and runtime notes in the instructions above, and any earlier update:\n" ++
+            "\n<lia-turn-context>\ngit_branch: feature\n</lia-turn-context>\n\nRuntime context: permission mode is ask.\n</lia-context-update>",
         note,
     );
     try std.testing.expect(try state.refresh(arena, arena, &current) == null);
@@ -225,7 +225,7 @@ test "the newest saved update counts as seen, and a change back to the saved cop
     var state = try State.init(arena, &history, null);
     try std.testing.expect(try state.refresh(arena, arena, &auto) == null);
     const back = (try state.refresh(arena, arena, &ask)).?;
-    try std.testing.expect(std.mem.endsWith(u8, back, "\nRuntime context: permission mode is ask.\n</fx-context-update>"));
+    try std.testing.expect(std.mem.endsWith(u8, back, "\nRuntime context: permission mode is ask.\n</lia-context-update>"));
 }
 
 test "a compaction summary ends the search, and an update kept after it still counts" {
@@ -249,7 +249,7 @@ test "a compaction summary ends the search, and an update kept after it still co
     const note = (try state.refresh(arena, arena, &full)).?;
     try std.testing.expectEqualStrings(full[0].content.?, state.captured.?[0]);
     try std.testing.expectEqualStrings(full[0].content.?, state.messages()[0].content.?);
-    try std.testing.expect(std.mem.endsWith(u8, note, "\nRuntime context: permission mode is full access.\n</fx-context-update>"));
+    try std.testing.expect(std.mem.endsWith(u8, note, "\nRuntime context: permission mode is full access.\n</lia-context-update>"));
 }
 
 test "a recovered turn keeps the runtime context its first attempt captured" {

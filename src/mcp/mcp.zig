@@ -49,7 +49,7 @@ pub const Host = @import("host.zig").Host;
 pub const trace = @import("io/trace.zig");
 
 /// Pure protocol machines, one per unit. Public so the dev labs and the
-/// Bun driver can exercise them directly; fx itself uses the engine API.
+/// Bun driver can exercise them directly; lia itself uses the engine API.
 pub const core = struct {
     pub const request = @import("core/request.zig");
     pub const stdio_conn = @import("core/stdio_conn.zig");

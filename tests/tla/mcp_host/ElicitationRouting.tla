@@ -1,12 +1,12 @@
 ---- MODULE ElicitationRouting ----
-\* Where fx routes an MCP server's questions and the user's answers
+\* Where lia routes an MCP server's questions and the user's answers
 \* (vercel-labs/fx at 53a561bea), for one server and one call that can ask.
 \*
 \* Code:
 \*   - src/core/mcp_host/runtime.zig onServer `.elicit` (2025): callAsking
 \*     finds a call on the server that can ask and isn't holding a question
 \*     (req.question == null), and offers it Pending{reply = .elicit = slot};
-\*     with none, fx answers it cancel at once. `.elicit_withdrawn`: endUrl only.
+\*     with none, lia answers it cancel at once. `.elicit_withdrawn`: endUrl only.
 \*   - onEvent `.input` (2026): the call's input requests, offered as
 \*     Pending{reply = .input = {call handle, keys}}.
 \*   - askWaiting, on the caller's thread: takes the offered question
@@ -51,7 +51,7 @@ VARIABLES
     posted,     \* an answer posted to the owner: [q, key], q = 0 for none
     answeredBy, \* [Qs -> 0..MaxQ]: whose answer the server got for each question
     shown,      \* ghost: [Qs -> BOOLEAN] the user saw it
-    dismissed    \* ghost: [Qs -> BOOLEAN] fx dismissed it at once
+    dismissed    \* ghost: [Qs -> BOOLEAN] lia dismissed it at once
 
 vars == <<version, nextQ, holder, pending, calling, offered, offerKey, asking, askKey, posted, answeredBy, shown, dismissed>>
 
@@ -85,8 +85,8 @@ Init ==
     /\ dismissed = [q \in Qs |-> FALSE]
 
 \* The server asks question q. 2025: the core takes the lowest free slot
-\* (none free: an error answers it, and it never reaches fx). 2026: a round.
-\* fx offers it to the call, or answers it cancel at once when no call can take it.
+\* (none free: an error answers it, and it never reaches lia). 2026: a round.
+\* lia offers it to the call, or answers it cancel at once when no call can take it.
 Ask ==
     /\ nextQ <= MaxQ
     /\ version = "2025" => Free # {}
@@ -98,7 +98,7 @@ Ask ==
           /\ pending' = [pending EXCEPT ![q] = take]
           /\ offered' = IF take THEN q ELSE offered
           /\ offerKey' = IF take THEN (IF version = "2025" THEN s ELSE q) ELSE offerKey
-          \* fx's cancel goes out at once, as this question's answer.
+          \* lia's cancel goes out at once, as this question's answer.
           /\ answeredBy' = IF take THEN answeredBy ELSE [answeredBy EXCEPT ![q] = q]
           /\ dismissed' = [dismissed EXCEPT ![q] = ~take]
     /\ UNCHANGED <<version, calling, asking, askKey, posted, shown>>
@@ -135,7 +135,7 @@ Deliver ==
 
 \* The server withdraws q: notifications/cancelled for its request (2025),
 \* which frees its slot. A shown question stays on screen. With the repair,
-\* fx drops q if the call holds it unshown (dropWithdrawn); before it, that
+\* lia drops q if the call holds it unshown (dropWithdrawn); before it, that
 \* stayed too. A 2026 round ends only with its call.
 Withdraw(q) ==
     /\ version = "2025" /\ pending[q]
@@ -167,10 +167,10 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 
 \* ---- Safety the code keeps ----
 
-\* Each question is answered at most once, by fx or by an answer the user gave.
+\* Each question is answered at most once, by lia or by an answer the user gave.
 AnsweredOnce == \A q \in Qs : answeredBy[q] # None => ~pending[q]
 
-\* A question fx dismissed at once (no call could ask) is never shown.
+\* A question lia dismissed at once (no call could ask) is never shown.
 DismissedNeverShown == \A q \in Qs : ~(shown[q] /\ dismissed[q])
 
 \* One question at a time on screen, and the call holds at most one more.

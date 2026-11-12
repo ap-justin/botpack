@@ -1,12 +1,12 @@
 //! A nesting limit for JSON that a provider sends, checked on the raw text
-//! before fx parses it. std.json parses any depth, but std.json.Stringify
+//! before lia parses it. std.json parses any depth, but std.json.Stringify
 //! stops past 256 levels in safe builds, and a recursive walk can run out of
 //! stack, so a provider value deeper than this must never reach either one.
 const std = @import("std");
 const text_utils = @import("../core/shared/text_utils.zig");
 
 /// Deep enough for any real tool input or provider metadata, and far enough
-/// under Stringify's 256 levels that fx can wrap a value when it saves it.
+/// under Stringify's 256 levels that lia can wrap a value when it saves it.
 pub const max_depth = 64;
 
 /// Whether `text` nests objects and arrays deeper than `max_depth`. Brackets

@@ -1,9 +1,9 @@
-//! The one way fx runs git itself: the `fx pr` and `fx issue` snapshot and the
+//! The one way lia runs git itself: the `lia pr` and `lia issue` snapshot and the
 //! agent's auto-run `git status`, `git diff` and `git log`. A repository's own
 //! config can name programs: fsmonitor, hooks, a pager, diff drivers, filter
 //! drivers and a signature verifier. Every invocation turns those off, while
 //! the user's global and system config stay trusted, so a global Git LFS still
-//! works. When fx cannot establish that, `prepare` refuses and git does not run.
+//! works. When lia cannot establish that, `prepare` refuses and git does not run.
 //!
 //! TLA+ model: `tests/tla/shell_command/GitAdmission.tla`.
 
@@ -31,7 +31,7 @@ pub const Refusal = enum {
     repo_config_unavailable,
     /// `-c` splits at the first `=`, so such a driver cannot be blanked.
     unsupported_filter_name,
-    /// git would use a different repository than the one whose config fx read.
+    /// git would use a different repository than the one whose config lia read.
     repository_mismatch,
 };
 
@@ -51,7 +51,7 @@ pub const Subcommand = enum { status, diff, log, branch, rev_parse };
 
 /// Decides whether git may run in the absolute directory `cwd`: reads the
 /// repository's config as data, checks the trusted git's version once per
-/// process, and confirms git resolves the same repository fx read. All memory
+/// process, and confirms git resolves the same repository lia read. All memory
 /// belongs to `arena`.
 pub fn prepare(arena: Allocator, cwd: []const u8) Allocator.Error!Prepared {
     const filters = indexer.repoFilters(arena, cwd) catch |err| switch (err) {
@@ -119,7 +119,7 @@ fn appendPrelude(arena: Allocator, argv: *std.ArrayList([]const u8), ready: Read
 
 /// The child environment for every safe git call: a fixed PATH and locale, no
 /// prompts, pagers or optional locks, and only the variables that locate the
-/// user's own git config. Nothing else from fx's environment, such as
+/// user's own git config. Nothing else from lia's environment, such as
 /// `GIT_DIR` or `GIT_CONFIG_PARAMETERS`, reaches git.
 pub fn environment(alloc: Allocator) Allocator.Error!std.process.Environ.Map {
     var map = std.process.Environ.Map.init(alloc);
@@ -198,9 +198,9 @@ fn leadingNumber(text: []const u8) ?u32 {
     return std.fmt.parseUnsigned(u32, text[0..end], 10) catch null;
 }
 
-/// Confirms git resolves the repository whose config fx read. git accepts a
-/// git directory used as the workspace, and fx's discovery does not, so
-/// without this check git could run with config fx never read. `rev-parse`
+/// Confirms git resolves the repository whose config lia read. git accepts a
+/// git directory used as the workspace, and lia's discovery does not, so
+/// without this check git could run with config lia never read. `rev-parse`
 /// reads config but runs none of the programs above.
 fn sameRepository(arena: Allocator, ready: Ready, cwd: []const u8, expected: ?[]const u8) Allocator.Error!bool {
     var argv: std.ArrayList([]const u8) = .empty;
@@ -294,7 +294,7 @@ test "safe git environment keeps only fixed values and user config locations" {
 /// git runs it. Setup and control runs use plain git; helper runs use the
 /// helper's environment. Both are isolated from the developer's git config.
 /// There is no pager route here: git never pages when its output is not a
-/// terminal, and fx always pipes it, so `--no-pager` and `GIT_PAGER=cat` are
+/// terminal, and lia always pipes it, so `--no-pager` and `GIT_PAGER=cat` are
 /// covered by the argv and environment tests above.
 const SentinelRepo = struct {
     arena: Allocator,
@@ -600,7 +600,7 @@ test "safe git follows git's repository choice and refuses what it cannot blank"
     const repo = try SentinelRepo.init(arena_state.allocator(), tmp.dir);
 
     // git skips an inner `.git` without `refs` and uses the outer repository.
-    // fx makes the same choice, so the outer repository's filter is blanked.
+    // lia makes the same choice, so the outer repository's filter is blanked.
     try repo.write("repo/.git/info/attributes", "a.txt filter=evil\n");
     try repo.plain(repo.repo, &.{ "config", "filter.evil.clean", repo.sentinel });
     try repo.write("repo/inner/.git/HEAD", "ref: refs/heads/main\n");
@@ -610,7 +610,7 @@ test "safe git follows git's repository choice and refuses what it cannot blank"
     try repo.expectBlocked(inner, .status, &.{"--short"}, &.{ "status", "--short" });
 
     // A git directory used as the workspace, with a separate work tree. git
-    // uses it; fx's discovery does not, so safe git refuses.
+    // uses it; lia's discovery does not, so safe git refuses.
     const gitdir = try repo.path("gitdir");
     try repo.plain(repo.root, &.{ "init", "-q", "--bare", "--template=", gitdir });
     try repo.plain(gitdir, &.{ "config", "core.bare", "false" });
@@ -618,7 +618,7 @@ test "safe git follows git's repository choice and refuses what it cannot blank"
     try std.testing.expectEqual(Refusal.repository_mismatch, (try prepare(repo.arena, gitdir)).refused);
 
     // An inner repository whose `HEAD` is a symlink into `refs/`. git uses
-    // it; fx's discovery rejects it and reads the outer repository, so the two
+    // it; lia's discovery rejects it and reads the outer repository, so the two
     // disagree and safe git refuses instead of running with the wrong config.
     const linked = try repo.path("repo/linked");
     try repo.plain(repo.repo, &.{ "init", "-q", "--template=", linked });

@@ -15,7 +15,7 @@ const Allocator = std.mem.Allocator;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 const Tree = tree_mod.Tree;
 
-const magic = "fx-file-index-v3\n";
+const magic = "lia-file-index-v3\n";
 const max_bytes: usize = 64 * 1024 * 1024;
 const max_path_bytes: usize = 4096;
 
@@ -343,7 +343,7 @@ test "snapshot round trips, rejects tampering, other scopes and v1 files, and an
 
     // Older formats fail the magic check. A v2 file stamped every source
     // without following symlinks.
-    for ([_][]const u8{ "fx-file-index-v1\n{}", "fx-file-index-v2\n" }) |old| {
+    for ([_][]const u8{ "lia-file-index-v1\n{}", "lia-file-index-v2\n" }) |old| {
         try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = path, .data = old, .flags = .{ .permissions = .fromMode(0o600) } });
         try std.testing.expect((try load(alloc, path, &roots)) == null);
     }

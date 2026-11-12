@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runFx } from "../evals/eval-helpers";
+import { runLia } from "../evals/eval-helpers";
 import { fakeGatewayFinalText } from "./fake-gateway";
 
 const TIMEOUT = 30_000;
@@ -23,7 +23,7 @@ describe("host-managed authentication", () => {
   let gatewayUnauthorizedResponses = 0;
 
   beforeAll(() => {
-    root = mkdtempSync(join(tmpdir(), "fx-host-managed-auth-"));
+    root = mkdtempSync(join(tmpdir(), "lia-host-managed-auth-"));
     home = join(root, "home");
     workspace = join(root, "workspace");
     mkdirSync(home, { recursive: true });
@@ -66,33 +66,33 @@ describe("host-managed authentication", () => {
       HOME: home,
       AI_GATEWAY_API_KEY: undefined,
       VERCEL_OIDC_TOKEN: undefined,
-      FX_AUTH_MODE: "host-managed",
-      FX_AUTO_UPGRADE: "0",
-      FX_DISABLE_KEYCHAIN: "1",
-      FX_TEST_SKIP_ONBOARDING: "1",
-      FX_SOUND: "0",
-      FX_TEST_GATEWAY_MODELS_URL: `${baseUrl}/gateway/models`,
-      FX_TEST_GATEWAY_CHAT_URL: `${baseUrl}/gateway/responses`,
+      LIA_AUTH_MODE: "host-managed",
+      LIA_AUTO_UPGRADE: "0",
+      LIA_DISABLE_KEYCHAIN: "1",
+      LIA_TEST_SKIP_ONBOARDING: "1",
+      LIA_SOUND: "0",
+      LIA_TEST_GATEWAY_MODELS_URL: `${baseUrl}/gateway/models`,
+      LIA_TEST_GATEWAY_CHAT_URL: `${baseUrl}/gateway/responses`,
     };
   }
 
   test("runs Gateway without local authentication headers", async () => {
     const childEnv = env();
-    const status = await runFx(["status", "--json"], { cwd: workspace, env: childEnv });
+    const status = await runLia(["status", "--json"], { cwd: workspace, env: childEnv });
     expect(status.code).toBe(0);
     expect(status.stderr).toBe("");
     expect(JSON.parse(status.stdout).auth).toBe("host managed");
 
     for (const command of [["login"], ["login", "--api-key"], ["logout"], ["setup"], ["teams"]]) {
-      const result = await runFx(command, { cwd: workspace, env: childEnv });
+      const result = await runLia(command, { cwd: workspace, env: childEnv });
       expect(result.code).toBe(0);
-      // `fx setup` is deprecated and says so even when the host manages authentication.
-      expect(result.stderr).toBe(command[0] === "setup" ? "fx setup is deprecated and stops working in fx 0.0.18; use fx login vercel --api-key\n" : "");
+      // `lia setup` is deprecated and says so even when the host manages authentication.
+      expect(result.stderr).toBe(command[0] === "setup" ? "lia setup is deprecated and stops working in lia 0.0.18; use lia login vercel --api-key\n" : "");
       expect(result.stdout).toBe("Authentication is managed by the host.\n");
     }
-    expect(existsSync(join(home, ".fx", "auth.json"))).toBe(false);
+    expect(existsSync(join(home, ".lia", "auth.json"))).toBe(false);
 
-    const selected = await runFx(["provider", "gateway"], {
+    const selected = await runLia(["provider", "gateway"], {
       cwd: workspace,
       env: childEnv,
       timeoutMs: TIMEOUT,
@@ -100,7 +100,7 @@ describe("host-managed authentication", () => {
     expect(selected.code).toBe(0);
     expect(selected.stderr).toBe("");
 
-    const models = await runFx(["models", "--json"], {
+    const models = await runLia(["models", "--json"], {
       cwd: workspace,
       env: childEnv,
       timeoutMs: TIMEOUT,
@@ -108,7 +108,7 @@ describe("host-managed authentication", () => {
     expect(models.code).toBe(0);
     expect(models.stderr).toBe("");
 
-    const asked = await runFx(["ask", "--json", "--no-save", "Reply once."], {
+    const asked = await runLia(["ask", "--json", "--no-save", "Reply once."], {
       cwd: workspace,
       env: childEnv,
       timeoutMs: TIMEOUT,
@@ -122,24 +122,24 @@ describe("host-managed authentication", () => {
       expect(request.headers.get("authorization"), request.path).toBeNull();
       expect(request.headers.get("x-vercel-ai-gateway-team"), request.path).toBeNull();
     }
-    expect(existsSync(join(home, ".fx", "auth.json"))).toBe(false);
+    expect(existsSync(join(home, ".lia", "auth.json"))).toBe(false);
   }, TIMEOUT);
 
   test("rejects malformed auth mode before provider I/O", async () => {
     const before = requests.length;
-    const result = await runFx(["ask", "--json", "--no-save", "Do nothing."], {
+    const result = await runLia(["ask", "--json", "--no-save", "Do nothing."], {
       cwd: workspace,
-      env: { ...env(), FX_AUTH_MODE: "host_managed" },
+      env: { ...env(), LIA_AUTH_MODE: "host_managed" },
       timeoutMs: TIMEOUT,
     });
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("FX_AUTH_MODE must be local or host-managed");
+    expect(result.stderr).toContain("LIA_AUTH_MODE must be local or host-managed");
     expect(requests.length).toBe(before);
   }, TIMEOUT);
 
   test("final provider 401 does not enter local refresh or replay", async () => {
     const childEnv = env();
-    const selected = await runFx(["provider", "gateway"], {
+    const selected = await runLia(["provider", "gateway"], {
       cwd: workspace,
       env: childEnv,
       timeoutMs: TIMEOUT,
@@ -148,7 +148,7 @@ describe("host-managed authentication", () => {
 
     const before = requests.filter((request) => request.path === "/gateway/responses").length;
     gatewayUnauthorizedResponses = 1;
-    const asked = await runFx(["ask", "--json", "--no-save", "Reply once."], {
+    const asked = await runLia(["ask", "--json", "--no-save", "Reply once."], {
       cwd: workspace,
       env: childEnv,
       timeoutMs: TIMEOUT,
@@ -157,6 +157,6 @@ describe("host-managed authentication", () => {
     expect(asked.code).toBe(1);
     const after = requests.filter((request) => request.path === "/gateway/responses").length;
     expect(after - before).toBe(1);
-    expect(existsSync(join(home, ".fx", "auth.json"))).toBe(false);
+    expect(existsSync(join(home, ".lia", "auth.json"))).toBe(false);
   }, TIMEOUT);
 });

@@ -337,7 +337,7 @@ fn requestHeaderValue(headers: []const u8, name: []const u8) ?[]const u8 {
     return null;
 }
 
-/// The fx logo's shapes on a 180 by 180 canvas.
+/// The lia logo's shapes on a 180 by 180 canvas.
 const logo_shapes = "<rect width=\"180\" height=\"180\" rx=\"37\" fill=\"#000\"/>" ++
     "<g transform=\"translate(34 33.95) scale(0.7186) translate(-166.241 0)\"><path fill=\"#fff\" d=\"" ++
     "M237.892 0C243.178 0 249.383 1.419 253.025 3.074L255.093 4.014L250.076 18.63L247.677 17.746" ++
@@ -352,9 +352,9 @@ const logo_shapes = "<rect width=\"180\" height=\"180\" rx=\"37\" fill=\"#000\"/
     "C223.737 1.612 230.127 0 237.892 0ZM273.987 99.084L260.073 120.25H234.541L261.003 82.022L273.987 99.084Z" ++
     "\"/></g>";
 
-/// The fx logo, inline so the page needs no image request under its CSP.
+/// The lia logo, inline so the page needs no image request under its CSP.
 const callback_logo = "<svg class=\"brand\" width=\"64\" height=\"64\" viewBox=\"0 0 180 180\" fill=\"none\" " ++
-    "xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"fx\">" ++ logo_shapes ++ "</svg>";
+    "xmlns=\"http://www.w3.org/2000/svg\" role=\"img\" aria-label=\"lia\">" ++ logo_shapes ++ "</svg>";
 
 /// The same logo as the tab icon, a data URL because the callback server
 /// serves nothing else and the CSP allows only `data:` images.
@@ -373,7 +373,7 @@ fn callbackPage(comptime title: []const u8, comptime detail: []const u8) []const
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" ++
         "<meta name=\"theme-color\" content=\"#000000\">" ++
         "<link rel=\"icon\" href=\"" ++ callback_icon ++ "\">" ++
-        "<title>fx</title><style>" ++
+        "<title>lia</title><style>" ++
         ":root{color-scheme:dark;font-family:\"Geist Mono\",ui-monospace,SFMono-Regular,Menlo,monospace;" ++
         "font-size:15px;line-height:1.75}" ++
         "*{box-sizing:border-box}" ++
@@ -398,14 +398,14 @@ pub fn writeResponse(stream: std.Io.net.Stream, outcome: Response, cors_origin: 
             .status = "200 OK",
             .body = comptime callbackPage(
                 "Authorization complete",
-                "You can close this tab and return to fx.",
+                "You can close this tab and return to lia.",
             ),
         },
         .failed => .{
             .status = "400 Bad Request",
             .body = comptime callbackPage(
                 "Authorization failed",
-                "Return to fx for details.",
+                "Return to lia for details.",
             ),
         },
         .unrelated => .{
@@ -469,7 +469,7 @@ fn setSocketTimeouts(socket: std.posix.socket_t) void {
     }
 }
 
-test "callback tab icon decodes to the fx logo" {
+test "callback tab icon decodes to the lia logo" {
     const prefix = "data:image/svg+xml;base64,";
     try std.testing.expect(std.mem.startsWith(u8, callback_icon, prefix));
     const encoded = callback_icon[prefix.len..];

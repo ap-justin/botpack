@@ -1,8 +1,8 @@
 ------------------------------ MODULE Wiring ------------------------------
 (***************************************************************************)
-(* Step: fx wiring, through the adapter.                                   *)
+(* Step: lia wiring, through the adapter.                                   *)
 (*                                                                         *)
-(* One fx process at a time, with one session store (D65). The host has   *)
+(* One lia process at a time, with one session store (D65). The host has   *)
 (* one session slot: it opens a session through the adapter, runs turns,  *)
 (* may switch to another session, and closes it at exit. To switch it may *)
 (* open the next session before closing the current one (D41), which      *)
@@ -16,14 +16,14 @@
 (* Subagents.tla, WriterLock.tla); here a reopen simply ends a turn a      *)
 (* crash left open as interrupted (D1).                                    *)
 (*                                                                         *)
-(* Design: system-design.md "fx mapping" and D20 to D27.                   *)
+(* Design: system-design.md "lia mapping" and D20 to D27.                   *)
 (***************************************************************************)
 CONSTANT Sessions
 
 Ends == {"none", "commit", "interrupt"}
 
 VARIABLES
-    up,          \* the fx process is running
+    up,          \* the lia process is running
     cur,         \* the session open in the host slot, or "none"
     turnOpen,    \* [Sessions -> BOOLEAN]: the log has an open turn
     lastEnd,     \* [Sessions -> Ends]: how the newest ended turn ended
@@ -62,7 +62,7 @@ Init ==
 
 Active == up /\ cur # "none"
 
-\* fx starts.
+\* lia starts.
 Start ==
     /\ ~up
     /\ up' = TRUE

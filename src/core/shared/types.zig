@@ -108,6 +108,7 @@ test "context notice body drops legacy markers from every line" {
 pub const CredentialSource = enum {
     vercel_oidc_token,
     ai_gateway_api_key,
+    /// Stored data: saved settings and checkpoints depend on the fx name.
     fx_login,
     stored_key,
     host_managed,
@@ -301,7 +302,7 @@ pub const StreamState = struct {
     /// When the turn started; 0 hides the elapsed counter and activity blink.
     /// Monotonic for the whole turn: phase and tool boundaries never reset it.
     turn_started_ms: i64 = 0,
-    /// When fx started waiting on user input (approval or question); 0 means
+    /// When lia started waiting on user input (approval or question); 0 means
     /// not waiting. While set, the turn clock freezes at this instant;
     /// on resume the wait is excluded by shifting turn_started_ms forward.
     waiting_since_ms: i64 = 0,
@@ -348,7 +349,7 @@ pub const ModelRecoveryAction = enum {
     regenerating_tool,
     continuing_after_tool,
     reconciling_tool,
-    // Checkpoints saved by older versions may name the next three; fx no
+    // Checkpoints saved by older versions may name the next three; lia no
     // longer writes them, but they still parse.
     waiting_for_connectivity,
     checking_liveness,
@@ -405,7 +406,7 @@ pub const ModelFailureDiagnostic = struct {
     }
 };
 
-/// Plain words for an error name fx shows people: the phrase for a name it
+/// Plain words for an error name lia shows people: the phrase for a name it
 /// knows, else the name split into lowercase words, so `InvalidModelReply`
 /// reads "invalid model reply". Text that is not an error name, such as a
 /// provider's own message, passes through unchanged. Raw names stay in trace
@@ -436,13 +437,13 @@ pub fn plainErrorText(raw: []const u8, buf: []u8) []const u8 {
         .{ "MalformedChatCompletionsChunk", "unreadable reply" },
         .{ "InvalidProviderFinishReason", "unreadable reply" },
         .{ "GatewaySseEventTooLarge", "reply too large to read" },
-        // Storage faults read as fx says them on startup and in ACP.
+        // Storage faults read as lia says them on startup and in ACP.
         .{ "AccessDenied", "permission denied" },
         .{ "ReadOnlyFileSystem", "the disk is read-only" },
         .{ "NoSpaceLeft", "the disk is full" },
         .{ "FileTooBig", "a file-size limit was reached" },
         .{ "InputOutput", "a disk read or write failed" },
-        // A write to fx's own stdout or stderr, which a command reports in
+        // A write to lia's own stdout or stderr, which a command reports in
         // place of `WriteFailed` (`cli_surface.runIfRequested`).
         .{ "OutputWriteFailed", "couldn't write the output" },
     };
@@ -493,11 +494,11 @@ pub const RouteRecoveryStatus = struct {
         /// result show it; the TUI clears its status line.
         recovered,
         /// The request ended on an error after the module showed a status,
-        /// with no terminal status of fx's own. It carries only the last
+        /// with no terminal status of lia's own. It carries only the last
         /// attempt; the error reaches the host its usual way. Hosts that
         /// report a result show it; the TUI clears its status line.
         failed,
-        // Terminal outcomes fx reports itself.
+        // Terminal outcomes lia reports itself.
         terminal_provider_error,
         unsafe_assistant_output,
         unsafe_tool_start,
@@ -505,7 +506,7 @@ pub const RouteRecoveryStatus = struct {
     };
 
     kind: Kind,
-    /// Set with `need_user`: the prompt the module asks fx to show.
+    /// Set with `need_user`: the prompt the module asks lia to show.
     need: ?recovery.Status.Need = null,
     /// The module's wording, shared by every host. Empty for `recovered` and
     /// for terminal outcomes.
@@ -534,7 +535,7 @@ pub const RouteRecoveryStatus = struct {
         };
     }
 
-    /// A status the recovery module produced, as opposed to one fx composed.
+    /// A status the recovery module produced, as opposed to one lia composed.
     pub fn fromModule(self: RouteRecoveryStatus) bool {
         return switch (self.kind) {
             .waiting, .retrying, .need_user => true,
@@ -548,8 +549,8 @@ pub const RouteRecoveryStatus = struct {
         };
     }
 
-    /// What `fx ask --json` reports as `recovery` and ACP as
-    /// `_meta.fx.modelResponseRecovery`. Every key is one word, so both
+    /// What `lia ask --json` reports as `recovery` and ACP as
+    /// `_meta.lia.modelResponseRecovery`. Every key is one word, so both
     /// spell them the same way, and `need` keeps the module's snake_case
     /// tags.
     pub const Report = struct {
@@ -587,15 +588,15 @@ pub const RouteRecoveryStatus = struct {
         };
     }
 
-    /// The `state` that `fx ask --json` and ACP report, written as its tag.
+    /// The `state` that `lia ask --json` and ACP report, written as its tag.
     pub const ReportedState = enum {
         waiting,
         retrying,
         need_user,
         recovered,
-        /// fx's terminal outcomes.
+        /// lia's terminal outcomes.
         failed,
-        /// A request an earlier fx process was running when it stopped, as
+        /// A request an earlier lia process was running when it stopped, as
         /// its saved recovery checkpoint reports it. No live status maps
         /// here: ACP reports it on session load.
         interrupted,
@@ -632,7 +633,7 @@ pub const RouteRecoveryStatus = struct {
         };
     }
 
-    /// The module's `text` when set; otherwise fx's own wording for a
+    /// The module's `text` when set; otherwise lia's own wording for a
     /// terminal outcome. The result lives in `buf`.
     pub fn label(self: RouteRecoveryStatus, buf: []u8) []const u8 {
         if (self.text.len > 0) {
@@ -771,7 +772,7 @@ test "route recovery terminal label names the cause, diagnostic, and attempts" {
     );
 }
 
-test "recovery reports write the shape fx ask and ACP share" {
+test "recovery reports write the shape lia ask and ACP share" {
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
     var label_buf: [RouteRecoveryStatus.label_max_bytes]u8 = undefined;
@@ -806,11 +807,11 @@ test "recovery reports write the shape fx ask and ACP share" {
 test "model failure diagnostics read as plain words" {
     var buf: [ModelFailureDiagnostic.max_bytes]u8 = undefined;
     const cases = [_]struct { raw: []const u8, plain: []const u8 }{
-        // A name fx knows has its own phrase.
+        // A name lia knows has its own phrase.
         .{ .raw = "ReadFailed", .plain = "connection dropped" },
         .{ .raw = "TlsInitializationFailed", .plain = "couldn't make a secure connection" },
         .{ .raw = "NoSpaceLeft", .plain = "the disk is full" },
-        // A failed write reads as a dropped connection unless fx knows the
+        // A failed write reads as a dropped connection unless lia knows the
         // write was to its own output.
         .{ .raw = "WriteFailed", .plain = "connection dropped" },
         .{ .raw = "OutputWriteFailed", .plain = "couldn't write the output" },
@@ -858,6 +859,7 @@ pub const FinalToolIdentity = enum {
 };
 
 pub const ToolExecutionProvenance = enum {
+    /// Stored data: saved sessions and the libfx hook payload depend on the fx name.
     fx_local,
     provider_executed,
 };
@@ -907,7 +909,7 @@ pub const ToolArgumentIntegrity = enum {
 };
 
 /// Explains why raw function arguments were `malformed_json`, captured before
-/// fx replaces them with `{}`. It carries positions only: rejected argument
+/// lia replaces them with `{}`. It carries positions only: rejected argument
 /// bytes never leave the parse step.
 pub const ToolArgumentDiagnostic = struct {
     pub const Failure = enum {
@@ -978,7 +980,7 @@ pub const ToolCall = struct {
     name: []const u8,
     arguments_json: []const u8,
     argument_integrity: ToolArgumentIntegrity = .valid,
-    /// Set when fx rejected the raw arguments as `malformed_json`. Copies keep
+    /// Set when lia rejected the raw arguments as `malformed_json`. Copies keep
     /// it; durable and provider encodings omit it.
     argument_diagnostic: ?ToolArgumentDiagnostic = null,
     provisional_id: ?[]const u8 = null,
@@ -1118,7 +1120,7 @@ pub const CommittedFilePresentation = struct {
 
     /// Writes every field as `std.json` would, except `review_lines` when it
     /// is null, so a presentation without rows encodes as it did before they
-    /// existed and older fx versions, which reject unknown fields, still read it.
+    /// existed and older lia versions, which reject unknown fields, still read it.
     pub fn jsonStringify(self: CommittedFilePresentation, writer: anytype) !void {
         try writer.beginObject();
         inline for (@typeInfo(CommittedFilePresentation).@"struct".field_names) |field_name| {
@@ -1236,7 +1238,7 @@ pub const TerminalFailurePresentation = enum {
             .session_not_found => "terminal session not found",
             .invalid_lifecycle => "terminal session is in an invalid lifecycle state",
             .authority_denied => "terminal authority denied",
-            .authority_retired => "saved terminal authority is from an older fx version; start a new terminal",
+            .authority_retired => "saved terminal authority is from an older lia version; start a new terminal",
             .lease_conflict => "terminal control lease conflict",
             .cursor_gap => "terminal output cursor gap",
             .screen_unavailable => "terminal screen is unavailable",
@@ -1345,14 +1347,14 @@ pub const PersistedSteering = struct {
 };
 
 /// An instruction file a context note delivered: its absolute path and a
-/// stamp of the file's metadata when fx delivered it. A stamp is never 0; 0
-/// means fx could not read it, so the stamp matches no file (D93).
+/// stamp of the file's metadata when lia delivered it. A stamp is never 0; 0
+/// means lia could not read it, so the stamp matches no file (D93).
 pub const ContextNoteSource = struct {
     path: []const u8,
     stamp: u64,
 };
 
-/// A system note fx added to the turn after its latest message, saved at the
+/// A system note lia added to the turn after its latest message, saved at the
 /// tool step boundary where the turn took it (D93). Owns `text`, `sources`,
 /// and each source path, so a later turn can count an unchanged file as
 /// delivered without reading the text.
@@ -1363,8 +1365,8 @@ pub const PersistedContextNote = struct {
 };
 
 /// What a model call was for: the turn's own request, or a compaction the
-/// turn ran. A record with a purpose this fx doesn't know is left out when
-/// read, as one written by a newer fx can be.
+/// turn ran. A record with a purpose this lia doesn't know is left out when
+/// read, as one written by a newer lia can be.
 pub const ModelCallPurpose = enum { turn, compaction };
 
 /// How a model call ended.
@@ -1705,7 +1707,7 @@ pub const ImageAttachment = struct {
     /// which the model's note names so its tools can open the image. An
     /// image saved as a blob keeps only this handle: readers load its bytes
     /// from the blob when they need them, checked against its digest. The
-    /// session store owns the file: fx never writes or deletes through this
+    /// session store owns the file: lia never writes or deletes through this
     /// path.
     blob_path: ?[]u8 = null,
 
@@ -1720,7 +1722,7 @@ pub const ImageAttachment = struct {
 /// Who wrote a message an agent receives. A model frames each message by its
 /// author, and only the user's words carry the user's authority.
 pub const MessageAuthor = enum {
-    /// The person at fx: typed on the agent's screen, or sent by an ACP client.
+    /// The person at lia: typed on the agent's screen, or sent by an ACP client.
     user,
     /// The agent that started this one, as its subagent.
     parent,
@@ -1789,7 +1791,7 @@ pub const ChatMessage = struct {
     permission_feedback: bool = false,
     /// Checkpoint steering text has already had its envelope removed.
     restored_steering: bool = false,
-    /// A `.system` message fx added after the conversation started, which
+    /// A `.system` message lia added after the conversation started, which
     /// only the messages lane carries (D93). Plain text content only.
     context_note: bool = false,
     /// The instruction files a context note delivers. Borrowed; never sent
@@ -1967,7 +1969,7 @@ pub const ProviderFailureCause = enum {
     non_retryable,
     rate_limited,
     /// A provider error whose error event gave neither a code nor a usable
-    /// HTTP status, so fx cannot tell whether a resend can succeed.
+    /// HTTP status, so lia cannot tell whether a resend can succeed.
     uncoded_error,
     /// A stream that finished with an error that no error event explained.
     unexplained_error_finish,
@@ -2461,7 +2463,7 @@ pub const AssistantHistoryTurn = struct {
 /// What a turn write does with the recovery module's record for the model
 /// request in flight (`src/core/recovery/recovery.zig` `Record`): leave it,
 /// save these bytes, or clear it because the request's response is complete.
-/// A model request a previous fx process left unfinished, which a turn
+/// A model request a previous lia process left unfinished, which a turn
 /// resumes: the record its turn saved last, if any, and whether it was
 /// interrupted more than a day ago.
 pub const RecoveryResume = struct {
@@ -2494,7 +2496,7 @@ pub const InterruptedHistoryTurn = struct {
     cancelled_command: ?CancelledCommandPresentation = null,
     terminal_reason: InterruptedTerminalReason = .cancelled,
     cancellation_origin: CancellationOrigin = .turn,
-    /// fx stopped before the turn ended, by a crash or a closed window,
+    /// lia stopped before the turn ended, by a crash or a closed window,
     /// rather than the turn failing or being cancelled. Only a session's
     /// replay sets it, and nothing saves it.
     stopped_by_exit: bool = false,
@@ -2588,7 +2590,7 @@ pub const PermissionMode = enum {
         return null;
     }
 
-    /// The name fx saves and prints: `ask`, `auto`, or `full-access`.
+    /// The name lia saves and prints: `ask`, `auto`, or `full-access`.
     /// `parse` still reads the older `yolo`.
     pub fn label(self: PermissionMode) []const u8 {
         return switch (self) {
@@ -3520,7 +3522,7 @@ pub fn freeToolCall(alloc: std.mem.Allocator, call: ToolCall) void {
     if (call.provider_result) |provider_result| alloc.free(provider_result);
 }
 
-test "dupeHistoryTurn keeps a turn fx stopped as stopped" {
+test "dupeHistoryTurn keeps a turn lia stopped as stopped" {
     const alloc = std.testing.allocator;
     const source: HistoryTurn = .{ .interrupted = .{
         .user = .{ .text = @constCast("go") },
@@ -3548,7 +3550,7 @@ test "dupeToolCall preserves argument integrity" {
 }
 
 test "dupeToolCall drops action scoped bindings" {
-    const skill: skill_contract.PreparedSkill = .{ .skill = .{ .name = "workflow", .description = "", .path = "/skills/workflow", .source = .global_fx } };
+    const skill: skill_contract.PreparedSkill = .{ .skill = .{ .name = "workflow", .description = "", .path = "/skills/workflow", .source = .global_lia } };
     const source: ToolCall = .{
         .id = "skill",
         .name = "skill",
@@ -3992,7 +3994,7 @@ test "HistoryTurn helpers duplicate and free owned turns" {
                 .handle = try alloc.dupe(u8, "fx-command-replay.bin"),
                 .framed_bytes = 42,
             } },
-            .command_artifact_handle = try alloc.dupe(u8, "fx-command.log"),
+            .command_artifact_handle = try alloc.dupe(u8, "lia-command.log"),
         },
         .terminal_reason = .failed,
     } };

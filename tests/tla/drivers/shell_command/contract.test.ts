@@ -1,5 +1,5 @@
-// Runs the real fx binary through every shell call the shell-contract TLA+
-// model covers, then has TLC replay what fx did through the model
+// Runs the real lia binary through every shell call the shell-contract TLA+
+// model covers, then has TLC replay what lia did through the model
 // (tests/tla/shell_command/ShellContract.tla). No model calls: a local fake Gateway serves
 // exact argument bytes.
 //
@@ -7,8 +7,8 @@
 //    proposed one, and the design properties on the observed trace must match the
 //    exhaustive model check of that design.
 // 2. Controls: tampered, partial and empty evidence must not be accepted.
-// 3. With FX_TLA_PROPOSED=1: the binary must conform to the proposed design
-//    with every property holding. This fails until fx implements it.
+// 3. With LIA_TLA_PROPOSED=1: the binary must conform to the proposed design
+//    with every property holding. This fails until lia implements it.
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
@@ -62,7 +62,7 @@ async function acceptedDesign(): Promise<Design> {
   return accepted[0]!.design;
 }
 
-test("real fx conforms to one modeled design", async () => {
+test("real lia conforms to one modeled design", async () => {
   const design = await acceptedDesign();
   const result = await verdict(design);
   const turns = await observations();
@@ -99,7 +99,7 @@ test("bridge rejects tampered, partial and empty evidence", async () => {
   assert.equal(empty.verdict, "INCONCLUSIVE", explain(empty));
 }, TIMEOUT);
 
-test.skipIf(process.env.FX_TLA_PROPOSED !== "1")("real fx meets the proposed design", async () => {
+test.skipIf(process.env.LIA_TLA_PROPOSED !== "1")("real lia meets the proposed design", async () => {
   const result = await verdict("proposed");
   assert.equal(result.verdict, "ACCEPTED", explain(result));
   for (const property of RUNTIME_PROPERTIES) {

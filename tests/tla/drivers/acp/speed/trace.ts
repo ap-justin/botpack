@@ -76,12 +76,12 @@ export class Acp {
   private async readLine(): Promise<any> {
     const buffered = this.lines.shift();
     if (buffered) return JSON.parse(buffered);
-    if (this.closed) throw new Error(`fx acp exited: ${this.stderr}`);
+    if (this.closed) throw new Error(`lia acp exited: ${this.stderr}`);
     const line = await new Promise<string>((resolveLine, reject) => {
-      const timer = setTimeout(() => reject(new Error(`fx acp read timeout: ${this.stderr}`)), 20_000);
+      const timer = setTimeout(() => reject(new Error(`lia acp read timeout: ${this.stderr}`)), 20_000);
       this.waiters.push((value) => { clearTimeout(timer); resolveLine(value); });
     });
-    if (!line) throw new Error(`fx acp exited: ${this.stderr}`);
+    if (!line) throw new Error(`lia acp exited: ${this.stderr}`);
     return JSON.parse(line);
   }
 
@@ -127,7 +127,7 @@ export function obsModule(observations: Observation[], catalog: TraceCatalog): s
   };
   return [
     "---------------------------- MODULE AcpSpeedObs ----------------------------",
-    "(* Generated from one observed fx acp run. *)",
+    "(* Generated from one observed lia acp run. *)",
     `TModels == ${tlaSet(catalog.models)}`,
     `TSupFast == ${tlaSet(catalog.supFast)}`,
     `TSupUltra == ${tlaSet(catalog.supUltra)}`,

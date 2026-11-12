@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runFx } from "../evals/eval-helpers";
+import { runLia } from "../evals/eval-helpers";
 import {
   FAKE_GATEWAY_MODEL,
   fakeGatewayFinalText,
@@ -25,15 +25,15 @@ const RETRY_REFRESH_TOKEN = "retry-refresh-token";
 const SELECTED_API_KEY = "selected-api-key";
 const ISSUER_A_ACCESS_TOKEN = "issuer-a-access-token";
 
-function writeFxLogin(
+function writeLiaLogin(
   home: string,
   issuer = "https://vercel.com",
   expiresAtMs = Date.now() - 60_000,
 ): void {
-  const fxDir = join(home, ".fx");
-  mkdirSync(fxDir, { recursive: true, mode: 0o700 });
-  chmodSync(fxDir, 0o700);
-  const authPath = join(fxDir, "auth.json");
+  const liaDir = join(home, ".lia");
+  mkdirSync(liaDir, { recursive: true, mode: 0o700 });
+  chmodSync(liaDir, 0o700);
+  const authPath = join(liaDir, "auth.json");
   writeFileSync(
     authPath,
     JSON.stringify({
@@ -127,24 +127,24 @@ async function waitForFileText(path: string, text: string): Promise<void> {
   throw new Error(`Timed out waiting for ${text} in ${path}`);
 }
 
-// Two fx whose login expired together: the second waits while the first is
+// Two lia whose login expired together: the second waits while the first is
 // still refreshing it, however slowly, and uses the login it saved.
 test(
-  "a second fx waits for another's slow login refresh and uses its login",
+  "a second lia waits for another's slow login refresh and uses its login",
   async () => {
-    const home = mkdtempSync(join(tmpdir(), "fx-auth-refresh-slow-holder-e2e-"));
+    const home = mkdtempSync(join(tmpdir(), "lia-auth-refresh-slow-holder-e2e-"));
     let markRefreshStarted = () => {};
     const refreshStarted = new Promise<void>((resolve) => {
       markRefreshStarted = resolve;
     });
     let tokenRequestCount = 0;
-    // Answered 5 s late: longer than fx used to wait for the lock.
+    // Answered 5 s late: longer than lia used to wait for the lock.
     const oauth = startFakeOAuth([ISSUER_A_ACCESS_TOKEN], "", async () => {
       tokenRequestCount += 1;
       markRefreshStarted();
       await Bun.sleep(5_000);
     });
-    writeFxLogin(home, oauth.issuerUrl);
+    writeLiaLogin(home, oauth.issuerUrl);
     const gateway = startFakeGateway([
       fakeGatewayFinalText("FIRST_ASK_DONE"),
       fakeGatewayFinalText("SECOND_ASK_DONE"),
@@ -153,18 +153,18 @@ test(
       HOME: home,
       AI_GATEWAY_API_KEY: undefined,
       VERCEL_OIDC_TOKEN: undefined,
-      FX_DISABLE_KEYCHAIN: "1",
-      FX_TEST_SKIP_ONBOARDING: "1",
-      FX_TEST_OAUTH_ISSUER_URL: oauth.issuerUrl,
-      FX_GATEWAY_BASE_URL: gateway.baseUrl,
-      FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-      FX_MODEL: FAKE_GATEWAY_MODEL,
+      LIA_DISABLE_KEYCHAIN: "1",
+      LIA_TEST_SKIP_ONBOARDING: "1",
+      LIA_TEST_OAUTH_ISSUER_URL: oauth.issuerUrl,
+      LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+      LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+      LIA_MODEL: FAKE_GATEWAY_MODEL,
     };
 
     try {
-      const first = runFx(["ask", "--json", "--no-save", "first"], { env, timeoutMs: TIMEOUT });
+      const first = runLia(["ask", "--json", "--no-save", "first"], { env, timeoutMs: TIMEOUT });
       await refreshStarted;
-      const second = runFx(["ask", "--json", "--no-save", "second"], { env, timeoutMs: TIMEOUT });
+      const second = runLia(["ask", "--json", "--no-save", "second"], { env, timeoutMs: TIMEOUT });
       const [firstResult, secondResult] = await Promise.all([first, second]);
       expect(firstResult.code, `stdout: ${firstResult.stdout}\nstderr: ${firstResult.stderr}`).toBe(0);
       expect(secondResult.code, `stdout: ${secondResult.stdout}\nstderr: ${secondResult.stderr}`).toBe(0);
@@ -185,8 +185,8 @@ test(
 test(
   "logout cannot be undone by an in-flight login refresh",
   async () => {
-    const home = mkdtempSync(join(tmpdir(), "fx-auth-refresh-logout-race-e2e-"));
-    const contentionPath = join(home, ".fx", "auth-lock-contention");
+    const home = mkdtempSync(join(tmpdir(), "lia-auth-refresh-logout-race-e2e-"));
+    const contentionPath = join(home, ".lia", "auth-lock-contention");
     let releaseRefresh = () => {};
     const refreshMayFinish = new Promise<void>((resolve) => {
       releaseRefresh = resolve;
@@ -205,7 +205,7 @@ test(
         await refreshMayFinish;
       },
     );
-    writeFxLogin(home, oauth.issuerUrl);
+    writeLiaLogin(home, oauth.issuerUrl);
     const gateway = startFakeGateway([
       fakeGatewayFinalText("REFRESH_COMPLETED_BEFORE_LOGOUT"),
     ]);
@@ -213,24 +213,24 @@ test(
       HOME: home,
       AI_GATEWAY_API_KEY: undefined,
       VERCEL_OIDC_TOKEN: undefined,
-      FX_DISABLE_KEYCHAIN: "1",
-      FX_TEST_SKIP_ONBOARDING: "1",
-      FX_TEST_OAUTH_ISSUER_URL: oauth.issuerUrl,
-      FX_GATEWAY_BASE_URL: gateway.baseUrl,
-      FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-      FX_MODEL: FAKE_GATEWAY_MODEL,
+      LIA_DISABLE_KEYCHAIN: "1",
+      LIA_TEST_SKIP_ONBOARDING: "1",
+      LIA_TEST_OAUTH_ISSUER_URL: oauth.issuerUrl,
+      LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+      LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+      LIA_MODEL: FAKE_GATEWAY_MODEL,
     };
 
     try {
-      const ask = runFx(
+      const ask = runLia(
         ["ask", "--json", "--no-save", "refresh while logout waits"],
         { env, timeoutMs: TIMEOUT },
       );
       await refreshStarted;
-      const logout = runFx(["logout"], {
+      const logout = runLia(["logout"], {
         env: {
           ...env,
-          FX_TEST_AUTH_LOCK_CONTENTION: "1",
+          LIA_TEST_AUTH_LOCK_CONTENTION: "1",
         },
         timeoutMs: TIMEOUT,
       });
@@ -251,9 +251,9 @@ test(
         logoutResult.code,
         `stdout: ${logoutResult.stdout}\nstderr: ${logoutResult.stderr}`,
       ).toBe(0);
-      expect(logoutResult.stdout).toBe("Signed out of fx.\n");
+      expect(logoutResult.stdout).toBe("Signed out of lia.\n");
       expect(tokenRequestCount).toBe(1);
-      expect(existsSync(join(home, ".fx", "auth.json"))).toBe(false);
+      expect(existsSync(join(home, ".lia", "auth.json"))).toBe(false);
       const revocations = oauth.requests.filter(
         (request) => request.path === "/oauth/revoke",
       );
@@ -273,16 +273,16 @@ test(
 );
 
 test(
-  "fx ask refreshes an expired login then forces one refresh and retry after 401",
+  "lia ask refreshes an expired login then forces one refresh and retry after 401",
   async () => {
-    const home = mkdtempSync(join(tmpdir(), "fx-auth-refresh-e2e-"));
+    const home = mkdtempSync(join(tmpdir(), "lia-auth-refresh-e2e-"));
     const oauth = startFakeOAuth(
       [EXPIRED_REFRESH_TOKEN, RETRY_REFRESH_TOKEN],
       "",
       undefined,
       ["first-rotated-refresh-token", "second-rotated-refresh-token"],
     );
-    writeFxLogin(home, oauth.issuerUrl);
+    writeLiaLogin(home, oauth.issuerUrl);
     const gateway = startFakeGateway([
       new Response(JSON.stringify({ error: { message: "expired" } }), {
         status: 401,
@@ -292,19 +292,19 @@ test(
     ]);
 
     try {
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--json", "--no-save", "exercise the refreshed login"],
         {
           env: {
             HOME: home,
             AI_GATEWAY_API_KEY: undefined,
             VERCEL_OIDC_TOKEN: undefined,
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_TEST_SKIP_ONBOARDING: "1",
-            FX_TEST_OAUTH_ISSUER_URL: oauth.issuerUrl,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
+            LIA_DISABLE_KEYCHAIN: "1",
+            LIA_TEST_SKIP_ONBOARDING: "1",
+            LIA_TEST_OAUTH_ISSUER_URL: oauth.issuerUrl,
+            LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+            LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+            LIA_MODEL: FAKE_GATEWAY_MODEL,
           },
           timeoutMs: TIMEOUT,
         },
@@ -336,7 +336,7 @@ test(
       expect(oauth.requests[3].body).toContain("refresh_token=first-rotated-refresh-token");
 
       const persisted = JSON.parse(
-        readFileSync(join(home, ".fx", "auth.json"), "utf8"),
+        readFileSync(join(home, ".lia", "auth.json"), "utf8"),
       );
       expect(persisted.access_token).toBe(RETRY_REFRESH_TOKEN);
       expect(persisted.refresh_token).toBe("second-rotated-refresh-token");
@@ -356,35 +356,35 @@ test(
 test(
   "status and doctor report an expired login instead of refreshing it",
   async () => {
-    const home = mkdtempSync(join(tmpdir(), "fx-auth-expired-report-e2e-"));
+    const home = mkdtempSync(join(tmpdir(), "lia-auth-expired-report-e2e-"));
     const oauth = startFakeOAuth([EXPIRED_REFRESH_TOKEN]);
-    writeFxLogin(home, oauth.issuerUrl);
-    const authPath = join(home, ".fx", "auth.json");
+    writeLiaLogin(home, oauth.issuerUrl);
+    const authPath = join(home, ".lia", "auth.json");
     const seededAuthFile = readFileSync(authPath, "utf8");
     const env = {
       HOME: home,
       AI_GATEWAY_API_KEY: undefined,
       VERCEL_OIDC_TOKEN: undefined,
-      FX_DISABLE_KEYCHAIN: "1",
-      FX_TEST_SKIP_ONBOARDING: "1",
-      FX_TEST_OAUTH_ISSUER_URL: oauth.issuerUrl,
+      LIA_DISABLE_KEYCHAIN: "1",
+      LIA_TEST_SKIP_ONBOARDING: "1",
+      LIA_TEST_OAUTH_ISSUER_URL: oauth.issuerUrl,
     };
 
     try {
-      const status = await runFx(["status", "--json"], { env, timeoutMs: TIMEOUT });
+      const status = await runLia(["status", "--json"], { env, timeoutMs: TIMEOUT });
       expect(
         status.code,
         `stdout: ${status.stdout}\nstderr: ${status.stderr}`,
       ).toBe(0);
       const statusJson = JSON.parse(status.stdout);
-      expect(statusJson.auth).toBe("fx login");
+      expect(statusJson.auth).toBe("lia login");
       expect(statusJson.auth_expired).toBe(true);
       expect(statusJson.auth_refreshable).toBe(true);
 
-      const doctor = await runFx(["doctor", "--json"], { env, timeoutMs: TIMEOUT });
+      const doctor = await runLia(["doctor", "--json"], { env, timeoutMs: TIMEOUT });
       expect(doctor.code).toBe(0);
       const doctorJson = JSON.parse(doctor.stdout);
-      expect(doctorJson.auth).toBe("fx login");
+      expect(doctorJson.auth).toBe("lia login");
       expect(doctorJson.auth_expired).toBe(true);
       const authCheck = doctorJson.checks.find(
         (check: { name: string }) => check.name === "auth",
@@ -406,12 +406,12 @@ test(
 );
 
 test(
-  "fx ask keeps a failed API key selected when login also exists",
+  "lia ask keeps a failed API key selected when login also exists",
   async () => {
-    const home = mkdtempSync(join(tmpdir(), "fx-auth-source-failure-e2e-"));
+    const home = mkdtempSync(join(tmpdir(), "lia-auth-source-failure-e2e-"));
     const tracePath = join(home, "trace.log");
     writeFileSync(tracePath, "");
-    writeFxLogin(home);
+    writeLiaLogin(home);
     const gateway = startFakeGateway([
       new Response(JSON.stringify({
         error: {
@@ -424,19 +424,19 @@ test(
     ]);
 
     try {
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--json", "--no-save", "keep the selected API key"],
         {
           env: {
             HOME: home,
             AI_GATEWAY_API_KEY: SELECTED_API_KEY,
             VERCEL_OIDC_TOKEN: undefined,
-            FX_DISABLE_KEYCHAIN: "1",
-            FX_TEST_SKIP_ONBOARDING: "1",
-            FX_TRACE_LOG: tracePath,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl,
-            FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_MODEL: FAKE_GATEWAY_MODEL,
+            LIA_DISABLE_KEYCHAIN: "1",
+            LIA_TEST_SKIP_ONBOARDING: "1",
+            LIA_TRACE_LOG: tracePath,
+            LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+            LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+            LIA_MODEL: FAKE_GATEWAY_MODEL,
           },
           timeoutMs: TIMEOUT,
         },
@@ -478,7 +478,7 @@ test(
 test(
   "saved API-key 401 keeps the rejected prompt as a new session, which resume last opens",
   async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-auth-empty-session-e2e-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-auth-empty-session-e2e-")));
     const home = join(root, "home");
     const workspace = join(root, "workspace");
     mkdirSync(home);
@@ -495,15 +495,15 @@ test(
       HOME: home,
       AI_GATEWAY_API_KEY: SELECTED_API_KEY,
       VERCEL_OIDC_TOKEN: undefined,
-      FX_DISABLE_KEYCHAIN: "1",
-      FX_TEST_SKIP_ONBOARDING: "1",
-      FX_GATEWAY_BASE_URL: gateway.baseUrl,
-      FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-      FX_MODEL: FAKE_GATEWAY_MODEL,
+      LIA_DISABLE_KEYCHAIN: "1",
+      LIA_TEST_SKIP_ONBOARDING: "1",
+      LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+      LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+      LIA_MODEL: FAKE_GATEWAY_MODEL,
     };
 
     try {
-      const seed = await runFx(
+      const seed = await runLia(
         ["ask", "--json", "--auto", "Persist the seed session."],
         { cwd: workspace, env, timeoutMs: TIMEOUT },
       );
@@ -518,13 +518,13 @@ test(
       const seedSessionId = seedJson.session_id as string;
       expect(savedSessionIds(home)).toEqual([seedSessionId]);
 
-      const rejected = await runFx(
+      const rejected = await runLia(
         ["ask", "--json", "--auto", "Reject this new saved session."],
         { cwd: workspace, env, timeoutMs: TIMEOUT },
       );
       expect(rejected.code).toBe(1);
       expect(rejected.stderr).toBe(
-        "fx ask: AI_GATEWAY_API_KEY authentication failed · HTTP 401\n",
+        "lia ask: AI_GATEWAY_API_KEY authentication failed · HTTP 401\n",
       );
       const rejectedJson = JSON.parse(rejected.stdout);
       expect(rejectedJson).toMatchObject({ exit_code: 1, steps: 0, tool_calls: [] });
@@ -536,7 +536,7 @@ test(
       expect(savedSessionIds(home).sort()).toEqual([seedSessionId, rejectedSessionId].sort());
       expect(gateway.requests).toHaveLength(2);
 
-      const sessionsResult = await runFx(
+      const sessionsResult = await runLia(
         ["sessions", "--json"],
         { cwd: workspace, env, timeoutMs: TIMEOUT },
       );
@@ -547,7 +547,7 @@ test(
       expect(sessions.sessions[1].history_len).toBe(1);
       expect(gateway.requests).toHaveLength(2);
 
-      const resumed = await runFx(
+      const resumed = await runLia(
         ["ask", "--json", "--auto", "--resume", "last", "Continue after the rejected request."],
         { cwd: workspace, env, timeoutMs: TIMEOUT },
       );
@@ -561,7 +561,7 @@ test(
       expect(resumedJson.output).toContain("RESUMED_SESSION_RESPONSE");
       expect(gateway.requests).toHaveLength(3);
 
-      const detail = await runFx(
+      const detail = await runLia(
         ["session", "--id", seedSessionId, "--json"],
         { cwd: workspace, env, timeoutMs: TIMEOUT },
       );
@@ -585,24 +585,24 @@ test(
 test(
   "OAuth sessions keep using their saved issuer when configuration changes",
   async () => {
-    const home = mkdtempSync(join(tmpdir(), "fx-auth-saved-issuer-e2e-"));
+    const home = mkdtempSync(join(tmpdir(), "lia-auth-saved-issuer-e2e-"));
     const issuerA = startFakeOAuth([ISSUER_A_ACCESS_TOKEN]);
     const issuerB = startFakeOAuth(["issuer-b-access-token"]);
     const gateway = startFakeGateway([]);
-    writeFxLogin(home, issuerA.issuerUrl);
+    writeLiaLogin(home, issuerA.issuerUrl);
 
     const env = {
       HOME: home,
       AI_GATEWAY_API_KEY: undefined,
       VERCEL_OIDC_TOKEN: undefined,
-      FX_DISABLE_KEYCHAIN: "1",
-      FX_TEST_OAUTH_ISSUER_URL: issuerB.issuerUrl,
-      FX_GATEWAY_BASE_URL: gateway.baseUrl,
-      FX_MODEL: FAKE_GATEWAY_MODEL,
+      LIA_DISABLE_KEYCHAIN: "1",
+      LIA_TEST_OAUTH_ISSUER_URL: issuerB.issuerUrl,
+      LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+      LIA_MODEL: FAKE_GATEWAY_MODEL,
     };
 
     try {
-      const teams = await runFx(["teams"], { env, timeoutMs: TIMEOUT });
+      const teams = await runLia(["teams"], { env, timeoutMs: TIMEOUT });
       expect(
         teams.code,
         `stdout: ${teams.stdout}\nstderr: ${teams.stderr}`,
@@ -613,7 +613,7 @@ test(
       expect(teams.stderr).toBe("");
 
       const persisted = JSON.parse(
-        readFileSync(join(home, ".fx", "auth.json"), "utf8"),
+        readFileSync(join(home, ".lia", "auth.json"), "utf8"),
       );
       expect(persisted).toMatchObject({
         issuer: issuerA.issuerUrl,
@@ -623,9 +623,9 @@ test(
         team_slug: "vercel-labs",
       });
 
-      const logout = await runFx(["logout"], { env, timeoutMs: TIMEOUT });
+      const logout = await runLia(["logout"], { env, timeoutMs: TIMEOUT });
       expect(logout.code).toBe(0);
-      expect(logout.stdout).toBe("Signed out of fx.\n");
+      expect(logout.stdout).toBe("Signed out of lia.\n");
       expect(logout.stderr).toBe("");
 
       expect(
@@ -675,27 +675,27 @@ test(
 test(
   "invalid saved OAuth issuers receive no access or refresh token",
   async () => {
-    const home = mkdtempSync(join(tmpdir(), "fx-auth-invalid-issuer-e2e-"));
+    const home = mkdtempSync(join(tmpdir(), "lia-auth-invalid-issuer-e2e-"));
     const invalidIssuer = startFakeOAuth([], "/tenant");
-    writeFxLogin(
+    writeLiaLogin(
       home,
       invalidIssuer.issuerUrl,
       Date.now() + 60 * 60 * 1000,
     );
 
     try {
-      const logout = await runFx(["logout"], {
+      const logout = await runLia(["logout"], {
         env: {
           HOME: home,
           AI_GATEWAY_API_KEY: undefined,
           VERCEL_OIDC_TOKEN: undefined,
-          FX_DISABLE_KEYCHAIN: "1",
+          LIA_DISABLE_KEYCHAIN: "1",
         },
         timeoutMs: TIMEOUT,
       });
 
       expect(logout.code).toBe(0);
-      expect(logout.stdout).toBe("Signed out of fx.\n");
+      expect(logout.stdout).toBe("Signed out of lia.\n");
       expect(logout.stderr).toBe("");
       expect(invalidIssuer.requests).toEqual([]);
       expect(logout.stdout).not.toContain("expired-access-token");

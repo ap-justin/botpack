@@ -590,7 +590,7 @@ export function startLegacyStreamableHttpFixture(
           ]);
         }
         // An event id first, so the stream could be resumed, then an answer
-        // over fx's 16 MiB message limit.
+        // over lia's 16 MiB message limit.
         if (mode === "oversized_resumable") {
           resumableCallId = message!.id;
           return sseResponse([
@@ -969,7 +969,7 @@ function toolCallResponse(id: number, text: string) {
   };
 }
 
-/** A tools/call answer over fx's 16 MiB message limit. */
+/** A tools/call answer over lia's 16 MiB message limit. */
 function oversizedCallResponse(id: number) {
   return toolCallResponse(id, "x".repeat(17 * 1024 * 1024));
 }

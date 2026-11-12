@@ -40,7 +40,7 @@ pub const CatalogView = union(enum) {
 
 /// Images reach the model inline exactly when the catalog lists `vision`.
 ///
-/// fx sends every image, user or tool, in an AI SDK `file` part with an
+/// lia sends every image, user or tool, in an AI SDK `file` part with an
 /// `image/*` media type, which is the AI Gateway's vision input. The
 /// catalog's `file-input` tag covers documents such as PDFs and says nothing
 /// about images, so it plays no part here.

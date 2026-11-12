@@ -1,14 +1,14 @@
-# Contributing to fx
+# Contributing to lia
 
-fx is open source and developed in public at [vercel-labs/fx](https://github.com/vercel-labs/fx). The fx team at Vercel maintains it and makes most changes, and pull requests from outside contributors are welcome and go through the same CI checks. Only maintainers can push branches to the repository, add labels, or start optional CI runs. Outside contributors work from a fork, and a maintainer handles those steps for them.
+lia is open source and developed in public at [ap-justin/lia](https://github.com/ap-justin/lia). The lia team maintains it and makes most changes, and pull requests from outside contributors are welcome and go through the same CI checks. Only maintainers can push branches to the repository, add labels, or start optional CI runs. Outside contributors work from a fork, and a maintainer handles those steps for them.
 
-Code conventions live in [AGENTS.md](AGENTS.md): which module owns which behavior, how fx uses Zig 0.17, how permissions and tests are structured, and the rules coding agents follow. Read it before you change code, whether you write the change yourself or with a coding agent.
+Code conventions live in [AGENTS.md](AGENTS.md): which module owns which behavior, how lia uses Zig 0.17, how permissions and tests are structured, and the rules coding agents follow. Read it before you change code, whether you write the change yourself or with a coding agent.
 
 ## Report a problem
 
-[Open an issue](https://github.com/vercel-labs/fx/issues/new/choose) with the bug report template. Describe what you did, what you expected, and what happened instead.
+[Open an issue](https://github.com/ap-justin/lia/issues/new/choose) with the bug report template. Describe what you did, what you expected, and what happened instead.
 
-Report security vulnerabilities through the [contact page](https://fx.sh/contact), not in a public issue.
+Report security vulnerabilities privately to the maintainers, not in a public issue.
 
 ## Set up a checkout
 
@@ -20,21 +20,21 @@ You need:
 
 The unit tests and most end-to-end tests don't call a model. To try a change that does, sign in as the [README](README.md#quick-start) describes or set `AI_GATEWAY_API_KEY`.
 
-Clone the repository, or your fork if you're an outside contributor, and build fx:
+Clone the repository, or your fork if you're an outside contributor, and build lia:
 
 ```bash
-git clone https://github.com/vercel-labs/fx.git
-cd fx
+git clone https://github.com/ap-justin/lia.git
+cd lia
 zig build
-./zig-out/bin/fx --version
+./zig-out/bin/lia --version
 ```
 
-Test your changes with `./zig-out/bin/fx` from your checkout. A bare `fx` runs whichever copy comes first on your `PATH`, which is usually an installed release that doesn't include your change.
+Test your changes with `./zig-out/bin/lia` from your checkout. A bare `lia` runs whichever copy comes first on your `PATH`, which is usually an installed release that doesn't include your change.
 
-fx keeps its settings and sessions in `~/.fx`, and on macOS it stores API keys and OAuth credentials in your Keychain. To try a change against an empty profile without touching your own, give fx a temporary home directory and turn off Keychain storage:
+lia keeps its settings and sessions in `~/.lia`, and on macOS it stores API keys and OAuth credentials in your Keychain. To try a change against an empty profile without touching your own, give lia a temporary home directory and turn off Keychain storage:
 
 ```bash
-HOME="$(mktemp -d)" FX_DISABLE_KEYCHAIN=1 ./zig-out/bin/fx status
+HOME="$(mktemp -d)" LIA_DISABLE_KEYCHAIN=1 ./zig-out/bin/lia status
 ```
 
 ## Make a change
@@ -47,27 +47,27 @@ These rules apply to every change:
 
 - `src/main.zig` only wires runtimes together. Feature logic and state belong to the module that owns them.
 - Sensitive tool behavior goes through the permission system in `src/core/permissions/permissions.zig`. Don't add a path around it.
-- fx has no dependencies outside the Zig standard library. Talk to the maintainers before you add one.
-- Don't commit generated state from `.fx/`, `.zig-cache/`, or `zig-out/`.
+- lia has no dependencies outside the Zig standard library. Talk to the maintainers before you add one.
+- Don't commit generated state from `.lia/`, `.zig-cache/`, or `zig-out/`.
 - Don't commit home-directory paths, real team IDs, or personal project slugs. `scripts/check-public-surface.sh` rejects them in CI, so use `/Users/example/` in fixtures.
 - Don't document behavior that doesn't exist yet.
 
-If a coding agent helps with your change, point it at AGENTS.md. Any prose the agent writes for your contribution, including pull request titles and descriptions, commit messages, documentation, and issues, must follow the `technical-writer` skill in `.fx/skills/technical-writer/`.
+If a coding agent helps with your change, point it at AGENTS.md. Any prose the agent writes for your contribution, including pull request titles and descriptions, commit messages, documentation, and issues, must follow the `technical-writer` skill in `.lia/skills/technical-writer/`.
 
 ### Add or change a command, flag, or setting
 
-Commands, flags, settings, environment variables, slash commands, and `--json` output are what people and scripts rely on, so fx gives them all one shape. Someone who knows git and the Unix command line should be able to guess what a control is called, where it goes, and which source wins when two disagree:
+Commands, flags, settings, environment variables, slash commands, and `--json` output are what people and scripts rely on, so lia gives them all one shape. Someone who knows git and the Unix command line should be able to guess what a control is called, where it goes, and which source wins when two disagree:
 
-- Each concept has one name, written in each surface's case: `permission_mode` in settings and JSON, `--permission-mode` as a flag, and `FX_PERMISSION_MODE` as an environment variable.
+- Each concept has one name, written in each surface's case: `permission_mode` in settings and JSON, `--permission-mode` as a flag, and `LIA_PERMISSION_MODE` as an environment variable.
 - A subcommand is an action, a flag changes one run and never saves, a setting persists, and an environment variable carries context from CI, a wrapper script, or a test.
 - Results go to stdout and diagnostics to stderr, `--json` fields are only added, and a usage error exits with 2.
 - A rename keeps the old spelling working with a warning that names its replacement and the release that drops it.
 
-The `fx-cli-shape` skill in `.fx/skills/fx-cli-shape/` has the full rules, the names that are already decided, and a script that lists the controls a diff adds or removes. Read it before you add, rename, or remove a control, and point your coding agent at it too. CI's `python3 -m scripts.check_cli_shape` fails when code reads an `FX_*` variable, compares a flag by hand, or parses a setting that its registries don't list. A new top-level command, a new stable environment variable, or a new project-safe setting needs a maintainer's approval in the pull request.
+The `lia-cli-shape` skill in `.lia/skills/lia-cli-shape/` has the full rules, the names that are already decided, and a script that lists the controls a diff adds or removes. Read it before you add, rename, or remove a control, and point your coding agent at it too. CI's `python3 -m scripts.check_cli_shape` fails when code reads an `LIA_*` variable, compares a flag by hand, or parses a setting that its registries don't list. A new top-level command, a new stable environment variable, or a new project-safe setting needs a maintainer's approval in the pull request.
 
 ## Test your change
 
-Run the tests that cover your change, build fx, and then use `./zig-out/bin/fx` to exercise the change yourself. Tests don't always start the full runtime, attach a terminal, or spawn background threads, so a passing suite can still miss a startup crash. Confirm that fx didn't abort, that stderr is clean, and that the behavior matches what you'll describe in the pull request.
+Run the tests that cover your change, build lia, and then use `./zig-out/bin/lia` to exercise the change yourself. Tests don't always start the full runtime, attach a terminal, or spawn background threads, so a passing suite can still miss a startup crash. Confirm that lia didn't abort, that stderr is clean, and that the behavior matches what you'll describe in the pull request.
 
 ```bash
 zig fmt src/
@@ -78,7 +78,7 @@ bun install
 bun test cli.test.ts
 ```
 
-Zig unit tests sit in `test` blocks inside the source file they cover, and `zig build test` runs all of them. CI checks formatting with `zig fmt --check src/`. The end-to-end tests run the binary at `zig-out/bin/fx`, so build before you run them. Run only the end-to-end files that cover your change, because CI runs the whole suite on every push.
+Zig unit tests sit in `test` blocks inside the source file they cover, and `zig build test` runs all of them. CI checks formatting with `zig fmt --check src/`. The end-to-end tests run the binary at `zig-out/bin/lia`, so build before you run them. Run only the end-to-end files that cover your change, because CI runs the whole suite on every push.
 
 ### Add an end-to-end test file
 
@@ -91,7 +91,7 @@ Every root `tests/e2e/*.test.ts` file needs an entry in the first three files be
 | `tests/e2e/ci-shard-weights.json` | A weight that balances the four CI shards |
 | `tests/e2e/macos-platform-tests.json` | Needed only when the file branches on `process.platform` or `platform()` being `darwin` or `linux` |
 
-The corpus drives the macOS arm64 PGSO build, which profiles fx on the training files, optimizes the code they exercise for speed, and compiles the functions they show to be cold for size. Classify a file as training when it covers common or performance-sensitive behavior. Use verification-only for correctness, recovery, security, or rare behavior that the build must pass without treating it as hot. Use an intentional exclusion only for coverage that is nondeterministic, needs the network or credentials, involves sound, or tests the harness itself, and record the reason. A test added to an existing file inherits that file's classification, and removing a file means removing its entries.
+The corpus drives the macOS arm64 PGSO build, which profiles lia on the training files, optimizes the code they exercise for speed, and compiles the functions they show to be cold for size. Classify a file as training when it covers common or performance-sensitive behavior. Use verification-only for correctness, recovery, security, or rare behavior that the build must pass without treating it as hot. Use an intentional exclusion only for coverage that is nondeterministic, needs the network or credentials, involves sound, or tests the harness itself, and record the reason. A test added to an existing file inherits that file's classification, and removing a file means removing its entries.
 
 ### Fuzz a parser
 
@@ -108,14 +108,14 @@ The Fuzz workflow fuzzes each target on `main` every night for about 20 minutes,
 
 A saved input holds the values the test reads from its `std.testing.Smith`, in order. For example, a test that calls `smith.slice` reads a 4-byte little-endian length and then that many bytes. Inputs that the fuzzer saves are already in this form. Inline seeds go through `@import("fuzz_seed").slices`, which writes each one in this form for a test whose first read is `smith.slice`. A seed written as a plain string would lose its first four bytes to the length.
 
-To add a target, write the fuzz test in the file it covers and add an entry to `tests/fuzz/targets.json`. For a target outside the session manager, also import its file in `src/fuzz_targets.zig`. Pass the seeds and saved inputs to the test with `.corpus = &(@import("fuzz_seed").slices(.{ <seeds> }) ++ @import("fuzz_corpus").<target>.*)`. The session manager imports nothing from fx, so its targets keep their seeds as files in `tests/fuzz/corpus/<target>/` and pass `.corpus = &(.{""} ++ @import("build_options").fuzz_corpus_<target>.*)`. Set `iterations` so that one round of `--fuzz` takes about 30 seconds on a developer machine. `scripts/tests/test_fuzz_nightly.py` fails when an entry names a test that doesn't exist or that `zig build fuzz` can't reach. The MCP engine in `src/mcp/` imports only the standard library, so its targets live in `src/core/mcp_host/wire_tests.zig`. A file that holds only tests, like that one, is also imported from the test block in `src/main.zig`.
+To add a target, write the fuzz test in the file it covers and add an entry to `tests/fuzz/targets.json`. For a target outside the session manager, also import its file in `src/fuzz_targets.zig`. Pass the seeds and saved inputs to the test with `.corpus = &(@import("fuzz_seed").slices(.{ <seeds> }) ++ @import("fuzz_corpus").<target>.*)`. The session manager imports nothing from lia, so its targets keep their seeds as files in `tests/fuzz/corpus/<target>/` and pass `.corpus = &(.{""} ++ @import("build_options").fuzz_corpus_<target>.*)`. Set `iterations` so that one round of `--fuzz` takes about 30 seconds on a developer machine. `scripts/tests/test_fuzz_nightly.py` fails when an entry names a test that doesn't exist or that `zig build fuzz` can't reach. The MCP engine in `src/mcp/` imports only the standard library, so its targets live in `src/core/mcp_host/wire_tests.zig`. A file that holds only tests, like that one, is also imported from the test block in `src/main.zig`.
 
 ### Find data races
 
-`-Dsanitize-thread=true` builds fx and its tests with ThreadSanitizer, which reports two threads touching the same memory without synchronization. The build is slow and large, so install it to its own prefix:
+`-Dsanitize-thread=true` builds lia and its tests with ThreadSanitizer, which reports two threads touching the same memory without synchronization. The build is slow and large, so install it to its own prefix:
 
 ```bash
-TSAN_OPTIONS=halt_on_error=0:abort_on_error=0 zig build test -Dsanitize-thread=true -p /tmp/fx-tsan
+TSAN_OPTIONS=halt_on_error=0:abort_on_error=0 zig build test -Dsanitize-thread=true -p /tmp/lia-tsan
 ```
 
 Without those options, the sanitizer aborts a test binary once it has reported a race, so that binary's later tests don't run. The Thread Sanitizer workflow runs the unit tests this way on `main` every night and lists each race in its job summary. It reports races without failing. A sanitized suite runs slower, so a few tests that depend on timing fail in it, such as the `command_runner` tests of output read after a command exits. Those failures aren't races.
@@ -132,7 +132,7 @@ The script builds a ReleaseSafe binary and needs hyperfine. On macOS, process an
 
 ### Check a TLA+ model
 
-`tests/tla/` holds TLA+ models of fx, such as the session manager, the MCP engine and host, ACP, usage refreshes, the shell tool, and the workspace indexer. Most come with Bun drivers that run the real binary and have TLC check what it did. CI runs the MCP models on `main` and on pull requests that change the code they cover; run the matching checker yourself when you change behavior that one of the others describes. You need Java and `tla2tools.jar`, and `tests/tla/README.md` lists every model and covers setup.
+`tests/tla/` holds TLA+ models of lia, such as the session manager, the MCP engine and host, ACP, usage refreshes, the shell tool, and the workspace indexer. Most come with Bun drivers that run the real binary and have TLC check what it did. CI runs the MCP models on `main` and on pull requests that change the code they cover; run the matching checker yourself when you change behavior that one of the others describes. You need Java and `tla2tools.jar`, and `tests/tla/README.md` lists every model and covers setup.
 
 ```bash
 tests/tla/session_manager/check.sh SessionLog
@@ -142,7 +142,7 @@ bun test ./tests/tla/drivers/shell_command/
 
 ### Run the model evals
 
-The evals in `tests/evals/` drive the agent through `fx ask --json` against real models and need `AI_GATEWAY_API_KEY`. They make billed model calls and their results vary between runs, so they aren't part of the pull request checks.
+The evals in `tests/evals/` drive the agent through `lia ask --json` against real models and need `AI_GATEWAY_API_KEY`. They make billed model calls and their results vary between runs, so they aren't part of the pull request checks.
 
 ```bash
 cd tests/evals
@@ -150,23 +150,23 @@ bun install
 bun test
 ```
 
-`prompt-cache-ab.test.ts` compares how two fx builds keep the provider's prompt cache through mid-session changes: a branch switch, a permission change, folder rules, a restart, and a named skill. A recording proxy keeps every request, and for each run it reports the requests that break the cached prefix, the new and cached input tokens, and whether the answers are right. It runs only when the variables name two builds and the models to try:
+`prompt-cache-ab.test.ts` compares how two lia builds keep the provider's prompt cache through mid-session changes: a branch switch, a permission change, folder rules, a restart, and a named skill. A recording proxy keeps every request, and for each run it reports the requests that break the cached prefix, the new and cached input tokens, and whether the answers are right. It runs only when the variables name two builds and the models to try:
 
 ```bash
 cd tests/evals
-FX_CACHE_AB_BASELINE_BIN=/abs/path/to/base/fx FX_CACHE_AB_CANDIDATE_BIN=/abs/path/to/zig-out/bin/fx \
-  FX_CACHE_AB_MODELS=anthropic/claude-haiku-5.5,openai/gpt-6.1-sol bun test prompt-cache-ab.test.ts
+LIA_CACHE_AB_BASELINE_BIN=/abs/path/to/base/lia LIA_CACHE_AB_CANDIDATE_BIN=/abs/path/to/zig-out/bin/lia \
+  LIA_CACHE_AB_MODELS=anthropic/claude-haiku-5.5,openai/gpt-6.1-sol bun test prompt-cache-ab.test.ts
 ```
 
-`FX_CACHE_AB_SCENARIOS` picks scenarios by name, and `FX_CACHE_AB_OUTPUT_DIR` keeps each run's requests and summary. One run per scenario varies, so compare several.
+`LIA_CACHE_AB_SCENARIOS` picks scenarios by name, and `LIA_CACHE_AB_OUTPUT_DIR` keeps each run's requests and summary. One run per scenario varies, so compare several.
 
 ## Open a pull request
 
 1. Sign every commit before you push it. `main` accepts only commits with verified signatures, and squash merging is turned off, so a single unsigned commit blocks the merge. GitHub explains how to set up [commit signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification) with an SSH or GPG key.
-2. Push your branch. Maintainers push to `vercel-labs/fx`. Outside contributors push to their fork and open the pull request against `main`.
+2. Push your branch. Maintainers push to `ap-justin/lia`. Outside contributors push to their fork and open the pull request against `main`.
 3. Open the pull request as a draft once your focused checks pass, so CI starts on it.
 4. Write the title as a plain imperative sentence, such as `Restore feedback report file clipboard`. Leave out bracketed prefixes like `[bug]`, because the type goes in a label.
-5. In the description, say what changes for users or callers, why it changes, and how you verified it, including what you ran with `./zig-out/bin/fx`.
+5. In the description, say what changes for users or callers, why it changes, and how you verified it, including what you ran with `./zig-out/bin/lia`.
 
 ### Choose a label
 
@@ -186,7 +186,7 @@ Only maintainers can add labels. Maintainers add the label when they open the pu
 
 ## CI checks
 
-CI runs on every push to a pull request, including drafts. Linux x86_64 gates every change, because most fx behavior is the same on every platform. A result counts only for the exact commit it ran on, so each new push needs a new passing run.
+CI runs on every push to a pull request, including drafts. Linux x86_64 gates every change, because most lia behavior is the same on every platform. A result counts only for the exact commit it ran on, so each new push needs a new passing run.
 
 These five checks must pass before a pull request merges:
 
@@ -246,7 +246,7 @@ Only maintainers can start these runs or add the `ci:macos` label. If you're an 
 Mark the pull request ready when all of these hold for its current commit:
 
 1. All five required checks passed. A queued, cancelled, skipped, or failed run doesn't count, and neither does a run on an earlier commit.
-2. You ran `./zig-out/bin/fx` through the changed behavior.
+2. You ran `./zig-out/bin/lia` through the changed behavior.
 3. The diff against `main` contains only the files this change needs.
 4. The documentation that describes the behavior is up to date.
 
@@ -259,25 +259,9 @@ Update the documentation in the same pull request as the behavior it describes:
 - The `--help` output comes from the command specs in `src/builtins/commands.zig`.
 - Update this file when build steps, development setup, or collaboration rules change.
 
-Change `README.md` only when one of its statements becomes false, or when a change adds a capability as broad as the ones in its feature list. A new option, command, or environment variable belongs in `--help` and the manual.
+Change `README.md` only when one of its statements becomes false, or when a change adds a capability as broad as the ones in its feature list. A new option, command, or environment variable belongs in `--help`.
 
 Don't edit `CHANGELOG.md` or the version in `src/main.zig`. Maintainers write the changelog when they prepare a release.
-
-### Changes to the manual
-
-The user manual at [fx.sh/docs](https://fx.sh/docs) is built from a private repository, so outside contributors can't edit it. When your change makes a manual page wrong or incomplete:
-
-- Maintainers update the page in a companion pull request and link it from theirs.
-- Outside contributors add a `## Docs` section to the pull request description with the exact change each affected page needs: the page URL, the section, and the text to add, replace, or remove. A maintainer makes the change in the manual.
-
-For example:
-
-```md
-## Docs
-
-- https://fx.sh/docs/configure-fx/permissions, "Change the mode": replace "<current text>" with "<new text>".
-- https://fx.sh/docs/using-fx/sessions: add "<new paragraph>" after the first paragraph.
-```
 
 ## Releases
 
@@ -289,4 +273,4 @@ After CI passes on `main`, the dev release workflow publishes binaries for that 
 
 ## License
 
-fx is licensed under [Apache-2.0](LICENSE). Unless you state otherwise, a contribution you submit for inclusion in fx is licensed under the same terms, as section 5 of the license describes.
+lia is licensed under [Apache-2.0](LICENSE). Unless you state otherwise, a contribution you submit for inclusion in lia is licensed under the same terms, as section 5 of the license describes.

@@ -1,5 +1,5 @@
 //! The URL and header rules for a configured HTTP MCP server, checked when
-//! fx reads the config.
+//! lia reads the config.
 
 const std = @import("std");
 const mcp_contract = @import("mcp_contract.zig");
@@ -40,7 +40,7 @@ pub fn validateEndpoint(url: []const u8) EndpointError!void {
 }
 
 /// An `oauth.resource`: an endpoint `validateEndpoint` takes, whose host and
-/// path fit fx's buffers.
+/// path fit lia's buffers.
 pub fn validateOAuthResource(url: []const u8) error{InvalidOAuthResource}!void {
     validateEndpoint(url) catch return error.InvalidOAuthResource;
     const uri = std.Uri.parse(url) catch return error.InvalidOAuthResource;
@@ -135,7 +135,7 @@ test "MCP endpoint policy accepts HTTPS and explicit loopback HTTP" {
     try std.testing.expectError(error.InvalidEndpoint, validateEndpoint("https://example.com/mcp#fragment"));
 }
 
-test "an OAuth resource and client metadata URL follow fx's URL rules" {
+test "an OAuth resource and client metadata URL follow lia's URL rules" {
     try validateOAuthResource("https://api.example.com/mcp?tenant=one");
     try validateOAuthResource("http://localhost:9876/mcp");
     try std.testing.expectError(error.InvalidOAuthResource, validateOAuthResource("http://api.example.com/mcp"));
@@ -143,10 +143,10 @@ test "an OAuth resource and client metadata URL follow fx's URL rules" {
     try std.testing.expectError(error.InvalidOAuthResource, validateOAuthResource("https://user@api.example.com/mcp"));
     try std.testing.expectError(error.InvalidOAuthResource, validateOAuthResource("https://api.example.com/mcp#part"));
 
-    try validateClientMetadataUrl("https://fx.example.com/client.json");
-    try std.testing.expectError(error.InvalidClientMetadataUrl, validateClientMetadataUrl("http://fx.example.com/client.json"));
-    try std.testing.expectError(error.InvalidClientMetadataUrl, validateClientMetadataUrl("https://fx.example.com/"));
-    try std.testing.expectError(error.InvalidClientMetadataUrl, validateClientMetadataUrl("https://fx.example.com/client.json#part"));
+    try validateClientMetadataUrl("https://lia.example.com/client.json");
+    try std.testing.expectError(error.InvalidClientMetadataUrl, validateClientMetadataUrl("http://lia.example.com/client.json"));
+    try std.testing.expectError(error.InvalidClientMetadataUrl, validateClientMetadataUrl("https://lia.example.com/"));
+    try std.testing.expectError(error.InvalidClientMetadataUrl, validateClientMetadataUrl("https://lia.example.com/client.json#part"));
 }
 
 test "MCP static headers reject malformed duplicate and protocol-owned names" {

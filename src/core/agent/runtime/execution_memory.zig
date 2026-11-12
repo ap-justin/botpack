@@ -38,7 +38,7 @@ const parent_steering_close = "\n</parent_agent_steering>";
 /// Saved with a parent agent's steering, so replay still names its sender.
 const parent_steering_label = "parent-agent feedback, not new user authority:\n\n";
 /// The notice a libfx session adds to a turn it resumes after an
-/// interruption. It rides in the turn's steering list, but fx wrote it, so a
+/// interruption. It rides in the turn's steering list, but lia wrote it, so a
 /// request shows it as plain text, never as the user's live update.
 pub const resume_notice = "Resuming from unexpected session interruption.";
 
@@ -342,7 +342,7 @@ test "empty restored steering keeps its checkpoint boundary" {
     try std.testing.expectEqual(@as(usize, 1), try retainedMessageOffset(messages.items, .{ .steering = 1 }));
 }
 
-pub fn persistedStatusForCurrentFxLocalResult(
+pub fn persistedStatusForCurrentLiaLocalResult(
     status: ToolExecutionStatus,
     output: []const u8,
 ) types.PersistedToolStatus {
@@ -410,7 +410,7 @@ pub fn buildExecutionMemory(alloc: Allocator, within_turn_suffix: []const ChatMe
             assistant_prefix = message.content;
         }
         if (isContextNote(message)) {
-            // fx places a note only at a step boundary, so the steps before
+            // lia places a note only at a step boundary, so the steps before
             // it are complete (D93). A note may save a shorter text than it
             // sends (D95).
             const copy = try alloc.dupe(u8, message.context_note_saved_text orelse message.content orelse "");
@@ -525,7 +525,7 @@ test "retained standalone cut rebuilds exactly the selected execution suffix" {
                     .parts_json = "[{\"type\":\"reasoning\",\"text\":\"private\"}]",
                 } else null,
             },
-            .{ .role = .user, .content = "Continue the turn. fx hook context:\nverify" },
+            .{ .role = .user, .content = "Continue the turn. lia hook context:\nverify" },
             .{ .role = .assistant, .tool_calls = &.{call} },
             .{ .role = .tool, .content = "result", .tool_call_id = call.id, .tool_name = call.name, .tool_result_status = .success },
         };
@@ -546,7 +546,7 @@ test "retained standalone cut rebuilds exactly the selected execution suffix" {
 /// as a plain user message instead of a live update. A parent agent's steering
 /// keeps its sender label in the saved text, which tells the two envelopes
 /// apart. Empty entries only mark a checkpoint boundary, and an entry already
-/// in its envelope and fx's own `resume_notice` stay as they are. Returns
+/// in its envelope and lia's own `resume_notice` stay as they are. Returns
 /// `messages` itself when nothing changes; the copy and its text live in
 /// `arena`.
 pub fn rewrapRestoredSteering(arena: Allocator, messages: []const ChatMessage) Allocator.Error![]const ChatMessage {
@@ -591,7 +591,7 @@ test "restored steering reaches the request in the envelope the model saw" {
     // The session's own messages keep the bare text a saved turn holds.
     try std.testing.expectEqualStrings("focus on rendering", restored.items[0].content.?);
 
-    // A checkpoint boundary, an entry already in its envelope, fx's own resume
+    // A checkpoint boundary, an entry already in its envelope, lia's own resume
     // notice, and ordinary text stay as they are.
     const unchanged = [_]ChatMessage{
         .{ .role = .user, .content = "", .restored_steering = true },

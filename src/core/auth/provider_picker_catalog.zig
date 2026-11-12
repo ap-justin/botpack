@@ -13,7 +13,7 @@ const types = @import("../shared/types.zig");
 /// How a provider is authenticated. Subscription providers expose no methods;
 /// choosing one acts directly instead of opening the method column.
 pub const Method = enum {
-    /// Browser sign-in that yields an fx login session.
+    /// Browser sign-in that yields a lia login session.
     oauth,
     /// A pasted AI Gateway key held in the keychain or profile.
     api_key,
@@ -53,11 +53,11 @@ pub fn writeKeyField(out: *[max_key_field_bytes]u8, mask_count: usize) []const u
 /// The distinction is who supplies the key, not where the secret sleeps: an
 /// `env` key may well live in a password manager the user's shell reads.
 pub const KeySource = enum {
-    /// AI_GATEWAY_API_KEY handed to fx through the environment.
+    /// AI_GATEWAY_API_KEY handed to lia through the environment.
     env,
-    /// The key fx saved itself when one was pasted.
+    /// The key lia saved itself when one was pasted.
     saved,
-    /// Paste a key fx does not have yet.
+    /// Paste a key lia does not have yet.
     new,
 };
 
@@ -74,7 +74,7 @@ pub fn keySourceSlug(source: KeySource) []const u8 {
 pub fn keySourceAnnotation(source: KeySource, current: bool) []const u8 {
     return switch (source) {
         .env => if (current) "AI_GATEWAY_API_KEY · current" else "AI_GATEWAY_API_KEY",
-        .saved => if (current) "saved by fx · current" else "saved by fx",
+        .saved => if (current) "saved by lia · current" else "saved by lia",
         .new => "paste a key",
     };
 }

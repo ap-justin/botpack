@@ -938,7 +938,7 @@ test "a first catalog load that never connects answers from the fallback after i
     const capabilities = try resolver.resolveWithin(alloc, gated.provider(), input, "provider/model", .{ .context_window = 1_000 }, 20);
     try std.testing.expectEqual(@as(?u32, 1_000), capabilities.context_window);
     try std.testing.expectEqual(CapabilityResolverState.failed, resolver.state);
-    // A load given up on before it connected is down for a connection fx
+    // A load given up on before it connected is down for a connection lia
     // could not make.
     try std.testing.expectEqual(model_catalog.FailureCategory.transport, resolver.downFailure().?);
 

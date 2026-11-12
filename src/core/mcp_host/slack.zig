@@ -1,4 +1,4 @@
-//! Slack signs in as fx's Slack app, since Slack has no client registration,
+//! Slack signs in as lia's Slack app, since Slack has no client registration,
 //! with the redirect `http://localhost:3118/callback`. Slack refreshes a PKCE
 //! app's tokens without the app's secret only for a localhost redirect
 //! (Slack's "Using PKCE"), so a login made through any other one lasts only
@@ -11,15 +11,15 @@ const io_mod = @import("../shared/io.zig");
 /// Slack's MCP server, which `add slack` uses when no URL is given.
 pub const server_url = "https://mcp.slack.com/mcp";
 
-/// fx's Slack app, used for Slack when the config names no app of its own.
+/// lia's Slack app, used for Slack when the config names no app of its own.
 pub const client_id = "12364000946.12017137861236";
 
-/// The port of the one redirect fx's Slack app allows,
+/// The port of the one redirect lia's Slack app allows,
 /// `http://localhost:3118/callback`. A config's `oauth.callback_port`
 /// replaces it.
 pub const callback_port: u16 = 3118;
 
-/// The user scopes fx's Slack app has; it may ask for no others.
+/// The user scopes lia's Slack app has; it may ask for no others.
 pub const scopes = "channels:history channels:read channels:write chat:write emoji:read files:write groups:history groups:read im:history im:read mpim:history mpim:read search:read.im search:read.mpim search:read.private search:read.public search:read.users users:read";
 
 /// Whether `url` is Slack's MCP server.
@@ -29,15 +29,15 @@ pub fn isSlack(url: ?[]const u8) bool {
 }
 
 /// A stand-in for Slack's server in tests, on 127.0.0.1
-/// (`FX_TEST_SLACK_ORIGIN`), as v1 takes it; null otherwise.
+/// (`LIA_TEST_SLACK_ORIGIN`), as v1 takes it; null otherwise.
 fn standIn() ?[]const u8 {
-    const configured = io_mod.getenv("FX_TEST_SLACK_ORIGIN") orelse return null;
+    const configured = io_mod.getenv("LIA_TEST_SLACK_ORIGIN") orelse return null;
     return if (loopbackOrigin(configured)) configured else null;
 }
 
-/// Whether `url` may sign in as fx's Slack app: Slack's MCP server, or in
+/// Whether `url` may sign in as lia's Slack app: Slack's MCP server, or in
 /// tests the server at the stand-in's own `{origin}/mcp`. Another server that
-/// names fx's app signs in with a redirect the app doesn't allow, so Slack
+/// names lia's app signs in with a redirect the app doesn't allow, so Slack
 /// never sends it a code.
 pub fn appServer(url: ?[]const u8) bool {
     return appServerAt(url orelse return false, standIn());
@@ -69,7 +69,7 @@ test "only Slack's MCP server, and only a loopback test stand-in" {
     try testing.expect(!loopbackOrigin("http://127.0.0.1:8080/x"));
 }
 
-test "fx's Slack app signs in only to Slack's MCP server, or a test stand-in's own" {
+test "lia's Slack app signs in only to Slack's MCP server, or a test stand-in's own" {
     try testing.expect(appServerAt("https://mcp.slack.com/mcp", null));
     try testing.expect(!appServerAt("https://mcp.example.com/mcp", null));
     try testing.expect(!appServerAt("http://127.0.0.1:8080/mcp", null));

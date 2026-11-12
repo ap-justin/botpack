@@ -16,22 +16,22 @@ import {
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { REPO_ROOT, runFx } from "../evals/eval-helpers";
+import { REPO_ROOT, runLia } from "../evals/eval-helpers";
 import { jpegHeader, paddedPng, solidPng } from "./fixtures/image-encoding";
 import { fakeGatewaySse, fakeGatewayTitleDefault, TITLE_GENERATION_MARKER, } from "./fake-gateway";
 import { copyV1Fixture, savedText, sessionDir } from "./saved-sessions";
 
 const TIMEOUT = 15_000;
-/** What fx says when it cannot connect to the model catalog and withholds
+/** What lia says when it cannot connect to the model catalog and withholds
  * earlier images (`catalogDownNotice` in `src/core/agent/runtime/orchestrator.zig`). */
 const CATALOG_CONNECT_IMAGE_NOTICE =
-  "fx couldn't connect to AI Gateway to load the model catalog, so earlier images aren't reaching the model until it loads. Check your network connection or firewall.";
+  "lia couldn't connect to AI Gateway to load the model catalog, so earlier images aren't reaching the model until it loads. Check your network connection or firewall.";
 const CATALOG_CONNECT_IMAGE_FAST_NOTICE =
-  "fx couldn't connect to AI Gateway to load the model catalog, so earlier images aren't reaching the model and fast mode is off until it loads. Check your network connection or firewall.";
+  "lia couldn't connect to AI Gateway to load the model catalog, so earlier images aren't reaching the model and fast mode is off until it loads. Check your network connection or firewall.";
 /** The line before the error for an image attached this turn
  * (`catalogUnreachableImageLine` in `src/core/agent/runtime/orchestrator.zig`). */
 const CATALOG_CONNECT_ATTACHED_IMAGE_LINE =
-  "fx couldn't connect to AI Gateway to load the model catalog, so it couldn't confirm that this model accepts images. Check your network connection or firewall.";
+  "lia couldn't connect to AI Gateway to load the model catalog, so it couldn't confirm that this model accepts images. Check your network connection or firewall.";
 const GLM_MODEL = "zai/glm-5.2-fast";
 const GEMINI_MODEL = "google/gemini-2.5-flash";
 const KIMI_MODEL = "moonshotai/kimi-k3";
@@ -166,7 +166,7 @@ function expectVisionResponseFormat(body: string, imageCount: number) {
   };
   expect(request.responseFormat).toMatchObject({
     type: "json",
-    name: "fx_vision_evidence",
+    name: "lia_vision_evidence",
     schema: {
       type: "object",
       required: ["images"],
@@ -280,12 +280,12 @@ async function refusedLoopbackUrl(path: string): Promise<string> {
 }
 
 function createIsolatedRoot() {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-vision-route-e2e-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-vision-route-e2e-")));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".lia"), { recursive: true });
   mkdirSync(workspace, { recursive: true });
-  writeFileSync(join(home, ".fx", "settings.json"), JSON.stringify({ permission: {} }));
+  writeFileSync(join(home, ".lia", "settings.json"), JSON.stringify({ permission: {} }));
   return { root, home, workspace: realpathSync(workspace) };
 }
 
@@ -319,7 +319,7 @@ function writeMarkedImage(imagePath: string, marker: string) {
 // holds the image, and its digest is one no other image there shares, so
 // an identical copy saved as a blob cannot restore it (D89).
 function damageFirstV1Image(home: string, sessionId: string): void {
-  const folder = join(home, ".fx", "sessions", sessionId);
+  const folder = join(home, ".lia", "sessions", sessionId);
   const snapshot = readdirSync(join(folder, "images")).find((name) => name.startsWith("image-1-"));
   expect(snapshot).toBeDefined();
   writeFileSync(join(folder, "images", snapshot!), "corrupt");
@@ -347,7 +347,7 @@ function writeLegacyZeroImageSession(
   sessionId: string,
   imagePaths: [string, string, string, string],
 ) {
-  const sessionDir = join(root.home, ".fx", "sessions", sessionId);
+  const sessionDir = join(root.home, ".lia", "sessions", sessionId);
   mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
   writeFileSync(
     join(sessionDir, "session.json"),
@@ -419,13 +419,13 @@ function fakeGatewayEnv(
     HOME: root.home,
     AI_GATEWAY_API_KEY: "fake-vision-route-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_MODEL: model,
+    LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+    LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_MODEL: model,
   };
 }
 
-function parseFxJson(result: Awaited<ReturnType<typeof runFx>>) {
+function parseLiaJson(result: Awaited<ReturnType<typeof runLia>>) {
   expect(result.code, result.stdout + result.stderr).toBe(0);
   return JSON.parse(result.stdout.trim()) as {
     output: string;
@@ -436,7 +436,7 @@ function parseFxJson(result: Awaited<ReturnType<typeof runFx>>) {
   };
 }
 
-function parseFxErrorJson(result: Awaited<ReturnType<typeof runFx>>) {
+function parseLiaErrorJson(result: Awaited<ReturnType<typeof runLia>>) {
   expect(result.code).toBe(1);
   return JSON.parse(result.stdout.trim()) as {
     output: string;
@@ -487,13 +487,13 @@ function toolResultText(body: string, toolCallId: string): string {
 
 describe("Vision route fake Gateway", () => {
   test(
-    "fx ask rejects missing images before Gateway startup in text and JSON modes",
+    "lia ask rejects missing images before Gateway startup in text and JSON modes",
     async () => {
       const root = createIsolatedRoot();
       const gateway = startImageGateway([]);
       const missingPath = join(root.workspace, "missing-image.png");
       try {
-        const textResult = await runFx(
+        const textResult = await runLia(
           ["ask", "--no-save", "--image", missingPath, "Describe the image."],
           {
             cwd: root.workspace,
@@ -506,7 +506,7 @@ describe("Vision route fake Gateway", () => {
         expect(textResult.stderr).toContain(missingPath);
         expect(textResult.stderr).toContain("image file not found");
 
-        const jsonResult = await runFx(
+        const jsonResult = await runLia(
           ["ask", "--json", "--no-save", "--image", missingPath, "Describe the image."],
           {
             cwd: root.workspace,
@@ -514,7 +514,7 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const json = parseFxErrorJson(jsonResult);
+        const json = parseLiaErrorJson(jsonResult);
         expect(json.output).toBe("");
         expect(json.error).toContain("FileNotFound");
         expect(json.error).toContain(missingPath);
@@ -530,7 +530,7 @@ describe("Vision route fake Gateway", () => {
   );
 
   test(
-    "fx ask gates GLM images through Vision without leaking paths",
+    "lia ask gates GLM images through Vision without leaking paths",
     async () => {
       const root = createIsolatedRoot();
       const fixture = createScopedImageFixture(root);
@@ -540,7 +540,7 @@ describe("Vision route fake Gateway", () => {
         sseText("GLM final image answer"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -557,7 +557,7 @@ describe("Vision route fake Gateway", () => {
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.exit_code).toBe(0);
         expect(json.output).toContain("GLM final image answer");
         expect(gateway.catalogRequests).toBe(1);
@@ -589,7 +589,7 @@ describe("Vision route fake Gateway", () => {
   );
 
   test(
-    "fx ask recovers when the model rejects the post-Vision prompt as assistant prefill",
+    "lia ask recovers when the model rejects the post-Vision prompt as assistant prefill",
     async () => {
       const root = createIsolatedRoot();
       const fixture = createScopedImageFixture(root);
@@ -614,7 +614,7 @@ describe("Vision route fake Gateway", () => {
         sseText("Recovered final image answer"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -631,7 +631,7 @@ describe("Vision route fake Gateway", () => {
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.exit_code).toBe(0);
         expect(json.output).toContain("Recovered final image answer");
         expect(gateway.chatRequests).toHaveLength(4);
@@ -653,13 +653,13 @@ describe("Vision route fake Gateway", () => {
   );
 
   test(
-    "fx ask executes path-source Vision and cleans transient snapshots without failure telemetry",
+    "lia ask executes path-source Vision and cleans transient snapshots without failure telemetry",
     async () => {
       const root = createIsolatedRoot();
       const imagePath = join(root.workspace, "path-source.png");
       const tracePath = join(root.root, "trace.log");
       const snapshotsBefore = readdirSync("/tmp")
-        .filter((name) => name.startsWith("fx-image-snapshots-"))
+        .filter((name) => name.startsWith("lia-image-snapshots-"))
         .sort();
       writeMarkedImage(imagePath, "HEADLESS_PATH_SOURCE");
       const gateway = startImageGateway([
@@ -672,7 +672,7 @@ describe("Vision route fake Gateway", () => {
         sseText("Path-source final answer"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -684,14 +684,14 @@ describe("Vision route fake Gateway", () => {
             cwd: root.workspace,
             env: {
               ...fakeGatewayEnv(root, gateway, GLM_MODEL),
-              FX_TRACE_LOG: tracePath,
-              FX_TRACE_SCOPES: "images",
+              LIA_TRACE_LOG: tracePath,
+              LIA_TRACE_SCOPES: "images",
             },
             timeoutMs: TIMEOUT,
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("Path-source final answer");
         expect(gateway.chatRequests).toHaveLength(3);
         expect(gateway.chatRequests[0]!.body).toContain('"name":"vision"');
@@ -703,7 +703,7 @@ describe("Vision route fake Gateway", () => {
         expect(readFileSync(tracePath, "utf8")).not.toContain("snapshot_cleanup_failed");
         expect(
           readdirSync("/tmp")
-            .filter((name) => name.startsWith("fx-image-snapshots-"))
+            .filter((name) => name.startsWith("lia-image-snapshots-"))
             .sort(),
         ).toEqual(snapshotsBefore);
       } finally {
@@ -797,7 +797,7 @@ describe("Vision route fake Gateway", () => {
           },
         );
         try {
-          const result = await runFx(
+          const result = await runLia(
             [
               "ask",
               "--json",
@@ -815,7 +815,7 @@ describe("Vision route fake Gateway", () => {
             },
           );
 
-          const json = parseFxJson(result);
+          const json = parseLiaJson(result);
           expect(json.output).toContain(`final ${entry.name}`);
           expect(gateway.chatRequests).toHaveLength(3);
           expect(gateway.chatRequests[1].headers.get("ai-language-model-id")).toBe(GEMINI_MODEL);
@@ -824,8 +824,8 @@ describe("Vision route fake Gateway", () => {
           for (const request of gateway.chatRequests) {
             for (const imagePath of fixture.paths) expect(request.body).not.toContain(imagePath);
             expect(request.body).not.toContain("data:image");
-            expect(request.body).not.toContain("fx-image-snapshots");
-            expect(request.body).not.toContain(".fx/sessions");
+            expect(request.body).not.toContain("lia-image-snapshots");
+            expect(request.body).not.toContain(".lia/sessions");
           }
         } finally {
           gateway.stop();
@@ -852,7 +852,7 @@ describe("Vision route fake Gateway", () => {
         sseText("Recovered after required Vision rejection"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -870,7 +870,7 @@ describe("Vision route fake Gateway", () => {
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("Recovered after required Vision rejection");
         expect(json.tool_calls).toContainEqual({ name: "read_file", status: "error" });
         expect(json.tool_calls).toContainEqual({ name: "vision", status: "success" });
@@ -899,13 +899,13 @@ describe("Vision route fake Gateway", () => {
   );
 
   test(
-    "fx ask preserves native image parts for Gemini",
+    "lia ask preserves native image parts for Gemini",
     async () => {
       const root = createIsolatedRoot();
       const fixture = createScopedImageFixture(root);
       const gateway = startImageGateway([sseText("Gemini native image answer")]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -922,7 +922,7 @@ describe("Vision route fake Gateway", () => {
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.exit_code).toBe(0);
         expect(json.output).toContain("Gemini native image answer");
         expect(gateway.catalogRequests).toBe(1);
@@ -941,13 +941,13 @@ describe("Vision route fake Gateway", () => {
   );
 
   test(
-    "fx ask uses Kimi native vision without Vision tool",
+    "lia ask uses Kimi native vision without Vision tool",
     async () => {
       const root = createIsolatedRoot();
       const fixture = createScopedImageFixture(root);
       const gateway = startImageGateway([sseText("Kimi native image answer")]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -964,7 +964,7 @@ describe("Vision route fake Gateway", () => {
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.exit_code).toBe(0);
         expect(json.output).toContain("Kimi native image answer");
         expect(gateway.catalogRequests).toBe(1);
@@ -983,7 +983,7 @@ describe("Vision route fake Gateway", () => {
   );
 
   test(
-    "fx ask withholds byte-oversized native images instead of normalizing or rejecting",
+    "lia ask withholds byte-oversized native images instead of normalizing or rejecting",
     async () => {
       const root = createIsolatedRoot();
       const oversizedPath = join(root.workspace, "encoded-oversized.png");
@@ -991,7 +991,7 @@ describe("Vision route fake Gateway", () => {
       truncateSync(oversizedPath, (5 * 1024 * 1024 * 3) / 4 + 1);
       const gateway = startImageGateway([sseText("Byte-oversized native image answer")]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -1008,7 +1008,7 @@ describe("Vision route fake Gateway", () => {
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.exit_code).toBe(0);
         expect(json.output).toContain("Byte-oversized native image answer");
         expect(json.tool_calls).toHaveLength(0);
@@ -1028,7 +1028,7 @@ describe("Vision route fake Gateway", () => {
   );
 
   test(
-    "fx ask sends single-request native PNG images byte-for-byte below the 8000-pixel limit",
+    "lia ask sends single-request native PNG images byte-for-byte below the 8000-pixel limit",
     async () => {
       const root = createIsolatedRoot();
       const widePath = join(root.workspace, "wide-screenshot.png");
@@ -1036,7 +1036,7 @@ describe("Vision route fake Gateway", () => {
       writeFileSync(widePath, original);
       const gateway = startImageGateway([sseText("Wide native image answer")]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -1053,7 +1053,7 @@ describe("Vision route fake Gateway", () => {
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("Wide native image answer");
         expect(result.stderr).toBe("");
         expect(gateway.chatRequests).toHaveLength(1);
@@ -1070,7 +1070,7 @@ describe("Vision route fake Gateway", () => {
   );
 
   test(
-    "fx ask names the saved copy of an attached image but not its source path",
+    "lia ask names the saved copy of an attached image but not its source path",
     async () => {
       const root = createIsolatedRoot();
       const shotPath = join(root.workspace, "CleanShot 2026-10-18 at 4.36.41 PM@2x.png");
@@ -1078,11 +1078,11 @@ describe("Vision route fake Gateway", () => {
       writeFileSync(shotPath, original);
       const gateway = startImageGateway([sseText("Located image answer")]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--json", "--image", shotPath, "Crop the attached screenshot."],
           { cwd: root.workspace, env: fakeGatewayEnv(root, gateway, GEMINI_MODEL), timeoutMs: TIMEOUT },
         );
-        expect(parseFxJson(result).output).toContain("Located image answer");
+        expect(parseLiaJson(result).output).toContain("Located image answer");
         expect(result.stderr).toBe("");
         expect(gateway.chatRequests).toHaveLength(1);
         const body = gateway.chatRequests[0]!.body;
@@ -1097,7 +1097,7 @@ describe("Vision route fake Gateway", () => {
         expect(body).not.toContain(shotPath);
         // The saved copy outlives the run and holds the bytes the model saw.
         const saved = JSON.parse(note![1]!) as string;
-        expect(saved.startsWith(join(root.home, ".fx", "sessions"))).toBe(true);
+        expect(saved.startsWith(join(root.home, ".lia", "sessions"))).toBe(true);
         expect(readFileSync(saved)).toEqual(original);
       } finally {
         gateway.stop();
@@ -1108,18 +1108,18 @@ describe("Vision route fake Gateway", () => {
   );
 
   test(
-    "fx ask withholds native JPEG images over the 8000-pixel limit with saved-path guidance",
+    "lia ask withholds native JPEG images over the 8000-pixel limit with saved-path guidance",
     async () => {
       const root = createIsolatedRoot();
       const photoPath = join(root.workspace, "photo.jpg");
       writeFileSync(photoPath, jpegHeader(8001, 1));
       const gateway = startImageGateway([sseText("Photo note answer")]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--json", "--no-save", "--image", photoPath, "Describe the attached image."],
           { cwd: root.workspace, env: fakeGatewayEnv(root, gateway, GEMINI_MODEL), timeoutMs: TIMEOUT },
         );
-        expect(parseFxJson(result).output).toContain("Photo note answer");
+        expect(parseLiaJson(result).output).toContain("Photo note answer");
         expect(gateway.chatRequests).toHaveLength(1);
         const body = gateway.chatRequests[0]!.body;
         expect(nativeFileParts(body)).toHaveLength(0);
@@ -1158,7 +1158,7 @@ describe("Vision route fake Gateway", () => {
         sseText("Gemini continued without historical Vision evidence"),
       ]);
       try {
-        const first = await runFx(
+        const first = await runLia(
           [
             "ask",
             "--json",
@@ -1175,7 +1175,7 @@ describe("Vision route fake Gateway", () => {
           },
         );
 
-        const firstJson = parseFxJson(first);
+        const firstJson = parseLiaJson(first);
         expect(firstJson.session_id.length).toBeGreaterThan(0);
         expect(firstJson.output).toContain("Gemini recovered after rejected Vision");
         expect(firstJson.tool_calls).toContainEqual({ name: "vision", status: "error" });
@@ -1214,7 +1214,7 @@ describe("Vision route fake Gateway", () => {
         const originalEvents = readFileSync(eventsPath, "utf8");
         if (shape !== "plain") expect(savedText(root.home, firstJson.session_id)).toContain("removed-vision-signature");
 
-        const resumed = await runFx(
+        const resumed = await runLia(
           [
             "ask",
             "--json",
@@ -1230,7 +1230,7 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const resumedJson = parseFxJson(resumed);
+        const resumedJson = parseLiaJson(resumed);
         expect(resumedJson.session_id).toBe(firstJson.session_id);
         expect(resumedJson.output).toContain(
           "Gemini continued without historical Vision evidence",
@@ -1265,7 +1265,7 @@ describe("Vision route fake Gateway", () => {
         expect(resumedUserText).not.toContain(root.home);
         expect(resumedUserText).not.toContain(root.workspace);
 
-        const detail = await runFx(
+        const detail = await runLia(
           ["session", "--id", firstJson.session_id, "--json"],
           {
             cwd: root.workspace,
@@ -1307,10 +1307,10 @@ describe("Vision route fake Gateway", () => {
 
       for (const entry of cases) {
         const root = createIsolatedRoot();
-        // A prompt image only an older fx's session file holds, damaged
+        // A prompt image only an older lia's session file holds, damaged
         // before the session converts on its next open.
         const [sessionId] = copyV1Fixture(root.home, "image", 1, root.workspace) as [string];
-        const imageDir = join(root.home, ".fx", "sessions", sessionId, "images");
+        const imageDir = join(root.home, ".lia", "sessions", sessionId, "images");
         const snapshotNames = readdirSync(imageDir).filter((name) => name.endsWith(".bin"));
         expect(snapshotNames).toHaveLength(1);
         entry.damage(join(imageDir, snapshotNames[0]));
@@ -1319,7 +1319,7 @@ describe("Vision route fake Gateway", () => {
           sseText(`final ${entry.name}`),
         ]);
         try {
-          const reread = await runFx(
+          const reread = await runLia(
             [
               "ask",
               "--json",
@@ -1335,7 +1335,7 @@ describe("Vision route fake Gateway", () => {
               timeoutMs: TIMEOUT,
             },
           );
-          const rereadJson = parseFxJson(reread);
+          const rereadJson = parseLiaJson(reread);
           expect(rereadJson.output).toContain(`final ${entry.name}`);
           expect(rereadJson.tool_calls).toContainEqual({ name: "vision", status: "error" });
           expect(gateway.chatRequests).toHaveLength(2);
@@ -1370,7 +1370,7 @@ describe("Vision route fake Gateway", () => {
   );
 
   test(
-    "fx ask applies image_adapter_output_bytes to Vision provider capture",
+    "lia ask applies image_adapter_output_bytes to Vision provider capture",
     async () => {
       const root = createIsolatedRoot();
       const fixture = createScopedImageFixture(root);
@@ -1380,7 +1380,7 @@ describe("Vision route fake Gateway", () => {
         sseText("bounded Vision answer"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "--context-limit",
             "image_adapter_output_bytes=64",
@@ -1399,7 +1399,7 @@ describe("Vision route fake Gateway", () => {
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("bounded Vision answer");
         expect(json.tool_calls).toContainEqual({ name: "vision", status: "error" });
         expect(result.stderr).toBe("Inspecting images\n");
@@ -1435,7 +1435,7 @@ describe("Vision route fake Gateway", () => {
       const root = createIsolatedRoot();
       const gateway = startImageGateway([sseText("text only answer")]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--json", "--no-save", "--no-color", "Reply exactly OK."],
           {
             cwd: root.workspace,
@@ -1444,7 +1444,7 @@ describe("Vision route fake Gateway", () => {
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.exit_code).toBe(0);
         expect(json.output).toContain("text only answer");
         expect(gateway.catalogRequests).toBe(1);
@@ -1466,7 +1466,7 @@ describe("Vision route fake Gateway", () => {
       const root = createIsolatedRoot();
       const gateway = startImageGateway([sseText("Kimi text only answer")]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--json", "--no-save", "--no-color", "Reply exactly OK."],
           {
             cwd: root.workspace,
@@ -1475,7 +1475,7 @@ describe("Vision route fake Gateway", () => {
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.exit_code).toBe(0);
         expect(json.output).toContain("Kimi text only answer");
         expect(gateway.catalogRequests).toBe(1);
@@ -1501,7 +1501,7 @@ describe("Vision route fake Gateway", () => {
         new Response("catalog unavailable", { status: 503 }),
       );
       try {
-        const textResult = await runFx(
+        const textResult = await runLia(
           ["ask", "--json", "--no-save", "--no-color", "Reply exactly OK."],
           {
             cwd: textRoot.workspace,
@@ -1509,7 +1509,7 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const textJson = parseFxJson(textResult);
+        const textJson = parseLiaJson(textResult);
         expect(textJson.exit_code).toBe(0);
         expect(textJson.output).toContain("text answer without Vision");
         expect(textGateway.catalogRequests).toBe(1);
@@ -1528,7 +1528,7 @@ describe("Vision route fake Gateway", () => {
         new Response("catalog unavailable", { status: 503 }),
       );
       try {
-        const imageResult = await runFx(
+        const imageResult = await runLia(
           [
             "ask",
             "--json",
@@ -1544,7 +1544,7 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const imageJson = parseFxErrorJson(imageResult);
+        const imageJson = parseLiaErrorJson(imageResult);
         expect(imageJson.error).toContain("ModelImageCapabilityUnavailable");
         expect(imageGateway.catalogRequests).toBe(1);
         expect(imageGateway.chatRequests).toHaveLength(0);
@@ -1567,7 +1567,7 @@ describe("Vision route fake Gateway", () => {
         new Response("catalog unavailable", { status: 503 }),
       );
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--no-save",
@@ -1586,7 +1586,7 @@ describe("Vision route fake Gateway", () => {
         expect(result.code).toBe(1);
         expect(result.stdout).toBe("");
         expect(result.stderr).toBe(
-          "fx ask: Unable to verify image support for this model, so the image was not sent. Try again later, choose another model, or remove the image.\n",
+          "lia ask: Unable to verify image support for this model, so the image was not sent. Try again later, choose another model, or remove the image.\n",
         );
         expect(result.stderr).not.toContain("ModelImageCapabilityUnavailable");
         expect(gateway.catalogRequests).toBe(1);
@@ -1607,10 +1607,10 @@ describe("Vision route fake Gateway", () => {
       const gateway = startImageGateway([]);
       const env = {
         ...fakeGatewayEnv(root, gateway, KIMI_MODEL),
-        FX_TEST_GATEWAY_MODELS_URL: await refusedLoopbackUrl("/coding-agent/v1/models"),
+        LIA_TEST_GATEWAY_MODELS_URL: await refusedLoopbackUrl("/coding-agent/v1/models"),
       };
       try {
-        const text = await runFx(
+        const text = await runLia(
           ["ask", "--no-save", "--no-color", "--image", fixture.imagePath, "Describe the attached image."],
           { cwd: root.workspace, env, timeoutMs: TIMEOUT },
         );
@@ -1621,11 +1621,11 @@ describe("Vision route fake Gateway", () => {
         );
 
         // JSON output keeps its error code; the cause line stays on stderr.
-        const json = await runFx(
+        const json = await runLia(
           ["ask", "--json", "--no-save", "--no-color", "--image", fixture.imagePath, "Describe the attached image."],
           { cwd: root.workspace, env, timeoutMs: TIMEOUT },
         );
-        expect(parseFxErrorJson(json).error).toBe("ModelImageCapabilityUnavailable");
+        expect(parseLiaErrorJson(json).error).toBe("ModelImageCapabilityUnavailable");
         expect(json.stderr).toBe(`${CATALOG_CONNECT_ATTACHED_IMAGE_LINE}\n`);
         expect(gateway.chatRequests).toHaveLength(0);
       } finally {
@@ -1649,20 +1649,20 @@ describe("Vision route fake Gateway", () => {
         new Response("catalog unavailable", { status: 503 }),
       );
       try {
-        const first = await runFx(
+        const first = await runLia(
           ["ask", "--json", "--auto", "--no-color", "--image", fixture.imagePath, "Describe the attached image."],
           { cwd: root.workspace, env: fakeGatewayEnv(root, up, KIMI_MODEL), timeoutMs: TIMEOUT },
         );
-        const firstJson = parseFxJson(first);
+        const firstJson = parseLiaJson(first);
         expect(firstJson.exit_code).toBe(0);
         expect(up.chatRequests[0]!.body).toContain(imageData);
 
         // The next turn, in a new process, cannot reach the catalog.
-        const resumed = await runFx(
+        const resumed = await runLia(
           ["ask", "--json", "--auto", "--no-color", "--resume", firstJson.session_id, "Testing"],
           { cwd: root.workspace, env: fakeGatewayEnv(root, down, KIMI_MODEL), timeoutMs: TIMEOUT },
         );
-        const resumedJson = parseFxJson(resumed);
+        const resumedJson = parseLiaJson(resumed);
         expect(resumedJson.exit_code).toBe(0);
         expect(resumedJson.output).toContain("Text turn answered");
         expect(down.chatRequests).toHaveLength(1);
@@ -1670,7 +1670,7 @@ describe("Vision route fake Gateway", () => {
         expect(filePartCount(body)).toBe(0);
         expect(body).not.toContain(imageData);
         expect(body).not.toContain('"name":"vision"');
-        expect(body).toContain("[Image #1 was not sent with this request: fx could not confirm image input support");
+        expect(body).toContain("[Image #1 was not sent with this request: lia could not confirm image input support");
         expect(resumed.stderr.split("Earlier images aren't reaching the model right now")).toHaveLength(2);
         expect(resumed.stderr).not.toContain("Unable to verify image support");
       } finally {
@@ -1691,35 +1691,35 @@ describe("Vision route fake Gateway", () => {
       const up = startImageGateway([sseText("It shows a logo.")]);
       const down = startImageGateway([sseText("Standard turn answered"), sseText("Fast turn answered")]);
       try {
-        const first = await runFx(
+        const first = await runLia(
           ["ask", "--json", "--auto", "--no-color", "--image", fixture.imagePath, "Describe the attached image."],
           { cwd: root.workspace, env: fakeGatewayEnv(root, up, KIMI_MODEL), timeoutMs: TIMEOUT },
         );
-        const firstJson = parseFxJson(first);
+        const firstJson = parseLiaJson(first);
         expect(firstJson.exit_code).toBe(0);
 
         // Each later turn runs in a new process whose catalog port refuses
         // connections, the first one with fast mode off.
         const env = {
           ...fakeGatewayEnv(root, down, KIMI_MODEL),
-          FX_TEST_GATEWAY_MODELS_URL: await refusedLoopbackUrl("/coding-agent/v1/models"),
+          LIA_TEST_GATEWAY_MODELS_URL: await refusedLoopbackUrl("/coding-agent/v1/models"),
         };
-        const standard = await runFx(
+        const standard = await runLia(
           ["ask", "--json", "--auto", "--no-color", "--resume", firstJson.session_id, "Testing"],
           { cwd: root.workspace, env, timeoutMs: TIMEOUT },
         );
-        expect(parseFxJson(standard).output).toContain("Standard turn answered");
+        expect(parseLiaJson(standard).output).toContain("Standard turn answered");
         expect(standard.stderr.split(CATALOG_CONNECT_IMAGE_NOTICE)).toHaveLength(2);
         expect(standard.stderr).not.toContain("fast mode");
         expect(standard.stderr).not.toContain("Earlier images aren't reaching the model right now");
 
         // The resumed session keeps its own preferences, so --fast turns fast
         // mode on for this run.
-        const fast = await runFx(
+        const fast = await runLia(
           ["ask", "--json", "--auto", "--no-color", "--fast", "--resume", firstJson.session_id, "Testing again"],
           { cwd: root.workspace, env, timeoutMs: TIMEOUT },
         );
-        expect(parseFxJson(fast).output).toContain("Fast turn answered");
+        expect(parseLiaJson(fast).output).toContain("Fast turn answered");
         // One line names the connection, the image, and fast mode together.
         expect(fast.stderr.split(CATALOG_CONNECT_IMAGE_FAST_NOTICE)).toHaveLength(2);
         expect(fast.stderr.split("couldn't connect")).toHaveLength(2);
@@ -1729,7 +1729,7 @@ describe("Vision route fake Gateway", () => {
         expect(down.chatRequests).toHaveLength(2);
         for (const request of down.chatRequests) {
           expect(request.body).not.toContain(imageData);
-          expect(request.body).toContain("[Image #1 was not sent with this request: fx could not confirm image input support");
+          expect(request.body).toContain("[Image #1 was not sent with this request: lia could not confirm image input support");
         }
       } finally {
         up.stop();
@@ -1752,7 +1752,7 @@ describe("Vision route fake Gateway", () => {
         sseText("Vision unavailable final answer"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -1769,7 +1769,7 @@ describe("Vision route fake Gateway", () => {
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("Vision unavailable final answer");
         expect(json.tool_calls).toContainEqual({ name: "vision", status: "error" });
         expect(result.stderr).toContain("Inspecting images\n");
@@ -1823,7 +1823,7 @@ describe("Vision route fake Gateway", () => {
         sseText("historical reread completed"),
       ]);
       try {
-        const first = await runFx(
+        const first = await runLia(
           [
             "ask",
             "--json",
@@ -1839,11 +1839,11 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const firstJson = parseFxJson(first);
+        const firstJson = parseLiaJson(first);
         expect(firstJson.session_id.length).toBeGreaterThan(0);
         expect(firstJson.tool_calls).toContainEqual({ name: "vision", status: "success" });
 
-        const native = await runFx(
+        const native = await runLia(
           [
             "ask",
             "--json",
@@ -1861,12 +1861,12 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const nativeJson = parseFxJson(native);
+        const nativeJson = parseLiaJson(native);
         expect(nativeJson.session_id).toBe(firstJson.session_id);
         expect(nativeJson.output).toContain("native route completed");
         expect(nativeJson.tool_calls).toHaveLength(0);
 
-        const reread = await runFx(
+        const reread = await runLia(
           [
             "ask",
             "--json",
@@ -1882,7 +1882,7 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const rereadJson = parseFxJson(reread);
+        const rereadJson = parseLiaJson(reread);
         expect(rereadJson.session_id).toBe(firstJson.session_id);
         expect(rereadJson.output).toContain("historical reread completed");
         expect(rereadJson.tool_calls).toContainEqual({ name: "vision", status: "success" });
@@ -1909,7 +1909,7 @@ describe("Vision route fake Gateway", () => {
         expect(gateway.chatRequests[6].body).toContain("second image evidence");
         expect(gateway.chatRequests[6].body).not.toContain('"type":"file"');
 
-        const detail = await runFx(
+        const detail = await runLia(
           ["session", "--id", firstJson.session_id, "--json"],
           {
             cwd: root.workspace,
@@ -1964,7 +1964,7 @@ describe("Vision route fake Gateway", () => {
         sseText("legacy text reread completed"),
       ]);
       try {
-        const native = await runFx(
+        const native = await runLia(
           [
             "ask",
             "--json",
@@ -1982,7 +1982,7 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const nativeJson = parseFxJson(native);
+        const nativeJson = parseLiaJson(native);
         expect(nativeJson.session_id).toBe(sessionId);
         expect(nativeJson.output).toContain("legacy native replay completed");
         expect(nativeJson.tool_calls).toHaveLength(0);
@@ -1996,7 +1996,7 @@ describe("Vision route fake Gateway", () => {
         expect(gateway.chatRequests[0].body).toContain(firstPayload);
         expect(gateway.chatRequests[0].body).toContain(secondPayload);
 
-        const detail = await runFx(
+        const detail = await runLia(
           ["session", "--id", sessionId, "--json"],
           {
             cwd: root.workspace,
@@ -2010,7 +2010,7 @@ describe("Vision route fake Gateway", () => {
         expect(persisted).toContain("Legacy first image: [Image #1]");
         expect(persisted).toContain("Legacy second image: [Image #2]");
 
-        const reread = await runFx(
+        const reread = await runLia(
           [
             "ask",
             "--json",
@@ -2026,7 +2026,7 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const rereadJson = parseFxJson(reread);
+        const rereadJson = parseLiaJson(reread);
         expect(rereadJson.session_id).toBe(sessionId);
         expect(rereadJson.output).toContain("legacy text reread completed");
         expect(rereadJson.tool_calls).toContainEqual({ name: "vision", status: "success" });
@@ -2070,7 +2070,7 @@ describe("Vision route fake Gateway", () => {
         sseText("recovered after invalid Vision result"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -2087,7 +2087,7 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("recovered after invalid Vision result");
         expect(json.tool_calls).toContainEqual({ name: "vision", status: "error" });
         expect(result.stderr).toBe("Inspecting images\n");
@@ -2126,7 +2126,7 @@ describe("Vision route fake Gateway", () => {
         sseText("recovered after malformed Vision result"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -2143,7 +2143,7 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("recovered after malformed Vision result");
         expect(json.tool_calls).toContainEqual({ name: "vision", status: "error" });
         expect(gateway.chatRequests).toHaveLength(4);
@@ -2179,7 +2179,7 @@ describe("Vision route fake Gateway", () => {
         sseText("recovered without re-uploading the image"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -2196,7 +2196,7 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("recovered without re-uploading the image");
         expect(json.tool_calls).toContainEqual({ name: "vision", status: "success" });
         expect(result.stderr).toBe("Inspecting images\n");
@@ -2244,7 +2244,7 @@ describe("Vision route fake Gateway", () => {
         sseText("continued with retained provider evidence"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -2263,7 +2263,7 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("continued with retained provider evidence");
         expect(json.tool_calls).toContainEqual({ name: "vision", status: "success" });
         expect(gateway.chatRequests).toHaveLength(3);
@@ -2311,7 +2311,7 @@ describe("Vision route fake Gateway", () => {
     "one corrupt image does not block its healthy sibling from Vision",
     async () => {
       const root = createIsolatedRoot();
-      // Twenty prompt images only an older fx's session file holds; one is
+      // Twenty prompt images only an older lia's session file holds; one is
       // damaged before the session converts on its next open.
       const [sessionId] = copyV1Fixture(root.home, "many-images", 1, root.workspace) as [string];
       damageFirstV1Image(root.home, sessionId);
@@ -2321,7 +2321,7 @@ describe("Vision route fake Gateway", () => {
         sseText("mixed-result recovery completed"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -2337,7 +2337,7 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("mixed-result recovery completed");
         expect(json.tool_calls).toContainEqual({ name: "vision", status: "success" });
         expect(gateway.chatRequests).toHaveLength(3);
@@ -2377,7 +2377,7 @@ describe("Vision route fake Gateway", () => {
     "one corrupt first-batch image keeps twenty-image provider batches at seven eight four",
     async () => {
       const root = createIsolatedRoot();
-      // Twenty prompt images only an older fx's session file holds; one is
+      // Twenty prompt images only an older lia's session file holds; one is
       // damaged before the session converts on its next open.
       const [sessionId] = copyV1Fixture(root.home, "many-images", 1, root.workspace) as [string];
       damageFirstV1Image(root.home, sessionId);
@@ -2390,7 +2390,7 @@ describe("Vision route fake Gateway", () => {
         sseText("twenty-image mixed-result recovery completed"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -2406,7 +2406,7 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("twenty-image mixed-result recovery completed");
         expect(json.tool_calls).toContainEqual({ name: "vision", status: "success" });
         expect(gateway.chatRequests).toHaveLength(5);
@@ -2467,7 +2467,7 @@ describe("Vision route fake Gateway", () => {
       ]);
       try {
         const imageArgs = imagePaths.flatMap((imagePath) => ["--image", imagePath]);
-        const result = await runFx(
+        const result = await runLia(
           [
             "ask",
             "--json",
@@ -2483,7 +2483,7 @@ describe("Vision route fake Gateway", () => {
             timeoutMs: TIMEOUT,
           },
         );
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("twenty image answer");
         expect(json.tool_calls).toContainEqual({ name: "vision", status: "success" });
         expect(gateway.chatRequests).toHaveLength(5);
@@ -2524,7 +2524,7 @@ for (const sourceChange of ["removed", "changed"] as const) {
     ]);
     const options = { cwd: root.workspace, env: fakeGatewayEnv(root, gateway, GLM_MODEL), timeoutMs: TIMEOUT };
     try {
-      const failed = await runFx(["ask", "--json", "--auto", "--image", input, "Describe the saved image."], options);
+      const failed = await runLia(["ask", "--json", "--auto", "--image", input, "Describe the saved image."], options);
       expect(failed.code).toBe(1);
       expect(failed.stdout).toContain("RequiredVisionToolCallMissing");
       const id = JSON.parse(failed.stdout).session_id;
@@ -2532,8 +2532,8 @@ for (const sourceChange of ["removed", "changed"] as const) {
       expectSavedBlob(root.home, id, original);
       if (sourceChange === "removed") rmSync(input);
       else writeMarkedImage(input, "REPLACEMENT_MUST_NOT_BE_USED");
-      const resumed = await runFx(["ask", "--json", "--auto", "--resume", id, "Describe the saved image again."], options);
-      expect(parseFxJson(resumed).output).toContain("RECOVERY_IMAGE_COMPLETE");
+      const resumed = await runLia(["ask", "--json", "--auto", "--resume", id, "Describe the saved image again."], options);
+      expect(parseLiaJson(resumed).output).toContain("RECOVERY_IMAGE_COMPLETE");
       expect(gateway.chatRequests).toHaveLength(4);
       const parts = nativeFileParts(gateway.chatRequests[2]!.body);
       expect(parts).toHaveLength(1);
@@ -2552,7 +2552,7 @@ describe("request size budget", () => {
   const SIZE_NOTICE = "not sent to keep the request under the provider's size limit";
   const SIZE_PROMPT = "Read img01.png through img06.png one at a time with read_file.";
   // Bodies AI Gateway returned on 2026-10-07 for a request over Claude's
-  // limit, reduced to the fields fx reads.
+  // limit, reduced to the fields lia reads.
   const gatewayFallbackBody = JSON.stringify({
     error: { message: "Bad Request", type: "AI_APICallError", param: { statusCode: 400 } },
     providerMetadata: {
@@ -2613,7 +2613,7 @@ describe("request size budget", () => {
         if (status !== 200) {
           return new Response(rejection.body, { status, headers: { "content-type": "application/json" } });
         }
-        if (!tools) return sseText("Summary: the user asked fx to read six images.");
+        if (!tools) return sseText("Summary: the user asked lia to read six images.");
         if (answer === "describe") return sseText("done: described the images");
         if (issued < count) {
           issued += 1;
@@ -2628,9 +2628,9 @@ describe("request size budget", () => {
         HOME: root.home,
         AI_GATEWAY_API_KEY: "fake-size-budget-key",
         VERCEL_OIDC_TOKEN: undefined,
-        FX_GATEWAY_BASE_URL: `http://127.0.0.1:${server.port}`,
-        FX_GATEWAY_CHAT_URL: `http://127.0.0.1:${server.port}/v4/ai/language-model`,
-        FX_MODEL: GEMINI_MODEL,
+        LIA_GATEWAY_BASE_URL: `http://127.0.0.1:${server.port}`,
+        LIA_GATEWAY_CHAT_URL: `http://127.0.0.1:${server.port}/v4/ai/language-model`,
+        LIA_MODEL: GEMINI_MODEL,
       }),
       stop() {
         server.stop(true);
@@ -2662,12 +2662,12 @@ describe("request size budget", () => {
       const images = writeSizeImages(root.workspace);
       const gateway = startSizeCappedGateway(rejection, images);
       try {
-        const result = await runFx(["ask", "--json", "--auto", "--no-color", SIZE_PROMPT], {
+        const result = await runLia(["ask", "--json", "--auto", "--no-color", SIZE_PROMPT], {
           cwd: root.workspace,
           env: gateway.env(root),
           timeoutMs: TIMEOUT * 2,
         });
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain(`done: read ${SIZE_IMAGE_COUNT} images`);
 
         const rejected = gateway.requests.filter((request) => request.status !== 200);
@@ -2700,7 +2700,7 @@ describe("request size budget", () => {
   test("a session past its size limit leaves its oldest images out a block at a time", async () => {
     const root = createIsolatedRoot();
     // 24 images of about 40 KB of base64 against a 600 KB limit: the first
-    // refusal teaches fx a limit of about 450 KB, which holds about ten of
+    // refusal teaches lia a limit of about 450 KB, which holds about ten of
     // them, and a block ends at a quarter of it, about three images.
     const count = 24;
     const images = writeSizeImages(root.workspace, count, 30_000);
@@ -2709,12 +2709,12 @@ describe("request size budget", () => {
       count,
     });
     try {
-      const result = await runFx(["ask", "--json", "--auto", "--no-color", "Read img01.png through img24.png one at a time with read_file."], {
+      const result = await runLia(["ask", "--json", "--auto", "--no-color", "Read img01.png through img24.png one at a time with read_file."], {
         cwd: root.workspace,
         env: gateway.env(root),
         timeoutMs: TIMEOUT * 2,
       });
-      const json = parseFxJson(result);
+      const json = parseLiaJson(result);
       expect(json.output).toContain(`done: read ${count} images`);
 
       const rejected = gateway.requests.filter((request) => request.status !== 200);
@@ -2750,18 +2750,18 @@ describe("request size budget", () => {
     const root = createIsolatedRoot();
     const images = writeSizeImages(root.workspace);
     // Six images of about 1 MB in one prompt against a 1.5 MB limit: each
-    // refusal lowers fx's limit by a quarter, so the request fits only after
+    // refusal lowers lia's limit by a quarter, so the request fits only after
     // a third refusal leaves out all but the newest image.
     const cap = 1_500_000;
     const gateway = startSizeCappedGateway({ status: 413, body: payloadTooLargeBody }, images, { cap, answer: "describe" });
     try {
       const imageArgs = [...images.keys()].flatMap((name) => ["--image", join(root.workspace, name)]);
-      const result = await runFx(["ask", "--json", "--auto", "--no-color", ...imageArgs, "Describe these images."], {
+      const result = await runLia(["ask", "--json", "--auto", "--no-color", ...imageArgs, "Describe these images."], {
         cwd: root.workspace,
         env: gateway.env(root),
         timeoutMs: TIMEOUT * 2,
       });
-      const json = parseFxJson(result);
+      const json = parseLiaJson(result);
       expect(json.output).toContain("done: described the images");
 
       const rejected = gateway.requests.filter((request) => request.status !== 200);

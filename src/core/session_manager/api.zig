@@ -1,7 +1,7 @@
 //! The session manager: one append-only log per session, one owner for
 //! session storage and the live-session lifecycle.
 //!
-//! This file (L4) is the only public root; fx imports it and nothing else.
+//! This file (L4) is the only public root; lia imports it and nothing else.
 //! A process creates one `Manager` with `init`, which does no disk I/O.
 //! Thirteen operations cover every host (`tests/tla/session_manager/system-design.md`
 //! "API"), plus `verify` and `rebuild` for doctor:
@@ -77,7 +77,7 @@ pub const RebuildError = error{ Busy, OutOfMemory } || storage.IoFault;
 pub const Backend = enum { posix };
 
 pub const InitOptions = struct {
-    /// The sessions root, `~/.fx/sessions/v2` in fx (D19); created on first
+    /// The sessions root, `~/.lia/sessions/v2` in lia (D19); created on first
     /// use, with any missing parent folders, all `0700`.
     root: []const u8,
     backend: Backend = .posix,
@@ -467,7 +467,7 @@ pub const Manager = struct {
 
     /// Deletes a session and the children it owns. Busy if any is open.
     /// Order per session (`tests/tla/session_manager/Catalog.tla`): children first, then the
-    /// rename to `.trash`, the index tombstone, and the purge. fx removes
+    /// rename to `.trash`, the index tombstone, and the purge. lia removes
     /// the matching terminal folders (D13).
     pub fn delete(m: *Manager, id: []const u8) DeleteError!void {
         try checkId(id);
@@ -641,7 +641,7 @@ pub const Session = struct {
 };
 
 /// Test and driver builds only (`-Dhooks=true`): fault injection, the trace
-/// writer and the internals a tracer reads. Empty in the build fx uses.
+/// writer and the internals a tracer reads. Empty in the build lia uses.
 pub const hooks = if (storage.hooks) struct {
     pub const Fault = storage.Fault;
     pub const flipBit = @import("storage_fault.zig").flipBit;
@@ -700,7 +700,7 @@ fn checkLanguage(gpa: std.mem.Allocator, raw: []const u8) AppendError!void {
 
 const max_language_bytes = 24;
 
-/// What a host may send: valid JSON for fx's content, and only the kinds
+/// What a host may send: valid JSON for lia's content, and only the kinds
 /// and reasons that belong to hosts. The manager writes the rest itself.
 fn checkEvents(gpa: std.mem.Allocator, events: []const Event, import: bool) AppendError!void {
     if (events.len == 0) return error.InvalidArgument;
@@ -770,7 +770,7 @@ test {
 const boundary_tests = struct {
     //! The module boundary, checked on every test run: files under `src/` import
     //! only the standard library, the build options, or a sibling in `src/`.
-    //! Nothing from fx reaches in, and nothing here reaches out.
+    //! Nothing from lia reaches in, and nothing here reaches out.
 
     const build_options = @import("build_options");
 
@@ -813,8 +813,8 @@ const boundary_tests = struct {
     }
 
     test "boundary scanner rejects parent paths and foreign packages" {
-        const up = firstViolation("const x = @import(\"../fx/src/main.zig\");").?;
-        try std.testing.expectEqualStrings("../fx/src/main.zig", up.import);
+        const up = firstViolation("const x = @import(\"../lia/src/main.zig\");").?;
+        try std.testing.expectEqualStrings("../lia/src/main.zig", up.import);
         const foreign = firstViolation("const z = @import(\"zero\");").?;
         try std.testing.expectEqualStrings("zero", foreign.import);
         const unterminated = firstViolation("@import(\"std").?;
@@ -847,7 +847,7 @@ test {
 }
 
 const api_tests = struct {
-    //! The API as fx will use it: this file imports only `api.zig`.
+    //! The API as lia will use it: this file imports only `api.zig`.
 
     const api = @import("api.zig");
 
@@ -942,7 +942,7 @@ const api_tests = struct {
         defer f.deinit();
         try testing.expectError(error.FileNotFound, f.dir());
         // Held settings and a close before any turn: still nothing, not even the
-        // root folder, so fx starting up does no session I/O (D2).
+        // root folder, so lia starting up does no session I/O (D2).
         const s = try f.manager.openNew(.{ .workspace = "/w", .host = .app });
         _ = try s.append(&.{.{ .set = .{ .key = .title, .value = "\"draft\"" } }});
         s.release();
@@ -1105,7 +1105,7 @@ const api_tests = struct {
         (try m.openResume(.{ .target = .{ .id = b_id }, .workspace = "/w", .host = .acp })).release();
 
         // b was updated last (closed by acp); the app last opened a. Resuming
-        // is itself an open, so this check runs as `fx ask --resume last`.
+        // is itself an open, so this check runs as `lia ask --resume last`.
         const last = try m.openResume(.{ .target = .last, .workspace = "/w", .host = .ask });
         try testing.expectEqualStrings(b_id, last.id());
         last.release();
@@ -1747,7 +1747,7 @@ const api_tests = struct {
         const s = try m.openNew(.{ .workspace = "/w", .host = .app });
         const id = try gpa.dupe(u8, s.id());
         defer gpa.free(id);
-        const types = [_][]const u8{ "user", "assistant", "tool_call", "tool_result", "steering", "a_name_fx_adds_later" };
+        const types = [_][]const u8{ "user", "assistant", "tool_call", "tool_result", "steering", "a_name_lia_adds_later" };
         _ = try s.append(&.{.turn_started});
         for (types) |t| _ = try s.append(&.{.{ .item = .{ .type = t, .data = "{}" } }});
         _ = try s.append(&.{.turn_committed});

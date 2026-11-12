@@ -80,7 +80,7 @@ Item(s, b) ==
 
 \* append(set{blobs}): a setting may list blobs, inside a turn or outside it,
 \* under the item's rule: the manager checks the blob exists in this
-\* session. fx writes such lines when it moves a session off its side folder
+\* session. lia writes such lines when it moves a session off its side folder
 \* (D47) and when its compactor keeps records (D50). One per session bounds
 \* the states; more such lines behave as more items do.
 SetBlob(s, b) ==

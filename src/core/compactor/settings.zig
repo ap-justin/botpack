@@ -1,5 +1,5 @@
 //! The `auto_compact_percent` setting: how full a request gets before
-//! fx-compactor runs on its own.
+//! lia-compactor runs on its own.
 
 const std = @import("std");
 

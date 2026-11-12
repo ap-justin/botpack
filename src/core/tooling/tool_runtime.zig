@@ -147,7 +147,7 @@ pub const Context = struct {
     account_id: ?[]const u8 = null,
     provider: model_provider.ProviderId = .gateway,
     provider_capabilities: provider_set.Bundle.Capabilities = .{
-        .fx_search = true,
+        .lia_search = true,
         .vision_fallback = true,
     },
     oauth_transport: oauth_transport.Provider = oauth_transport.unavailable_provider,
@@ -230,7 +230,7 @@ pub const Context = struct {
     tool_progress_ctx: ?*anyopaque = null,
     on_tool_progress: ?*const fn (*anyopaque, types.ToolLifecycleId, []const u8) void = null,
     /// Where a tool call shows rows for tool calls it makes itself: the MCP
-    /// calls of an `fx mcp call` its command runs. Null shows none.
+    /// calls of a `lia mcp call` its command runs. Null shows none.
     nested_tool_lifecycle: ?ToolLifecyclePublisher = null,
     subagent_status_renderer: ?types.SubagentStatusRenderer = null,
     advertised_dynamic_tool_names: []const []const u8 = &.{},
@@ -968,7 +968,7 @@ fn executeRegisteredTool(
     return execution;
 }
 
-/// Lends this tool call's permission check and MCP call to the `fx mcp call`
+/// Lends this tool call's permission check and MCP call to the `lia mcp call`
 /// bridge while the call runs (`mcp_call_capability.zig`).
 const McpCallBridgeState = struct {
     runtime: Context,
@@ -992,7 +992,7 @@ fn authorizeBridgeCall(
     const state: *McpCallBridgeState = @ptrCast(@alignCast(raw));
     const ctx = state.runtime;
     if (ctx.tool_registry.lookup(tool) != null) {
-        return .{ .deny = try arena.print("{s} is a built-in tool; fx mcp call runs MCP tools only.", .{tool}) };
+        return .{ .deny = try arena.print("{s} is a built-in tool; lia mcp call runs MCP tools only.", .{tool}) };
     }
     const resolved = (try resolveUnselectedMcpTool(ctx, arena, tool)) orelse {
         return .{ .deny = try arena.print("No MCP tool named {s} is available to this agent. Find tool names with capability_search.", .{tool}) };
@@ -1138,7 +1138,7 @@ fn callBridgeTool(
         .success => .{ .status = .ok, .bytes = try bridgeResultData(arena, result.model_output) },
         .tool_failure => .{ .status = .tool_error, .bytes = try bridgeResultData(arena, result.model_output) },
         .protocol_failure => .{ .status = .failed, .bytes = result.model_output },
-        .input_required => .{ .status = .failed, .bytes = "This tool asked for input that fx mcp call cannot give. Call the tool directly instead." },
+        .input_required => .{ .status = .failed, .bytes = "This tool asked for input that lia mcp call cannot give. Call the tool directly instead." },
     };
 }
 
@@ -1193,7 +1193,7 @@ const max_bridge_list_pages = 100;
 /// may hold a whole page of tools.
 const bridge_search_page_bytes = 256 * 1024;
 
-/// Answers `fx mcp call list`, `search`, and `help` with the tools this agent
+/// Answers `lia mcp call list`, `search`, and `help` with the tools this agent
 /// may use: the same search and schemas as its own `capability_search`, with
 /// the same access and permission rules.
 fn lookupBridge(
@@ -1208,10 +1208,10 @@ fn lookupBridge(
     switch (question) {
         .help => |tool| {
             if (ctx.tool_registry.lookup(tool) != null) {
-                return .{ .status = .failed, .bytes = try arena.print("{s} is a built-in tool; fx mcp call runs MCP tools only.", .{tool}) };
+                return .{ .status = .failed, .bytes = try arena.print("{s} is a built-in tool; lia mcp call runs MCP tools only.", .{tool}) };
             }
             const resolved = (try resolveUnselectedMcpTool(ctx, arena, tool)) orelse {
-                return .{ .status = .failed, .bytes = try arena.print("No MCP tool named {s} is available to this agent. Find tool names with fx mcp call search.", .{tool}) };
+                return .{ .status = .failed, .bytes = try arena.print("No MCP tool named {s} is available to this agent. Find tool names with lia mcp call search.", .{tool}) };
             };
             mcp_tool_lookup.writeHelp(arena, &out.writer, resolved.schema_json) catch |err| switch (err) {
                 error.OutOfMemory, error.WriteFailed => return error.OutOfMemory,
@@ -1223,7 +1223,7 @@ fn lookupBridge(
             const search = ctx.mcp_search_tools orelse return .{ .status = .failed, .bytes = "MCP is not available in this session." };
             const query = try arena.create(lexical_relevance.PreparedQuery);
             query.* = lexical_relevance.prepare(if (question == .list) "" else text) catch |err| {
-                return .{ .status = .failed, .bytes = try arena.print("fx can't search for that: {s}.", .{@errorName(err)}) };
+                return .{ .status = .failed, .bytes = try arena.print("lia can't search for that: {s}.", .{@errorName(err)}) };
             };
             var limits = ctx.context_limits;
             limits.mcp_search_result_bytes.value = .{ .bytes = bridge_search_page_bytes };
@@ -1237,12 +1237,12 @@ fn lookupBridge(
                     .cursor = cursor,
                 };
                 request.validate() catch |err| {
-                    return .{ .status = .failed, .bytes = try arena.print("fx can't search for that: {s}.", .{@errorName(err)}) };
+                    return .{ .status = .failed, .bytes = try arena.print("lia can't search for that: {s}.", .{@errorName(err)}) };
                 };
                 const result = try search(runtime, arena, request, ctx.permission_rules, limits, ctx.mcp_access, cancel);
                 const page = mcp_tool_lookup.writeToolLines(arena, &out.writer, result.model_output) catch |err| switch (err) {
                     error.OutOfMemory, error.WriteFailed => return error.OutOfMemory,
-                    error.InvalidSearchPage => return .{ .status = .failed, .bytes = "The MCP search returned a page fx could not read." },
+                    error.InvalidSearchPage => return .{ .status = .failed, .bytes = "The MCP search returned a page lia could not read." },
                 };
                 if (page.problem) |problem| if (out.written().len == 0) return .{ .status = .failed, .bytes = problem };
                 if (question == .search) break;
@@ -1331,13 +1331,13 @@ test "a bridge call of a server-qualified spelling is checked and called under t
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const allowed = switch (try capability.authorize(arena, "fx-mcp-call-1", "fs.read", "{}")) {
+    const allowed = switch (try capability.authorize(arena, "lia-mcp-call-1", "fs.read", "{}")) {
         .allow => |value| value,
         .deny => return error.TestExpectedAuthorization,
     };
     try std.testing.expectEqualStrings("mcp_fs_read", allowed.tool orelse "");
     var cancel: std.atomic.Value(bool) = .init(false);
-    const outcome = try capability.call(arena, "fx-mcp-call-1", "fs.read", "{}", allowed, &cancel);
+    const outcome = try capability.call(arena, "lia-mcp-call-1", "fs.read", "{}", allowed, &cancel);
     try std.testing.expectEqual(mcp_call_capability.CallStatus.ok, outcome.status);
     try std.testing.expectEqualStrings("mcp ok", outcome.bytes);
     try std.testing.expectEqual(@as(usize, 1), server.calls);
@@ -2800,7 +2800,7 @@ const test_tool_registry = tool_dispatch.Registry{ .tools = &.{
 } };
 
 fn matchesTestRunCommandCompatibility(command: []const u8) bool {
-    return std.mem.startsWith(u8, command, "fx-compatibility-probe");
+    return std.mem.startsWith(u8, command, "lia-compatibility-probe");
 }
 
 fn executeTestRunCommandCompatibility(
@@ -2905,7 +2905,7 @@ const TestRuntime = struct {
     api_key: []const u8 = "",
     provider: model_provider.ProviderId = .gateway,
     provider_capabilities: provider_set.Bundle.Capabilities = .{
-        .fx_search = true,
+        .lia_search = true,
         .vision_fallback = true,
     },
     gateway_team: ?[]const u8 = null,
@@ -3125,7 +3125,7 @@ test "captured command compatibility bypasses compound commands" {
     const arena = arena_state.allocator();
 
     try std.testing.expect((try tool_dispatch.dispatchRunCommandCompatibility(typedDispatchContext(rt.context(), arena), rt.tool_registry, .{
-        .command = "fx-compatibility-probe; printf shell-fallback",
+        .command = "lia-compatibility-probe; printf shell-fallback",
         .resolved_cwd = "/tmp",
         .environment = .legacy,
         .timeout_ms = 600_000,
@@ -3139,7 +3139,7 @@ test "captured command compatibility bypasses compound commands" {
             typedDispatchContext(rt.context(), arena),
             rt.tool_registry,
             .{
-                .command = "fx-compatibility-probe",
+                .command = "lia-compatibility-probe",
                 .resolved_cwd = "/tmp",
                 .environment = environment,
                 .timeout_ms = 600_000,
@@ -3161,7 +3161,7 @@ test "run command compatibility returns installer failure without shell fallback
         typedDispatchContext(rt.context(), arena_state.allocator()),
         rt.tool_registry,
         .{
-            .command = "fx-compatibility-probe",
+            .command = "lia-compatibility-probe",
             .resolved_cwd = "/tmp",
             .environment = .legacy,
             .timeout_ms = 600_000,
@@ -4357,7 +4357,7 @@ test "non-web_fetch tool-call metrics retain bounded args and result" {
     diagnostics.recordToolCallResult(.{
         .name = "read_file",
         .arguments_json = "{\"path\":\"README.md\"}",
-        .model_output = "<path>README.md</path>\n<content>\n# fx\nnormal result\n</content>",
+        .model_output = "<path>README.md</path>\n<content>\n# lia\nnormal result\n</content>",
         .outcome = .succeeded,
         .started_at_ms = 1000,
     });
@@ -4367,7 +4367,7 @@ test "non-web_fetch tool-call metrics retain bounded args and result" {
     try std.testing.expectEqual(@as(usize, 1), n);
     try std.testing.expectEqualStrings("read_file", buf[0].name());
     try expectContains(buf[0].args(), "README.md");
-    try expectContains(buf[0].result(), "# fx");
+    try expectContains(buf[0].result(), "# lia");
     try expectContains(buf[0].result(), "normal result");
 }
 
@@ -4393,7 +4393,7 @@ test "request tool permission keeps safe defaults while local writes bypass revi
     try std.testing.expectEqual(ToolPermissionDecision.once, (try tool_admission.requestPermissionOutcome(rt.context().admissionInput(), arena, .{
         .id = "1",
         .name = "write_file",
-        .arguments_json = "{\"path\":\"fx-permission-test.txt\",\"content\":\"hello\"}",
+        .arguments_json = "{\"path\":\"lia-permission-test.txt\",\"content\":\"hello\"}",
     }, .auto, &.{})).decision);
 
     try std.testing.expectEqual(ToolPermissionDecision.once, (try tool_admission.requestPermissionOutcome(rt.context().admissionInput(), arena, .{
@@ -5885,7 +5885,7 @@ test "required replay spill failure returns recoverable capture failure" {
     const alloc = std.testing.allocator;
     var store = command_replay_store.EphemeralStore.initForTesting(
         alloc,
-        "/definitely/missing/fx-replay-dir",
+        "/definitely/missing/lia-replay-dir",
     );
     defer store.deinit();
     var rt = TestRuntime{
@@ -7259,7 +7259,7 @@ test "install_skill explicit tool installs local skill source" {
     var arena_state = std.heap.ArenaAllocator.init(alloc);
     defer arena_state.deinit();
     const result = try executeToolCall(rt.context(), arena_state.allocator(), .{ .id = "1", .name = "install_skill", .arguments_json = args_json });
-    try expectContains(result.model_output, "Installed 1 skill(s) into fx.");
+    try expectContains(result.model_output, "Installed 1 skill(s) into lia.");
     try expectContains(result.model_output, "- workflow&quot;&lt;injected&gt;\n");
     try expectNotContains(result.model_output, "<skill");
     try expectNotContains(result.model_output, "BODY SENTINEL");
@@ -7283,10 +7283,10 @@ test "skill tool preserves resource and discovery notices separately" {
     defer tmp.cleanup();
 
     try tmp.dir.createDirPath(io_mod.getIo(), "home/workspace");
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx/skills/workflow/assets");
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx/skills/malformed");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia/skills/workflow/assets");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia/skills/malformed");
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.fx/skills/workflow/SKILL.md", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.lia/skills/workflow/SKILL.md", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(
             io_mod.getIo(),
@@ -7294,19 +7294,19 @@ test "skill tool preserves resource and discovery notices separately" {
         );
     }
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.fx/skills/workflow/assets/data.txt", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.lia/skills/workflow/assets/data.txt", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(io_mod.getIo(), "hello\n");
     }
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.fx/skills/malformed/SKILL.md", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.lia/skills/malformed/SKILL.md", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(io_mod.getIo(), "---\ndescription: missing name\n---\nMALFORMED BODY");
     }
 
     const workspace_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/workspace");
     defer alloc.free(workspace_root);
-    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.fx/skills");
+    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.lia/skills");
     defer alloc.free(skills_dir);
     try setTestHome(null);
     defer io_mod.resetEnvironForTest();
@@ -7341,7 +7341,7 @@ test "skill tool loads the exact advertised duplicate and rejects ambiguous or u
     defer tmp.cleanup();
 
     try tmp.dir.createDirPath(io_mod.getIo(), "home/workspace/.agents/skills/workflow/assets");
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx/skills/workflow/assets");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia/skills/workflow/assets");
     try tmp.dir.createDirPath(io_mod.getIo(), "home/outside/workflow/assets");
     {
         var file = try tmp.dir.createFile(io_mod.getIo(), "home/workspace/.agents/skills/workflow/SKILL.md", .{});
@@ -7354,12 +7354,12 @@ test "skill tool loads the exact advertised duplicate and rejects ambiguous or u
         try file.writeStreamingAll(io_mod.getIo(), "WORKSPACE COMPANION A\n");
     }
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.fx/skills/workflow/SKILL.md", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.lia/skills/workflow/SKILL.md", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(io_mod.getIo(), "---\nname: workflow\ndescription: managed workflow\n---\n\nMANAGED BODY B\n");
     }
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.fx/skills/workflow/assets/b-only.txt", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.lia/skills/workflow/assets/b-only.txt", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(io_mod.getIo(), "MANAGED COMPANION B\n");
     }
@@ -7376,11 +7376,11 @@ test "skill tool loads the exact advertised duplicate and rejects ambiguous or u
 
     const workspace_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/workspace");
     defer alloc.free(workspace_root);
-    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.fx/skills");
+    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.lia/skills");
     defer alloc.free(skills_dir);
     const workspace_skill = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/workspace/.agents/skills/workflow");
     defer alloc.free(workspace_skill);
-    const managed_skill = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.fx/skills/workflow");
+    const managed_skill = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.lia/skills/workflow");
     defer alloc.free(managed_skill);
     const outside_skill = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/outside/workflow");
     defer alloc.free(outside_skill);
@@ -7431,16 +7431,16 @@ test "name-only skill call rediscovers a duplicate added after the first read" {
     defer tmp.cleanup();
 
     try tmp.dir.createDirPath(io_mod.getIo(), "home/workspace");
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx/skills/workflow");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia/skills/workflow");
     {
-        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.fx/skills/workflow/SKILL.md", .{});
+        var file = try tmp.dir.createFile(io_mod.getIo(), "home/.lia/skills/workflow/SKILL.md", .{});
         defer file.close(io_mod.getIo());
         try file.writeStreamingAll(io_mod.getIo(), "---\nname: workflow\ndescription: managed workflow\n---\n\nMANAGED BODY A\n");
     }
 
     const workspace_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/workspace");
     defer alloc.free(workspace_root);
-    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.fx/skills");
+    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.lia/skills");
     defer alloc.free(skills_dir);
     try setTestHome(null);
     defer io_mod.resetEnvironForTest();
@@ -7495,11 +7495,11 @@ test "skill tool reports missing skill" {
     defer tmp.cleanup();
 
     try tmp.dir.createDirPath(io_mod.getIo(), "home/workspace");
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx/skills");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia/skills");
 
     const workspace_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/workspace");
     defer alloc.free(workspace_root);
-    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.fx/skills");
+    const skills_dir = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home/.lia/skills");
     defer alloc.free(skills_dir);
     try setTestHome(null);
     defer io_mod.resetEnvironForTest();

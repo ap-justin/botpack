@@ -1,4 +1,4 @@
-//! In-process owner of the `tty=true` terminals one fx process starts.
+//! In-process owner of the `tty=true` terminals one lia process starts.
 //!
 //! Requests are admitted without I/O, then run on worker threads against a
 //! native session registry and durable profile store that are created on the
@@ -1085,7 +1085,7 @@ test "ordered mutations run in ticket order" {
 }
 
 /// Drives one real terminal through the in-process runtime. The launcher is
-/// the installed fx binary that `zig build test` provides.
+/// the installed lia binary that `zig build test` provides.
 const LiveTerminalFixture = struct {
     const owner_session_id = "terminal-client-owner";
     const action_executor = @import("action_executor.zig");
@@ -1111,9 +1111,9 @@ const LiveTerminalFixture = struct {
             .{ .iterate = true, .follow_symlinks = false },
         ) };
         defer root.close();
-        var fx_dir = try io_mod.openOrCreateVerifiedPrivateDir(&root, ".fx");
-        defer fx_dir.close();
-        var sessions = try io_mod.openOrCreateVerifiedPrivateDir(&fx_dir, "sessions");
+        var lia_dir = try io_mod.openOrCreateVerifiedPrivateDir(&root, ".lia");
+        defer lia_dir.close();
+        var sessions = try io_mod.openOrCreateVerifiedPrivateDir(&lia_dir, "sessions");
         defer sessions.close();
         var owner = try io_mod.openOrCreateVerifiedPrivateDir(&sessions, owner_session_id);
         owner.close();
@@ -1262,7 +1262,7 @@ const LiveTerminalFixture = struct {
         const name = try alloc.print("record-{s}.json", .{session_id});
         defer alloc.free(name);
         const path = try std.Io.Dir.path.join(alloc, &.{
-            ".fx", "sessions", owner_session_id, "terminal", "state", name,
+            ".lia", "sessions", owner_session_id, "terminal", "state", name,
         });
         defer alloc.free(path);
         const bytes = try fixture.tmp.dir.readFileAlloc(
@@ -1289,7 +1289,7 @@ const LiveTerminalFixture = struct {
         const name = try alloc.print("record-{s}.json", .{session_id});
         defer alloc.free(name);
         const path = try std.Io.Dir.path.join(alloc, &.{
-            ".fx", "sessions", owner_session_id, "terminal", "state", name,
+            ".lia", "sessions", owner_session_id, "terminal", "state", name,
         });
         defer alloc.free(path);
         const bytes = try fixture.tmp.dir.readFileAlloc(

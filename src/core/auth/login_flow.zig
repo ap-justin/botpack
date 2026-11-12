@@ -330,7 +330,7 @@ pub const SignInRuntime = struct {
     /// the input loop can open the browser for it.
     browser_pending: bool = false,
 
-    /// Starts an fx login sign-in. On native hosts the issuer discovery and
+    /// Starts a lia login sign-in. On native hosts the issuer discovery and
     /// device-code request run on the sign-in worker, so the input loop never
     /// waits on them; `snapshot().preparing` holds until the code arrives.
     pub fn start(
@@ -864,7 +864,7 @@ pub fn loadTeamSelection(
         var loaded = (try mutation.load(alloc)) orelse return LoginError.NoSession;
         errdefer loaded.deinit(alloc);
         if (loaded.expired(io_mod.milliTimestamp())) {
-            try credentials.refreshFxSession(alloc, transport, &mutation, &loaded);
+            try credentials.refreshLiaSession(alloc, transport, &mutation, &loaded);
         }
         break :blk loaded;
     };
@@ -902,7 +902,7 @@ pub fn logout(
     return result;
 }
 
-/// The outcome of deleting the saved fx login session, with the deleted
+/// The outcome of deleting the saved lia login session, with the deleted
 /// session kept so its tokens can still be revoked.
 pub const LocalLogout = struct {
     result: LogoutResult = .{},
@@ -911,7 +911,7 @@ pub const LocalLogout = struct {
     session: ?oauth_session.Session = null,
 };
 
-/// Deletes the saved fx login session without contacting the issuer. Revoke
+/// Deletes the saved lia login session without contacting the issuer. Revoke
 /// the returned session with `revokeLoggedOutSession`, then release it.
 pub fn logoutLocally(alloc: Allocator) LogoutError!LocalLogout {
     var session: ?oauth_session.Session = null;
@@ -1161,7 +1161,7 @@ const BrowserOpenPrompt = struct {
         const stdin_is_tty = try std.Io.File.stdin().isTty(io_mod.getIo());
         return .{
             .url = url,
-            .enabled = browserOpenEnabled(io_mod.getenv("FX_NO_OPEN_BROWSER") != null, stdin_is_tty, host.current()),
+            .enabled = browserOpenEnabled(io_mod.getenv("LIA_NO_OPEN_BROWSER") != null, stdin_is_tty, host.current()),
         };
     }
 

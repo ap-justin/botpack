@@ -22,7 +22,7 @@ const sort_utils = @import("../shared/sort_utils.zig");
 
 const Allocator = std.mem.Allocator;
 
-/// Where records are kept: plain named files that fx-compactor's caller
+/// Where records are kept: plain named files that lia-compactor's caller
 /// provides, such as a session's tool-results folder. The store checks names
 /// and reports missing files as `FileNotFound`.
 pub const Store = struct {
@@ -326,7 +326,7 @@ fn writeCoverage(writer: *std.Io.Writer, query: Query, docs: []const Doc) !void 
 }
 
 /// Transcripts of earlier conversation saved by the previous compactor. They
-/// hold what came before fx saved numbered turns and tool calls.
+/// hold what came before lia saved numbered turns and tool calls.
 fn isEarlierArchive(name: []const u8) bool {
     return std.mem.startsWith(u8, name, "result-source-") and std.mem.endsWith(u8, name, file_suffix);
 }

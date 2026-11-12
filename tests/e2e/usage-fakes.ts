@@ -1,5 +1,5 @@
-// Loopback fakes for `fx usage`. One handler answers every usage
-// read fx makes, so a single fake gateway serves chat, models, and usage:
+// Loopback fakes for `lia usage`. One handler answers every usage
+// read lia makes, so a single fake gateway serves chat, models, and usage:
 // AI Gateway's /v1/report and the Vercel usage-report budget. Every name and
 // token here is synthetic.
 
@@ -78,9 +78,9 @@ export function usageFake(options: UsageFakeOptions = {}) {
 /** Points every usage origin at `baseUrl` and pins `/usage`'s clock. */
 export function usageEnv(baseUrl: string, clockFile: string) {
   return {
-    FX_GATEWAY_BASE_URL: baseUrl,
-    FX_TEST_USAGE_CLOCK_FILE: clockFile,
-    FX_DISABLE_KEYCHAIN: "1",
+    LIA_GATEWAY_BASE_URL: baseUrl,
+    LIA_TEST_USAGE_CLOCK_FILE: clockFile,
+    LIA_DISABLE_KEYCHAIN: "1",
   };
 }
 

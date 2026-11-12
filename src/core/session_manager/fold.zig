@@ -20,10 +20,10 @@ pub const Child = struct {
     open: bool = true,
     /// How the newest finished work item ended; null before the first finish.
     outcome: ?schema.Outcome = null,
-    /// fx's `data` from the newest `child_spawned` and `child_finished`.
+    /// lia's `data` from the newest `child_spawned` and `child_finished`.
     spawn_data: ?[]u8 = null,
     finish_data: ?[]u8 = null,
-    /// Seq of the newest line about this child; fx uses it as a generation.
+    /// Seq of the newest line about this child; lia uses it as a generation.
     seq: u64,
 
     fn deinit(child: Child, gpa: std.mem.Allocator) void {
@@ -79,7 +79,7 @@ pub const State = struct {
     /// Every child spawned in this session, in first-spawn order (D22).
     children: std.ArrayList(Child) = .empty,
     last_compaction_seq: ?u64 = null,
-    /// Byte offset of the newest `compacted` line. fx's `data` there may
+    /// Byte offset of the newest `compacted` line. lia's `data` there may
     /// keep a tail of earlier lines, which the adapter reads back to.
     compaction_offset: ?u64 = null,
     /// The last line is `closed`.
@@ -271,9 +271,9 @@ pub const Event = union(enum) {
     child_finished: schema.Body.Finished,
 };
 
-/// One completed piece of a turn: fx's data, and the blobs it refers to.
+/// One completed piece of a turn: lia's data, and the blobs it refers to.
 pub const Piece = struct {
-    /// fx's name for the piece, such as `steering` or `tool_result` (D17).
+    /// lia's name for the piece, such as `steering` or `tool_result` (D17).
     type: []const u8,
     data: []const u8,
     blobs: []const []const u8 = &.{},

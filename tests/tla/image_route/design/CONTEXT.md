@@ -4,25 +4,25 @@ Line numbers refer to `origin/main` at `b0a90fd3a` unless a line says "this chan
 
 ## The report
 
-A libfx user building an AI SDK harness adapter reported that an image in a tool result never reaches the agent unless they pass a custom `model`. The default model, `spacexai/grok-4.7`, is listed in fx's model catalog with `vision` but without `file-input`, and fx requires both. The report held on libfx 0.0.13 and again on 0.0.14. The reproduction is the AI SDK example `examples/ai-functions/src/harness-agent/fx/with-to-model-output.ts`, lines 53–54, which set the model. Removing them makes the image disappear.
+A libfx user building an AI SDK harness adapter reported that an image in a tool result never reaches the agent unless they pass a custom `model`. The default model, `spacexai/grok-4.7`, is listed in lia's model catalog with `vision` but without `file-input`, and lia requires both. The report held on libfx 0.0.13 and again on 0.0.14. The reproduction is the AI SDK example `examples/ai-functions/src/harness-agent/lia/with-to-model-output.ts`, lines 53–54, which set the model. Removing them makes the image disappear.
 
-Both catalogs fx reads were fetched on 2026-10-19:
+Both catalogs lia reads were fetched on 2026-10-19:
 
 | Catalog | Used by | Models | `spacexai/grok-4.7` tags |
 | --- | --- | --- | --- |
-| `https://ai-gateway.vercel.sh/coding-agent/v1/models` | capability lookups (`src/builtins/gateway.zig:46`, the E2E fake at `tests/e2e/gateway-stream-lifecycle.test.ts:1305`), libfx `listModels` (`sdk/fx-sdk.js:611`) | 263 | `reasoning`, `tool-use`, `implicit-caching`, `vision`, `structured-output` |
+| `https://ai-gateway.vercel.sh/coding-agent/v1/models` | capability lookups (`src/builtins/gateway.zig:46`, the E2E fake at `tests/e2e/gateway-stream-lifecycle.test.ts:1305`), libfx `listModels` (`sdk/lia-sdk.js:611`) | 263 | `reasoning`, `tool-use`, `implicit-caching`, `vision`, `structured-output` |
 | `https://ai-gateway.vercel.sh/v1/models` | the public catalog, and the fallback models path when no web-search path is set (`src/core/app/app_agent_runtime.zig:250`) | 478 | the same |
 
 In `/v1/models`, 73 models list `vision` without `file-input`, including the default and `spacexai/grok-4.6`. None lists `file-input` without `vision`.
 
-The AI Gateway documents the two tags as separate capabilities. Vision covers images such as a PNG screenshot. File input covers documents such as a PDF ([Inputs and Tools](https://vercel.com/docs/ai-gateway/inputs-and-tools)). For the AI SDK format that fx speaks, image input is "a `file` part with an `image/*` `mediaType`" ([Vision and Image Input](https://vercel.com/docs/ai-gateway/inputs-and-tools/vision)).
+The AI Gateway documents the two tags as separate capabilities. Vision covers images such as a PNG screenshot. File input covers documents such as a PDF ([Inputs and Tools](https://vercel.com/docs/ai-gateway/inputs-and-tools)). For the AI SDK format that lia speaks, image input is "a `file` part with an `image/*` `mediaType`" ([Vision and Image Input](https://vercel.com/docs/ai-gateway/inputs-and-tools/vision)).
 
 ## Entry points
 
 | Entry point | Path to the decision |
 | --- | --- |
-| `fx`, `fx ask` | `processQueuedPromptLoop` (`src/core/agent/runtime/orchestrator.zig:6915`) builds every model request of a turn |
-| libfx `createFxEngine` (native and WebAssembly) | The ACP server in the Zig core, then the same loop. A host tool returns `{ type: "libfx.tool-result", text, images }` (`sdk/tests/test-agent-images.mjs:1266`), which becomes `tool_result_memory.tool_images` |
+| `lia`, `lia ask` | `processQueuedPromptLoop` (`src/core/agent/runtime/orchestrator.zig:6915`) builds every model request of a turn |
+| libfx `createLiaEngine` (native and WebAssembly) | The ACP server in the Zig core, then the same loop. A host tool returns `{ type: "libfx.tool-result", text, images }` (`sdk/tests/test-agent-images.mjs:1266`), which becomes `tool_result_memory.tool_images` |
 | `read_file` on an image | The same loop, with the image in `tool_result_memory` (`tests/e2e/file-tool-paths.test.ts:349-440`) |
 
 The default model is `spacexai/grok-4.7` (`src/builtins/gateway.zig:43`).
@@ -58,7 +58,7 @@ The default model is `spacexai/grok-4.7` (`src/builtins/gateway.zig:43`).
 ## Contracts and saved formats
 
 - `ImageInputSupport` (`model_capabilities.zig:36-40`) is in-memory only. `/model` info prints it next to `supports_vision` and `supports_file_input` (`src/core/app/app_commands.zig:3048-3050`).
-- The catalog `tags` array is an external contract that fx reads and never writes.
+- The catalog `tags` array is an external contract that lia reads and never writes.
 - The routing decision, the withheld-image notice, and the materialized image bytes are built per request in the overlay arena and never saved (`orchestrator.zig:7494-7507`). Sessions save tool images by handle or name, as before. No saved format records image support.
 - The wire format is the AI SDK prompt with `file` parts. It doesn't change.
 
@@ -92,7 +92,7 @@ The only fakes are effect handlers at the edge of a shell:
 | The catalog reply | `tests/tla/drivers/image_route/code-to-spec.ts`, `spec-to-code.ts` | The result of the core's `resolve_capabilities` effect, and the capabilities a turn starts with, given as a catalog view the harness turns into support with the real `supportFromCatalog` |
 | Recording `send`, `fail`, and `notify` | `tests/tla/drivers/image_route/harness.zig` | Sending the request, failing the turn, and printing the notice. The harness prints the effects instead of running them |
 | A crash | `Harness.crash` in `tests/tla/drivers/image_route/lib.ts` | A process dying. The driver kills the harness process with `SIGKILL` and starts a new one |
-| The fake gateway | `startFakeGateway` (`tests/e2e/fake-gateway.ts`) in `tests/e2e/file-tool-paths.test.ts` | The catalog and the model, for the built `fx` binary |
+| The fake gateway | `startFakeGateway` (`tests/e2e/fake-gateway.ts`) in `tests/e2e/file-tool-paths.test.ts` | The catalog and the model, for the built `lia` binary |
 | `mockGateway` | `sdk/tests/test-agent-images.mjs:79-101` | The catalog and the model, for libfx |
 
 The drivers call the real `src/core/images/image_route.zig` through the harness. They never reimplement it.

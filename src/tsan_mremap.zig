@@ -9,7 +9,7 @@
 //! has to move, it maps a new one, copies, and unmaps the old one.
 //!
 //! The copy relies on the mapping being private, anonymous, and readable and
-//! writable. fx calls `mremap` only through `std.heap.PageAllocator`, whose
+//! writable. lia calls `mremap` only through `std.heap.PageAllocator`, whose
 //! mappings are. Any other flags go straight to the kernel.
 //!
 //! libc declares `mremap` variadic and reads a fifth argument only with

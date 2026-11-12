@@ -1,5 +1,5 @@
-//! The `fx mcp call` bridge: the shell around the pure core in
-//! `mcp_call.zig`. A command that fx's shell tool runs can call the
+//! The `lia mcp call` bridge: the shell around the pure core in
+//! `mcp_call.zig`. A command that lia's shell tool runs can call the
 //! session's MCP tools through it, so a large result can go to a file
 //! instead of into the model's context.
 //!
@@ -170,7 +170,7 @@ fn startLocked(io: std.Io) !void {
     const tmp = std.mem.trimEnd(u8, io_mod.getenv("TMPDIR") orelse "/tmp", "/");
     // A Unix socket path is at most 104 bytes on macOS.
     const base = if (tmp.len + 40 < 100) tmp else "/tmp";
-    const dir_path = try gpa.print("{s}/fx-mcp-{s}", .{ base, &hex });
+    const dir_path = try gpa.print("{s}/lia-mcp-{s}", .{ base, &hex });
     errdefer gpa.free(dir_path);
     const socket_path = try gpa.print("{s}/s", .{dir_path});
     errdefer gpa.free(socket_path);
@@ -318,11 +318,11 @@ fn writeReply(stream: std.Io.net.Stream, status: wire.Status, reason: ?wire.Reas
 
 fn refusalMessage(reason: wire.Reason) []const u8 {
     return switch (reason) {
-        .closed => "The fx session's shell call that started this command has ended. Run fx mcp call from a command in a new shell call.",
-        .unauthorized => "This command was not started by a running fx shell call, or that call has ended. Run fx mcp call from a command fx's shell tool runs, not from one left running in the background.",
-        .unsupported_version => "This fx mcp call is from another fx version than the running session. Run the fx that started the session, or restart the session with this one.",
-        .busy => "Too many fx mcp call requests are running in this session. Nothing ran; try again when one finishes.",
-        .malformed => "The request was not an fx mcp call request. Send requests with the fx that started the session.",
+        .closed => "The lia session's shell call that started this command has ended. Run lia mcp call from a command in a new shell call.",
+        .unauthorized => "This command was not started by a running lia shell call, or that call has ended. Run lia mcp call from a command lia's shell tool runs, not from one left running in the background.",
+        .unsupported_version => "This lia mcp call is from another lia version than the running session. Run the lia that started the session, or restart the session with this one.",
+        .busy => "Too many lia mcp call requests are running in this session. Nothing ran; try again when one finishes.",
+        .malformed => "The request was not a lia mcp call request. Send requests with the lia that started the session.",
         .too_large => "The request is over 1 MiB. Pass smaller arguments.",
     };
 }
@@ -379,7 +379,7 @@ fn serve(stream: std.Io.net.Stream) void {
     bridge.mutex.lockUncancelable(io);
     bridge.live.ensureUnusedCapacity(gpa, 1) catch {
         bridge.mutex.unlock(io);
-        _ = writeReply(stream, .failed, null, "fx could not take this request: out of memory.");
+        _ = writeReply(stream, .failed, null, "lia could not take this request: out of memory.");
         return;
     };
     const admitted = step(.{ .request = .{ .token = request.token orelse @splat(0), .version = request.version } });
@@ -429,7 +429,7 @@ fn serve(stream: std.Io.net.Stream) void {
         task.await(io);
     };
 
-    const request_id = arena.print("fx-mcp-call-{d}", .{@backingInt(work.id)}) catch "fx-mcp-call";
+    const request_id = arena.print("lia-mcp-call-{d}", .{@backingInt(work.id)}) catch "lia-mcp-call";
     // A lookup reads tool metadata only, like the agent's own
     // `capability_search`, so it has no permission check to wait for.
     const authorization: capability_mod.Authorization = switch (request.operation) {

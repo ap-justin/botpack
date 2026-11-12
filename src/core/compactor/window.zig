@@ -1,4 +1,4 @@
-//! Which part of the conversation fx-compactor compacts. The newest turns
+//! Which part of the conversation lia-compactor compacts. The newest turns
 //! stay unchanged within a share of the room the request aims for right
 //! after compaction; everything older is compacted. The compacted part keeps
 //! every user message and final reply, so a long session may need more than
@@ -38,7 +38,7 @@ pub const Size = struct {
     /// definitions, measured like the request. When unknown, half of the
     /// room after compaction is set aside for it.
     fixed_tokens: ?usize = null,
-    /// How far fx's token estimate ran from the provider's count on a recent
+    /// How far lia's token estimate ran from the provider's count on a recent
     /// request. The compactor measures text with that estimate, so its room
     /// is scaled by the same ratio.
     correction: ?Correction = null,
@@ -50,7 +50,7 @@ pub const Size = struct {
     /// `estimated`.
     pub const Correction = struct { estimated: usize, measured: usize };
 
-    /// `tokens` as the provider counts them, in fx's estimate.
+    /// `tokens` as the provider counts them, in lia's estimate.
     fn estimate(self: Size, tokens: usize) usize {
         const correction = self.correction orelse return tokens;
         if (correction.estimated == 0 or correction.measured == 0 or tokens == std.math.maxInt(usize)) return tokens;
@@ -481,7 +481,7 @@ test "the kept turns get a share of a fifth of the usable input, less the fixed 
     try testing.expectEqual(@as(usize, 100_000), (Size{ .compact_at_tokens = 800_000, .usable_tokens = 1_000_000 }).conversationTokens());
     try testing.expectEqual(@as(usize, 50_000), (Size{ .compact_at_tokens = 800_000, .usable_tokens = 1_000_000, .fixed_tokens = 190_000 }).conversationTokens());
     try testing.expectEqual(std.math.maxInt(usize), (Size{ .compact_at_tokens = null, .usable_tokens = null }).conversationTokens());
-    // When the provider counts a third more tokens than fx estimates, the
+    // When the provider counts a third more tokens than lia estimates, the
     // compactor's estimated room shrinks to match.
     var counted_more = large;
     counted_more.correction = .{ .estimated = 30_000, .measured = 40_000 };
@@ -595,7 +595,7 @@ test "a summary request may use the usable input, less after an overflow" {
 
 test "a request after the conversation gets what the conversation leaves" {
     try testing.expectEqual(@as(?usize, 10_000), (Size{ .compact_at_tokens = 96_000, .usable_tokens = 120_000, .request_tokens = 110_000 }).roomAfterConversation());
-    // In fx's estimate when the provider counts a third more.
+    // In lia's estimate when the provider counts a third more.
     try testing.expectEqual(@as(?usize, 7_500), (Size{ .compact_at_tokens = 96_000, .usable_tokens = 120_000, .request_tokens = 110_000, .correction = .{ .estimated = 30_000, .measured = 40_000 } }).roomAfterConversation());
     try testing.expectEqual(@as(?usize, null), (Size{ .compact_at_tokens = 96_000, .usable_tokens = 120_000 }).roomAfterConversation());
     try testing.expectEqual(@as(?usize, null), (Size{ .compact_at_tokens = 96_000, .usable_tokens = 120_000, .request_tokens = 120_000 }).roomAfterConversation());

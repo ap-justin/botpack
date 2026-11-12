@@ -19,6 +19,7 @@ pub fn derive(
 ) ?Identity {
     _ = account_id;
     var hash = Sha256.init(.{});
+    // Stored data: saved checkpoints carry this hash, so the fx name stays.
     hash.update("fx-credential-authority-v1\x00");
     hash.update(@tagName(source));
     switch (source) {

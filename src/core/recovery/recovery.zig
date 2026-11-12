@@ -1,8 +1,8 @@
 //! Recovery for one model request.
 //!
-//! fx reports what happened to a request through `step`, and `step` answers
+//! lia reports what happened to a request through `step`, and `step` answers
 //! with a `Plan`: save a record, send the request, replace the status line, or
-//! finish. The module decides and fx acts. It performs no I/O, reads no clock,
+//! finish. The module decides and lia acts. It performs no I/O, reads no clock,
 //! starts no thread, keeps no global state, and never allocates, so the same
 //! events at the same times always produce the same plans.
 //!
@@ -18,7 +18,7 @@
 const std = @import("std");
 
 /// The one entry point. `now_ms` is `std.Io.Clock.boot` in milliseconds,
-/// which keeps counting while the machine sleeps. fx carries out the plan's
+/// which keeps counting while the machine sleeps. lia carries out the plan's
 /// fields in declaration order and reports what happens as later events.
 pub fn step(state: *State, event: Event, now_ms: u64) Plan {
     return switch (event) {
@@ -33,9 +33,9 @@ pub fn step(state: *State, event: Event, now_ms: u64) Plan {
     };
 }
 
-/// What fx reports.
+/// What lia reports.
 pub const Event = union(enum) {
-    /// A new request, or one a previous fx process was running.
+    /// A new request, or one a previous lia process was running.
     start: Start,
     /// The first byte of the current send's response arrived.
     responding,
@@ -46,20 +46,20 @@ pub const Event = union(enum) {
     tick,
     /// Enter, a successful sign-in, or a picker choice that retries.
     user_continue,
-    /// Esc, or quitting fx.
+    /// Esc, or quitting lia.
     user_cancel,
-    /// SIGHUP or SIGTERM: fx is exiting, and the request resumes next launch.
+    /// SIGHUP or SIGTERM: lia is exiting, and the request resumes next launch.
     closing,
 };
 
 pub const Start = struct {
-    /// A record saved by a previous fx process; null starts a new request,
+    /// A record saved by a previous lia process; null starts a new request,
     /// or resumes one that had no request in flight.
     resume_from: ?Record = null,
     /// The request uses the Fast route, so dropping Fast is a real option.
     fast: bool = false,
     /// The request resumes from an interruption more than a day ago, or
-    /// dated in the future, with or without a record. fx reads the wall
+    /// dated in the future, with or without a record. lia reads the wall
     /// clock, which the module never does.
     stale: bool = false,
 };
@@ -86,13 +86,13 @@ pub const Failure = struct {
         sign_in,
         quota,
         content_filter,
-        /// The server answered with a stream fx could not read. Waits and
+        /// The server answered with a stream lia could not read. Waits and
         /// resends as `dropped` does, under its own name.
         unreadable,
     };
 };
 
-/// What the module asks fx to do, in field order.
+/// What the module asks lia to do, in field order.
 pub const Plan = struct {
     /// Persist, replacing any saved record.
     save: ?Record = null,
@@ -112,13 +112,13 @@ pub const Send = packed struct {
 
 pub const Finish = enum { succeeded, cancelled };
 
-/// Opaque saved state. fx stores the bytes and hands them back unchanged.
+/// Opaque saved state. lia stores the bytes and hands them back unchanged.
 pub const Record = [32]u8;
 
 /// What the status line shows.
 pub const Status = struct {
     kind: Kind,
-    /// Set when `kind` is `need_user`; tells fx which prompt to show.
+    /// Set when `kind` is `need_user`; tells lia which prompt to show.
     need: ?Need = null,
     /// Canonical wording, shared by every host.
     text: Text = .{},
@@ -150,7 +150,7 @@ pub const Text = struct {
     }
 };
 
-/// One request's recovery state. fx holds it and passes it to `step`, but
+/// One request's recovery state. lia holds it and passes it to `step`, but
 /// never reads or writes its fields. `State{}` comes before the first `start`.
 pub const State = struct {
     phase: Phase = .idle,
@@ -169,7 +169,7 @@ pub const State = struct {
     abrupt_deaths: u8 = 0,
     /// Jitter state, seeded from `now_ms` at `start` so replays stay exact.
     seed: u32 = 1,
-    /// Request time carried over from earlier fx processes.
+    /// Request time carried over from earlier lia processes.
     carried_ms: u32 = 0,
     /// When this process started or resumed the request.
     started_ms: u64 = 0,
@@ -180,7 +180,7 @@ pub const State = struct {
     /// When the latest resend went out.
     sent_ms: u64 = 0,
     retry_label: RetryLabel = .after_failure,
-    /// Key of the status line fx is showing; 0 means clear.
+    /// Key of the status line lia is showing; 0 means clear.
     shown: u32 = 0,
 };
 
@@ -207,7 +207,7 @@ const offline_ms = [_]u32{ 1_000, 2_000, 5_000 };
 /// Waits keep 80 to 100 percent of their table value, so retries from many
 /// processes spread out without ever passing the 30-second cap.
 const jitter_floor_percent: u32 = 80;
-/// How long a resend shows its retry status before fx's thinking row takes
+/// How long a resend shows its retry status before lia's thinking row takes
 /// the line back. A model can think for a minute before its first byte, and
 /// the gateway sends no headers until then, so holding the status until the
 /// first byte would keep "Connection lost" on screen over a healthy
@@ -299,7 +299,7 @@ fn onFailed(state: *State, failure: Failure, now_ms: u64) Plan {
 }
 
 /// While waiting, the countdown changes every second. A resend keeps its
-/// retry status for `handoff_ms`, then clears it so fx shows its thinking
+/// retry status for `handoff_ms`, then clears it so lia shows its thinking
 /// row until the answer arrives.
 fn onTick(state: *State, now_ms: u64) Plan {
     return switch (state.phase) {
@@ -459,7 +459,7 @@ fn jittered(state: *State, base_ms: u32) u32 {
     return @intCast(@as(u64, base_ms) * percent / 100);
 }
 
-/// Time since the request's first send, across relaunches. Time while no fx
+/// Time since the request's first send, across relaunches. Time while no lia
 /// process was running is not counted, since the record holds no clock values.
 fn elapsedMs(state: *const State, now_ms: u64) u64 {
     return @as(u64, state.carried_ms) +| (now_ms -| state.started_ms);
@@ -521,8 +521,8 @@ fn needStatus(need: Status.Need) Status {
         ),
         .crash_loop => needOf(
             need,
-            "This request crashed fx twice · Enter to retry, Esc to cancel",
-            "Crashed fx twice · Enter retries, Esc cancels",
+            "This request crashed lia twice · Enter to retry, Esc to cancel",
+            "Crashed lia twice · Enter retries, Esc cancels",
         ),
         .stale => needOf(
             need,
@@ -587,7 +587,7 @@ fn show(state: *State, status: Status) Status {
     return status;
 }
 
-/// Emits the status only when its text changed since fx last showed one.
+/// Emits the status only when its text changed since lia last showed one.
 fn refresh(state: *State, status: Status) Plan {
     const key = statusKey(&status);
     if (key == state.shown) return .{};
@@ -1059,7 +1059,7 @@ test "two abrupt deaths with a send in flight ask once" {
     const second = step(&state, .{ .start = .{ .resume_from = record } }, 50);
     try testing.expect(second.send == null);
     try testing.expectEqual(Status.Need.crash_loop, second.status.?.need.?);
-    try testing.expectEqualStrings("Crashed fx twice · Enter retries, Esc cancels", second.status.?.short.slice());
+    try testing.expectEqualStrings("Crashed lia twice · Enter retries, Esc cancels", second.status.?.short.slice());
 
     const resumed = step(&state, .user_continue, 900);
     try testing.expect(resumed.send != null);
@@ -1186,7 +1186,7 @@ test "the same events at the same times produce the same plans" {
     }
 }
 
-// Simulation: random hosts that follow fx's side of the contract, with
+// Simulation: random hosts that follow lia's side of the contract, with
 // junk events mixed in, checked against the rules after every step.
 
 const SimHost = struct {
@@ -1292,7 +1292,7 @@ const SimHost = struct {
         try host.deliver(.user_continue);
     }
 
-    /// The process dies, gracefully or not, and fx starts again.
+    /// The process dies, gracefully or not, and lia starts again.
     fn relaunch(host: *SimHost, graceful: bool) !void {
         if (graceful) {
             try host.deliver(.closing);

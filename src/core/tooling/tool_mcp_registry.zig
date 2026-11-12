@@ -104,7 +104,7 @@ fn call(
     };
 }
 
-/// How large an MCP result may come back. Where fx keeps results behind a
+/// How large an MCP result may come back. Where lia keeps results behind a
 /// handle, that store keeps it whole and the model sees a preview; only
 /// without one is it cut to the model's limit here.
 fn resultBytes(ctx: tool_dispatch.DispatchContext) usize {
@@ -184,7 +184,7 @@ fn callFixture(
     return .{ .model_output = try alloc.dupe(u8, "mcp ok") };
 }
 
-test "an MCP result may be as large as the result store keeps where fx stores results" {
+test "an MCP result may be as large as the result store keeps where lia stores results" {
     var seen: usize = 0;
     const advertised = [_][]const u8{"mcp_fs_read"};
     const runtime = tool_mcp_runtime.RuntimeCapabilities{ .context = @ptrCast(&seen), .call_tool = callRecordingBytes };

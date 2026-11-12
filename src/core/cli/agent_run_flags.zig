@@ -1,5 +1,5 @@
 //! The flags that shape an agent run, one set for every command that runs the
-//! agent: `fx ask`, `fx pr`, `fx issue`, and `fx acp`. Each command documents
+//! agent: `lia ask`, `lia pr`, `lia issue`, and `lia acp`. Each command documents
 //! them in `src/builtins/commands.zig` and parses them here, so a flag means
 //! the same thing everywhere.
 

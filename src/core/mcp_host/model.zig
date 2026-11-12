@@ -1,8 +1,8 @@
 //! What the model sees of the MCP engine: each server's tools under the
-//! names fx gives them, and the has, validate, call, search, schema, and
-//! snapshot operations fx's tool runtime asks for. The tool lists come from
+//! names lia gives them, and the has, validate, call, search, schema, and
+//! snapshot operations lia's tool runtime asks for. The tool lists come from
 //! the runtime; parsing, names, bindings, ranking, schemas, and call results
-//! are fx's own MCP code.
+//! are lia's own MCP code.
 
 const std = @import("std");
 const text_utils = @import("../shared/text_utils.zig");
@@ -73,7 +73,7 @@ pub const Catalog = struct {
 
     const Found = struct { server: usize, tool: *const McpTool };
 
-    /// `runtime` must outlive the catalog. `builtins` are fx's own tools, so an
+    /// `runtime` must outlive the catalog. `builtins` are lia's own tools, so an
     /// MCP tool's name never takes one of theirs.
     pub fn init(c: *Catalog, gpa: Allocator, io: std.Io, runtime: *Runtime, builtins: tool_dispatch.Registry) Allocator.Error!void {
         const servers = runtime.servers();
@@ -727,7 +727,7 @@ pub const Catalog = struct {
         l.state = state;
     }
 
-    /// The tools of one listed server as fx names them, in `a`.
+    /// The tools of one listed server as lia names them, in `a`.
     fn build(c: *Catalog, a: Allocator, server_name: []const u8, listed: []const runtime_mod.Tool) Allocator.Error![]McpTool {
         var out: std.ArrayList(McpTool) = .empty;
         for (listed) |item| {
@@ -769,9 +769,9 @@ pub const Catalog = struct {
             .needs_login => try needsLoginText(alloc, s.name, signIn(c.runtime.options.slash_commands, s.source)),
             .failed => try alloc.print("MCP server '{s}' is unavailable: {s}", .{ s.name, l.failure orelse "it did not start" }),
             else => if (s.held == .missing_env)
-                try alloc.print("MCP server '{s}' needs {s} set before fx starts.", .{ s.name, s.missing orelse "a variable" })
+                try alloc.print("MCP server '{s}' needs {s} set before lia starts.", .{ s.name, s.missing orelse "a variable" })
             else if (s.held == .invalid_env)
-                try alloc.print("MCP server '{s}' can't use {s}: its value holds a line break or another character a header can't carry. Fix it, then restart fx.", .{ s.name, s.missing orelse "a variable" })
+                try alloc.print("MCP server '{s}' can't use {s}: its value holds a line break or another character a header can't carry. Fix it, then restart lia.", .{ s.name, s.missing orelse "a variable" })
             else
                 null,
         };
@@ -818,11 +818,11 @@ pub const Catalog = struct {
     }
 };
 
-/// How long fx's question UI waits for the user before giving up.
+/// How long lia's question UI waits for the user before giving up.
 const question_timeout_ms: i64 = 10 * 60 * 1000;
 
 /// A call's questions, asked through the tool context's input responder:
-/// fx's question UI in the shell, the client's elicitation in ACP.
+/// lia's question UI in the shell, the client's elicitation in ACP.
 const Asking = struct {
     responder: tool_mcp_runtime.InputResponder,
     tool: []const u8,
@@ -885,7 +885,7 @@ const Asking = struct {
     }
 };
 
-/// Turns the runtime's answer into the result the model sees, through fx's
+/// Turns the runtime's answer into the result the model sees, through lia's
 /// result projection: content, images, size limits, and errors.
 fn statusOf(statuses: []const runtime_mod.Status, name: []const u8) ?runtime_mod.Status {
     for (statuses) |s| if (std.mem.eql(u8, s.name, name)) return s;
@@ -913,7 +913,7 @@ fn render(arena: Allocator, server: []const u8, name: []const u8, answer: runtim
 
 /// A call that ended without an answer.
 fn ended(arena: Allocator, server: []const u8, name: []const u8, e: @FieldType(runtime_mod.CallResult, "ended"), max_bytes: usize, how: SignIn) !tool_mcp_runtime.CallResult {
-    // A call fx stopped waiting for ends cancelled too, but the model hears
+    // A call lia stopped waiting for ends cancelled too, but the model hears
     // that it ran out of time rather than that someone cancelled it.
     if (e.outcome == .cancelled and !e.timed_out) return error.Cancelled;
     const why = switch (e.outcome) {
@@ -926,14 +926,14 @@ fn ended(arena: Allocator, server: []const u8, name: []const u8, e: @FieldType(r
         .transport_failed, .http_failure => "the connection failed",
         .malformed => "the server's answer was malformed",
         .rounds_exceeded => "the server asked for input too many times",
-        .unsupported_input => "the server asked for input fx can't give",
-        .denied => "fx's permission refused it",
+        .unsupported_input => "the server asked for input lia can't give",
+        .denied => "lia's permission refused it",
         else => @tagName(e.outcome),
     };
-    // fx ended a call that ran out of time, so it says so and names the
+    // lia ended a call that ran out of time, so it says so and names the
     // setting that waits longer. A server the editor supplied has none.
     const text = if (e.timed_out) try arena.print(
-        "fx stopped waiting for MCP server '{s}': it did not answer within its operation timeout.{s}{s}",
+        "lia stopped waiting for MCP server '{s}': it did not answer within its operation timeout.{s}{s}",
         .{
             server,
             if (e.maybe_ran) " The tool may have run." else "",
@@ -953,9 +953,9 @@ fn needsLoginText(alloc: Allocator, server: []const u8, how: SignIn) ![]u8 {
     return alloc.print("MCP server '{s}' needs a login. Ask the user to {s}, then try again.", .{ server, step });
 }
 
-/// Where the user signs in: fx's shell takes `/mcp login`; `fx ask` and an
+/// Where the user signs in: lia's shell takes `/mcp login`; `lia ask` and an
 /// editor have no slash commands, so it's a terminal. A server the editor
-/// supplied isn't in fx's config, so its credentials go in the editor's.
+/// supplied isn't in lia's config, so its credentials go in the editor's.
 const SignIn = enum { shell, terminal, editor };
 
 fn signIn(slash_commands: bool, source: mcp_contract.ConfigSource) SignIn {
@@ -967,7 +967,7 @@ fn signIn(slash_commands: bool, source: mcp_contract.ConfigSource) SignIn {
 fn signInStep(alloc: Allocator, server: []const u8, how: SignIn) ![]u8 {
     return switch (how) {
         .shell => alloc.print("run /mcp login {s}", .{server}),
-        .terminal => alloc.print("run fx mcp login {s} in a terminal", .{server}),
+        .terminal => alloc.print("run lia mcp login {s} in a terminal", .{server}),
         .editor => alloc.print("add an Authorization header for {s} in the editor's MCP server settings", .{server}),
     };
 }
@@ -1089,7 +1089,7 @@ test "an instance's server filter allows the tools of its servers and refuses th
     try testing.expectEqual(@as(usize, 0), found.selected_tools.len);
 }
 
-test "an MCP server's tools reach the model under fx's names" {
+test "an MCP server's tools reach the model under lia's names" {
     var f: Fixture = undefined;
     try f.init();
     defer f.deinit();
@@ -1104,7 +1104,7 @@ test "an MCP server's tools reach the model under fx's names" {
     defer arena.deinit();
     const a = arena.allocator();
 
-    // Asking for a tool by its fx name starts its server and loads the list.
+    // Asking for a tool by its lia name starts its server and loads the list.
     try testing.expect(c.hasTool("mcp_fake_echo", .unrestricted));
     try testing.expect(!c.hasTool("mcp_fake_nope", .unrestricted));
     try testing.expect(!c.hasTool("mcp_fake_echo", .disabled));
@@ -1181,7 +1181,7 @@ test "a server-qualified name resolves to the exposed tools it fits" {
     try testing.expect(try c.resolveQualified(a, "echo", .{}, .unrestricted, null) == .none);
     try testing.expect(try c.resolveQualified(a, "fake.echo", .{}, .disabled, null) == .none);
 
-    // Two servers whose names fx writes alike fit one spelling.
+    // Two servers whose names lia writes alike fit one spelling.
     const ambiguous = try c.resolveQualified(a, "my_server.echo", .{}, .unrestricted, null);
     try testing.expectEqual(@as(usize, 2), ambiguous.many.len);
     try testing.expectEqualStrings("mcp_my_server_echo", ambiguous.many[0]);
@@ -1287,7 +1287,7 @@ test "an object-typed argument sent as a JSON string becomes the object" {
         try tools_feature.coerceObjectArguments(a, schema, "{\"deep\":\"{\\\"inner\\\":\\\"{\\\\\\\"a\\\\\\\":true}\\\"}\"}"),
     );
 
-    // An object nested past fx's 64-level argument limit stays the string it came as.
+    // An object nested past lia's 64-level argument limit stays the string it came as.
     const too_deep = "{\"arguments\":\"" ++ text_utils.repeat("{\\\"a\\\":", 70) ++ "{}" ++ text_utils.repeat("}", 70) ++ "\"}";
     try std.testing.expectEqualStrings(too_deep, try tools_feature.coerceObjectArguments(a, schema, too_deep));
 
@@ -1357,7 +1357,7 @@ test "a tool schema lookup names the server that yielded no tool list" {
         .name = "keyed",
         .transport = .http,
         .url = "https://example.invalid/mcp",
-        .bearer_token_env = @constCast("FX_MCP_HOST_TEST_UNSET"),
+        .bearer_token_env = @constCast("LIA_MCP_HOST_TEST_UNSET"),
     }};
     var r: Runtime = undefined;
     try r.start(testing.allocator, testing.io, &configs, &f.inherited, f.options());
@@ -1381,7 +1381,7 @@ test "a search says why a server it names has no tools, and calls that end say h
         .name = "keyed",
         .transport = .http,
         .url = "https://example.invalid/mcp",
-        .bearer_token_env = @constCast("FX_MCP_HOST_TEST_UNSET"),
+        .bearer_token_env = @constCast("LIA_MCP_HOST_TEST_UNSET"),
     }};
     var r: Runtime = undefined;
     try r.start(testing.allocator, testing.io, &configs, &f.inherited, f.options());
@@ -1396,24 +1396,24 @@ test "a search says why a server it names has no tools, and calls that end say h
     const query = try lexical_relevance.prepare("issues");
     const keyed = try c.searchTools(a, .{ .query = &query, .kind = .mcp, .server = "keyed" }, .{}, .{}, .unrestricted, null);
     try testing.expectEqualStrings(
-        "{\"tools\":[],\"count\":0,\"authentication_required\":{\"server\":\"keyed\",\"interactive\":false,\"environment\":\"FX_MCP_HOST_TEST_UNSET\",\"message\":\"Set this environment variable before starting fx.\"}}",
+        "{\"tools\":[],\"count\":0,\"authentication_required\":{\"server\":\"keyed\",\"interactive\":false,\"environment\":\"LIA_MCP_HOST_TEST_UNSET\",\"message\":\"Set this environment variable before starting lia.\"}}",
         keyed.model_output,
     );
     // A search that names no server and finds nothing says why each server
     // has no tools, one held on a missing variable too.
     const open = try c.searchTools(a, .{ .query = &query, .kind = .mcp }, .{}, .{}, .unrestricted, null);
-    try testing.expect(std.mem.find(u8, open.model_output, "MCP server 'keyed' needs FX_MCP_HOST_TEST_UNSET set before fx starts.") != null);
+    try testing.expect(std.mem.find(u8, open.model_output, "MCP server 'keyed' needs LIA_MCP_HOST_TEST_UNSET set before lia starts.") != null);
     const missing = try c.searchTools(a, .{ .query = &query, .kind = .mcp, .server = "nope" }, .{}, .{}, .unrestricted, null);
     try testing.expect(std.mem.find(u8, missing.model_output, "\"state\":\"server_not_found\"") != null);
 
     const login = try ended(a, "linear", "mcp_linear_list", .{ .outcome = .needs_auth, .maybe_ran = false, .timed_out = false }, 4096, .terminal);
     try testing.expectEqual(tool_mcp_runtime.CallStatus.tool_failure, login.status);
-    try testing.expect(std.mem.find(u8, login.model_output, "Ask the user to run fx mcp login linear in a terminal, then try again.") != null);
+    try testing.expect(std.mem.find(u8, login.model_output, "Ask the user to run lia mcp login linear in a terminal, then try again.") != null);
     // The shell takes slash commands, so the user signs in without leaving it.
     const in_shell = try ended(a, "linear", "mcp_linear_list", .{ .outcome = .needs_auth, .maybe_ran = false, .timed_out = false }, 4096, .shell);
     try testing.expect(std.mem.find(u8, in_shell.model_output, "Ask the user to run /mcp login linear, then try again.") != null);
     try testing.expect(std.mem.find(u8, in_shell.model_output, "terminal") == null);
-    // A server the editor supplied isn't in fx's config: its credentials go
+    // A server the editor supplied isn't in lia's config: its credentials go
     // in the editor's settings, wherever the session runs.
     try testing.expectEqual(SignIn.editor, signIn(true, .acp));
     try testing.expectEqual(SignIn.editor, signIn(false, .acp));
@@ -1421,7 +1421,7 @@ test "a search says why a server it names has no tools, and calls that end say h
     try testing.expectEqual(SignIn.terminal, signIn(false, .profile));
     const in_editor = try ended(a, "linear", "mcp_linear_list", .{ .outcome = .needs_auth, .maybe_ran = false, .timed_out = false }, 4096, .editor);
     try testing.expect(std.mem.find(u8, in_editor.model_output, "Ask the user to add an Authorization header for linear in the editor's MCP server settings, then try again.") != null);
-    try testing.expect(std.mem.find(u8, in_editor.model_output, "fx mcp login") == null);
+    try testing.expect(std.mem.find(u8, in_editor.model_output, "lia mcp login") == null);
     const lost = try ended(a, "linear", "mcp_linear_list", .{ .outcome = .lost, .maybe_ran = true, .timed_out = false }, 4096, .terminal);
     try testing.expectEqual(tool_mcp_runtime.CallStatus.protocol_failure, lost.status);
     try testing.expect(std.mem.find(u8, lost.model_output, "the server went away. The tool may have run.") != null);
@@ -1430,12 +1430,12 @@ test "a search says why a server it names has no tools, and calls that end say h
     try testing.expect(std.mem.find(u8, unrenewed.model_output, "may have run") == null);
     try testing.expectError(error.Cancelled, ended(a, "linear", "mcp_linear_list", .{ .outcome = .cancelled, .maybe_ran = false, .timed_out = false }, 4096, .terminal));
     // The engine ends a call that runs out of time as cancelled; the model
-    // hears that fx stopped waiting, and how to wait longer.
+    // hears that lia stopped waiting, and how to wait longer.
     const slow = try ended(a, "aside", "mcp_aside_repl", .{ .outcome = .cancelled, .maybe_ran = true, .timed_out = true }, 4096, .terminal);
     try testing.expectEqual(tool_mcp_runtime.CallStatus.protocol_failure, slow.status);
-    try testing.expect(std.mem.find(u8, slow.model_output, "fx stopped waiting for MCP server 'aside': it did not answer within its operation timeout. The tool may have run. Raise operation_timeout_ms for this server in its MCP config if it needs longer.") != null);
+    try testing.expect(std.mem.find(u8, slow.model_output, "lia stopped waiting for MCP server 'aside': it did not answer within its operation timeout. The tool may have run. Raise operation_timeout_ms for this server in its MCP config if it needs longer.") != null);
     // An editor's server has no timeout setting to raise.
     const slow_in_editor = try ended(a, "aside", "mcp_aside_repl", .{ .outcome = .cancelled, .maybe_ran = false, .timed_out = true }, 4096, .editor);
-    try testing.expect(std.mem.find(u8, slow_in_editor.model_output, "fx stopped waiting for MCP server 'aside': it did not answer within its operation timeout.") != null);
+    try testing.expect(std.mem.find(u8, slow_in_editor.model_output, "lia stopped waiting for MCP server 'aside': it did not answer within its operation timeout.") != null);
     try testing.expect(std.mem.find(u8, slow_in_editor.model_output, "operation_timeout_ms") == null);
 }

@@ -3,7 +3,7 @@
 # (OpenCancel.tla; src/gateway/open_job.zig and OpenJob in
 # src/gateway/client.zig) with TLC and require each config's expected verdict.
 #
-# open-cancel.cfg is the design and must pass. open-cancel-today.cfg is fx
+# open-cancel.cfg is the design and must pass. open-cancel-today.cfg is lia
 # before the open job, where Esc waited for a DNS lookup that never returned
 # (CancelReturns). Each open-cancel-mutation-*.cfg plants one defect, and the
 # rule it names must catch it:

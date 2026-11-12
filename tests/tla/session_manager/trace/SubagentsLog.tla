@@ -1,6 +1,6 @@
 --------------------------- MODULE SubagentsLog ---------------------------
 (***************************************************************************)
-(* Checks a parent log fx saved against Subagents.tla, after the fact.     *)
+(* Checks a parent log lia saved against Subagents.tla, after the fact.     *)
 (*                                                                         *)
 (* Only the disk is known: the parent's child lines, in order (`Target`,   *)
 (* records [k, c, w, o]), and which children have a log at the end         *)

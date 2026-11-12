@@ -290,7 +290,7 @@ def temporal_candidate_link_argv(
         "_main",
         "-no_deduplicate",
         "-no_function_starts",
-        # fx builds without unwind tables; newer ld otherwise emits ~160 KB.
+        # lia builds without unwind tables; newer ld otherwise emits ~160 KB.
         "-no_compact_unwind",
         "-order_file",
         str(paths.logs / "candidate-order.txt"),
@@ -899,7 +899,7 @@ def public_api_flags(toolchain: Toolchain, paths: PipelinePaths) -> tuple[str, .
 
 def link_candidate_binary(toolchain: Toolchain, paths: PipelinePaths) -> None:
     """Link, strip, and sign the candidate from `paths.profile_use_object`."""
-    if paths.selector == "fx":
+    if paths.selector == "lia":
         _link_temporal_candidate(toolchain, paths)
     else:
         run_checked(

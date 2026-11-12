@@ -755,7 +755,7 @@ fn readStoredTextManaged(
     return file.readToEnd(alloc, stored_text_max_bytes);
 }
 
-/// This session's tool-results folder as fx-compactor's record store, or on
+/// This session's tool-results folder as lia-compactor's record store, or on
 /// v2 its records kept as blobs (D50). The store borrows `capability`.
 pub fn compactorStore(capability: *session_child_store.SessionChildCapability) compactor.Store {
     return .{ .context = capability, .vtable = &.{

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Strict runtime-trace checking of real fx sessions against the session manager
+"""Strict runtime-trace checking of real lia sessions against the session manager
 trace wrappers in tests/tla/session_manager/trace/: each log's turns, its
 children's work, a fork's copied lines (ForkLog), and the processes' wiring."""
 import argparse

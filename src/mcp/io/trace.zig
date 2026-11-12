@@ -10,7 +10,7 @@ const std = @import("std");
 
 pub const format_version = 1;
 
-/// Whether trace code is compiled in. Release fx leaves it out:
+/// Whether trace code is compiled in. Release lia leaves it out:
 /// a program has it only by declaring `pub const mcpv2_trace = true;` in its
 /// root file, and tests always have it.
 pub const enabled = @import("builtin").is_test or

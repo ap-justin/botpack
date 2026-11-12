@@ -1,6 +1,6 @@
 ---------------------------- MODULE LaunchSelection ----------------------------
 (***************************************************************************)
-(* Launch-time model, speed and effort flags for `fx` and `fx ask`.        *)
+(* Launch-time model, speed and effort flags for `lia` and `lia ask`.        *)
 (*                                                                         *)
 (* One scenario fixes what the user asked for, what the catalog load       *)
 (* returns, and what the chosen model supports. The machine then runs the  *)
@@ -85,7 +85,7 @@ Name(s, m) == IF m = "raw" /\ s.model \in {"exact", "private_hidden"} THEN "cano
 (* The real gateway accepts a name only when that model exists.             *)
 GatewayAccepts(s, m) == Name(s, m) \in {"canonical", "configured"}
 
-(* fx knows the capabilities of the model it will send only when the loaded *)
+(* lia knows the capabilities of the model it will send only when the loaded *)
 (* catalog lists that exact name.                                           *)
 CapKnownFor(s, m) ==
   /\ Loaded(s)
@@ -224,20 +224,20 @@ FairSpec == Spec /\ WF_vars(Next)
 (* saw the catalog for interactive).                                        *)
 Decided == st.req.after
 
-(* With an authenticated catalog, fx never sends a model that does not exist. *)
+(* With an authenticated catalog, lia never sends a model that does not exist. *)
 ValidModel == Decided /\ Authoritative(S) => GatewayAccepts(S, st.req.model)
 
-(* When fx knows the capabilities, the speed it shows is the speed it sends. *)
+(* When lia knows the capabilities, the speed it shows is the speed it sends. *)
 HonestSpeed ==
   Decided /\ CapKnownFor(S, st.req.model) =>
     /\ st.req.claimedFast = st.req.wireFast
     /\ st.req.claimedUltra = st.req.wireUltra
 
-(* When fx knows the capabilities, the effort it claims is the effort it sends. *)
+(* When lia knows the capabilities, the effort it claims is the effort it sends. *)
 HonestEffort ==
   Decided /\ CapKnownFor(S, st.req.model) => st.req.claimedEffort = st.req.wireEffort
 
-(* fx ask fails during validation, never with a late turn error.            *)
+(* lia ask fails during validation, never with a late turn error.            *)
 AskFailsEarly == S.path = "ask" => st.outcome # "turn_error"
 
 (* Every rejection or correction is backed by catalog evidence.             *)

@@ -10,7 +10,7 @@
 \*     `GET /callback`, or for a bridged server the first form posted from
 \*     the bridge's origin, carrying the state `.authorize` gave the
 \*     listener, is posted as finish_login; the task then ends),
-\*     finishLogin (`fx mcp login NAME --no-browser`: a pasted address,
+\*     finishLogin (`lia mcp login NAME --no-browser`: a pasted address,
 \*     past the listener), `.finish_login` (engine.finishSignIn: the engine's
 \*     flow checks the state),
 \*     onServer `.authorize` / `.signed_in` / `.sign_in_failed`, expireLogins
@@ -33,7 +33,7 @@
 \*     only when it matches.
 \*
 \* Logins are numbered 1..MaxLogins in the order started; login k's flow has
-\* its own state, also k. A callback carries a state: 0 is one fx never made.
+\* its own state, also k. A callback carries a state: 0 is one lia never made.
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS
@@ -102,7 +102,7 @@ Ended(k) == [phase EXCEPT ![k] = "closed"]
 \* The host's login, while it's under way.
 SigningIn(h) == live[h] # 0 /\ Open(live[h])
 
-\* `/mcp login NAME` or `fx mcp login NAME` on the current host, or the same
+\* `/mcp login NAME` or `lia mcp login NAME` on the current host, or the same
 \* login `add` starts for a new server that asks for one (verbs.zig
 \* signInAfterAdd, app_mcp_runtime.zig signInAfterAdd). It waits while any
 \* other host is alive. The engine starts a flow only when none is running.

@@ -13,7 +13,7 @@ type Mutant = { id: string; note: string; from: string; to: string; expect: stri
 const MUTANTS: Mutant[] = [
   {
     id: "new-reports-ask",
-    note: "a new session reports Ask whatever fx enforces (an earlier fx)",
+    note: "a new session reports Ask whatever lia enforces (an earlier lia)",
     from: `/\\ last = Obs("new", "none", TRUE, TRUE, SessionView(Eff(profile)), "none", profile)`,
     to: `/\\ last = Obs("new", "none", TRUE, TRUE, SessionView("ask"), "none", profile)`,
     expect: "ReportsEnforcedMode",
@@ -62,21 +62,21 @@ const MUTANTS: Mutant[] = [
   },
   {
     id: "unknown-accepted",
-    note: "set_config_option answers success for an unknown mode (an earlier fx)",
+    note: "set_config_option answers success for an unknown mode (an earlier lia)",
     from: `ELSE /\\ last' = Obs("set", v, FALSE, FALSE, NoView, "none", profile)`,
     to: `ELSE /\\ last' = Obs("set", v, TRUE, FALSE, NoView, "none", profile)`,
     expect: "UnknownRejected",
   },
   {
     id: "config-change-not-saved",
-    note: "a set_config_option change is not saved to the profile (an earlier fx)",
+    note: "a set_config_option change is not saved to the profile (an earlier lia)",
     from: `/\\ profile' = v\n         /\\ last' = Obs("set"`,
     to: `/\\ profile' = profile\n         /\\ last' = Obs("set"`,
     expect: "ChangeIsSaved",
   },
   {
     id: "legacy-change-not-saved",
-    note: "a session/set_mode change is not saved to the profile (an earlier fx)",
+    note: "a session/set_mode change is not saved to the profile (an earlier lia)",
     from: `/\\ profile' = v\n         /\\ last' = Obs("legacy"`,
     to: `/\\ profile' = profile\n         /\\ last' = Obs("legacy"`,
     expect: "ChangeIsSaved",
@@ -97,7 +97,7 @@ const MUTANTS: Mutant[] = [
   },
   {
     id: "status-shows-open-session",
-    note: "fx status reports the open session's mode instead of the next session's",
+    note: "lia status reports the open session's mode instead of the next session's",
     from: `StatusView(Eff(profile))`,
     to: `StatusView(cur)`,
     expect: "StatusMatchesNextSession",

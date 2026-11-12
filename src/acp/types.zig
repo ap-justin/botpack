@@ -20,34 +20,34 @@ pub fn generateMessageId(storage: *MessageIdBuffer) []const u8 {
 
 pub const protocol_version: u32 = 1;
 
-/// Returns the borrowed value at `_meta.fx.<key>` on an ACP params object.
-/// fx reads and writes its protocol extensions under that one namespace.
-pub fn fxMetaField(object: std.json.ObjectMap, key: []const u8) ?std.json.Value {
+/// Returns the borrowed value at `_meta.lia.<key>` on an ACP params object.
+/// lia reads and writes its protocol extensions under that one namespace.
+pub fn liaMetaField(object: std.json.ObjectMap, key: []const u8) ?std.json.Value {
     const meta = object.get("_meta") orelse return null;
     if (meta != .object) return null;
-    const fx = meta.object.get("fx") orelse return null;
-    if (fx != .object) return null;
-    return fx.object.get(key);
+    const lia = meta.object.get("lia") orelse return null;
+    if (lia != .object) return null;
+    return lia.object.get(key);
 }
 
-/// Returns `_meta.fx.<key>` when it is a JSON boolean.
-pub fn fxMetaBool(object: std.json.ObjectMap, key: []const u8) ?bool {
-    const value = fxMetaField(object, key) orelse return null;
+/// Returns `_meta.lia.<key>` when it is a JSON boolean.
+pub fn liaMetaBool(object: std.json.ObjectMap, key: []const u8) ?bool {
+    const value = liaMetaField(object, key) orelse return null;
     return if (value == .bool) value.bool else null;
 }
 
-/// Returns `_meta.fx.<key>` when it is a JSON integer.
-pub fn fxMetaInteger(object: std.json.ObjectMap, key: []const u8) ?i64 {
-    const value = fxMetaField(object, key) orelse return null;
+/// Returns `_meta.lia.<key>` when it is a JSON integer.
+pub fn liaMetaInteger(object: std.json.ObjectMap, key: []const u8) ?i64 {
+    const value = liaMetaField(object, key) orelse return null;
     return if (value == .integer) value.integer else null;
 }
 
-const model_recovery_update_prefix = "{\"sessionUpdate\":\"session_info_update\",\"_meta\":{\"fx\":{\"modelResponseRecovery\":";
+const model_recovery_update_prefix = "{\"sessionUpdate\":\"session_info_update\",\"_meta\":{\"lia\":{\"modelResponseRecovery\":";
 
-/// What a session load reports for a request an earlier fx process was
+/// What a session load reports for a request an earlier lia process was
 /// running when it stopped.
-/// `_meta.fx.modelResponseRecovery`: the recovery module's shape, as in
-/// `fx ask --json` (decision 38). Null clears the client's status.
+/// `_meta.lia.modelResponseRecovery`: the recovery module's shape, as in
+/// `lia ask --json` (decision 38). Null clears the client's status.
 pub fn writeModelRecoveryInfoUpdate(
     writer: *std.Io.Writer,
     status: ?core_types.RouteRecoveryStatus,
@@ -86,9 +86,9 @@ pub const StopReason = enum {
         };
     }
 
-    /// fx's own name for this reason, sent as `_meta.fx.stopReason` when it
+    /// lia's own name for this reason, sent as `_meta.lia.stopReason` when it
     /// differs from the v1 value.
-    fn fxString(self: StopReason) []const u8 {
+    fn liaString(self: StopReason) []const u8 {
         return switch (self) {
             .end_turn => "end_turn",
             .max_output_tokens => "max_output_tokens",
@@ -100,16 +100,16 @@ pub const StopReason = enum {
         };
     }
 
-    fn hasFxMeta(self: StopReason) bool {
-        return !std.mem.eql(u8, self.jsonString(), self.fxString());
+    fn hasLiaMeta(self: StopReason) bool {
+        return !std.mem.eql(u8, self.jsonString(), self.liaString());
     }
 };
 
-/// Writes `"stopReason":"..."` inside an `_meta.fx` object; the caller writes
+/// Writes `"stopReason":"..."` inside an `_meta.lia` object; the caller writes
 /// any separating comma.
-fn writeFxStopReasonField(w: *std.Io.Writer, reason: StopReason) !void {
+fn writeLiaStopReasonField(w: *std.Io.Writer, reason: StopReason) !void {
     try w.writeAll("\"stopReason\":");
-    try writeJsonStr(reason.fxString(), w);
+    try writeJsonStr(reason.liaString(), w);
 }
 
 pub const ToolCallKind = enum {
@@ -216,17 +216,17 @@ pub fn writeUserImageChunk(
     try w.writeAll("}}");
 }
 
-/// Host-facing identity of a tool call, sent as `_meta.fx.toolCall` so
+/// Host-facing identity of a tool call, sent as `_meta.lia.toolCall` so
 /// clients never need to match on tool names.
 pub const ToolCallMeta = struct {
-    /// fx's own discovery or bookkeeping step, which hosts may hide.
+    /// lia's own discovery or bookkeeping step, which hosts may hide.
     internal: bool = false,
     /// The MCP server and its own tool name, for MCP tool calls.
     mcp: ?struct { server: []const u8, tool: []const u8 } = null,
 };
 
 fn writeToolCallMeta(w: *std.Io.Writer, meta: ToolCallMeta) !void {
-    try w.writeAll(",\"_meta\":{\"fx\":{\"toolCall\":{\"internal\":");
+    try w.writeAll(",\"_meta\":{\"lia\":{\"toolCall\":{\"internal\":");
     try w.writeAll(if (meta.internal) "true" else "false");
     if (meta.mcp) |mcp| {
         try w.writeAll(",\"mcp\":{\"server\":");
@@ -303,19 +303,19 @@ pub const AgentCapabilities = struct {
     system_prompt: bool = false,
     /// Serves `type: "acp"` MCP servers over this connection.
     mcp_over_acp: bool = false,
-    /// Speaks MCP's HTTP+SSE transport (2024-11-05), which fx's MCP engine doesn't.
+    /// Speaks MCP's HTTP+SSE transport (2024-11-05), which lia's MCP engine doesn't.
     mcp_sse: bool = true,
 };
 
 /// The `agent` auth method, always advertised: the person runs the login its
-/// text names, then the client calls `authenticate` and fx re-reads the
+/// text names, then the client calls `authenticate` and lia re-reads the
 /// credentials. The registry's auth check never sends `auth.terminal`, so this
 /// is the entry that keeps `authMethods` non-empty.
-pub const agent_auth_method_id = "fx-login";
+pub const agent_auth_method_id = "lia-login";
 /// The Terminal Auth method, advertised only to a client that sent
 /// `clientCapabilities.auth.terminal: true`. It runs
-/// `fx login vercel --api-key`.
-pub const terminal_auth_method_id = "fx-login-api-key";
+/// `lia login vercel --api-key`.
+pub const terminal_auth_method_id = "lia-login-api-key";
 
 /// Whether `authenticate` accepts `method_id`. The terminal id is accepted
 /// too, though ACP v1 clients must not send it, so older clients keep working.
@@ -324,7 +324,7 @@ pub fn isAuthMethodId(method_id: []const u8) bool {
         std.mem.eql(u8, method_id, terminal_auth_method_id);
 }
 
-/// The fx login that yields a credential for the selected provider.
+/// The lia login that yields a credential for the selected provider.
 pub const AuthLogin = enum {
     vercel,
 
@@ -341,7 +341,7 @@ pub const AuthLogin = enum {
         };
     }
 
-    /// The `fx` arguments a terminal client appends to run this login; each
+    /// The `lia` arguments a terminal client appends to run this login; each
     /// is a login `cli_surface.zig:parseLoginArgs` accepts.
     fn terminalArgs(self: AuthLogin) []const []const u8 {
         return switch (self) {
@@ -357,7 +357,7 @@ pub const AuthLogin = enum {
 
     fn terminalDescription(self: AuthLogin) []const u8 {
         return switch (self) {
-            .vercel => "Paste a Vercel AI Gateway API key in a terminal. fx saves it for later sessions.",
+            .vercel => "Paste a Vercel AI Gateway API key in a terminal. lia saves it for later sessions.",
         };
     }
 };
@@ -415,8 +415,8 @@ pub fn writeInitializeResponse(w: *std.Io.Writer, capabilities: AgentCapabilitie
     try w.writeAll("\"sessionCapabilities\":{\"list\":{},\"resume\":{},\"close\":{}");
     if (capabilities.system_prompt) try w.writeAll(",\"systemPrompt\":{}");
     try w.writeByte('}');
-    try w.print(",\"_meta\":{{\"fx\":{{\"steering\":{s}}}}}", .{if (capabilities.steering) "true" else "false"});
-    try w.writeAll("},\"agentInfo\":{\"name\":\"fx\",\"title\":\"fx\",\"version\":");
+    try w.print(",\"_meta\":{{\"lia\":{{\"steering\":{s}}}}}", .{if (capabilities.steering) "true" else "false"});
+    try w.writeAll("},\"agentInfo\":{\"name\":\"lia\",\"title\":\"lia\",\"version\":");
     try writeJsonStr(build_options.app_version, w);
     try w.writeAll("},\"authMethods\":");
     try writeAuthMethods(w, auth);
@@ -426,9 +426,9 @@ pub fn writeInitializeResponse(w: *std.Io.Writer, capabilities: AgentCapabilitie
 pub fn writePromptResponse(w: *std.Io.Writer, reason: StopReason) !void {
     try w.writeAll("{\"stopReason\":");
     try writeJsonStr(reason.jsonString(), w);
-    if (reason.hasFxMeta()) {
-        try w.writeAll(",\"_meta\":{\"fx\":{");
-        try writeFxStopReasonField(w, reason);
+    if (reason.hasLiaMeta()) {
+        try w.writeAll(",\"_meta\":{\"lia\":{");
+        try writeLiaStopReasonField(w, reason);
         try w.writeAll("}}");
     }
     try w.writeAll("}");
@@ -445,11 +445,11 @@ pub const SteeringDelivery = enum {
 pub fn writeSteeringPromptResponse(w: *std.Io.Writer, reason: StopReason, delivery: SteeringDelivery) !void {
     try w.writeAll("{\"stopReason\":");
     try writeJsonStr(reason.jsonString(), w);
-    try w.writeAll(",\"_meta\":{\"fx\":{\"steering\":");
+    try w.writeAll(",\"_meta\":{\"lia\":{\"steering\":");
     try writeJsonStr(@tagName(delivery), w);
-    if (reason.hasFxMeta()) {
+    if (reason.hasLiaMeta()) {
         try w.writeByte(',');
-        try writeFxStopReasonField(w, reason);
+        try writeLiaStopReasonField(w, reason);
     }
     try w.writeAll("}}}");
 }
@@ -467,7 +467,7 @@ pub fn writeSteeringUserMessageChunk(
     try writeJsonStr(message_id, w);
     try w.writeAll(",\"content\":{\"type\":\"text\",\"text\":");
     try writeJsonStr(text, w);
-    try w.writeAll("},\"_meta\":{\"fx\":{\"steering\":{\"requestId\":");
+    try w.writeAll("},\"_meta\":{\"lia\":{\"steering\":{\"requestId\":");
     try jsonrpc.Writer.writeId(w, request_id);
     if (input_id) |id| {
         try w.writeAll(",\"inputId\":");
@@ -481,13 +481,13 @@ test "steering replay carries a libfx input id only when it has one" {
     defer out.deinit();
     try writeSteeringUserMessageChunk(&out.writer, "m1", "use tabs", .{ .integer = 4 }, null);
     try std.testing.expectEqualStrings(
-        "{\"sessionUpdate\":\"user_message_chunk\",\"messageId\":\"m1\",\"content\":{\"type\":\"text\",\"text\":\"use tabs\"},\"_meta\":{\"fx\":{\"steering\":{\"requestId\":4}}}}",
+        "{\"sessionUpdate\":\"user_message_chunk\",\"messageId\":\"m1\",\"content\":{\"type\":\"text\",\"text\":\"use tabs\"},\"_meta\":{\"lia\":{\"steering\":{\"requestId\":4}}}}",
         out.written(),
     );
     out.clearRetainingCapacity();
     try writeSteeringUserMessageChunk(&out.writer, "m2", "be brief", null, "s1");
     try std.testing.expectEqualStrings(
-        "{\"sessionUpdate\":\"user_message_chunk\",\"messageId\":\"m2\",\"content\":{\"type\":\"text\",\"text\":\"be brief\"},\"_meta\":{\"fx\":{\"steering\":{\"requestId\":null,\"inputId\":\"s1\"}}}}",
+        "{\"sessionUpdate\":\"user_message_chunk\",\"messageId\":\"m2\",\"content\":{\"type\":\"text\",\"text\":\"be brief\"},\"_meta\":{\"lia\":{\"steering\":{\"requestId\":null,\"inputId\":\"s1\"}}}}",
         out.written(),
     );
 }
@@ -516,9 +516,9 @@ pub fn writePromptResponseWithUsage(
         }
     }
     try w.writeAll("}");
-    if (reason.hasFxMeta()) {
-        try w.writeAll(",\"_meta\":{\"fx\":{");
-        try writeFxStopReasonField(w, reason);
+    if (reason.hasLiaMeta()) {
+        try w.writeAll(",\"_meta\":{\"lia\":{");
+        try writeLiaStopReasonField(w, reason);
         try w.writeAll("}}");
     }
     try w.writeAll("}");
@@ -575,7 +575,7 @@ test "writeToolCall produces valid json" {
     );
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, out.writer.buffered(), .{});
     defer parsed.deinit();
-    const tool_call_meta = parsed.value.object.get("_meta").?.object.get("fx").?.object.get("toolCall").?.object;
+    const tool_call_meta = parsed.value.object.get("_meta").?.object.get("lia").?.object.get("toolCall").?.object;
     try std.testing.expect(!tool_call_meta.get("internal").?.bool);
     try std.testing.expect(tool_call_meta.get("mcp") == null);
 
@@ -597,14 +597,14 @@ test "writePromptResponse produces valid json" {
 }
 
 test "StopReason maps every reason to an ACP v1 value" {
-    const cases = [_]struct { reason: StopReason, v1: []const u8, fx: ?[]const u8 }{
-        .{ .reason = .end_turn, .v1 = "end_turn", .fx = null },
-        .{ .reason = .cancelled, .v1 = "cancelled", .fx = null },
-        .{ .reason = .max_output_tokens, .v1 = "max_tokens", .fx = "max_output_tokens" },
-        .{ .reason = .max_model_turns, .v1 = "max_turn_requests", .fx = "max_model_turns" },
-        .{ .reason = .refused, .v1 = "refusal", .fx = "refused" },
-        .{ .reason = .content_filter, .v1 = "refusal", .fx = "content_filter" },
-        .{ .reason = .yielded, .v1 = "max_turn_requests", .fx = "yielded" },
+    const cases = [_]struct { reason: StopReason, v1: []const u8, lia: ?[]const u8 }{
+        .{ .reason = .end_turn, .v1 = "end_turn", .lia = null },
+        .{ .reason = .cancelled, .v1 = "cancelled", .lia = null },
+        .{ .reason = .max_output_tokens, .v1 = "max_tokens", .lia = "max_output_tokens" },
+        .{ .reason = .max_model_turns, .v1 = "max_turn_requests", .lia = "max_model_turns" },
+        .{ .reason = .refused, .v1 = "refusal", .lia = "refused" },
+        .{ .reason = .content_filter, .v1 = "refusal", .lia = "content_filter" },
+        .{ .reason = .yielded, .v1 = "max_turn_requests", .lia = "yielded" },
     };
     const alloc = std.testing.allocator;
     for (cases) |case| {
@@ -612,8 +612,8 @@ test "StopReason maps every reason to an ACP v1 value" {
         var out: std.Io.Writer.Allocating = .init(alloc);
         defer out.deinit();
         try writePromptResponse(&out.writer, case.reason);
-        const expected = if (case.fx) |fx|
-            try alloc.print("{{\"stopReason\":\"{s}\",\"_meta\":{{\"fx\":{{\"stopReason\":\"{s}\"}}}}}}", .{ case.v1, fx })
+        const expected = if (case.lia) |lia|
+            try alloc.print("{{\"stopReason\":\"{s}\",\"_meta\":{{\"lia\":{{\"stopReason\":\"{s}\"}}}}}}", .{ case.v1, lia })
         else
             try alloc.print("{{\"stopReason\":\"{s}\"}}", .{case.v1});
         defer alloc.free(expected);
@@ -621,34 +621,34 @@ test "StopReason maps every reason to an ACP v1 value" {
     }
 }
 
-test "steering and usage responses carry the fx stop reason" {
+test "steering and usage responses carry the lia stop reason" {
     const alloc = std.testing.allocator;
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
     try writeSteeringPromptResponse(&out.writer, .yielded, .absorbed);
     try std.testing.expectEqualStrings(
-        "{\"stopReason\":\"max_turn_requests\",\"_meta\":{\"fx\":{\"steering\":\"absorbed\",\"stopReason\":\"yielded\"}}}",
+        "{\"stopReason\":\"max_turn_requests\",\"_meta\":{\"lia\":{\"steering\":\"absorbed\",\"stopReason\":\"yielded\"}}}",
         out.writer.buffered(),
     );
     var usage_out: std.Io.Writer.Allocating = .init(alloc);
     defer usage_out.deinit();
     try writePromptResponseWithUsage(&usage_out.writer, .refused, .{ .input_tokens = 3 });
     try std.testing.expectEqualStrings(
-        "{\"stopReason\":\"refusal\",\"usage\":{\"inputTokens\":3},\"_meta\":{\"fx\":{\"stopReason\":\"refused\"}}}",
+        "{\"stopReason\":\"refusal\",\"usage\":{\"inputTokens\":3},\"_meta\":{\"lia\":{\"stopReason\":\"refused\"}}}",
         usage_out.writer.buffered(),
     );
 
-    // A reason ACP names itself adds no `_meta.fx.stopReason`.
+    // A reason ACP names itself adds no `_meta.lia.stopReason`.
     out.clearRetainingCapacity();
     try writeSteeringPromptResponse(&out.writer, .end_turn, .absorbed);
     try std.testing.expectEqualStrings(
-        "{\"stopReason\":\"end_turn\",\"_meta\":{\"fx\":{\"steering\":\"absorbed\"}}}",
+        "{\"stopReason\":\"end_turn\",\"_meta\":{\"lia\":{\"steering\":\"absorbed\"}}}",
         out.written(),
     );
     out.clearRetainingCapacity();
     try writeSteeringPromptResponse(&out.writer, .cancelled, .dropped);
     try std.testing.expectEqualStrings(
-        "{\"stopReason\":\"cancelled\",\"_meta\":{\"fx\":{\"steering\":\"dropped\"}}}",
+        "{\"stopReason\":\"cancelled\",\"_meta\":{\"lia\":{\"steering\":\"dropped\"}}}",
         out.written(),
     );
     out.clearRetainingCapacity();
@@ -734,7 +734,7 @@ test "writeInitializeResponse contains required fields" {
     const mcp_capabilities = agent_capabilities.get("mcpCapabilities").?.object;
     try std.testing.expect(std.mem.find(u8, out.writer.buffered(), "\"protocolVersion\":1") != null);
     try std.testing.expect(std.mem.find(u8, out.writer.buffered(), "\"loadSession\":true") != null);
-    try std.testing.expect(std.mem.find(u8, out.writer.buffered(), "\"name\":\"fx\"") != null);
+    try std.testing.expect(std.mem.find(u8, out.writer.buffered(), "\"name\":\"lia\"") != null);
     try std.testing.expectEqualStrings(
         build_options.app_version,
         parsed.value.object.get("agentInfo").?.object.get("version").?.string,
@@ -748,8 +748,8 @@ test "writeInitializeResponse contains required fields" {
     try std.testing.expect(mcp_capabilities.get("acp").?.bool);
     const session_capabilities = agent_capabilities.get("sessionCapabilities").?.object;
     try std.testing.expectEqual(@as(usize, 0), session_capabilities.get("systemPrompt").?.object.count());
-    const fx_meta = agent_capabilities.get("_meta").?.object.get("fx").?.object;
-    try std.testing.expect(fx_meta.get("steering").?.bool);
+    const lia_meta = agent_capabilities.get("_meta").?.object.get("lia").?.object;
+    try std.testing.expect(lia_meta.get("steering").?.bool);
 }
 
 test "writeInitializeResponse withholds MCP transports a host rejects" {
@@ -774,7 +774,7 @@ test "writeToolCall separates MCP server and tool identity" {
     var parsed = try std.json.parseFromSlice(std.json.Value, alloc, out.writer.buffered(), .{});
     defer parsed.deinit();
     try std.testing.expectEqualStrings("Evaluate JavaScript", parsed.value.object.get("title").?.string);
-    const meta = parsed.value.object.get("_meta").?.object.get("fx").?.object.get("toolCall").?.object;
+    const meta = parsed.value.object.get("_meta").?.object.get("lia").?.object.get("toolCall").?.object;
     try std.testing.expect(!meta.get("internal").?.bool);
     try std.testing.expectEqualStrings("mini", meta.get("mcp").?.object.get("server").?.string);
     try std.testing.expectEqualStrings("browser_eval", meta.get("mcp").?.object.get("tool").?.string);
@@ -810,7 +810,7 @@ test "writeSessionUpdate wraps update with sessionId" {
 }
 
 test "model recovery info update wraps the shared report and is clearable" {
-    // The report's shape is `types.zig` "recovery reports write the shape fx
+    // The report's shape is `types.zig` "recovery reports write the shape lia
     // ask and ACP share"; this pins the ACP envelope around it.
     const alloc = std.testing.allocator;
     var out: std.Io.Writer.Allocating = .init(alloc);
@@ -821,7 +821,7 @@ test "model recovery info update wraps the shared report and is clearable" {
         .attempt = 4,
     });
     try std.testing.expectEqualStrings(
-        "{\"sessionUpdate\":\"session_info_update\",\"_meta\":{\"fx\":{\"modelResponseRecovery\":{\"state\":\"waiting\",\"attempt\":4,\"message\":\"Gateway error · next try in 8s · attempt 4 · 1m 12s\"}}}}",
+        "{\"sessionUpdate\":\"session_info_update\",\"_meta\":{\"lia\":{\"modelResponseRecovery\":{\"state\":\"waiting\",\"attempt\":4,\"message\":\"Gateway error · next try in 8s · attempt 4 · 1m 12s\"}}}}",
         out.writer.buffered(),
     );
 
@@ -840,12 +840,12 @@ fn initializeAuthMethodsAlloc(alloc: Allocator, offer: AuthOffer) !std.json.Pars
 
 test "initialize offers only the agent auth method without auth.terminal" {
     const alloc = std.testing.allocator;
-    const vercel_help = "fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.";
+    const vercel_help = "lia needs access to Vercel AI Gateway. Run lia login to sign in, lia login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.";
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
     try writeAuthMethods(&out.writer, .{});
     try std.testing.expectEqualStrings(
-        "[{\"id\":\"fx-login\",\"name\":\"" ++ vercel_help ++ "\",\"description\":\"" ++ vercel_help ++ "\"}]",
+        "[{\"id\":\"lia-login\",\"name\":\"" ++ vercel_help ++ "\",\"description\":\"" ++ vercel_help ++ "\"}]",
         out.written(),
     );
 
@@ -853,7 +853,7 @@ test "initialize offers only the agent auth method without auth.terminal" {
     defer parsed.deinit();
     const methods = parsed.value.object.get("authMethods").?.array.items;
     try std.testing.expectEqual(@as(usize, 1), methods.len);
-    try std.testing.expectEqualStrings("fx-login", methods[0].object.get("id").?.string);
+    try std.testing.expectEqualStrings("lia-login", methods[0].object.get("id").?.string);
     try std.testing.expect(methods[0].object.get("type") == null);
 }
 
@@ -863,10 +863,10 @@ test "initialize adds the terminal auth method only with auth.terminal" {
     defer parsed.deinit();
     const methods = parsed.value.object.get("authMethods").?.array.items;
     try std.testing.expectEqual(@as(usize, 2), methods.len);
-    try std.testing.expectEqualStrings("fx-login", methods[0].object.get("id").?.string);
+    try std.testing.expectEqualStrings("lia-login", methods[0].object.get("id").?.string);
     try std.testing.expect(methods[0].object.get("type") == null);
     const terminal = methods[1].object;
-    try std.testing.expectEqualStrings("fx-login-api-key", terminal.get("id").?.string);
+    try std.testing.expectEqualStrings("lia-login-api-key", terminal.get("id").?.string);
     try std.testing.expectEqualStrings("terminal", terminal.get("type").?.string);
     const args = terminal.get("args").?.array.items;
     try std.testing.expectEqual(@as(usize, 3), args.len);
@@ -902,8 +902,8 @@ test "AUTH_REQUIRED data carries the same auth methods" {
 }
 
 test "authenticate accepts the agent and terminal method ids only" {
-    try std.testing.expect(isAuthMethodId("fx-login"));
-    try std.testing.expect(isAuthMethodId("fx-login-api-key"));
-    try std.testing.expect(!isAuthMethodId("fx-login-codex"));
+    try std.testing.expect(isAuthMethodId("lia-login"));
+    try std.testing.expect(isAuthMethodId("lia-login-api-key"));
+    try std.testing.expect(!isAuthMethodId("lia-login-codex"));
     try std.testing.expect(!isAuthMethodId(""));
 }

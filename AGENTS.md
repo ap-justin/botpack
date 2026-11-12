@@ -18,13 +18,13 @@ If you cannot run the binary in your environment, say so explicitly and ask the 
 
 ### Always use the built binary in this repo
 
-When running fx for verification, **always use the freshly-built binary at** **`./zig-out/bin/fx`** from this checkout. Never run `fx` from `PATH`, never rely on the installed copy at `~/.local/bin/fx`, and never assume an installed copy reflects your change.
+When running lia for verification, **always use the freshly-built binary at** **`./zig-out/bin/lia`** from this checkout. Never run `lia` from `PATH`, never rely on the installed copy at `~/.local/bin/lia`, and never assume an installed copy reflects your change.
 
-* The user may have an older `fx` on their PATH (e.g. installed with the install script). Running that one will not exercise your edits.
+* The user may have an older `lia` on their PATH (e.g. installed with the install script). Running that one will not exercise your edits.
 
 * When a user reports "still not working" after you believe you fixed something, do not assume they are running the wrong binary. Assume your fix is incomplete and investigate further. If you genuinely suspect a PATH mismatch, ask — do not silently copy binaries onto their `PATH`.
 
-* In any shell invocation — tmux, direct run, scripts — reference fx as `/Users/<you>/path/to/repo/zig-out/bin/fx` (absolute) or `./zig-out/bin/fx` (when cwd is the repo root). Bare `fx` is always wrong for dev verification.
+* In any shell invocation — tmux, direct run, scripts — reference lia as `/Users/<you>/path/to/repo/zig-out/bin/lia` (absolute) or `./zig-out/bin/lia` (when cwd is the repo root). Bare `lia` is always wrong for dev verification.
 
 ## Language and Toolchain
 
@@ -50,7 +50,7 @@ The test suites under `tests/` use Bun but are separate from the Zig codebase. `
 
 * In documentation, never use double hyphens (`--`) as a dash. Use an emdash (—) sparingly, or rewrite to avoid dashes.
 
-* Use the `technical-writer` skill (`.fx/skills/technical-writer/SKILL.md`) when you write or edit prose, including documentation, commit messages, PR titles and descriptions, and issues. Where the skill and this section differ, such as on em dashes, this section takes precedence.
+* Use the `technical-writer` skill (`.lia/skills/technical-writer/SKILL.md`) when you write or edit prose, including documentation, commit messages, PR titles and descriptions, and issues. Where the skill and this section differ, such as on em dashes, this section takes precedence.
 
 * CLI flags use kebab-case (e.g. `--no-save`, `--json`). Never use camelCase for flags.
 
@@ -72,13 +72,13 @@ Key rules:
 
 * `src/core/indexer/` is the native workspace indexer. It reads git's ignore rules, repository layout, and git config as data and never starts a process, so a repository's configuration cannot make it run a program. Outside code imports only its front door, `indexer.zig`, and the indexer imports only the standard library, its own files, `io.zig`, and `debug_trace.zig`. `@`-completion, `glob_files`, and `grep_files` list files only through it and never start a process. `scripts/check-indexer-boundary.sh` enforces this in CI.
 
-* `src/core/recovery/` decides how one model request recovers: when to retry, how long to wait, when to try another way, what the status line says, and what to save so the request survives a closed window or a crash. fx reports events to `step` and carries out the plan it returns. The module performs no I/O, reads no clock, and never allocates. Outside code imports only its front door, `recovery.zig`, and the module imports only the standard library. `tests/tla/recovery/Recovery.tla` models it, and `scripts/check-recovery-boundary.sh` enforces the boundary in CI.
+* `src/core/recovery/` decides how one model request recovers: when to retry, how long to wait, when to try another way, what the status line says, and what to save so the request survives a closed window or a crash. lia reports events to `step` and carries out the plan it returns. The module performs no I/O, reads no clock, and never allocates. Outside code imports only its front door, `recovery.zig`, and the module imports only the standard library. `tests/tla/recovery/Recovery.tla` models it, and `scripts/check-recovery-boundary.sh` enforces the boundary in CI.
 
 * `src/core/agents/` owns `Agent`, one conversation's own state: its session, worker, stream, prompts, submission, title, totals, attachments, diffs, and undo stack. `App.main_agent` holds the main conversation's. Outside code imports only its front door, `agents.zig`, and the folder never imports the terminal runtime or `main.zig`, nor a file that imports `main.zig` itself, because the app that hosts an agent owns those. Generic helpers probe these fields with `agents.hasAgentField`, not `@hasField`, and test apps nest them under `main_agent` the same way. `scripts/check-agents-boundary.sh` enforces the imports in CI.
 
-* `src/core/shell_command/safe_git.zig` runs git for the `fx pr` and `fx issue` snapshot and for the agent's direct read-only `git status`, `git diff`, and `git log` when the command does not use the user's own shell environment. It turns off every program a repository's own config can name and refuses to run when git would use a different repository than the one fx read. In `auto` mode a git command it refuses is returned to the agent without running. Commands that run in a shell use git with the repository's full config: git in the shell tool's default `user` environment, and the routine commands `auto` mode runs without review, such as `git status` with other flags, `git fetch`, or `npm test`.
+* `src/core/shell_command/safe_git.zig` runs git for the `lia pr` and `lia issue` snapshot and for the agent's direct read-only `git status`, `git diff`, and `git log` when the command does not use the user's own shell environment. It turns off every program a repository's own config can name and refuses to run when git would use a different repository than the one lia read. In `auto` mode a git command it refuses is returned to the agent without running. Commands that run in a shell use git with the repository's full config: git in the shell tool's default `user` environment, and the routine commands `auto` mode runs without review, such as `git status` with other flags, `git fetch`, or `npm test`.
 
-* `src/mcp/` is the MCP engine. Its files import only `std` and each other, and the host passes in `std.Io` and every other service through `src/mcp/host.zig`. fx connects to it through `src/core/mcp_host/`. `src/core/mcp/` holds the MCP types, config parsing, schema checks, search, and tool naming that the host, the tools, ACP, and the UI share.
+* `src/mcp/` is the MCP engine. Its files import only `std` and each other, and the host passes in `std.Io` and every other service through `src/mcp/host.zig`. lia connects to it through `src/core/mcp_host/`. `src/core/mcp/` holds the MCP types, config parsing, schema checks, search, and tool naming that the host, the tools, ACP, and the UI share.
 
 * `src/tools/` owns built-in tool implementations. Generic tool contracts and dispatch live in `src/core/tooling/`. Default tool specs are centralized in `src/core/tooling/tool_specs.zig` or `src/builtins/tools.zig`, not in individual tool files.
 
@@ -132,30 +132,30 @@ CI fails on a missing or stale entry.
 
 Do not scatter help text or argument parsing across multiple files.
 
-Use the `fx-cli-shape` skill (`.fx/skills/fx-cli-shape/SKILL.md`) when you add, rename, remove, or review a user-facing control: a command, argument, flag, setting, env var, slash command, JSON output field, or exit code. It covers which mechanism to use, the name on every surface, and the controls that need a maintainer's approval.
+Use the `lia-cli-shape` skill (`.lia/skills/lia-cli-shape/SKILL.md`) when you add, rename, remove, or review a user-facing control: a command, argument, flag, setting, env var, slash command, JSON output field, or exit code. It covers which mechanism to use, the name on every surface, and the controls that need a maintainer's approval.
 
 ## Configuration and State
 
-Profile configuration and runtime state lives under `~/.fx/`. Project `.fx.json` contains committed project defaults only.
+Profile configuration and runtime state lives under `~/.lia/`. Project `.lia.json` contains committed project defaults only.
 
 Config precedence (highest wins):
 
 1. Command-line flags, where a command supports them
-2. Environment variables such as `FX_PROVIDER`, `FX_MODEL`, `FX_PERMISSION_MODE`, and `FX_MAX_AGENT_STEPS`
-3. `~/.fx/settings.json` → `workspaces["<workspace_path>"]` (profile workspace overrides)
-4. `~/.fx/settings.json` top-level (profile global settings)
-5. `<workspace>/.fx.json` (committed project defaults)
+2. Environment variables such as `LIA_PROVIDER`, `LIA_MODEL`, `LIA_PERMISSION_MODE`, and `LIA_MAX_AGENT_STEPS`
+3. `~/.lia/settings.json` → `workspaces["<workspace_path>"]` (profile workspace overrides)
+4. `~/.lia/settings.json` top-level (profile global settings)
+5. `<workspace>/.lia.json` (committed project defaults)
 6. Built-in defaults
 
-Project `.fx.json` accepts only repo-safe defaults: `max_agent_steps`, `max_tool_result_bytes`, `context`, `provider_order`, and `provider_strict`, parsed by `parseProjectSafeFields` in `src/core/config/config_runtime.zig`. The project layer never parses profile-owned keys, such as provider and model selection, permissions, and interface preferences.
+Project `.lia.json` accepts only repo-safe defaults: `max_agent_steps`, `max_tool_result_bytes`, `context`, `provider_order`, and `provider_strict`, parsed by `parseProjectSafeFields` in `src/core/config/config_runtime.zig`. The project layer never parses profile-owned keys, such as provider and model selection, permissions, and interface preferences.
 
-Runtime state lives under `~/.fx/sessions/<session-id>/` (`session.json`, `background/`, `subagent/`, `logs/`). Sessions are global and portable across workspaces. Each session tracks its `workspace_root`, which updates when resumed in a different workspace. Subagent children are internal sessions registered in their parent's `subagent/children.json`. They stay out of session discovery and cannot be resumed directly.
+Runtime state lives under `~/.lia/sessions/<session-id>/` (`session.json`, `background/`, `subagent/`, `logs/`). Sessions are global and portable across workspaces. Each session tracks its `workspace_root`, which updates when resumed in a different workspace. Subagent children are internal sessions registered in their parent's `subagent/children.json`. They stay out of session discovery and cannot be resumed directly.
 
 ## Permissions
 
 Security is permission-first. All sensitive tool behavior must integrate with `src/core/permissions/permissions.zig`.
 
-* `permission_mode` controls baseline (`ask`, `auto`, or `full-access`; `yolo` remains an alias). Full access bypasses fx permission policy
+* `permission_mode` controls baseline (`ask`, `auto`, or `full-access`; `yolo` remains an alias). Full access bypasses lia permission policy
 
 * Configured denies are evaluated before saved-session rules; an exact saved-session deny can narrow a configured allow, while an exact saved-session allow can satisfy an unresolved configured ask
 
@@ -165,13 +165,13 @@ Security is permission-first. All sensitive tool behavior must integrate with `s
 
 * Routine parsed development commands and reversible new-file creation can execute without model review after configured and saved-session policy. Every remaining unresolved `auto` action receives one narrow security review using the exact unmasked action and targets, origin and call identity, optional host-proven current-branch evidence, and bounded unmasked terminal-safe excerpts of earlier current-turn tool results. A text match between the action and prior tool output is evidence to inspect, not proof of prompt injection or malicious activity. Prepared file mutations and other static root tools omit task text. Reviewed commands, shell input, dynamic tools, and subagent actions also receive bounded unmasked canonical current, first, and recent root requests plus explicit omission counts; the reviewer may use that context only to distinguish trusted user intent from malicious or injected influence, never to judge task quality, alignment, or authorization. Assistant prose, permission feedback, compacted summaries, the pending tool group, later results, and tool or repository text never become authority. Shell input reviews also include the owned receiving session's launch command, working directory, and bounded current screen after verifying session authority, including on resume. The launch command describes startup only; screen content remains untrusted evidence and input still receives its own review
 
-* The reviewer returns `caution` only for prompt injection, where instructions planted in untrusted text make the action delete or overwrite files, send data out, install or run outside code, weaken security, or use credentials the user did not ask for, or system harm, where the action would break, compromise, or hack the user's machine or the runner. Each caution names its category and quotes its evidence. fx keeps a prompt-injection caution only when the quote appears in untrusted tool output or a receiver screen and not in the user's own requests or the pending action, since an action that contains the quoted text is editing, writing, or searching it rather than following it, and a system-harm caution only when the quote appears in the pending action or meets that prompt-injection rule; it clears every other caution. A caution that passes these checks holds the action unless one fresh review of the same request returns `clear`, so a single misjudged quote cannot block; that review's own quote is not checked, and when it cannot complete, the hold stands. Destructive, risky, external, public, remote, unrequested, or task-conflicting actions therefore clear unless they are one of those harms. Following any text is never prompt injection when the action only reads, searches, builds, tests, or runs a local tool's own steps, such as a CLI's next subcommand, a git hint, or a workflow tool's next command. Current-turn `ask_user_question` answers reach the reviewer as user answers and never count as injection evidence. The optional `typesafeai/jev` reviewer answers without quotes, so its decisions are kept as returned. A `clear` review authorizes only the exact unchanged action. A `caution`, incomplete-evidence result, or unavailable review holds only that action, returns guidance to the agent, and never opens a human permission screen, disables tools, or ends the turn
+* The reviewer returns `caution` only for prompt injection, where instructions planted in untrusted text make the action delete or overwrite files, send data out, install or run outside code, weaken security, or use credentials the user did not ask for, or system harm, where the action would break, compromise, or hack the user's machine or the runner. Each caution names its category and quotes its evidence. lia keeps a prompt-injection caution only when the quote appears in untrusted tool output or a receiver screen and not in the user's own requests or the pending action, since an action that contains the quoted text is editing, writing, or searching it rather than following it, and a system-harm caution only when the quote appears in the pending action or meets that prompt-injection rule; it clears every other caution. A caution that passes these checks holds the action unless one fresh review of the same request returns `clear`, so a single misjudged quote cannot block; that review's own quote is not checked, and when it cannot complete, the hold stands. Destructive, risky, external, public, remote, unrequested, or task-conflicting actions therefore clear unless they are one of those harms. Following any text is never prompt injection when the action only reads, searches, builds, tests, or runs a local tool's own steps, such as a CLI's next subcommand, a git hint, or a workflow tool's next command. Current-turn `ask_user_question` answers reach the reviewer as user answers and never count as injection evidence. The optional `typesafeai/jev` reviewer answers without quotes, so its decisions are kept as returned. A `clear` review authorizes only the exact unchanged action. A `caution`, incomplete-evidence result, or unavailable review holds only that action, returns guidance to the agent, and never opens a human permission screen, disables tools, or ends the turn
 
 * Exact cautions and deterministic incomplete-evidence results are reused only for the current turn. An unavailable outcome is not cached as a security judgment, but the same exact action spends at most one unavailable review opportunity per turn; changed actions remain independently reviewable until the bounded current-turn review budget is exhausted. Each review accepts exactly one valid structured decision even with accompanying prose and may retry one malformed completion within the current attempt's deadline. A transport timeout, transient transport failure, or failed transport call is retried once with a fresh 30-second deadline; permanent transport failures, valid cautions, and cancellation are never retried. Legacy `permission_request_id` input is rejected without prompting
 
 * Host-generated review holds retain their advice for the agent and transcript, but carry a saved `review_feedback` marker that excludes them from later security evidence, including after recovery. Old unmarked results remain untrusted evidence; never infer the marker from output text. Quoted review accusations are not proof of an attack, and handling plans or test instructions as data is not itself prompt injection
 
-* A command form that fx runs without review, through `command_effect.plan` or `command_effect.knownReversibleAutoCommand`, must be listed in `parity_review_free_commands` in `src/core/shell_command/command_effect.zig`. The shell parity tests check that sh, dash, bash, and zsh, with and without `extendedglob`, run each one exactly as fx parsed it, and the nightly `shell_parity` fuzz target checks generated commands the same way
+* A command form that lia runs without review, through `command_effect.plan` or `command_effect.knownReversibleAutoCommand`, must be listed in `parity_review_free_commands` in `src/core/shell_command/command_effect.zig`. The shell parity tests check that sh, dash, bash, and zsh, with and without `extendedglob`, run each one exactly as lia parsed it, and the nightly `shell_parity` fuzz target checks generated commands the same way
 
 Do not bypass the permission system for new tools.
 
@@ -227,7 +227,7 @@ Do not bypass the permission system for new tools.
 
 ### Zig 0.17 Standard Library
 
-fx does not use declarations that Zig 0.17 deprecates. They still compile, so check new code against this list:
+lia does not use declarations that Zig 0.17 deprecates. They still compile, so check new code against this list:
 
 * Format with `alloc.print(fmt, args)` and `std.mem.print(buf, fmt, args)`, not `std.fmt.allocPrint` or `std.fmt.bufPrint`.
 
@@ -265,11 +265,11 @@ fx does not use declarations that Zig 0.17 deprecates. They still compile, so ch
 
 Two test suites live under `tests/`, both using Bun. `tests/AGENTS.md` says where each kind of test belongs, how to wire a new E2E file into CI, and how code comments cite tests and specs.
 
-Set `FX_SOUND=0` when you run either suite locally, for example `cd tests/e2e && FX_SOUND=0 bun test cli.test.ts`. On macOS, sound playback during a test run can overload the machine and crash it.
+Set `LIA_SOUND=0` when you run either suite locally, for example `cd tests/e2e && LIA_SOUND=0 bun test cli.test.ts`. On macOS, sound playback during a test run can overload the machine and crash it.
 
 ### `tests/evals/` — LLM Evals
 
-Eval scenarios that exercise the agent through `fx ask --json`. Require `AI_GATEWAY_API_KEY`.
+Eval scenarios that exercise the agent through `lia ask --json`. Require `AI_GATEWAY_API_KEY`.
 
 ```bash
 cd tests/evals && bun install && bun test           # run all evals
@@ -310,15 +310,15 @@ Every pull request must have exactly one `type:` label before it merges, chosen 
 
 * `type: security`: fixes or hardens a security boundary
 
-If the authenticated contributor can manage labels on `vercel-labs/fx`, which takes triage access or higher, assign the label when the PR is opened and keep it accurate when the PR changes. For a mixed PR, choose the label that describes the primary reason the PR exists. If that is ambiguous, ask before applying or changing the label. Outside contributors cannot manage labels, so their pull requests do not need one when opened: a maintainer applies it during review. Do not hold an outside contributor's PR in draft for a missing label.
+If the authenticated contributor can manage labels on `ap-justin/lia`, which takes triage access or higher, assign the label when the PR is opened and keep it accurate when the PR changes. For a mixed PR, choose the label that describes the primary reason the PR exists. If that is ambiguous, ask before applying or changing the label. Outside contributors cannot manage labels, so their pull requests do not need one when opened: a maintainer applies it during review. Do not hold an outside contributor's PR in draft for a missing label.
 
 Keep PR titles as clean imperative sentences, such as `Restore feedback report file clipboard`. Do not add bracketed prefixes such as `[bug]`, `[feature]`, or `[improvement]`. Type belongs in the label, not the title.
 
 ## CI on Pull Requests
 
-Do not run the complete deterministic test suite locally as the default development loop. Run the focused test for the changed path, build the binary, and exercise that path with `./zig-out/bin/fx`.
+Do not run the complete deterministic test suite locally as the default development loop. Run the focused test for the changed path, build the binary, and exercise that path with `./zig-out/bin/lia`.
 
-After the focused checks pass, create a clean checkpoint commit, push the non-`main` feature branch, and open a draft PR immediately. Linux is the gate for every change because most fx behavior is identical on every platform:
+After the focused checks pass, create a clean checkpoint commit, push the non-`main` feature branch, and open a draft PR immediately. Linux is the gate for every change because most lia behavior is identical on every platform:
 
 * `.github/workflows/ci.yml` runs on Linux x86_64. It checks formatting, the PGSO corpus, the public surface, and the agents, compactor, indexer, and recovery boundaries, model-checks request recovery and the empty-reply nudge, runs the ReleaseSafe unit tests, and runs the E2E files in four weighted shards plus the MCP conformance baseline. A failed E2E file is retried once. A file that passes only on retry gets a warning annotation; investigate it as a possible race.
 * `.github/workflows/binary-size.yml` builds each release target on its native runner, reports the size change, and smoke-tests every target's binary. See **Binary Size Observability**.
@@ -330,7 +330,7 @@ macOS runs only when `scripts/detect-macos-need.sh` finds a change that can beha
 
 The `TLA+ MCP models and drivers` job takes about 20 minutes, so a pull request runs its model checks and drivers only when the same detector finds a change to `src/mcp/`, `src/core/mcp_host/`, `src/core/mcp/`, the models in `tests/tla/mcp/` and `tests/tla/mcp_host/`, their drivers in `tests/tla/drivers/mcp/`, `tests/tla/drivers/mcp_host/`, and `tests/tla/drivers/lib/`, the `tests/e2e/fixtures/mcp-*` servers, the helpers those drivers load (`tests/e2e/fake-gateway.ts` and `tests/evals/eval-helpers.ts`), `build.zig`, `build.zig.zon`, or `.github/workflows/ci.yml`. Every push to `main` runs them, and the same `gh workflow run ci.yml --ref <branch>` runs them for any other change.
 
-The `fx mcp call` model check, `.github/workflows/tla-mcp-call.yml`, runs `tests/tla/mcp_call/check.sh`: TLC on the bridge model, the core's tests, both drivers against the real core, and every planted bug. Every push to `main` runs it. A pull request runs it only with the `ci:tla-mcp-call` label, and `gh workflow run tla-mcp-call.yml --ref <branch>` runs it on any branch. Like `ci:macos`, the label needs triage access.
+The `lia mcp call` model check, `.github/workflows/tla-mcp-call.yml`, runs `tests/tla/mcp_call/check.sh`: TLC on the bridge model, the core's tests, both drivers against the real core, and every planted bug. Every push to `main` runs it. A pull request runs it only with the `ci:tla-mcp-call` label, and `gh workflow run tla-mcp-call.yml --ref <branch>` runs it on any branch. Like `ci:macos`, the label needs triage access.
 
 The macOS arm64 PGSO workflow runs on a pull request only when the PGSO pipeline changes: `scripts/pgso/` other than `corpus.json`, the `setup-pgso` action, or `.github/workflows/pgso-macos-arm64.yml`. To qualify any other change, run `gh workflow run pgso-macos-arm64.yml --ref <branch>`. The stable release always runs it.
 
@@ -353,11 +353,11 @@ The `Startup Latency` job builds a ReleaseSafe binary, measures six CLI paths wi
 
 The long-turn memory benchmark runs only on request. Start it with `gh workflow run bench.yml --ref <branch> -f long_turn_memory=true`.
 
-The startup benchmark uses `FX_BENCH=1`, an environment variable that runs through arg parsing and CLI dispatch, then exits before TTY initialization. This lives in `src/core/app/app_entry_runtime.zig`.
+The startup benchmark uses `LIA_BENCH=1`, an environment variable that runs through arg parsing and CLI dispatch, then exits before TTY initialization. This lives in `src/core/app/app_entry_runtime.zig`.
 
-The budget is 2ms of raw wall-clock time for every command on the Linux CI runner, which is the authoritative product budget. Local macOS runs report raw means only, because process and dynamic-loader overhead there can exceed 2ms independently of fx. The process baseline is diagnostic only and is never subtracted.
+The budget is 2ms of raw wall-clock time for every command on the Linux CI runner, which is the authoritative product budget. Local macOS runs report raw means only, because process and dynamic-loader overhead there can exceed 2ms independently of lia. The process baseline is diagnostic only and is never subtracted.
 
-When adding features, consider their impact on startup latency. The `fx help` path is the baseline cold-start benchmark.
+When adding features, consider their impact on startup latency. The `lia help` path is the baseline cold-start benchmark.
 
 ## Binary Size Observability
 
@@ -383,15 +383,11 @@ When adding or changing user-facing behavior, update the documentation this repo
 1. `--help` output via command specs in `src/builtins/commands.zig`
 2. `CONTRIBUTING.md` if build steps, development setup, or collaboration rules change
 
-The user manual at fx.sh/docs is built from a private repository. When a change makes a page wrong or incomplete, updating the manual is part of the change:
+lia has no separate user manual: `--help` and `README.md` are its documentation.
 
-* If you are a member of the `vercel-labs` organization on GitHub, you can fetch the private repository behind fx.sh. When you can push to it, update the page there in a companion pull request and link it from this one. A page's source is `apps/marketing/app/(site)/(docs)/docs/<path>/page.mdx`, where `<path>` is the part of its URL after `fx.sh/docs/`.
+Do not move feature descriptions, option lists, or usage examples into `README.md` in place of `--help`.
 
-* If you can't push to that repository, add a `## Docs` section to the PR description with the exact change each affected page needs, as `CONTRIBUTING.md` describes, so a maintainer can make it.
-
-Do not move feature descriptions, option lists, or usage examples into `README.md` in place of the manual.
-
-`README.md` is a short introduction that links to fx.sh/docs. Change it only when one of its statements becomes false, such as a command, flag, path, or link it names, or when a change adds a capability as broad as the ones in its feature list. A single new option, command, or environment variable belongs in `--help` and the manual, not in `README.md`.
+`README.md` is a short introduction. Change it only when one of its statements becomes false, such as a command, flag, path, or link it names, or when a change adds a capability as broad as the ones in its feature list. A single new option, command, or environment variable belongs in `--help`, not in `README.md`.
 
 Do not document intended behavior as if it already exists.
 
@@ -416,7 +412,7 @@ The changelog is public product copy. Describe observable user behavior, not the
 
 Public changelog entries must:
 
-* Spell the product name `fx`. Preserve different casing only when it is part of an exact code identifier such as `FX_MODEL`.
+* Spell the product name `lia`. Preserve different casing only when it is part of an exact code identifier such as `LIA_MODEL`.
 * Open with a short bold summary of the release.
 * Use only relevant sections from `### Breaking Changes`, `### New Features`, `### Improvements`, `### Bug Fixes`, and `### Security`. Omit empty sections.
 * Write each bullet as one or two plain sentences on a single line. Lead with the concrete change, then say what happens now. Do not add a bold `**Label:**` prefix.
@@ -431,11 +427,11 @@ Only the current release should have markers; remove `<!-- release:start -->` an
 
 <!-- release:start -->
 
-**`fx sessions` can now list saved sessions from every workspace.**
+**`lia sessions` can now list saved sessions from every workspace.**
 
 ### New Features
 
-- `fx sessions --all` lists saved sessions across every workspace in the profile.
+- `lia sessions --all` lists saved sessions across every workspace in the profile.
 <!-- release:end -->
 
 ## 0.2.5
@@ -453,7 +449,7 @@ Do not create version tags manually. Do not change `build.zig.zon` version (it i
 
 ## Repository and License
 
-The canonical repository is `vercel-labs/fx` on GitHub. All URLs, links, and references to the repo must use `vercel-labs/fx` (not `vercel/fx`, `user/fx`, or any other org/owner). Licensed under Apache-2.0.
+The canonical repository is `ap-justin/lia` on GitHub. All URLs, links, and references to the repo must use `ap-justin/lia` (not `vercel/lia`, `user/lia`, or any other org/owner). Licensed under Apache-2.0.
 
 ## What Not To Do
 
@@ -461,6 +457,6 @@ The canonical repository is `vercel-labs/fx` on GitHub. All URLs, links, and ref
 
 * Do not add a second execution path for the same feature without a clear reason
 
-* Do not commit generated state from `.fx/`, `.zig-cache/`, or `zig-out/`
+* Do not commit generated state from `.lia/`, `.zig-cache/`, or `zig-out/`
 
 * Do not add dependencies outside the Zig standard library without discussion

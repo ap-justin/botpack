@@ -11,6 +11,8 @@ const Allocator = std.mem.Allocator;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 const Stream = command_output_content.Stream;
 const replay_magic = "FXRPLY01";
+/// Stored data: saved sessions name their replay files with the fx prefix.
+const handle_prefix = "fx-command-replay-";
 const frame_header_bytes: usize = 9;
 const max_frame_payload_bytes: usize = 1024 * 1024;
 const max_agent_line_bytes: usize = max_frame_payload_bytes;
@@ -271,7 +273,7 @@ fn blobReplayHandle(alloc: Allocator, hash: session_child_store.Blobs.Hash) ![]u
     var run_id: [6]u8 = undefined;
     try std.Io.randomSecure(io_mod.getIo(), &run_id);
     const run_hex = std.fmt.bytesToHex(run_id, .lower);
-    return std.mem.concat(alloc, u8, &.{ "fx-command-replay-", &run_hex, "-", &hash, ".bin" });
+    return std.mem.concat(alloc, u8, &.{ handle_prefix, &run_hex, "-", &hash, ".bin" });
 }
 
 const OpenSpool = struct {
@@ -883,7 +885,7 @@ fn randomReplayStem(alloc: Allocator) ![]u8 {
     try std.Io.randomSecure(io_mod.getIo(), &random);
     const random_hex = std.fmt.bytesToHex(random, .lower);
     return alloc.print(
-        "fx-command-replay-{s}",
+        handle_prefix ++ "{s}",
         .{&random_hex},
     );
 }
@@ -941,7 +943,7 @@ fn contentAddressedHandle(
 }
 
 pub fn isReplayHandle(handle: []const u8) bool {
-    return std.mem.startsWith(u8, handle, "fx-command-replay-") and
+    return std.mem.startsWith(u8, handle, handle_prefix) and
         std.mem.endsWith(u8, handle, ".bin");
 }
 

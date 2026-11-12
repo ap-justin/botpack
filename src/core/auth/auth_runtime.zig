@@ -255,8 +255,8 @@ fn loadCredentialForRefresh(
 ) !?credentials.Credential {
     return switch (source) {
         .fx_login => switch (mode) {
-            .if_needed, .reload => credentials.loadFxLoginCredential(alloc, transport),
-            .force => credentials.refreshFxLoginCredential(alloc, transport),
+            .if_needed, .reload => credentials.loadLiaLoginCredential(alloc, transport),
+            .force => credentials.refreshLiaLoginCredential(alloc, transport),
         },
         else => null,
     };
@@ -322,7 +322,7 @@ fn prepareResolvedCredential(
             if (preparationError(classifyCredentialFailure(failure.source, failure.err))) |err| return err;
             return null;
         }
-        if (resolution.fx_login_status == .unavailable or resolution.stored_key_status == .unavailable) {
+        if (resolution.lia_login_status == .unavailable or resolution.stored_key_status == .unavailable) {
             return error.CredentialStorageUnavailable;
         }
         return null;
@@ -400,7 +400,7 @@ pub fn preparationFailureText(alloc: Allocator, provider: model_provider.Provide
 }
 
 test "credential preparation blocks an unavailable explicit source" {
-    var resolution = credentials.Resolution{ .fx_login_status = .unavailable };
+    var resolution = credentials.Resolution{ .lia_login_status = .unavailable };
     try std.testing.expectError(error.CredentialStorageUnavailable, prepareResolvedCredential(
         std.testing.allocator,
         .gateway,
@@ -1246,7 +1246,7 @@ const InventoryRefreshTask = struct {
 /// asked for it.
 const TeamListPurpose = enum { change_team, provider_picker };
 
-/// Lists the fx login's Vercel teams off the input loop. Listing can renew
+/// Lists the lia login's Vercel teams off the input loop. Listing can renew
 /// the session first, and both steps talk to the network.
 const TeamListTask = struct {
     alloc: Allocator,
@@ -1341,7 +1341,7 @@ pub const PickerView = struct {
     active_provider: model_provider.ProviderId = .gateway,
     include_skip: bool,
     stage: PickerStage = .root,
-    fx_login_session_available: bool = false,
+    lia_login_session_available: bool = false,
     /// A team list is loading in the background for a picker.
     team_list_loading: bool = false,
     teams: []const login_flow.Team = &.{},
@@ -1443,12 +1443,12 @@ pub const PickerView = struct {
             .source => |source| if (self.active_source == source) "current" else "available",
             .action => |action| switch (action) {
                 .connections => "",
-                .login => if (self.fx_login_session_available) "connected" else "",
+                .login => if (self.lia_login_session_available) "connected" else "",
                 .setup, .switch_credential, .switch_provider => "",
                 .automatic => "use the first available source",
                 .change_team => if (self.team_list_loading)
                     team_list_loading_label
-                else if (self.fx_login_session_available)
+                else if (self.lia_login_session_available)
                     "choose a team"
                 else
                     "sign in first",
@@ -1459,7 +1459,7 @@ pub const PickerView = struct {
 
     pub fn choiceEnabled(self: PickerView, choice: Choice) bool {
         return switch (choice) {
-            .action => |action| action != .change_team or self.fx_login_session_available,
+            .action => |action| action != .change_team or self.lia_login_session_available,
             .provider, .source, .team => true,
         };
     }
@@ -1491,7 +1491,7 @@ fn connectionChoiceAt(index: usize) ?Choice {
     };
 }
 
-/// Teams match by name or slug, and keep their order, as every fx menu
+/// Teams match by name or slug, and keep their order, as every lia menu
 /// filters (`fuzzy_match.Filter`).
 const TeamMatches = struct {
     teams: []const login_flow.Team,
@@ -1527,7 +1527,7 @@ pub const StatusSnapshot = struct {
     team: ?[]const u8 = null,
     owned_team: ?[]u8 = null,
     stored_key_status: credentials.StoredKeyReadStatus = .not_attempted,
-    fx_login_status: credentials.FxLoginReadStatus = .not_attempted,
+    lia_login_status: credentials.LiaLoginReadStatus = .not_attempted,
     failure: ?CredentialFailure = null,
     gateway_connected: bool = false,
     /// The active credential is past its refresh deadline. Distinct from `refreshable`,
@@ -1559,19 +1559,19 @@ pub const StatusSnapshot = struct {
         }
         const required_source = self.required_source orelse return credentials.missing_credential_message;
         return switch (required_source) {
-            .vercel_oidc_token => "VERCEL_OIDC_TOKEN is selected but unavailable. Set VERCEL_OIDC_TOKEN before starting fx; no other credential was selected.",
-            .ai_gateway_api_key => "AI_GATEWAY_API_KEY is selected but unavailable. Set AI_GATEWAY_API_KEY before starting fx; no other credential was selected.",
+            .vercel_oidc_token => "VERCEL_OIDC_TOKEN is selected but unavailable. Set VERCEL_OIDC_TOKEN before starting lia; no other credential was selected.",
+            .ai_gateway_api_key => "AI_GATEWAY_API_KEY is selected but unavailable. Set AI_GATEWAY_API_KEY before starting lia; no other credential was selected.",
             .stored_key => stored_key_unavailable_help,
-            .fx_login => if (self.fx_login_status == .unavailable)
-                "The saved fx login could not be loaded. Run fx login to repair this source; no other credential was selected."
+            .fx_login => if (self.lia_login_status == .unavailable)
+                "The saved lia login could not be loaded. Run lia login to repair this source; no other credential was selected."
             else
-                "fx login is selected but unavailable. Run fx login to reconnect; no other credential was selected.",
+                "lia login is selected but unavailable. Run lia login to reconnect; no other credential was selected.",
             .host_managed => credentials.missing_credential_message,
             .configured => "The configured provider credential is unavailable. Check its auth environment variable in settings.json; no other provider was selected.",
         };
     }
 
-    const stored_key_repair = "Run fx login vercel --api-key to save a key again, or fx login to sign in instead; no other credential was selected.";
+    const stored_key_repair = "Run lia login vercel --api-key to save a key again, or lia login to sign in instead; no other credential was selected.";
     const stored_key_unreadable_help = "The selected stored API key could not be read from " ++ credentials.stored_key_backend_label ++ ". " ++ stored_key_repair;
     const stored_key_unavailable_help = "A stored API key is selected but unavailable. " ++ stored_key_repair;
 
@@ -1643,7 +1643,7 @@ pub fn loadStatusSnapshotForProvider(
             .team = owned_team,
             .owned_team = owned_team,
             .stored_key_status = resolution.stored_key_status,
-            .fx_login_status = resolution.fx_login_status,
+            .lia_login_status = resolution.lia_login_status,
             .gateway_connected = gateway_connected,
             .expired = expired,
         };
@@ -1651,7 +1651,7 @@ pub fn loadStatusSnapshotForProvider(
     return .{
         .required_source = if (provider) |selected_provider| requestedSource(selected_provider, preferred) else preferred,
         .stored_key_status = resolution.stored_key_status,
-        .fx_login_status = resolution.fx_login_status,
+        .lia_login_status = resolution.lia_login_status,
         .failure = if (resolution.failure) |failure| classifyCredentialFailure(failure.source, failure.err) else null,
         .gateway_connected = gateway_connected,
     };
@@ -1663,7 +1663,7 @@ pub const View = struct {
     selected_team: ?[]const u8,
     refreshable: bool,
     stored_key_status: credentials.StoredKeyReadStatus,
-    fx_login_status: credentials.FxLoginReadStatus,
+    lia_login_status: credentials.LiaLoginReadStatus,
     onboarding_skipped: bool,
 
     pub fn activeSourceLabel(self: View) []const u8 {
@@ -1680,9 +1680,9 @@ pub const GatewayCredential = struct {
     api_key: ?[]const u8,
     gateway_team: ?[]const u8,
     source: credentials.Source,
-    /// The fx login account, when the credential carries one.
+    /// The lia login account, when the credential carries one.
     account: ?[]const u8 = null,
-    /// The fx login team's slug, for display.
+    /// The lia login team's slug, for display.
     team_slug: ?[]const u8 = null,
 };
 
@@ -1708,14 +1708,14 @@ pub const Runtime = struct {
     source_inventory: SourceSet = .empty,
     unavailable_sources: SourceSet = .empty,
     stored_key_status: credentials.StoredKeyReadStatus = .not_attempted,
-    fx_login_status: credentials.FxLoginReadStatus = .not_attempted,
+    lia_login_status: credentials.LiaLoginReadStatus = .not_attempted,
     onboarding_skipped: bool = false,
     picker_active: bool = false,
     picker_selection: ?Choice = null,
     picker_include_skip: bool = false,
     picker_stage: PickerStage = .root,
     provider_picker_active: model_provider.ProviderId = .gateway,
-    fx_login_session_available: bool = false,
+    lia_login_session_available: bool = false,
     team_selection: ?login_flow.TeamSelection = null,
     team_query: std.ArrayList(u8) = .empty,
     sign_in_flow: login_flow.SignInRuntime = .{},
@@ -1794,14 +1794,14 @@ pub const Runtime = struct {
         storage.source_inventory = .empty;
         storage.unavailable_sources = .empty;
         storage.stored_key_status = .not_attempted;
-        storage.fx_login_status = .not_attempted;
+        storage.lia_login_status = .not_attempted;
         storage.onboarding_skipped = false;
         storage.picker_active = false;
         storage.picker_selection = null;
         storage.picker_include_skip = false;
         storage.picker_stage = .root;
         storage.provider_picker_active = .gateway;
-        storage.fx_login_session_available = false;
+        storage.lia_login_session_available = false;
         storage.team_selection = null;
         storage.team_query = .empty;
         storage.sign_in_flow = .{};
@@ -2010,7 +2010,7 @@ pub const Runtime = struct {
             else
                 null,
             .stored_key_status = if (provider == .gateway) self.stored_key_status else .not_attempted,
-            .fx_login_status = if (provider == .gateway) self.fx_login_status else .not_attempted,
+            .lia_login_status = if (provider == .gateway) self.lia_login_status else .not_attempted,
             .gateway_connected = gateway_connected,
         };
         return .{
@@ -2032,7 +2032,7 @@ pub const Runtime = struct {
             .selected_team = if (self.selected_credential) |credential| credential.gatewayTeam() else null,
             .refreshable = if (active_source) |source| credentials.sourceRefreshable(source) else false,
             .stored_key_status = self.stored_key_status,
-            .fx_login_status = self.fx_login_status,
+            .lia_login_status = self.lia_login_status,
             .onboarding_skipped = self.onboarding_skipped,
         };
     }
@@ -2040,12 +2040,12 @@ pub const Runtime = struct {
     pub fn recordStartupStatus(
         self: *Self,
         stored_key_status: credentials.StoredKeyReadStatus,
-        fx_login_status: credentials.FxLoginReadStatus,
+        lia_login_status: credentials.LiaLoginReadStatus,
         load_failure: ?credentials.LoadFailure,
         onboarding_skipped: bool,
     ) void {
         self.stored_key_status = stored_key_status;
-        self.fx_login_status = fx_login_status;
+        self.lia_login_status = lia_login_status;
         self.onboarding_skipped = onboarding_skipped;
         if (self.auth_mode == .local and self.selected_credential == null) {
             self.credential_failure = if (load_failure) |failure| .{
@@ -2143,7 +2143,7 @@ pub const Runtime = struct {
         return .{ .ready = task.action };
     }
 
-    /// Starts listing the fx login's teams in a `std.Io` task, unless one is
+    /// Starts listing the lia login's teams in a `std.Io` task, unless one is
     /// loading; `takeTeamList` returns the result once to the screen that
     /// asked for it.
     pub fn beginTeamList(self: *Self, alloc: Allocator, purpose: TeamListPurpose) !void {
@@ -2183,12 +2183,12 @@ pub const Runtime = struct {
     fn applySourceInventory(self: *Self, inventory: SourceInventory) void {
         self.source_inventory = inventory.available;
         self.unavailable_sources = inventory.unavailable;
-        self.fx_login_session_available = inventory.available.contains(.fx_login);
+        self.lia_login_session_available = inventory.available.contains(.fx_login);
         if (!inventory.available.contains(.stored_key) and !inventory.unavailable.contains(.stored_key)) {
             self.stored_key_status = .not_found;
         }
         if (!inventory.available.contains(.fx_login) and !inventory.unavailable.contains(.fx_login)) {
-            self.fx_login_status = .absent;
+            self.lia_login_status = .absent;
         }
         if (self.credentialSource()) |source| {
             if (source != .host_managed and !inventory.unavailable.contains(source)) self.source_inventory.insert(source);
@@ -2238,7 +2238,7 @@ pub const Runtime = struct {
             .active_provider = self.provider_picker_active,
             .include_skip = self.picker_include_skip,
             .stage = self.picker_stage,
-            .fx_login_session_available = self.fx_login_session_available,
+            .lia_login_session_available = self.lia_login_session_available,
             .team_list_loading = self.team_list_task != null,
             .teams = if (self.team_selection) |*selection| selection.teams.items else &.{},
             .current_team = if (self.team_selection) |*selection|
@@ -2797,7 +2797,7 @@ pub const Runtime = struct {
         credential.team_slug = null;
         self.source_inventory.insert(source);
         self.unavailable_sources.remove(source);
-        if (source == .fx_login) self.fx_login_session_available = true;
+        if (source == .fx_login) self.lia_login_session_available = true;
         if (source == .stored_key) self.stored_key_status = .not_attempted;
         return change;
     }
@@ -3012,8 +3012,8 @@ pub const Runtime = struct {
         return previous != null;
     }
 
-    pub fn reconcileAfterFxLoginLogout(self: *Self, alloc: Allocator) !bool {
-        return self.reconcileAfterFxLoginLogoutWithDeps(
+    pub fn reconcileAfterLiaLoginLogout(self: *Self, alloc: Allocator) !bool {
+        return self.reconcileAfterLiaLoginLogoutWithDeps(
             alloc,
             self,
             probeCredentialSource,
@@ -3021,7 +3021,7 @@ pub const Runtime = struct {
         );
     }
 
-    fn reconcileAfterFxLoginLogoutWithDeps(
+    fn reconcileAfterLiaLoginLogoutWithDeps(
         self: *Self,
         alloc: Allocator,
         ctx: ?*anyopaque,
@@ -3390,13 +3390,13 @@ test "auth failure snapshot keeps refresh failures distinct from HTTP rejection"
 
     const message = try snapshot.renderText(std.testing.allocator);
     defer std.testing.allocator.free(message);
-    try std.testing.expectEqualStrings("fx login credential refresh failed", message);
+    try std.testing.expectEqualStrings("lia login credential refresh failed", message);
 
     const json = try snapshot.renderJson(std.testing.allocator);
     defer std.testing.allocator.free(json);
     var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
     defer parsed.deinit();
-    try std.testing.expectEqualStrings("fx login", parsed.value.object.get("source").?.string);
+    try std.testing.expectEqualStrings("lia login", parsed.value.object.get("source").?.string);
     try std.testing.expectEqualStrings("credential_refresh_failed", parsed.value.object.get("reason").?.string);
     try std.testing.expect(parsed.value.object.get("http_status") == null);
 
@@ -3557,7 +3557,7 @@ test "auth runtime exposes one current Gateway credential for prompt admission" 
     try std.testing.expectEqual(credentials.Source.fx_login, gateway_credential.source);
 }
 
-test "auth runtime never admits a teamless fx login credential" {
+test "auth runtime never admits a teamless lia login credential" {
     const alloc = std.testing.allocator;
     var runtime: Runtime = .{};
     defer runtime.deinit(alloc);
@@ -3568,7 +3568,7 @@ test "auth runtime never admits a teamless fx login credential" {
     try std.testing.expect(runtime.gatewayCredential() == null);
 }
 
-test "auth runtime withholds an fx credential across its expiry boundary" {
+test "auth runtime withholds a lia credential across its expiry boundary" {
     const alloc = std.testing.allocator;
     var runtime: Runtime = .{};
     defer runtime.deinit(alloc);
@@ -3641,7 +3641,7 @@ test "auth runtime view preserves missing and loaded states" {
     try std.testing.expect(missing.selected_team == null);
     try std.testing.expect(!missing.refreshable);
     try std.testing.expectEqual(credentials.StoredKeyReadStatus.unavailable, missing.stored_key_status);
-    try std.testing.expectEqual(credentials.FxLoginReadStatus.unavailable, missing.fx_login_status);
+    try std.testing.expectEqual(credentials.LiaLoginReadStatus.unavailable, missing.lia_login_status);
     try std.testing.expect(missing.onboarding_skipped);
     try std.testing.expectEqual(GatewayTeamStatus.unknown, missing.gatewayTeamStatus());
     try std.testing.expectEqual(@as(usize, 0), missing.available_inactive_sources.count());
@@ -3690,7 +3690,7 @@ test "confirmed source removal clears stale store status after adoption and logo
     _ = runtime.adoptCredential(alloc, &login);
     runtime.applySourceInventory(.{ .available = SourceSet.initOne(.fx_login) });
     var fixture: LogoutFixture = .{ .existing = .empty };
-    _ = try runtime.reconcileAfterFxLoginLogoutWithDeps(alloc, &fixture, LogoutFixture.probe, LogoutFixture.load);
+    _ = try runtime.reconcileAfterLiaLoginLogoutWithDeps(alloc, &fixture, LogoutFixture.probe, LogoutFixture.load);
 
     try std.testing.expectEqualStrings(credentials.missing_credential_message, runtime.statusSnapshotAt(100, .gateway, null).missingHelp().?);
 }
@@ -3764,9 +3764,9 @@ test "auth status names each explicit key source and its recovery" {
         label: []const u8,
         recovery: []const u8,
     }{
-        .{ .source = .vercel_oidc_token, .label = "VERCEL_OIDC_TOKEN", .recovery = "Set VERCEL_OIDC_TOKEN before starting fx" },
-        .{ .source = .ai_gateway_api_key, .label = "AI_GATEWAY_API_KEY", .recovery = "Set AI_GATEWAY_API_KEY before starting fx" },
-        .{ .source = .stored_key, .label = "stored API key", .recovery = "Run fx login vercel --api-key" },
+        .{ .source = .vercel_oidc_token, .label = "VERCEL_OIDC_TOKEN", .recovery = "Set VERCEL_OIDC_TOKEN before starting lia" },
+        .{ .source = .ai_gateway_api_key, .label = "AI_GATEWAY_API_KEY", .recovery = "Set AI_GATEWAY_API_KEY before starting lia" },
+        .{ .source = .stored_key, .label = "stored API key", .recovery = "Run lia login vercel --api-key" },
     };
     for (cases) |case| {
         const status = StatusSnapshot{ .required_source = case.source };
@@ -3779,10 +3779,10 @@ test "auth status names each explicit key source and its recovery" {
     }
 }
 
-test "a selected stored key that is missing points at fx login, not the removed /provider" {
+test "a selected stored key that is missing points at lia login, not the removed /provider" {
     const status = StatusSnapshot{ .required_source = .stored_key };
     try std.testing.expectEqualStrings(
-        "A stored API key is selected but unavailable. Run fx login vercel --api-key to save a key again, or fx login to sign in instead; no other credential was selected.",
+        "A stored API key is selected but unavailable. Run lia login vercel --api-key to save a key again, or lia login to sign in instead; no other credential was selected.",
         status.missingHelp().?,
     );
 }
@@ -3795,7 +3795,7 @@ test "auth status preserves selected stored-key read failure without suggesting 
     };
     try std.testing.expectEqualStrings(
         "The selected stored API key could not be read from " ++ credentials.stored_key_backend_label ++
-            ". Run fx login vercel --api-key to save a key again, or fx login to sign in instead; no other credential was selected.",
+            ". Run lia login vercel --api-key to save a key again, or lia login to sign in instead; no other credential was selected.",
         status.missingHelp().?,
     );
     status.required_source = null;
@@ -3804,14 +3804,14 @@ test "auth status preserves selected stored-key read failure without suggesting 
     try std.testing.expect(status.missingHelp() == null);
 }
 
-test "auth status keeps an unavailable explicit fx login distinct from automatic absence" {
-    for ([_]credentials.FxLoginReadStatus{ .absent, .unavailable }) |read_status| {
+test "auth status keeps an unavailable explicit lia login distinct from automatic absence" {
+    for ([_]credentials.LiaLoginReadStatus{ .absent, .unavailable }) |read_status| {
         const status = StatusSnapshot{
             .required_source = .fx_login,
-            .fx_login_status = read_status,
+            .lia_login_status = read_status,
         };
         const help = status.missingHelp().?;
-        try std.testing.expect(std.mem.find(u8, help, "Run fx login") != null);
+        try std.testing.expect(std.mem.find(u8, help, "Run lia login") != null);
         try std.testing.expect(std.mem.find(u8, help, "no other credential was selected") != null);
     }
 }
@@ -3823,7 +3823,7 @@ test "auth status snapshot reports an expired session without claiming it is unr
     const fresh_detail = try fresh.formatDoctorDetail(alloc);
     defer alloc.free(fresh_detail);
     try std.testing.expectEqualStrings(
-        "fx login is configured; refreshable=true; team=vercel-labs",
+        "lia login is configured; refreshable=true; team=vercel-labs",
         fresh_detail,
     );
 
@@ -3831,7 +3831,7 @@ test "auth status snapshot reports an expired session without claiming it is unr
     const stale_detail = try stale.formatDoctorDetail(alloc);
     defer alloc.free(stale_detail);
     try std.testing.expectEqualStrings(
-        "fx login is configured; session expired; refreshable=true; team=vercel-labs",
+        "lia login is configured; session expired; refreshable=true; team=vercel-labs",
         stale_detail,
     );
 
@@ -3905,7 +3905,7 @@ test "auth inventory skips unavailable sources and keeps later sources" {
     try runtime.refreshSourceInventoryWithProbe(alloc, &probe, Probe.exists);
     try std.testing.expectEqual(expected, runtime.source_inventory);
     try std.testing.expect(runtime.pickerView().unavailable_sources.contains(.fx_login));
-    try std.testing.expect(!runtime.fx_login_session_available);
+    try std.testing.expect(!runtime.lia_login_session_available);
     try std.testing.expectEqual(credentials.Source.fx_login, runtime.credentialSource().?);
 
     try std.testing.expectEqual(InventoryRefreshStart.started, runtime.beginSourceInventoryRefreshWithDeps(
@@ -3922,7 +3922,7 @@ test "auth inventory skips unavailable sources and keeps later sources" {
     probe.unavailable = false;
     try runtime.refreshSourceInventoryWithProbe(alloc, &probe, Probe.exists);
     try std.testing.expect(runtime.source_inventory.contains(.fx_login));
-    try std.testing.expect(runtime.fx_login_session_available);
+    try std.testing.expect(runtime.lia_login_session_available);
     try std.testing.expectEqual(SourceSet.empty, runtime.pickerView().unavailable_sources);
 }
 
@@ -4058,20 +4058,20 @@ const LogoutFixture = struct {
     }
 };
 
-test "logout replaces an active fx login with the next available source" {
+test "logout replaces an active lia login with the next available source" {
     const alloc = std.testing.allocator;
     var runtime: Runtime = .{};
     defer runtime.deinit(alloc);
     runtime.skipOnboarding();
 
-    var active = try makeTestCredential(alloc, "fx-token", .fx_login, null, null);
+    var active = try makeTestCredential(alloc, "lia-token", .fx_login, null, null);
     defer active.deinit(alloc);
     _ = runtime.adoptCredential(alloc, &active);
 
     var fixture = LogoutFixture{
         .existing = SourceSet.initMany(&.{ .ai_gateway_api_key, .stored_key }),
     };
-    try std.testing.expect(try runtime.reconcileAfterFxLoginLogoutWithDeps(
+    try std.testing.expect(try runtime.reconcileAfterLiaLoginLogoutWithDeps(
         alloc,
         &fixture,
         LogoutFixture.probe,
@@ -4096,7 +4096,7 @@ test "logout preserves an active non-login credential" {
     runtime.source_inventory.insert(.fx_login);
 
     var fixture = LogoutFixture{ .existing = SourceSet.initOne(.ai_gateway_api_key) };
-    try std.testing.expect(!try runtime.reconcileAfterFxLoginLogoutWithDeps(
+    try std.testing.expect(!try runtime.reconcileAfterLiaLoginLogoutWithDeps(
         alloc,
         &fixture,
         LogoutFixture.probe,
@@ -4115,12 +4115,12 @@ test "logout clears the active login and re-enables auth selection when no sourc
     defer runtime.deinit(alloc);
     runtime.skipOnboarding();
 
-    var active = try makeTestCredential(alloc, "fx-token", .fx_login, null, null);
+    var active = try makeTestCredential(alloc, "lia-token", .fx_login, null, null);
     defer active.deinit(alloc);
     _ = runtime.adoptCredential(alloc, &active);
 
     var fixture = LogoutFixture{ .existing = .empty };
-    try std.testing.expect(try runtime.reconcileAfterFxLoginLogoutWithDeps(
+    try std.testing.expect(try runtime.reconcileAfterLiaLoginLogoutWithDeps(
         alloc,
         &fixture,
         LogoutFixture.probe,
@@ -4132,17 +4132,17 @@ test "logout clears the active login and re-enables auth selection when no sourc
     try std.testing.expect(!runtime.view().onboarding_skipped);
 }
 
-test "logout reconciliation adopts a newer concurrent fx login" {
+test "logout reconciliation adopts a newer concurrent lia login" {
     const alloc = std.testing.allocator;
     var runtime: Runtime = .{};
     defer runtime.deinit(alloc);
 
-    var active = try makeTestCredential(alloc, "old-fx-token", .fx_login, "team_1", null);
+    var active = try makeTestCredential(alloc, "old-lia-token", .fx_login, "team_1", null);
     defer active.deinit(alloc);
     _ = runtime.adoptCredential(alloc, &active);
 
     var fixture = LogoutFixture{ .existing = SourceSet.initOne(.fx_login) };
-    try std.testing.expect(try runtime.reconcileAfterFxLoginLogoutWithDeps(
+    try std.testing.expect(try runtime.reconcileAfterLiaLoginLogoutWithDeps(
         alloc,
         &fixture,
         LogoutFixture.probe,
@@ -4176,7 +4176,7 @@ test "auth picker navigation wraps across the four setup sections" {
     const alloc = std.testing.allocator;
     var runtime: Runtime = .{};
     runtime.source_inventory = SourceSet.initMany(&.{ .ai_gateway_api_key, .fx_login });
-    runtime.fx_login_session_available = true;
+    runtime.lia_login_session_available = true;
     runtime.openPicker(alloc);
 
     try std.testing.expect(runtime.movePicker(1));
@@ -4227,7 +4227,7 @@ test "provider picker projects the active Vercel team" {
     try std.testing.expectEqualStrings("team_1", current_team.?);
 }
 
-test "adopting fx login publishes Vercel session availability to setup" {
+test "adopting lia login publishes Vercel session availability to setup" {
     const alloc = std.testing.allocator;
     var runtime: Runtime = .{};
     defer runtime.deinit(alloc);
@@ -4237,7 +4237,7 @@ test "adopting fx login publishes Vercel session availability to setup" {
     _ = runtime.adoptCredential(alloc, &credential);
 
     const picker = runtime.pickerView();
-    try std.testing.expect(picker.fx_login_session_available);
+    try std.testing.expect(picker.lia_login_session_available);
     try std.testing.expect(picker.choiceEnabled(.{ .action = .change_team }));
 }
 
@@ -4348,7 +4348,7 @@ test "team selection reached from onboarding returns to the setup hub" {
     const alloc = std.testing.allocator;
     var runtime: Runtime = .{};
     defer runtime.deinit(alloc);
-    runtime.fx_login_session_available = true;
+    runtime.lia_login_session_available = true;
     runtime.openOnboardingPicker(alloc);
 
     var selection: login_flow.TeamSelection = .{};
@@ -4575,7 +4575,7 @@ test "api key entry never reallocates while the key is in memory" {
 }
 
 test "api key stage zeroes its allocation on every exit path" {
-    const sentinel = "FX_API_KEY_ZERO_SENTINEL";
+    const sentinel = "LIA_API_KEY_ZERO_SENTINEL";
 
     {
         var backing: [16384]u8 = @splat(0xa5);

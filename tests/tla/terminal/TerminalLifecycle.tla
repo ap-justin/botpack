@@ -1,19 +1,19 @@
 -------------------------- MODULE TerminalLifecycle --------------------------
 (***************************************************************************)
-(* fx tty terminal lifecycle without the terminal host daemon.            *)
+(* lia tty terminal lifecycle without the terminal host daemon.            *)
 (*                                                                          *)
-(* tty=true terminals are owned by the fx process instance that opened     *)
+(* tty=true terminals are owned by the lia process instance that opened     *)
 (* them:                                                                    *)
 (*   - Normal exit hangs up and reaps every owned terminal before the      *)
 (*     process ends, with no prompt.                                       *)
 (*   - A crash leaves cleanup to the kernel PTY hangup and the launcher    *)
 (*     watchdog (best effort).                                             *)
-(*   - A later process (resume, or another fx) reconciles stale durable    *)
+(*   - A later process (resume, or another lia) reconciles stale durable    *)
 (*     records to "ended" only when the owning process instance is gone,   *)
 (*     and never reattaches to them.                                       *)
 (*                                                                          *)
 (* `Mutation` enables one deliberately broken rule. "daemon_survives" is   *)
-(* the behavior with a host daemon: terminals outlive a clean fx exit.      *)
+(* the behavior with a host daemon: terminals outlive a clean lia exit.      *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets, TLC
 
@@ -24,7 +24,7 @@ ASSUME Mutation \in {"none", "daemon_survives", "exit_skips_close",
                      "profile_wide_recover", "reattach"}
 
 VARIABLES
-    run,          \* fx process slot state
+    run,          \* lia process slot state
     inst,         \* current instance number of each slot (restart = new instance)
     crashedInst,  \* <<slot, instance>> pairs that ended by crash
     owner,        \* owning <<slot, instance>> of each terminal
@@ -176,7 +176,7 @@ SafetySpec == Init /\ [][Next]_vars
 -----------------------------------------------------------------------------
 (* Safety.                                                                  *)
 
-\* No terminal outlives its fx process except transiently after a crash.
+\* No terminal outlives its lia process except transiently after a crash.
 OrphansOnlyAfterCrash ==
     \A t \in Ttys :
         (alive[t] /\ ~OwnerRunning(t)) => <<owner[t].p, owner[t].i>> \in crashedInst
@@ -190,7 +190,7 @@ ShownLiveIsOwned ==
 \* Resume never reattaches: input only reaches terminals of the caller instance.
 NoBadInteract == ~badInteract
 
-\* Reconciliation never ends a terminal owned by another running fx process.
+\* Reconciliation never ends a terminal owned by another running lia process.
 NoWrongEnd == ~wrongEnd
 
 -----------------------------------------------------------------------------

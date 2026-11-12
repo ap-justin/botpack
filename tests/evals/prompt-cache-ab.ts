@@ -1,10 +1,10 @@
 /**
  * Model-backed A/B eval of the prompt cache across mid-session changes.
  *
- * Each scenario is one saved fx session in its own profile and repository:
+ * Each scenario is one saved lia session in its own profile and repository:
  * turn 1 reads every file to build a real history, then one event happens
  * (a branch switch, a permission change, folder rules, a restart, a named
- * skill), then more turns, each through `fx ask --resume last`. A recording
+ * skill), then more turns, each through `lia ask --resume last`. A recording
  * proxy in front of AI Gateway keeps every request and the usage its stream
  * reports. Per run it reports:
  *
@@ -13,7 +13,7 @@
  * - new tokens (uncached input plus cache writes) and cache reads;
  * - whether the answers are right for the scenario.
  *
- * It compares two explicit fx binaries on the same models. Results vary
+ * It compares two explicit lia binaries on the same models. Results vary
  * between runs, so compare several runs, not one. It makes billed calls and
  * is not a pull request check.
  */
@@ -138,7 +138,7 @@ export interface Scenario {
   turns: string[];
   /** Changes the repository or profile after turn 1. */
   afterTurn1?: (repo: string, home: string) => void;
-  /** Runs before the turn at this index, outside fx. */
+  /** Runs before the turn at this index, outside lia. */
   beforeTurn?: Record<number, (repo: string) => void>;
   /** Turns at these indexes run without `--full-access`, in the profile's `auto` mode. */
   defaultAccess?: number[];
@@ -204,7 +204,7 @@ export const SCENARIOS: Scenario[] = [
   { name: "control", turns: ["Reply with the single word OK."] },
   {
     // The agent switches branches mid-turn; later turns ask which branch is
-    // checked out, and before the last one it switches back outside fx. The
+    // checked out, and before the last one it switches back outside lia. The
     // switch back names `master`, so it works even when a build never ran the
     // first turn's checkout.
     name: "branchnote",
@@ -221,7 +221,7 @@ export const SCENARIOS: Scenario[] = [
   },
   {
     name: "permnote",
-    turns: ["Without running any tools, which fx permission mode applies right now? Reply with only the mode name."],
+    turns: ["Without running any tools, which lia permission mode applies right now? Reply with only the mode name."],
     defaultAccess: [0],
     check: (run) => (run.turns[1]?.output ?? "").toLowerCase().includes("auto"),
   },
@@ -282,11 +282,11 @@ export function writeFixtureRepo(repo: string): void {
 }
 
 function writeProfile(home: string): void {
-  mkdirSync(join(home, ".fx", "skills", "pineapple-note"), { recursive: true, mode: 0o700 });
-  writeFileSync(join(home, ".fx", "settings.json"), JSON.stringify({ permission_mode: "auto" }) + "\n", { mode: 0o600 });
+  mkdirSync(join(home, ".lia", "skills", "pineapple-note"), { recursive: true, mode: 0o700 });
+  writeFileSync(join(home, ".lia", "settings.json"), JSON.stringify({ permission_mode: "auto" }) + "\n", { mode: 0o600 });
   // Every scenario has the same profile from turn 1, so only the event differs.
   writeFileSync(
-    join(home, ".fx", "skills", "pineapple-note", "SKILL.md"),
+    join(home, ".lia", "skills", "pineapple-note", "SKILL.md"),
     "---\nname: pineapple-note\ndescription: Demo skill with a visible effect. Use when asked for a pineapple note.\n---\n\n" +
       "# Pineapple note\n\nWhen this skill is active, end every reply with the word PINEAPPLE.\n",
   );
@@ -326,7 +326,7 @@ export async function runScenario(
   scenario: Scenario,
   opts: { binary: string; side: string; model: string; timeoutMs: number; upstream?: string },
 ): Promise<ScenarioRun> {
-  const root = mkdtempSync(join(tmpdir(), `fx-cache-ab-${scenario.name}-`));
+  const root = mkdtempSync(join(tmpdir(), `lia-cache-ab-${scenario.name}-`));
   const home = join(root, "home");
   const repo = join(root, "repo");
   mkdirSync(repo, { recursive: true });
@@ -338,11 +338,11 @@ export async function runScenario(
     ...process.env,
     HOME: home,
     NO_COLOR: "1",
-    FX_SOUND: "0",
-    FX_MODEL: opts.model,
-    FX_MAX_AGENT_STEPS: "40",
-    FX_GATEWAY_CHAT_URL: `${proxy.url}/v4/ai/language-model`,
-    FX_GATEWAY_BASE_URL: proxy.url,
+    LIA_SOUND: "0",
+    LIA_MODEL: opts.model,
+    LIA_MAX_AGENT_STEPS: "40",
+    LIA_GATEWAY_CHAT_URL: `${proxy.url}/v4/ai/language-model`,
+    LIA_GATEWAY_BASE_URL: proxy.url,
   };
   const turn = async (prompt: string, resume: boolean, fullAccess: boolean) => {
     const args = ["ask", ...(fullAccess ? ["--full-access"] : []), "--json", ...(resume ? ["--resume", "last"] : []), "--", prompt];
@@ -404,21 +404,21 @@ export interface CacheAbConfig {
 }
 
 export function loadCacheAbConfigFromEnv(env: NodeJS.ProcessEnv = process.env): CacheAbConfig {
-  const models = (env.FX_CACHE_AB_MODELS ?? "").split(",").map((m) => m.trim()).filter(Boolean);
-  if (models.length === 0) throw new Error("FX_CACHE_AB_MODELS must name at least one model");
-  const wanted = (env.FX_CACHE_AB_SCENARIOS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const models = (env.LIA_CACHE_AB_MODELS ?? "").split(",").map((m) => m.trim()).filter(Boolean);
+  if (models.length === 0) throw new Error("LIA_CACHE_AB_MODELS must name at least one model");
+  const wanted = (env.LIA_CACHE_AB_SCENARIOS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const scenarios = wanted.length === 0 ? SCENARIOS : wanted.map((name) => {
     const scenario = SCENARIOS.find((s) => s.name === name);
     if (!scenario) throw new Error(`unknown scenario ${name}`);
     return scenario;
   });
   return {
-    baselineBin: requireAbsoluteExecutableBinary(env.FX_CACHE_AB_BASELINE_BIN ?? "", "baseline"),
-    candidateBin: requireAbsoluteExecutableBinary(env.FX_CACHE_AB_CANDIDATE_BIN ?? "", "candidate"),
+    baselineBin: requireAbsoluteExecutableBinary(env.LIA_CACHE_AB_BASELINE_BIN ?? "", "baseline"),
+    candidateBin: requireAbsoluteExecutableBinary(env.LIA_CACHE_AB_CANDIDATE_BIN ?? "", "candidate"),
     models,
     scenarios,
-    outputDir: env.FX_CACHE_AB_OUTPUT_DIR ?? mkdtempSync(join(tmpdir(), `fx-cache-ab-${Date.now()}-`)),
-    timeoutMs: Number(env.FX_CACHE_AB_TIMEOUT_MS ?? "1800000"),
+    outputDir: env.LIA_CACHE_AB_OUTPUT_DIR ?? mkdtempSync(join(tmpdir(), `lia-cache-ab-${Date.now()}-`)),
+    timeoutMs: Number(env.LIA_CACHE_AB_TIMEOUT_MS ?? "1800000"),
   };
 }
 

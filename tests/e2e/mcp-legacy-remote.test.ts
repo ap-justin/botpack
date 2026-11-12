@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runFx } from "../evals/eval-helpers";
+import { runLia } from "../evals/eval-helpers";
 import {
   LEGACY_REMOTE_TOOL_RESULT,
   startLegacyStreamableHttpFixture,
@@ -55,19 +55,19 @@ function createRoot(
   remoteOverrides: Record<string, unknown> = {},
 ) {
   const root = realpathSync(
-    mkdtempSync(join(tmpdir(), `fx-mcp-legacy-${label}-`)),
+    mkdtempSync(join(tmpdir(), `lia-mcp-legacy-${label}-`)),
   );
   cleanupRoot = root;
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".lia"), { recursive: true });
   mkdirSync(workspace, { recursive: true });
   writeFileSync(
-    join(home, ".fx", "settings.json"),
+    join(home, ".lia", "settings.json"),
     JSON.stringify({}),
   );
   writeFileSync(
-    join(home, ".fx", "mcp.json"),
+    join(home, ".lia", "mcp.json"),
     JSON.stringify({
       mcp: {
         fixture: {
@@ -81,7 +81,7 @@ function createRoot(
       },
     }),
   );
-  return { root, home, workspace, traceLogPath: join(root, "fx-trace.log") };
+  return { root, home, workspace, traceLogPath: join(root, "lia-trace.log") };
 }
 
 function fixtureEnv(
@@ -92,14 +92,14 @@ function fixtureEnv(
     HOME: root.home,
     AI_GATEWAY_API_KEY: "fake-mcp-legacy-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_AUTO_UPGRADE: "0",
-    FX_PERMISSION_MODE: "auto",
-    FX_GATEWAY_BASE_URL: activeGateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: activeGateway.chatUrl,
-    FX_TEST_GATEWAY_CHAT_URL: activeGateway.chatUrl,
-    FX_MODEL: MODEL,
-    FX_TRACE_LOG: root.traceLogPath,
-    FX_TRACE_SCOPES: "mcp",
+    LIA_AUTO_UPGRADE: "0",
+    LIA_PERMISSION_MODE: "auto",
+    LIA_GATEWAY_BASE_URL: activeGateway.baseUrl,
+    LIA_GATEWAY_CHAT_URL: activeGateway.chatUrl,
+    LIA_TEST_GATEWAY_CHAT_URL: activeGateway.chatUrl,
+    LIA_MODEL: MODEL,
+    LIA_TRACE_LOG: root.traceLogPath,
+    LIA_TRACE_SCOPES: "mcp",
   };
 }
 
@@ -119,7 +119,7 @@ async function runAsk(
   prompt: string,
   extraEnv: Record<string, string> = {},
 ) {
-  return runFx(
+  return runLia(
     ["ask", "--json", "--auto", "--no-save", prompt],
     {
       cwd: root.workspace,
@@ -243,7 +243,7 @@ describe("version-scoped legacy MCP remote transports", () => {
   }
 
   for (const version of VERSIONS) {
-    test(`fresh fx ask calls Streamable HTTP ${version} with its lifecycle headers`, async () => {
+    test(`fresh lia ask calls Streamable HTTP ${version} with its lifecycle headers`, async () => {
       streamable = startLegacyStreamableHttpFixture(version);
       const root = createRoot(`ask-${version}`, "http", streamable.url);
       gateway = startToolGateway(`${version} complete.`);
@@ -258,7 +258,7 @@ describe("version-scoped legacy MCP remote transports", () => {
       const messages = streamable.requests
         .filter((entry) => entry.message)
         .map((entry) => entry.message!.method);
-      // fx asks for the 2026 discovery first, then initializes the 2025 way.
+      // lia asks for the 2026 discovery first, then initializes the 2025 way.
       expect(messages).toEqual([
         "server/discover",
         "initialize",
@@ -283,7 +283,7 @@ describe("version-scoped legacy MCP remote transports", () => {
         expect(entry.headers["mcp-protocol-version"]).toBe(version);
         expect(entry.headers["x-workspace"]).toBe("legacy");
       }
-      // fx exits without waiting on servers, so the session's DELETE is
+      // lia exits without waiting on servers, so the session's DELETE is
       // skipped at exit (replace-v1 decision 11).
       expect(streamable.deleteCalls).toBe(0);
     }, 30_000);
@@ -317,10 +317,10 @@ describe("version-scoped legacy MCP remote transports", () => {
     }, 30_000);
   }
 
-  // fx reads at most 16 MiB of one message. Before, an answer over that was
-  // treated as a broken stream: fx resumed it twice, getting the same answer
+  // lia reads at most 16 MiB of one message. Before, an answer over that was
+  // treated as a broken stream: lia resumed it twice, getting the same answer
   // each time, then told the model the server went away.
-  test("Streamable HTTP ends a call whose answer is over fx's message limit at once, without resuming it", async () => {
+  test("Streamable HTTP ends a call whose answer is over lia's message limit at once, without resuming it", async () => {
     streamable = startLegacyStreamableHttpFixture("2025-06-18", { mode: "oversized_resumable" });
     const root = createRoot("oversized-answer", "http", streamable.url);
     gateway = startToolGateway("Oversized answer handled.");
@@ -330,7 +330,7 @@ describe("version-scoped legacy MCP remote transports", () => {
     expect(result.code).toBe(0);
     // What the model was told: the call's error text.
     const told = /MCP server 'fixture' ended the call[^"\\]*/.exec(gateway.requests[2]?.body ?? "")?.[0] ?? "";
-    expect(told).toContain("its reply was larger than fx reads in one message, so fx dropped it");
+    expect(told).toContain("its reply was larger than lia reads in one message, so lia dropped it");
     expect(told).not.toContain("the server went away");
     expect(streamable.requests.filter((entry) => entry.message?.method === "tools/call")).toHaveLength(1);
     expect(streamable.requests.filter((entry) =>
@@ -594,7 +594,7 @@ describe("version-scoped legacy MCP remote transports", () => {
     expect(result.code).toBe(0);
     expect(streamable.toolCallCalls).toBe(1);
     expect(toolResultText(gateway.requests[2]!.body, "call_mcp")).toContain(
-      "MCP server 'fixture' needs a login. Ask the user to run fx mcp login fixture in a terminal, then try again.",
+      "MCP server 'fixture' needs a login. Ask the user to run lia mcp login fixture in a terminal, then try again.",
     );
   }, 30_000);
 
@@ -606,9 +606,9 @@ describe("version-scoped legacy MCP remote transports", () => {
       streamable = fixture;
       const root = createRoot("hold-initialize-v2", "http", fixture.url);
       const started = Date.now();
-      const result = await runFx(["mcp", "show", "fixture", "--json"], {
+      const result = await runLia(["mcp", "show", "fixture", "--json"], {
         cwd: root.workspace,
-        env: { HOME: root.home, FX_AUTO_UPGRADE: "0" },
+        env: { HOME: root.home, LIA_AUTO_UPGRADE: "0" },
         timeoutMs: 90_000,
       });
       expect(result.signal).toBeNull();
@@ -627,15 +627,15 @@ describe("version-scoped legacy MCP remote transports", () => {
       streamable = fixture;
       const root = createRoot("hold-initialized-v2", "http", fixture.url);
       const started = Date.now();
-      const result = await runFx(["mcp", "show", "fixture", "--json"], {
+      const result = await runLia(["mcp", "show", "fixture", "--json"], {
         cwd: root.workspace,
-        env: { HOME: root.home, FX_AUTO_UPGRADE: "0" },
+        env: { HOME: root.home, LIA_AUTO_UPGRADE: "0" },
         timeoutMs: 90_000,
       });
       expect(result.signal).toBeNull();
       expect(Date.now() - started).toBeLessThan(85_000);
       expect(result.code).toBe(1);
-      expect(JSON.parse(result.stdout).error).toBe("it never answered fx's initialized notification");
+      expect(JSON.parse(result.stdout).error).toBe("it never answered lia's initialized notification");
       // Everything after initialized waits for its answer.
       expect(fixture.toolsListCalls).toBe(0);
     },

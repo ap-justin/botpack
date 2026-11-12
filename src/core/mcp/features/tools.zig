@@ -22,7 +22,7 @@ pub const Limits = struct {
     max_content_items: usize = 256,
     max_content_field_bytes: usize = 1024 * 1024,
     /// A text item, or a resource's text, may be as large as the whole
-    /// result: fx stores or cuts a big result itself.
+    /// result: lia stores or cuts a big result itself.
     max_content_text_bytes: usize = @import("../../images/image_data.zig").max_result_frame_bytes,
     max_image_bytes: usize = @import("../../images/image_data.zig").max_encoded_image_bytes,
     max_input_requests: usize = 32,

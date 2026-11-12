@@ -1,4 +1,4 @@
-//! `fx usage`: the module's front door. fx hands in a `Host` (HTTP, clock,
+//! `lia usage`: the module's front door. lia hands in a `Host` (HTTP, clock,
 //! home directory) and a `Credential` for the provider in use; the CLI calls
 //! the `Dashboard` and renders its `Snapshot`. AI Gateway sign-ins read usage
 //! reports. All usage logic lives here.
@@ -17,7 +17,7 @@ pub const Period = view.Period;
 pub const View = view.View;
 pub const Scope = report.Scope;
 
-/// Which service a request goes to; fx resolves the origin.
+/// Which service a request goes to; lia resolves the origin.
 pub const Service = enum {
     /// `ai-gateway.vercel.sh` (`/v1/report`).
     gateway,
@@ -50,11 +50,11 @@ pub const Host = struct {
     now_fn: *const fn (ctx: ?*anyopaque) i64,
     /// The I/O implementation for files, locks and the worker.
     io_fn: *const fn (ctx: ?*anyopaque) Io,
-    /// The folder that holds fx's folder: the user's home directory, or the
-    /// parent of `$FX_HOME`. The cache lives in `<home>/<fx_dir_name>`.
+    /// The folder that holds lia's folder: the user's home directory, or the
+    /// parent of `$LIA_HOME`. The cache lives in `<home>/<lia_dir_name>`.
     home: []const u8,
-    /// The name of fx's folder inside `home`.
-    fx_dir_name: []const u8 = ".fx",
+    /// The name of lia's folder inside `home`.
+    lia_dir_name: []const u8 = ".lia",
 };
 
 /// The sign-in `/usage` reads with. The bearer is borrowed only for the call
@@ -64,12 +64,12 @@ pub const Credential = struct {
     bearer: []const u8,
     /// Required for `.member`.
     team: ?[]const u8,
-    /// Stable per person: the fx login account or the API key itself.
+    /// Stable per person: the lia login account or the API key itself.
     subject: []const u8,
     /// The provider account the numbers belong to, when it has one.
     account_id: ?[]const u8 = null,
     /// Who the numbers belong to, shown in the heading, e.g.
-    /// `acme-design-tools-platform (fx login)`. Never a secret.
+    /// `acme-design-tools-platform (lia login)`. Never a secret.
     label: []const u8 = "",
 };
 
@@ -77,7 +77,7 @@ pub const Credential = struct {
 pub const Unavailable = enum {
     /// Not signed in to AI Gateway (a subscription provider, or no sign-in).
     no_gateway_sign_in,
-    /// fx login without a team.
+    /// lia login without a team.
     no_team,
     /// Signed in to a provider whose usage `/usage` cannot show yet.
     unsupported_provider,
@@ -315,7 +315,7 @@ pub const Dashboard = struct {
         };
     }
 
-    /// Waits for the fetch in flight, if any. For `fx usage` and tests.
+    /// Waits for the fetch in flight, if any. For `lia usage` and tests.
     pub fn waitForFetch(self: *Dashboard) void {
         self.runQueuedFetch();
         self.joinWorker();
@@ -417,7 +417,7 @@ pub const Dashboard = struct {
         self.unavailable = reason;
     }
 
-    /// Re-reads this sign-in's entry from the shared cache, which other fx
+    /// Re-reads this sign-in's entry from the shared cache, which other lia
     /// processes may have written since, keeping the newer of each part. The
     /// file normally holds at least what is in memory, but after it was
     /// unreadable a store may have started over from less. A missing or
@@ -452,34 +452,34 @@ pub const Dashboard = struct {
     }
 
     fn readCache(self: *Dashboard, identity: cache.Identity) ?cache.Owned {
-        var fx_dir = self.openFxDir() orelse return null;
-        defer fx_dir.close(self.io());
-        return cache.read(self.gpa, self.io(), fx_dir, identity);
+        var lia_dir = self.openLiaDir() orelse return null;
+        defer lia_dir.close(self.io());
+        return cache.read(self.gpa, self.io(), lia_dir, identity);
     }
 
     /// The home directory, if the host gave an absolute one. An empty or
-    /// relative `$HOME` counts as none, as everywhere else in fx.
+    /// relative `$HOME` counts as none, as everywhere else in lia.
     fn openHome(self: *Dashboard) ?Io.Dir {
         if (!Io.Dir.path.isAbsolute(self.host.home)) return null;
         return Io.Dir.openDirAbsolute(self.io(), self.host.home, .{}) catch null;
     }
 
-    fn openFxDir(self: *Dashboard) ?Io.Dir {
+    fn openLiaDir(self: *Dashboard) ?Io.Dir {
         var home = self.openHome() orelse return null;
         defer home.close(self.io());
-        return home.openDir(self.io(), self.host.fx_dir_name, .{}) catch null;
+        return home.openDir(self.io(), self.host.lia_dir_name, .{}) catch null;
     }
 
-    /// `~/.fx`, created private when missing: `fx usage` with only an API
+    /// `~/.lia`, created private when missing: `lia usage` with only an API
     /// key may run before anything else made it.
-    fn openOrCreateFxDir(self: *Dashboard) ?Io.Dir {
+    fn openOrCreateLiaDir(self: *Dashboard) ?Io.Dir {
         var home = self.openHome() orelse return null;
         defer home.close(self.io());
-        home.createDir(self.io(), self.host.fx_dir_name, .fromMode(0o700)) catch |err| switch (err) {
+        home.createDir(self.io(), self.host.lia_dir_name, .fromMode(0o700)) catch |err| switch (err) {
             error.PathAlreadyExists => {},
             else => return null,
         };
-        return home.openDir(self.io(), self.host.fx_dir_name, .{}) catch null;
+        return home.openDir(self.io(), self.host.lia_dir_name, .{}) catch null;
     }
 
     fn maybeStartLocked(self: *Dashboard, trigger: policy.Trigger) bool {
@@ -626,9 +626,9 @@ fn fetchAll(dashboard: *Dashboard, job: *const Job) Outcome {
     var latest = dashboard.ownedEntryFor(job.identity);
     defer if (latest) |*l| l.deinit();
     const held: ?cache.Entry = if (latest) |l| l.entry else null;
-    var fx_dir = dashboard.openOrCreateFxDir() orelse return unsaved(dashboard, job, fetched, now, held);
-    defer fx_dir.close(dashboard.io());
-    const stored = cache.store(dashboard.gpa, dashboard.io(), fx_dir, job.identity, fetched, now, held) catch |err| switch (err) {
+    var lia_dir = dashboard.openOrCreateLiaDir() orelse return unsaved(dashboard, job, fetched, now, held);
+    defer lia_dir.close(dashboard.io());
+    const stored = cache.store(dashboard.gpa, dashboard.io(), lia_dir, job.identity, fetched, now, held) catch |err| switch (err) {
         // The fetch itself is unfit to keep.
         error.InvalidCache => return .{ .failed = .cache },
         else => return unsaved(dashboard, job, fetched, now, held),
@@ -637,7 +637,7 @@ fn fetchAll(dashboard: *Dashboard, job: *const Job) Outcome {
 }
 
 /// What a fetch shows when the cache cannot be written (a read-only or
-/// misplaced `~/.fx/usage-cache`): the fetch merged with whatever can still
+/// misplaced `~/.lia/usage-cache`): the fetch merged with whatever can still
 /// be read, or else with what the dashboard holds, kept in memory only.
 fn unsaved(dashboard: *Dashboard, job: *const Job, fetched: cache.Entry, now: i64, held: ?cache.Entry) Outcome {
     var on_disk = dashboard.readCache(job.identity);
@@ -755,7 +755,7 @@ const FakeGateway = struct {
 
     const profile_body = "{\"profile\":{\"display_name\":\"samdoe\"},\"stats\":{\"lifetime_tokens\":1000," ++
         "\"daily_usage_buckets\":[{\"start_date\":\"2026-10-11\",\"tokens\":40},{\"start_date\":\"2026-10-06\",\"tokens\":2}]," ++
-        "\"top_invocations\":[{\"type\":\"skill\",\"skill_name\":\"fx-review\",\"usage_count\":3}]}," ++
+        "\"top_invocations\":[{\"type\":\"skill\",\"skill_name\":\"lia-review\",\"usage_count\":3}]}," ++
         "\"metadata\":{\"stats_as_of\":\"2026-10-11\"}}";
     const breakdown_body = "{\"data\":[" ++
         "{\"date\":\"2026-10-05\",\"product_surface_usage_values\":{\"desktop_app\":4},\"models\":[{\"model\":\"gpt-6-astra\",\"speed\":\"fast\",\"credits\":4}]}," ++
@@ -806,11 +806,11 @@ const FakeGateway = struct {
     }
 };
 
-const member: Credential = .{ .scope = .member, .bearer = "vca_token", .team = "team_1", .subject = "acct_1", .label = "team-one (fx login)" };
+const member: Credential = .{ .scope = .member, .bearer = "vca_token", .team = "team_1", .subject = "acct_1", .label = "team-one (lia login)" };
 const api_key: Credential = .{ .scope = .api_key, .bearer = "vck_key", .team = null, .subject = "vck_key" };
 
 fn testHome(tmp: *std.testing.TmpDir) ![:0]u8 {
-    try tmp.dir.createDir(testing.io, ".fx", .fromMode(0o700));
+    try tmp.dir.createDir(testing.io, ".lia", .fromMode(0o700));
     return tmp.dir.realPathFileAlloc(testing.io, ".", testing.allocator);
 }
 
@@ -834,7 +834,7 @@ test "opening shows the cache at once and fills it from AI Gateway in the backgr
     var snap = try dashboard.snapshot(testing.allocator);
     defer snap.deinit();
     try testing.expect(snap.status == .ready);
-    try testing.expectEqualStrings("team-one (fx login)", snap.label);
+    try testing.expectEqualStrings("team-one (lia login)", snap.label);
     try testing.expectApproxEqAbs(@as(f64, 2.5), snap.of(.today).totals.total_cost, 1e-9);
     try testing.expectApproxEqAbs(@as(f64, 43), snap.of(.days_7).totals.total_cost, 1e-9);
     try testing.expectApproxEqAbs(@as(f64, 43), snap.of(.month).totals.total_cost, 1e-9);
@@ -886,7 +886,7 @@ test "without a worker thread, tick runs the fetch open started, outside the loc
     try testing.expect(snap.status == .ready);
     try testing.expectApproxEqAbs(@as(f64, 2.5), snap.of(.today).totals.total_cost, 1e-9);
 
-    // `r` queues the next fetch, and `fx usage` runs one by waiting for it.
+    // `r` queues the next fetch, and `lia usage` runs one by waiting for it.
     try testing.expect(dashboard.refresh());
     try testing.expectEqual(@as(usize, 3), gateway.count);
     dashboard.waitForFetch();
@@ -909,7 +909,7 @@ test "a fetch queued without a worker thread is freed if it never runs" {
     dashboard.deinit();
 }
 
-test "a dashboard reads what another fx process stored since" {
+test "a dashboard reads what another lia process stored since" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     const home = try testHome(&tmp);
@@ -968,7 +968,7 @@ test "a dashboard reads what another fx process stored since" {
     try testing.expectEqual(@as(usize, 5), first_gateway.count);
 }
 
-test "a first fetch creates a private ~/.fx for its cache" {
+test "a first fetch creates a private ~/.lia for its cache" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     const home = try tmp.dir.realPathFileAlloc(testing.io, ".", testing.allocator);
@@ -982,7 +982,7 @@ test "a first fetch creates a private ~/.fx for its cache" {
     var snap = try dashboard.snapshot(testing.allocator);
     defer snap.deinit();
     try testing.expect(snap.status == .ready);
-    const stat = try tmp.dir.statFile(testing.io, ".fx", .{});
+    const stat = try tmp.dir.statFile(testing.io, ".lia", .{});
     try testing.expectEqual(std.Io.File.Kind.directory, stat.kind);
     try testing.expectEqual(@as(u32, 0o700), @as(u32, @intCast(stat.permissions.toMode() & 0o777)));
 }
@@ -1141,10 +1141,10 @@ test "an unreadable cache file keeps the finished days on screen and in the file
     dashboard.open(api_key);
     dashboard.waitForFetch();
 
-    // Something else (garbage, or another fx version's schema) replaces the file.
+    // Something else (garbage, or another lia version's schema) replaces the file.
     const identity = cache.identityOf(.api_key, api_key.subject, "");
     var name_buf: [128]u8 = undefined;
-    const name = try std.mem.print(&name_buf, ".fx/{s}/{s}.json", .{ cache.dir_name, &identity });
+    const name = try std.mem.print(&name_buf, ".lia/{s}/{s}.json", .{ cache.dir_name, &identity });
     try tmp.dir.writeFile(testing.io, .{ .sub_path = name, .data = "{\"schema_version\":3}" });
 
     gateway.now_ms += 2 * std.time.ms_per_min;
@@ -1159,7 +1159,7 @@ test "an unreadable cache file keeps the finished days on screen and in the file
         try testing.expect(shown.of(.days_7).finished_current);
         try testing.expect(shown.of(.days_7).totals.total_cost > 40);
     }
-    // The file has them again for every other fx process.
+    // The file has them again for every other lia process.
     var other = Dashboard.init(testing.allocator, gateway.host(home));
     defer other.deinit();
     other.open(api_key);
@@ -1174,7 +1174,7 @@ test "a cache that cannot be written still shows what was fetched" {
     const home = try testHome(&tmp);
     defer testing.allocator.free(home);
     // `usage-cache` is a file, so nothing can be stored.
-    try tmp.dir.writeFile(testing.io, .{ .sub_path = ".fx/" ++ cache.dir_name, .data = "not a directory" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = ".lia/" ++ cache.dir_name, .data = "not a directory" });
     var gateway: FakeGateway = .{};
     var dashboard = Dashboard.init(testing.allocator, gateway.host(home));
     defer dashboard.deinit();
@@ -1206,7 +1206,7 @@ test "a dashboard never shows less than it had when the file goes back" {
     });
     defer testing.allocator.free(older);
     var name_buf: [128]u8 = undefined;
-    const name = try std.mem.print(&name_buf, ".fx/{s}/{s}.json", .{ cache.dir_name, &identity });
+    const name = try std.mem.print(&name_buf, ".lia/{s}/{s}.json", .{ cache.dir_name, &identity });
     try tmp.dir.writeFile(testing.io, .{ .sub_path = name, .data = older });
 
     var shown = try dashboard.snapshot(testing.allocator);

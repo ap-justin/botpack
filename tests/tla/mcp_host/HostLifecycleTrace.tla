@@ -4,9 +4,9 @@
 \*   spawn {server}    the fixture server started (its pid log)
 \*   ready {server}    it answered tools/list
 \*   stop {server}     it exited at stdin's end
-\*   term {server}     it exited after fx quit (SIGTERM; its log says which)
+\*   term {server}     it exited after lia quit (SIGTERM; its log says which)
 \*   reload {server, change}  `/mcp approve|reject|remove|add` typed
-\*   edit {server, change}    `fx mcp add|remove` run outside the session
+\*   edit {server, change}    `lia mcp add|remove` run outside the session
 \*   lease {}, release {}     `/mcp show NAME` started, and printed its answer
 \*   status {k, who, why, r, e}  the status line, read once it stopped changing
 \*   quit {}           Ctrl+C twice

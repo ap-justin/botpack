@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { FX_BIN, runFx } from "../evals/eval-helpers";
+import { LIA_BIN, runLia } from "../evals/eval-helpers";
 import { completion, toolCompletion, createConfiguredProviderFixture as fixture } from "./fixtures/chat-completions";
 import { reviewedActionEvidence } from "./fake-gateway";
 
@@ -50,7 +50,7 @@ describe("configured providers", () => {
     });
     try {
       writeFileSync(join(f.workspace, "note.txt"), "fixture contents");
-      const first = await runFx(["ask", "--json", "Read note.txt"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const first = await runLia(["ask", "--json", "Read note.txt"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       if (first.code !== 0) throw new Error(first.stdout + first.stderr);
       const saved = JSON.parse(first.stdout);
       expect(saved.output).toBe("read complete");
@@ -59,7 +59,7 @@ describe("configured providers", () => {
       expect(toolTurn[field]).toBe("Inspect note first.");
       expect(toolTurn._tool_call_ids).toBeUndefined();
       expect(f.requests[1].body.messages.at(-1).content).toContain("fixture contents");
-      const resumed = await runFx(["ask", "--json", "--resume", saved.session_id, "Continue the saved task"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const resumed = await runLia(["ask", "--json", "--resume", saved.session_id, "Continue the saved task"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       if (resumed.code !== 0) throw new Error(resumed.stdout + resumed.stderr);
       expect(JSON.parse(resumed.stdout).output).toBe("resumed reply");
       expect(f.requests).toHaveLength(3);
@@ -80,7 +80,7 @@ describe("configured providers", () => {
     try {
       writeFileSync(join(f.workspace, "note-1.txt"), "first contents");
       writeFileSync(join(f.workspace, "note-2.txt"), "second contents");
-      const result = await runFx(["ask", "--json", "--no-save", "Read both notes"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const result = await runLia(["ask", "--json", "--no-save", "Read both notes"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       if (result.code !== 0) throw new Error(result.stdout + result.stderr);
       expect(JSON.parse(result.stdout).output).toBe("The two files were read.");
       expect(f.requests).toHaveLength(4);
@@ -91,14 +91,14 @@ describe("configured providers", () => {
     } finally { f.close(); }
   }, 25000);
 
-  test("a tool call cut off by the provider's own limit is resent once with fx's limit", async () => {
+  test("a tool call cut off by the provider's own limit is resent once with lia's limit", async () => {
     let calls = 0;
     const f = fixture(body => ++calls === 1 ? cutToolCall(body.model, "printf ran > cut.txt") : completion(body.model, "finished after the resend"));
     try {
       // No limit in the metadata, so the first request names none.
       (f.settings.providers.local.model_metadata as any)["local-model"] = { context_window: 262144, supports_tool_use: true };
       f.save();
-      const result = await runFx(["ask", "--json", "--no-save", "Run the command"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const result = await runLia(["ask", "--json", "--no-save", "Run the command"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       if (result.code !== 0) throw new Error(result.stdout + result.stderr);
       expect(JSON.parse(result.stdout).final_output).toBe("finished after the resend");
       expect(f.requests).toHaveLength(2);
@@ -114,7 +114,7 @@ describe("configured providers", () => {
     let calls = 0;
     const f = fixture(body => ++calls === 1 ? cutToolCall(body.model, "printf ran > cut.txt") : completion(body.model, "a resend must not be sent"));
     try {
-      const result = await runFx(["ask", "--json", "--no-save", "Run the command"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const result = await runLia(["ask", "--json", "--no-save", "Run the command"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       expect(result.code).toBe(1);
       expect(f.requests).toHaveLength(1);
       expect(f.requests[0].body.max_tokens).toBe(8192);
@@ -135,7 +135,7 @@ describe("configured providers", () => {
     });
     try {
       writeFileSync(join(f.workspace, "note.txt"), "fixture contents");
-      const first = await runFx(["ask", "--json", "Read note.txt"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const first = await runLia(["ask", "--json", "Read note.txt"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       if (first.code !== 0) throw new Error(first.stdout + first.stderr);
       const saved = JSON.parse(first.stdout);
       expect(saved.output).toBe("read complete");
@@ -145,16 +145,16 @@ describe("configured providers", () => {
       expect(toolTurn.tool_calls[0].id).toBe(callId);
       expect(toolTurn._tool_call_ids).toBeUndefined();
       expect(f.requests[1].body.messages.at(-1).tool_call_id).toBe(callId);
-      const resumed = await runFx(["ask", "--json", "--resume", saved.session_id, "Continue the saved task"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const resumed = await runLia(["ask", "--json", "--resume", saved.session_id, "Continue the saved task"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       if (resumed.code !== 0) throw new Error(resumed.stdout + resumed.stderr);
       expect(f.requests).toHaveLength(3);
       const restored = f.requests[2].body.messages.find((message: any) => message.reasoning_details);
       expect(restored.reasoning_details).toEqual([firstDetail, secondDetail]);
       expect(restored.tool_calls[0].id).toBe(callId);
-      const switched = await runFx(["ask", "--json", "--resume", saved.session_id, "Continue on the other connection"], { cwd: f.workspace, env: { ...f.env, FX_PROVIDER: "remote" }, timeoutMs: 20000 });
+      const switched = await runLia(["ask", "--json", "--resume", saved.session_id, "Continue on the other connection"], { cwd: f.workspace, env: { ...f.env, LIA_PROVIDER: "remote" }, timeoutMs: 20000 });
       if (switched.code !== 0) throw new Error(switched.stdout + switched.stderr);
       expect(f.requests).toHaveLength(4);
-      expect(f.requests[3].authorization).toBe(`Bearer ${f.env.FX_TEST_PROVIDER_TOKEN}`);
+      expect(f.requests[3].authorization).toBe(`Bearer ${f.env.LIA_TEST_PROVIDER_TOKEN}`);
       expect(f.requests[3].body.messages.every((message: any) => message.reasoning_details === undefined && message.reasoning === undefined && message.reasoning_content === undefined)).toBe(true);
     } finally { f.close(); }
   }, 65000);
@@ -162,7 +162,7 @@ describe("configured providers", () => {
   test("status identifies the configured connection and endpoint without probing it", async () => {
     const f = fixture();
     try {
-      const result = await runFx(["status", "--json"], { cwd: f.workspace, env: f.env });
+      const result = await runLia(["status", "--json"], { cwd: f.workspace, env: f.env });
       expect(result.code).toBe(0);
       const status = JSON.parse(result.stdout);
       expect(status.model_source).toBe("local");
@@ -175,9 +175,9 @@ describe("configured providers", () => {
   test("anonymous local requests use Chat Completions without Gateway credentials", async () => {
     const f = fixture();
     try {
-      const result = await runFx(["ask", "--json", "--no-save", "say hello"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const result = await runLia(["ask", "--json", "--no-save", "say hello"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       expect(result.stderr).toBe("");
-      if (result.code !== 0) throw new Error(`fx ask failed: ${result.stdout} ${result.stderr}; paths=${f.requests.map(r => r.path).join(",")}`);
+      if (result.code !== 0) throw new Error(`lia ask failed: ${result.stdout} ${result.stderr}; paths=${f.requests.map(r => r.path).join(",")}`);
       expect(result.code).toBe(0);
       expect(JSON.parse(result.stdout).output).toBe("local reply");
       expect(f.requests).toHaveLength(1);
@@ -196,7 +196,7 @@ describe("configured providers", () => {
       return new Response(wire, { headers: response.headers });
     });
     try {
-      const result = await runFx(["ask", "--json", "--no-save", "say hello"], { cwd: f.workspace, env: f.env });
+      const result = await runLia(["ask", "--json", "--no-save", "say hello"], { cwd: f.workspace, env: f.env });
       expect(result.code).toBe(0);
       expect(result.stderr).toBe("");
       const parsed = JSON.parse(result.stdout);
@@ -209,11 +209,11 @@ describe("configured providers", () => {
   test("CLI selection persists a configured name and uses only its credential", async () => {
     const f = fixture();
     try {
-      const selection = await runFx(["provider", "remote"], { cwd: f.workspace, env: f.env });
+      const selection = await runLia(["provider", "remote"], { cwd: f.workspace, env: f.env });
       expect(selection.code).toBe(0);
       expect(JSON.parse(readFileSync(f.settingsPath, "utf8")).provider).toBe("remote");
-      const result = await runFx(["ask", "--json", "--no-save", "say hello"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
-      if (result.code !== 0) throw new Error(`fx ask failed: ${result.stdout} ${result.stderr}; paths=${f.requests.map(r => r.path).join(",")}`);
+      const result = await runLia(["ask", "--json", "--no-save", "say hello"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      if (result.code !== 0) throw new Error(`lia ask failed: ${result.stdout} ${result.stderr}; paths=${f.requests.map(r => r.path).join(",")}`);
       expect(result.code).toBe(0);
       expect(f.requests).toHaveLength(1);
       expect(f.requests[0].authorization).toBe("Bearer own-provider-token");
@@ -221,10 +221,10 @@ describe("configured providers", () => {
     } finally { f.close(); }
   }, 25000);
 
-  test("ask --provider picks a connection for one request, beats FX_PROVIDER, and is never saved", async () => {
+  test("ask --provider picks a connection for one request, beats LIA_PROVIDER, and is never saved", async () => {
     const f = fixture();
     try {
-      const first = await runFx(["ask", "--json", "--provider", "remote", "remember this"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const first = await runLia(["ask", "--json", "--provider", "remote", "remember this"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       if (first.code !== 0) throw new Error(first.stdout + first.stderr);
       expect(f.requests).toHaveLength(1);
       expect(f.requests[0].authorization).toBe("Bearer own-provider-token");
@@ -232,13 +232,13 @@ describe("configured providers", () => {
       expect(JSON.parse(readFileSync(f.settingsPath, "utf8")).provider).toBe("local");
       const saved = JSON.parse(first.stdout);
 
-      const flagWins = await runFx(["ask", "--json", "--no-save", "--provider=local", "say hello"], { cwd: f.workspace, env: { ...f.env, FX_PROVIDER: "remote" }, timeoutMs: 20000 });
+      const flagWins = await runLia(["ask", "--json", "--no-save", "--provider=local", "say hello"], { cwd: f.workspace, env: { ...f.env, LIA_PROVIDER: "remote" }, timeoutMs: 20000 });
       if (flagWins.code !== 0) throw new Error(flagWins.stdout + flagWins.stderr);
       expect(f.requests).toHaveLength(2);
       expect(f.requests[1].authorization).toBeNull();
       expect(f.requests[1].body.model).toBe("local-model");
 
-      const resumed = await runFx(["ask", "--json", "--resume", saved.session_id, "--provider", "local", "continue"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const resumed = await runLia(["ask", "--json", "--resume", saved.session_id, "--provider", "local", "continue"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       if (resumed.code !== 0) throw new Error(resumed.stdout + resumed.stderr);
       expect(f.requests).toHaveLength(3);
       expect(f.requests[2].authorization).toBeNull();
@@ -251,17 +251,17 @@ describe("configured providers", () => {
     const f = fixture();
     try {
       const before = readFileSync(f.settingsPath, "utf8");
-      const selection = await runFx(["provider", "remte"], { cwd: f.workspace, env: f.env });
+      const selection = await runLia(["provider", "remte"], { cwd: f.workspace, env: f.env });
       expect(selection.code).toBe(2);
       expect(selection.stdout).toBe("");
       expect(selection.stderr).toBe(
-        'fx provider: unknown provider remte; expected gateway or a name under "providers" in ~/.fx/settings.json\n',
+        'lia provider: unknown provider remte; expected gateway or a name under "providers" in ~/.lia/settings.json\n',
       );
-      // fx ask --provider names it the same way.
-      const ask = await runFx(["ask", "--provider", "remte", "hi"], { cwd: f.workspace, env: f.env });
+      // lia ask --provider names it the same way.
+      const ask = await runLia(["ask", "--provider", "remte", "hi"], { cwd: f.workspace, env: f.env });
       expect(ask.code).toBe(2);
       expect(ask.stderr).toBe(
-        'fx ask: unknown provider remte; expected gateway or a name under "providers" in ~/.fx/settings.json\n',
+        'lia ask: unknown provider remte; expected gateway or a name under "providers" in ~/.lia/settings.json\n',
       );
       expect(readFileSync(f.settingsPath, "utf8")).toBe(before);
       expect(f.requests).toHaveLength(0);
@@ -274,7 +274,7 @@ describe("configured providers", () => {
       delete (f.settings.models as any).remote;
       (f.settings as any).workspaces = { [f.workspace]: { models: { remote: "workspace-model" } } };
       f.save();
-      const selection = await runFx(["provider", "remote"], { cwd: f.workspace, env: f.env });
+      const selection = await runLia(["provider", "remote"], { cwd: f.workspace, env: f.env });
       if (selection.code !== 0) throw new Error(selection.stdout + selection.stderr);
       const saved = JSON.parse(readFileSync(f.settingsPath, "utf8"));
       expect(saved.provider).toBe("remote");
@@ -289,13 +289,13 @@ describe("configured providers", () => {
     try {
       f.settings.provider = "remote";
       f.save();
-      const env = { ...f.env, FX_TEST_PROVIDER_TOKEN: undefined };
-      const catalog = await runFx(["models"], { cwd: f.workspace, env });
+      const env = { ...f.env, LIA_TEST_PROVIDER_TOKEN: undefined };
+      const catalog = await runLia(["models"], { cwd: f.workspace, env });
       if (catalog.code !== 0) throw new Error(catalog.stdout + catalog.stderr);
       expect(catalog.stdout).toContain("remote-model");
       f.settings.models.remote = "opaque/custom:v1";
       f.save();
-      const selection = await runFx(["status", "--json"], { cwd: f.workspace, env });
+      const selection = await runLia(["status", "--json"], { cwd: f.workspace, env });
       if (selection.code !== 0) throw new Error(selection.stdout + selection.stderr);
       expect(JSON.parse(selection.stdout).model).toBe("opaque/custom:v1");
       expect(f.requests).toHaveLength(0);
@@ -308,7 +308,7 @@ describe("configured providers", () => {
       : toolCompletion(body.model, "read_file", { path: "note.txt" }));
     try {
       writeFileSync(join(f.workspace, "note.txt"), "fixture contents");
-      const result = await runFx(["ask", "--json", "--no-save", "Read note.txt"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const result = await runLia(["ask", "--json", "--no-save", "Read note.txt"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       if (result.code !== 0) throw new Error(result.stdout + result.stderr);
       expect(JSON.parse(result.stdout).output).toBe("read succeeded");
       expect(f.requests).toHaveLength(2);
@@ -329,7 +329,7 @@ describe("configured providers", () => {
       ]));
     try {
       writeFileSync(join(f.workspace, "note.txt"), "fixture contents");
-      const result = await runFx(["ask", "--json", "--no-save", "Read note.txt"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const result = await runLia(["ask", "--json", "--no-save", "Read note.txt"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       if (result.code !== 0) throw new Error(result.stdout + result.stderr);
       const output = JSON.parse(result.stdout);
       expect(output.output).toBe("recovered");
@@ -353,17 +353,17 @@ describe("configured providers", () => {
   test("saved sessions resume the named connection and reject endpoint rebinding", async () => {
     const f = fixture();
     try {
-      const first = await runFx(["ask", "--json", "remember this"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const first = await runLia(["ask", "--json", "remember this"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       if (first.code !== 0) throw new Error(first.stdout + first.stderr);
       const session = JSON.parse(first.stdout).session_id;
       expect(session.length).toBeGreaterThan(0);
-      const second = await runFx(["ask", "--json", "--resume", session, "continue"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const second = await runLia(["ask", "--json", "--resume", session, "continue"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       if (second.code !== 0) throw new Error(second.stdout + second.stderr);
       expect(f.requests).toHaveLength(2);
       expect(f.requests[1].body.messages.some((message: any) => message.content?.includes("remember this"))).toBe(true);
       f.settings.providers.local.base_url += "/changed";
       f.save();
-      const rebound = await runFx(["ask", "--json", "--resume", session, "continue again"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+      const rebound = await runLia(["ask", "--json", "--resume", session, "continue again"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
       expect(rebound.code).not.toBe(0);
       expect(f.requests).toHaveLength(2);
     } finally { f.close(); }
@@ -381,7 +381,7 @@ describe("configured providers", () => {
     (f.settings.providers.local.model_metadata as any)["child-model"] = { context_window: 32768, max_output_tokens: 1024, supports_tool_use: true };
     f.save();
     try {
-      const result = await runFx(["ask", "--json", "Delegate a task"], { cwd: f.workspace, env: f.env, timeoutMs: 30000 });
+      const result = await runLia(["ask", "--json", "Delegate a task"], { cwd: f.workspace, env: f.env, timeoutMs: 30000 });
       if (result.code !== 0) throw new Error(result.stdout + result.stderr);
       // The parent's turn ends with the receipt; the child's report starts its next one.
       const output = JSON.parse(result.stdout).output;
@@ -410,12 +410,12 @@ describe("configured providers", () => {
     (f.settings.providers.remote as any).model_metadata = { "shared-model": { context_window: 65536, max_output_tokens: 1024, supports_tool_use: true } };
     f.save();
     try {
-      const first = await runFx(["ask", "--json", "Create the named child"], { cwd: f.workspace, env: { ...f.env, FX_PROVIDER: "remote" }, timeoutMs: 30000 });
+      const first = await runLia(["ask", "--json", "Create the named child"], { cwd: f.workspace, env: { ...f.env, LIA_PROVIDER: "remote" }, timeoutMs: 30000 });
       if (first.code !== 0) throw new Error(first.stdout + first.stderr);
       const id = JSON.parse(first.stdout).session_id;
       // Parent call, the child and the parent after its receipt, then the report turn.
       expect(f.requests.map(request => request.body.max_tokens)).toEqual([1024, 1024, 1024, 1024]);
-      const resumed = await runFx(["ask", "--json", "--resume", id, "Continue the named child"], { cwd: f.workspace, env: { ...f.env, FX_PROVIDER: "local" }, timeoutMs: 30000 });
+      const resumed = await runLia(["ask", "--json", "--resume", id, "Continue the named child"], { cwd: f.workspace, env: { ...f.env, LIA_PROVIDER: "local" }, timeoutMs: 30000 });
       if (resumed.code !== 0) throw new Error(resumed.stdout + resumed.stderr);
       const resumedRequests = f.requests.slice(4);
       const resumedResult = resumedRequests.find(request => request.body.messages.at(-1)?.role === "tool")!.body.messages.at(-1).content;
@@ -424,11 +424,11 @@ describe("configured providers", () => {
       // The child keeps the connection it was made with; the parent uses its new one.
       const resumedChild = resumedRequests.filter(request => isChildRequest(request.body));
       const resumedParent = resumedRequests.filter(request => !isChildRequest(request.body));
-      expect(resumedChild.map(request => [request.body.max_tokens, request.authorization])).toEqual([[1024, `Bearer ${f.env.FX_TEST_PROVIDER_TOKEN}`]]);
+      expect(resumedChild.map(request => [request.body.max_tokens, request.authorization])).toEqual([[1024, `Bearer ${f.env.LIA_TEST_PROVIDER_TOKEN}`]]);
       expect(resumedParent.map(request => [request.body.max_tokens, request.authorization])).toEqual([[512, null], [512, null], [512, null]]);
       f.settings.providers.remote.base_url += "/changed";
       f.save();
-      const rebound = await runFx(["ask", "--json", "--resume", id, "Continue the named child again"], { cwd: f.workspace, env: { ...f.env, FX_PROVIDER: "local" }, timeoutMs: 30000 });
+      const rebound = await runLia(["ask", "--json", "--resume", id, "Continue the named child again"], { cwd: f.workspace, env: { ...f.env, LIA_PROVIDER: "local" }, timeoutMs: 30000 });
       if (rebound.code !== 0) throw new Error(rebound.stdout + rebound.stderr);
       // The child cannot reach its rebound endpoint, so it never asks, and its
       // failure reaches the parent as a report.
@@ -458,7 +458,7 @@ describe("configured providers", () => {
     let id: string | undefined;
     try {
       for (let turn = 0; turn < 12; turn++) {
-        const result = await runFx(["ask", "--json", ...(id ? ["--resume", id] : []), "Continue the child context"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
+        const result = await runLia(["ask", "--json", ...(id ? ["--resume", id] : []), "Continue the child context"], { cwd: f.workspace, env: f.env, timeoutMs: 20000 });
         if (result.code !== 0) throw new Error(result.stdout + result.stderr);
         id = JSON.parse(result.stdout).session_id;
         const returned = f.requests.filter(request => request.body.model === "local-model" && request.body.messages.at(-1)?.role === "tool").at(-1)!.body.messages.at(-1).content;
@@ -484,7 +484,7 @@ describe("configured providers", () => {
       (f.settings.providers.local as any).reviewer_model = "review-model";
       (f.settings.providers.local.model_metadata as any)["review-model"] = { context_window: 262144, max_output_tokens: 512 };
       f.save();
-      const result = await runFx(["ask", "--json", "--no-save", "Run the Python snippet"], { cwd: f.workspace, env: f.env, timeoutMs: 30000 });
+      const result = await runLia(["ask", "--json", "--no-save", "Run the Python snippet"], { cwd: f.workspace, env: f.env, timeoutMs: 30000 });
       if (result.code !== 0) throw new Error(result.stdout + result.stderr);
       const review = f.requests.find(request => request.body.tools?.some((tool: any) => tool.function?.name === "permission_decision"));
       expect(review?.body.model).toBe("review-model");
@@ -522,7 +522,7 @@ describe("configured providers", () => {
       writeFileSync(marker, "");
       f.settings.permission_mode = "auto";
       f.save();
-      const result = await runFx(["ask", "--json", "--no-save", "Run the local fixture once."], { cwd: f.workspace, env: f.env, timeoutMs: 15000 });
+      const result = await runLia(["ask", "--json", "--no-save", "Run the local fixture once."], { cwd: f.workspace, env: f.env, timeoutMs: 15000 });
       if (result.code !== 0) throw new Error(result.stdout + result.stderr);
       expect(readFileSync(marker, "utf8")).toBe(["clear", "malformed"].includes(outcome) ? "one\n" : "");
       // A held caution adds one confirming review of the same request.
@@ -548,7 +548,7 @@ describe("configured providers", () => {
       marker = join(f.workspace, "review-must-not-run.txt");
       f.settings.permission_mode = "auto";
       f.save();
-      const result = await runFx(["ask", "--json", "--no-save", "Run the Python snippet"], { cwd: f.workspace, env: f.env, timeoutMs: 15000 });
+      const result = await runLia(["ask", "--json", "--no-save", "Run the Python snippet"], { cwd: f.workspace, env: f.env, timeoutMs: 15000 });
       if (result.code !== 0) throw new Error(result.stdout + result.stderr);
       expect(f.requests.some(request => request.body.tools?.some((tool: any) => tool.function?.name === "permission_decision"))).toBe(true);
       expect(existsSync(marker)).toBe(false);
@@ -559,13 +559,13 @@ describe("configured providers", () => {
   test("resume uses its own key when a different bearer connection is the default", async () => {
     const f = fixture();
     try {
-      (f.settings.providers.local as any).auth = { type: "bearer", env: "FX_TEST_LOCAL_TOKEN" };
+      (f.settings.providers.local as any).auth = { type: "bearer", env: "LIA_TEST_LOCAL_TOKEN" };
       f.save();
-      const env = { ...f.env, FX_TEST_LOCAL_TOKEN: "local-only-token" };
-      const first = await runFx(["ask", "--json", "remember remote"], { cwd: f.workspace, env: { ...env, FX_PROVIDER: "remote" }, timeoutMs: 20000 });
+      const env = { ...f.env, LIA_TEST_LOCAL_TOKEN: "local-only-token" };
+      const first = await runLia(["ask", "--json", "remember remote"], { cwd: f.workspace, env: { ...env, LIA_PROVIDER: "remote" }, timeoutMs: 20000 });
       if (first.code !== 0) throw new Error(first.stdout + first.stderr);
       const id = JSON.parse(first.stdout).session_id;
-      const resumed = await runFx(["ask", "--json", "--resume", id, "continue"], { cwd: f.workspace, env, timeoutMs: 20000 });
+      const resumed = await runLia(["ask", "--json", "--resume", id, "continue"], { cwd: f.workspace, env, timeoutMs: 20000 });
       if (resumed.code !== 0) throw new Error(resumed.stdout + resumed.stderr);
       expect(f.requests).toHaveLength(2);
       expect(f.requests[1].body.model).toBe("remote-model");
@@ -579,7 +579,7 @@ describe("configured providers", () => {
       f.settings.provider = "gateway";
       (f.settings as any).workspaces = { [f.workspace]: { provider: "local", permission_mode: "invalid" } };
       f.save();
-      const result = await runFx(["ask", "--json", "--no-save", "local-only prompt"], { cwd: f.workspace, env: f.env, timeoutMs: 10000 });
+      const result = await runLia(["ask", "--json", "--no-save", "local-only prompt"], { cwd: f.workspace, env: f.env, timeoutMs: 10000 });
       expect(result.code).not.toBe(0);
       expect(f.requests).toHaveLength(0);
     } finally { f.close(); }
@@ -591,7 +591,7 @@ describe("configured providers", () => {
       f.settings.permission_mode = "full-access";
       (f.settings as any).yolo_acknowledged = true;
       f.save();
-      const result = await runFx(["ask", "--json", "--no-save", "Write must-not-exist.txt"], { cwd: f.workspace, env: f.env, timeoutMs: 10000 });
+      const result = await runLia(["ask", "--json", "--no-save", "Write must-not-exist.txt"], { cwd: f.workspace, env: f.env, timeoutMs: 10000 });
       expect(result.code).not.toBe(0);
       expect(existsSync(join(f.workspace, "must-not-exist.txt"))).toBe(false);
       expect(f.requests).toHaveLength(1);
@@ -604,7 +604,7 @@ describe("configured providers", () => {
     for (const [key, value] of Object.entries(f.env)) {
       if (value === undefined) delete env[key]; else env[key] = value;
     }
-    const child = Bun.spawn([FX_BIN, "ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([LIA_BIN, "ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const output = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
     let forced = false;
     const timer = setTimeout(() => { forced = true; child.kill("SIGKILL"); }, 8000);
@@ -626,26 +626,26 @@ describe("configured providers", () => {
     }
   }, 12000);
 
-  test("a connection without a saved model runs from --model or FX_MODEL and rejects a blank FX_MODEL", async () => {
+  test("a connection without a saved model runs from --model or LIA_MODEL and rejects a blank LIA_MODEL", async () => {
     const f = fixture();
     try {
       delete (f.settings.models as Record<string, string>).local;
       f.save();
       const chatModels = () => f.requests.filter(request => request.path === "/v1/chat/completions").map(request => request.body.model);
 
-      const flag = await runFx(["ask", "--json", "--no-save", "--model", "flag-model", "hello"], { cwd: f.workspace, env: f.env, timeoutMs: 10000 });
+      const flag = await runLia(["ask", "--json", "--no-save", "--model", "flag-model", "hello"], { cwd: f.workspace, env: f.env, timeoutMs: 10000 });
       if (flag.code !== 0) throw new Error(flag.stdout + flag.stderr);
-      const env = await runFx(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, FX_MODEL: "  env-model  " }, timeoutMs: 10000 });
+      const env = await runLia(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, LIA_MODEL: "  env-model  " }, timeoutMs: 10000 });
       if (env.code !== 0) throw new Error(env.stdout + env.stderr);
       expect(chatModels()).toEqual(["flag-model", "env-model"]);
 
-      const status = await runFx(["status", "--json"], { cwd: f.workspace, env: { ...f.env, FX_MODEL: "env-model" } });
+      const status = await runLia(["status", "--json"], { cwd: f.workspace, env: { ...f.env, LIA_MODEL: "env-model" } });
       expect(status.code).toBe(0);
-      expect(JSON.parse(status.stdout)).toMatchObject({ model: "env-model", model_origin: "FX_MODEL", model_source: "local" });
+      expect(JSON.parse(status.stdout)).toMatchObject({ model: "env-model", model_origin: "LIA_MODEL", model_source: "local" });
 
-      const blank = await runFx(["status"], { cwd: f.workspace, env: { ...f.env, FX_MODEL: "   " } });
+      const blank = await runLia(["status"], { cwd: f.workspace, env: { ...f.env, LIA_MODEL: "   " } });
       expect(blank.code).toBe(1);
-      expect(blank.stderr).toBe("fx: no model is selected for this connection; save one under \"models\" in ~/.fx/settings.json, or set a model for this run with --model or FX_MODEL\n");
+      expect(blank.stderr).toBe("lia: no model is selected for this connection; save one under \"models\" in ~/.lia/settings.json, or set a model for this run with --model or LIA_MODEL\n");
       expect(chatModels()).toHaveLength(2);
       expect(JSON.parse(readFileSync(f.settingsPath, "utf8")).models.local).toBeUndefined();
     } finally { f.close(); }
@@ -655,7 +655,7 @@ describe("configured providers", () => {
     const target = fixture();
     const f = fixture(() => new Response("redirect", { status: 307, headers: { location: `${target.settings.providers.local.base_url}/chat/completions` } }));
     try {
-      const result = await runFx(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, FX_PROVIDER: "remote" } });
+      const result = await runLia(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, LIA_PROVIDER: "remote" } });
       expect(result.code).not.toBe(0);
       expect(f.requests).toHaveLength(1);
       expect(target.requests).toHaveLength(0);
@@ -665,7 +665,7 @@ describe("configured providers", () => {
   test("provider error diagnostics redact the selected key", async () => {
     const f = fixture(() => Response.json({ error: { message: "rejected own-provider-token" } }, { status: 401, headers: { "retry-after": "3" } }));
     try {
-      const result = await runFx(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, FX_PROVIDER: "remote" }, timeoutMs: 10000 });
+      const result = await runLia(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, LIA_PROVIDER: "remote" }, timeoutMs: 10000 });
       expect(result.code).toBe(1);
       expect(() => JSON.parse(result.stdout)).not.toThrow();
       expect(result.stderr).not.toContain("panic");
@@ -680,7 +680,7 @@ describe("configured providers", () => {
     const body = encoding === "plain" ? `rejected ${token}` : encoding === "duplicate" ? `{"error":{"message":"rejected ${encoded}"},"${token}":0,"${encoded}":1}` : `{"error":{"message":"rejected ${encoded}","code":"${encoded}"}}`;
     const f = fixture(() => new Response(body, { status: 400 }));
     try {
-      const result = await runFx(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, FX_PROVIDER: "remote", FX_TEST_PROVIDER_TOKEN: token } });
+      const result = await runLia(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, LIA_PROVIDER: "remote", LIA_TEST_PROVIDER_TOKEN: token } });
       expect(result.code).toBe(1);
       expect(() => JSON.parse(result.stdout)).not.toThrow();
       expect(result.stdout + result.stderr).not.toContain(token);
@@ -692,7 +692,7 @@ describe("configured providers", () => {
     const f = fixture();
     try {
       writeFileSync(f.settingsPath, '{"provider":"local",');
-      const result = await runFx(["ask", "--json", "--no-save", "local-only prompt"], { cwd: f.workspace, env: f.env, timeoutMs: 8000 });
+      const result = await runLia(["ask", "--json", "--no-save", "local-only prompt"], { cwd: f.workspace, env: f.env, timeoutMs: 8000 });
       expect(result.code).not.toBe(0);
       expect(f.requests).toHaveLength(0);
     } finally { f.close(); }
@@ -701,7 +701,7 @@ describe("configured providers", () => {
   test("invalid bearer header bytes are rejected before sending", async () => {
     const f = fixture();
     try {
-      const result = await runFx(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, FX_PROVIDER: "remote", FX_TEST_PROVIDER_TOKEN: "bad\nheader" } });
+      const result = await runLia(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, LIA_PROVIDER: "remote", LIA_TEST_PROVIDER_TOKEN: "bad\nheader" } });
       expect(result.code).not.toBe(0);
       expect(f.requests).toHaveLength(0);
     } finally { f.close(); }
@@ -711,7 +711,7 @@ describe("configured providers", () => {
     const f = fixture();
     try {
       const before = readFileSync(f.settingsPath, "utf8");
-      const result = await runFx(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, FX_PROVIDER: "remote", FX_MODEL: "unlisted-model" } });
+      const result = await runLia(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, LIA_PROVIDER: "remote", LIA_MODEL: "unlisted-model" } });
       if (result.code !== 0) throw new Error(result.stdout + result.stderr);
       expect(f.requests).toHaveLength(1);
       expect(f.requests[0].body.model).toBe("unlisted-model");
@@ -723,8 +723,8 @@ describe("configured providers", () => {
   test("project files cannot replace profile connections", async () => {
     const f = fixture();
     try {
-      writeFileSync(join(f.workspace, ".fx.json"), JSON.stringify({ provider: "remote", providers: { local: "invalid" } }));
-      const result = await runFx(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: f.env });
+      writeFileSync(join(f.workspace, ".lia.json"), JSON.stringify({ provider: "remote", providers: { local: "invalid" } }));
+      const result = await runLia(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: f.env });
       if (result.code !== 0) throw new Error(result.stdout + result.stderr);
       expect(f.requests).toHaveLength(1);
       expect(f.requests[0].body.model).toBe("local-model");
@@ -735,12 +735,12 @@ describe("configured providers", () => {
   test("saved history remains readable after its connection is removed", async () => {
     const f = fixture();
     try {
-      const saved = await runFx(["ask", "--json", "remember this"], { cwd: f.workspace, env: f.env });
+      const saved = await runLia(["ask", "--json", "remember this"], { cwd: f.workspace, env: f.env });
       if (saved.code !== 0) throw new Error(saved.stdout + saved.stderr);
       const id = JSON.parse(saved.stdout).session_id;
       delete (f.settings.providers as any).local;
       f.save();
-      const history = await runFx(["session", id, "--json"], { cwd: f.workspace, env: f.env });
+      const history = await runLia(["session", id, "--json"], { cwd: f.workspace, env: f.env });
       if (history.code !== 0) throw new Error(history.stdout + history.stderr);
       expect(history.stdout).toContain("remember this");
       expect(f.requests).toHaveLength(1);
@@ -757,7 +757,7 @@ describe("configured providers", () => {
         },
       };
       f.save();
-      const result = await runFx(["status", "--json"], { cwd: f.workspace, env: f.env });
+      const result = await runLia(["status", "--json"], { cwd: f.workspace, env: f.env });
       expect(result.code).toBe(0);
       const status = JSON.parse(result.stdout);
       expect(status.model_source).toBe("local");
@@ -778,7 +778,7 @@ describe("configured providers", () => {
         },
       };
       f.save();
-      const result = await runFx(["status", "--json"], { cwd: f.workspace, env: f.env });
+      const result = await runLia(["status", "--json"], { cwd: f.workspace, env: f.env });
       expect(result.code).toBe(0);
       const status = JSON.parse(result.stdout);
       expect(status.provider_endpoint).toBe(f.settings.providers.local.base_url);
@@ -789,9 +789,9 @@ describe("configured providers", () => {
   test("unknown connections and missing keys fail without a Gateway fallback", async () => {
     const f = fixture();
     try {
-      const unknown = await runFx(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, FX_PROVIDER: "missing" } });
+      const unknown = await runLia(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, LIA_PROVIDER: "missing" } });
       expect(unknown.code).not.toBe(0);
-      const missingKey = await runFx(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, FX_PROVIDER: "remote", FX_TEST_PROVIDER_TOKEN: undefined } });
+      const missingKey = await runLia(["ask", "--json", "--no-save", "hello"], { cwd: f.workspace, env: { ...f.env, LIA_PROVIDER: "remote", LIA_TEST_PROVIDER_TOKEN: undefined } });
       expect(missingKey.code).not.toBe(0);
       expect(f.requests).toHaveLength(0);
     } finally { f.close(); }

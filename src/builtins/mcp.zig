@@ -28,7 +28,7 @@ pub fn configPathFromHome(alloc: Allocator, home: []const u8) ![]u8 {
     return profile_paths.mcpConfigPath(alloc, home);
 }
 
-/// The servers fx runs in `workspace_root`: the profile's, then the project's
+/// The servers lia runs in `workspace_root`: the profile's, then the project's
 /// that no profile server shadows, with project trust applied. Owns both lists.
 pub const NativeConfigs = struct {
     configs: std.ArrayList(McpServerConfig) = .empty,
@@ -45,7 +45,7 @@ pub const NativeConfigs = struct {
 pub fn loadNativeConfigs(alloc: Allocator, workspace_root: []const u8) !NativeConfigs {
     var profile: std.ArrayList(McpServerConfig) = .empty;
     errdefer freeConfigs(alloc, &profile);
-    // A profile entry fx can't read is skipped with a note, ahead of the
+    // A profile entry lia can't read is skipped with a note, ahead of the
     // project's notes.
     var loaded: NativeConfigs = .{};
     errdefer loaded.deinit(alloc);
@@ -349,7 +349,7 @@ fn readProfile(alloc: Allocator, path: []const u8, skipped: ?*std.ArrayList(proj
     const json_text = (config_file.read(alloc, path) catch |err| {
         logConfigFailure("read", path, err);
         // Named for this file, so a caller that has only the error, such as
-        // `fx ask` at startup, can say what's wrong with ~/.fx/mcp.json.
+        // `lia ask` at startup, can say what's wrong with ~/.lia/mcp.json.
         return switch (err) {
             error.SymLinkLoop => error.McpConfigLinkLoop,
             error.StreamTooLong => error.McpConfigTooLarge,
@@ -604,9 +604,9 @@ test "a server whose name a terminal can't show is skipped with a note that esca
     try std.testing.expectEqualStrings("caf\u{e9} two", loaded.configs.items[0].name);
     try std.testing.expectEqual(@as(usize, 3), loaded.diagnostics.items.len);
     const expected = [_][]const u8{
-        "~/.fx/mcp.json server 'bad\\xff' was skipped: its name has a character fx won't print.",
-        "~/.fx/mcp.json server 'evil\\x1b]0;x\\x07' was skipped: its name has a character fx won't print.",
-        "~/.fx/mcp.json server 'rtl\\u{202e}txt' was skipped: its name has a character fx won't print.",
+        "~/.lia/mcp.json server 'bad\\xff' was skipped: its name has a character lia won't print.",
+        "~/.lia/mcp.json server 'evil\\x1b]0;x\\x07' was skipped: its name has a character lia won't print.",
+        "~/.lia/mcp.json server 'rtl\\u{202e}txt' was skipped: its name has a character lia won't print.",
     };
     for (loaded.diagnostics.items, expected) |diagnostic, want| {
         const note = try project_config.renderWorkspaceDiagnostic(alloc, diagnostic);
@@ -622,17 +622,17 @@ test "saving MCP config replaces the file durably" {
     defer tmp.cleanup();
 
     const original = "{\"mcp\":{\"stale\":{\"command\":\"echo\"}}}";
-    try writeTempFile(&tmp, "home/.fx/mcp.json", original);
-    const path = try tmpDirPath(alloc, tmp.dir, "home/.fx/mcp.json");
+    try writeTempFile(&tmp, "home/.lia/mcp.json", original);
+    const path = try tmpDirPath(alloc, tmp.dir, "home/.lia/mcp.json");
     defer alloc.free(path);
 
-    var fx_dir = try tmp.dir.openDir(io_mod.getIo(), "home/.fx", .{ .iterate = true });
-    defer fx_dir.close(io_mod.getIo());
+    var lia_dir = try tmp.dir.openDir(io_mod.getIo(), "home/.lia", .{ .iterate = true });
+    defer lia_dir.close(io_mod.getIo());
 
     // Seed a group-readable mode so the 0600 assertion below cannot pass just
     // because the developer's umask already produced it.
     {
-        var seed = try fx_dir.openFile(io_mod.getIo(), "mcp.json", .{ .mode = .read_write });
+        var seed = try lia_dir.openFile(io_mod.getIo(), "mcp.json", .{ .mode = .read_write });
         defer seed.close(io_mod.getIo());
         try seed.setPermissions(io_mod.getIo(), std.Io.File.Permissions.fromMode(0o644));
     }
@@ -640,7 +640,7 @@ test "saving MCP config replaces the file durably" {
     // Hold the pre-save file open. A rename-over leaves this descriptor on the
     // old, unlinked inode; an in-place truncate would empty it instead, which
     // is the failure this save must not have.
-    var held = try fx_dir.openFile(io_mod.getIo(), "mcp.json", .{});
+    var held = try lia_dir.openFile(io_mod.getIo(), "mcp.json", .{});
     defer held.close(io_mod.getIo());
 
     try saveConfigsToPath(alloc, path, &.{});
@@ -655,10 +655,10 @@ test "saving MCP config replaces the file durably" {
     defer alloc.free(written);
     try std.testing.expect(std.mem.find(u8, written, "stale") == null);
 
-    const stat = try fx_dir.statFile(io_mod.getIo(), "mcp.json", .{ .follow_symlinks = false });
+    const stat = try lia_dir.statFile(io_mod.getIo(), "mcp.json", .{ .follow_symlinks = false });
     try std.testing.expectEqual(@as(u32, 0o600), stat.permissions.toMode() & 0o777);
 
-    var it = fx_dir.iterate();
+    var it = lia_dir.iterate();
     var entries: usize = 0;
     while (try it.next(io_mod.getIo())) |entry| {
         entries += 1;
@@ -701,7 +701,7 @@ test "MCP config diagnostic treats nonblocking profile states as clear" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
     const home_path = try tmpDirPath(alloc, tmp.dir, "home");
     defer alloc.free(home_path);
 
@@ -715,7 +715,7 @@ test "MCP config diagnostic treats nonblocking profile states as clear" {
         }
     }
 
-    try writeTempFile(&tmp, "home/.fx/mcp.json", "{\"mcp\":{}}");
+    try writeTempFile(&tmp, "home/.lia/mcp.json", "{\"mcp\":{}}");
     {
         const test_home = try TestHome.install(alloc, home_path);
         defer test_home.deinit();
@@ -788,12 +788,12 @@ test "workspace MCP loading expands command args environment and HTTP headers" {
     try std.testing.expectEqualStrings("Bearer secret-value", remote.headers[0].value);
 }
 
-test "fx mcp approve saves the approval of a project server" {
+test "lia mcp approve saves the approval of a project server" {
     const alloc = std.testing.allocator;
     const mcp_verbs = @import("../core/mcp_host/verbs.zig");
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
     try writeTempFile(&tmp, "workspace/.mcp.json",
         \\{"mcpServers":{"fixture":{"command":"fixture-server"}}}
     );
@@ -804,9 +804,9 @@ test "fx mcp approve saves the approval of a project server" {
     const test_home = try TestHome.install(alloc, home);
     defer test_home.deinit();
     // Sign-ins go to a file under the test home, never the user's Keychain.
-    try test_home.map.put("FX_DISABLE_KEYCHAIN", "1");
+    try test_home.map.put("LIA_DISABLE_KEYCHAIN", "1");
 
-    // `fx mcp` signals servers for exit when it is done, which would stop
+    // `lia mcp` signals servers for exit when it is done, which would stop
     // every later test from starting one; this host is destroyed instead.
     const Hosts = struct {
         workspace_root: []const u8,
@@ -855,12 +855,12 @@ test "saving MCP config refuses a symlinked target" {
 
     const external = "{\"mcp\":{\"fs\":{\"command\":\"node\"}}}";
     try writeTempFile(&tmp, "home/external.json", external);
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
     const external_path = try tmpDirPath(alloc, tmp.dir, "home/external.json");
     defer alloc.free(external_path);
-    try tmp.dir.symLink(io_mod.getIo(), external_path, "home/.fx/mcp.json", .{ .is_directory = false });
+    try tmp.dir.symLink(io_mod.getIo(), external_path, "home/.lia/mcp.json", .{ .is_directory = false });
 
-    const path = try std.Io.Dir.path.join(alloc, &.{ std.Io.Dir.path.dirname(external_path).?, ".fx", "mcp.json" });
+    const path = try std.Io.Dir.path.join(alloc, &.{ std.Io.Dir.path.dirname(external_path).?, ".lia", "mcp.json" });
     defer alloc.free(path);
 
     // The durable helper refuses a target that is not a plain private file, so
@@ -872,7 +872,7 @@ test "saving MCP config refuses a symlinked target" {
     try std.testing.expectEqualStrings(external, untouched);
 }
 
-test "a profile config fx can't read fails with an error named for the file" {
+test "a profile config lia can't read fails with an error named for the file" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -1050,7 +1050,7 @@ test "loadConfigFromJson preserves HTTP identity headers and timeouts" {
 test "remote config keeps credential references and OAuth policy without secrets" {
     const alloc = std.testing.allocator;
     const json =
-        \\{"mcp":{"api":{"type":"http","url":"https://api.example.com/mcp","header_env":{"X-Workspace":"MCP_WORKSPACE"},"bearer_token_env":"MCP_TOKEN","oauth":{"resource":"https://api.example.com/mcp","issuer":"https://login.example.com","client_id":"fx-client","client_secret_env":"MCP_CLIENT_SECRET","client_metadata_url":"https://client.example/fx.json","scopes":["tools.read","tools.call"]}}}}
+        \\{"mcp":{"api":{"type":"http","url":"https://api.example.com/mcp","header_env":{"X-Workspace":"MCP_WORKSPACE"},"bearer_token_env":"MCP_TOKEN","oauth":{"resource":"https://api.example.com/mcp","issuer":"https://login.example.com","client_id":"lia-client","client_secret_env":"MCP_CLIENT_SECRET","client_metadata_url":"https://client.example/lia.json","scopes":["tools.read","tools.call"]}}}}
     ;
     var configs = try loadConfigFromJson(alloc, json);
     defer freeConfigs(alloc, &configs);
@@ -1067,7 +1067,7 @@ test "remote config keeps credential references and OAuth policy without secrets
         auth.resource.?,
     );
     try std.testing.expectEqualStrings("https://login.example.com", auth.issuer.?);
-    try std.testing.expectEqualStrings("fx-client", auth.client_id.?);
+    try std.testing.expectEqualStrings("lia-client", auth.client_id.?);
     try std.testing.expectEqualStrings("MCP_CLIENT_SECRET", auth.client_secret_env.?);
     try std.testing.expectEqual(@as(usize, 2), auth.scopes.len);
     try std.testing.expectEqual(@as(?u16, null), auth.callback_port);
@@ -1076,14 +1076,14 @@ test "remote config keeps credential references and OAuth policy without secrets
 test "remote config keeps a pinned OAuth callback port" {
     const alloc = std.testing.allocator;
     const json =
-        \\{"mcp":{"slack":{"type":"http","url":"https://mcp.slack.com/mcp","oauth":{"client_id":"fx-client","callback_port":3118}}}}
+        \\{"mcp":{"slack":{"type":"http","url":"https://mcp.slack.com/mcp","oauth":{"client_id":"lia-client","callback_port":3118}}}}
     ;
     var configs = try loadConfigFromJson(alloc, json);
     defer freeConfigs(alloc, &configs);
 
     try std.testing.expectEqual(@as(usize, 1), configs.items.len);
     const auth = configs.items[0].auth.?;
-    try std.testing.expectEqualStrings("fx-client", auth.client_id.?);
+    try std.testing.expectEqualStrings("lia-client", auth.client_id.?);
     try std.testing.expectEqual(@as(?u16, 3118), auth.callback_port);
 }
 
@@ -1108,7 +1108,7 @@ test "profile config rejects out-of-range OAuth callback ports" {
 
 test "profile config rejects a mixed set containing invalid client metadata URLs" {
     const json =
-        \\{"mcp":{"loopback":{"type":"http","url":"https://api.example.com/mcp","oauth":{"client_metadata_url":"http://127.0.0.1:4321/client.json"}},"pathless":{"type":"http","url":"https://api.example.com/mcp","oauth":{"client_metadata_url":"https://client.example"}},"root":{"type":"http","url":"https://api.example.com/mcp","oauth":{"client_metadata_url":"https://client.example/"}},"valid":{"type":"http","url":"https://api.example.com/mcp","oauth":{"client_metadata_url":"https://client.example/fx.json"}}}}
+        \\{"mcp":{"loopback":{"type":"http","url":"https://api.example.com/mcp","oauth":{"client_metadata_url":"http://127.0.0.1:4321/client.json"}},"pathless":{"type":"http","url":"https://api.example.com/mcp","oauth":{"client_metadata_url":"https://client.example"}},"root":{"type":"http","url":"https://api.example.com/mcp","oauth":{"client_metadata_url":"https://client.example/"}},"valid":{"type":"http","url":"https://api.example.com/mcp","oauth":{"client_metadata_url":"https://client.example/lia.json"}}}}
     ;
     try std.testing.expectError(
         error.McpConfigInvalidOAuth,

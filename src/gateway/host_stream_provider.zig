@@ -21,7 +21,7 @@ pub const Transport = struct {
     consumed_fn: ?*const fn (?*anyopaque, i32) void = null,
     // Optional: an opened response's Retry-After in whole seconds, or -1 when
     // it has none. Read once its status is ready; a host without it leaves
-    // waits on fx's own backoff.
+    // waits on lia's own backoff.
     retry_after_fn: ?*const fn (?*anyopaque, i32) i32 = null,
 
     fn open(self: Transport, method: []const u8, url: []const u8, headers: []const u8, body: []const u8) !i32 {
@@ -152,8 +152,8 @@ fn stream(raw: ?*anyopaque, alloc: Allocator, request: stream_provider.ModelRequ
     defer headers.deinit(alloc);
     try headers.appendSlice(alloc, &.{
         .{ .name = "content-type", .value = "application/json" },
-        .{ .name = "HTTP-Referer", .value = "https://github.com/vercel-labs/fx" },
-        .{ .name = "X-Title", .value = "fx" },
+        .{ .name = "HTTP-Referer", .value = "https://github.com/ap-justin/lia" },
+        .{ .name = "X-Title", .value = "lia" },
         .{ .name = "ai-gateway-protocol-version", .value = "0.0.1" },
         .{ .name = "ai-language-model-specification-version", .value = "4" },
         .{ .name = "ai-language-model-id", .value = request.model },
@@ -304,7 +304,7 @@ pub fn get(
     return .{ .status = http_status, .body = body };
 }
 
-/// `body` with the request's own key masked, as fx masks a configured
+/// `body` with the request's own key masked, as lia masks a configured
 /// provider's: the detail reaches the turn, its events and the saved session,
 /// so a server that quotes the key back must not put it there. Takes `body`;
 /// the caller owns the result.
@@ -1020,7 +1020,7 @@ test "host stream reader throttles cooperative pulses" {
     try std.testing.expectEqual(@as(usize, 2), trace.calls);
 }
 
-test "a host's Retry-After and status reach the failure, and a host without one leaves the wait to fx" {
+test "a host's Retry-After and status reach the failure, and a host without one leaves the wait to lia" {
     const FakeTransport = struct {
         retry_after: i32,
         admitted: usize = 0,

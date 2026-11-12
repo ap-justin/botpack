@@ -1,6 +1,6 @@
 //! U02 lab: drives the real request core with a seeded random event stream and
 //! writes its trace, so the Bun driver can have TLC check the core against
-//! spec/Request.tla before any transport exists. Dev only; never moves into fx.
+//! spec/Request.tla before any transport exists. Dev only; never moves into lia.
 //!
 //! Usage: request_lab <trace-path> [--seed N] [--steps N] [--slots N]
 //!                    [--plant-bug late-delivery]

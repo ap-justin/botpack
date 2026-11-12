@@ -3,7 +3,7 @@
 //! named by its first argument and writes one JSON result per operation to
 //! the file named by its second.
 //!
-//! The lab plays fx's part around the module and knows nothing about the
+//! The lab plays lia's part around the module and knows nothing about the
 //! model: it keeps the saved record and the clock, and it carries out each
 //! plan. A save is durable as soon as the plan asks for it, as the model
 //! assumes. The lab decodes saved records from the byte layout

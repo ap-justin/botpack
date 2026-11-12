@@ -39,7 +39,7 @@ pub const processAgentPrompt = runtime_orchestrator.processAgentPrompt;
 pub const compactContext = runtime_orchestrator.compactContext;
 pub const compactionSize = runtime_orchestrator.compactionSize;
 pub const CompactorCaller = @import("runtime/text_completion.zig").CompactorCaller;
-pub const persistedStatusForCurrentFxLocalResult = runtime_execution_memory.persistedStatusForCurrentFxLocalResult;
+pub const persistedStatusForCurrentLiaLocalResult = runtime_execution_memory.persistedStatusForCurrentLiaLocalResult;
 pub const classifyProviderExecutedResultStatus = runtime_execution_memory.classifyProviderExecutedResultStatus;
 pub const normalizeAssistantTextForDisplay = runtime_assistant_stream.normalizeAssistantTextForDisplay;
 

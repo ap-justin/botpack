@@ -94,7 +94,7 @@ function seedV0ChangelogRepo(dir: string): void {
   ]);
 }
 
-function seedFxHistoryRepo(dir: string): void {
+function seedLiaHistoryRepo(dir: string): void {
   // A shallow clone of the real repository: its history and origin/main agree with GitHub.
   execSync("git clone -q --depth 20 --single-branch https://github.com/vercel-labs/fx.git .", { cwd: dir, stdio: "pipe" });
 }
@@ -153,10 +153,10 @@ describe("eval: GitHub and repo routing", () => {
     "uses local git for current checkout history questions",
     async () => {
       workDir = createWorkDir();
-      seedFxHistoryRepo(workDir);
+      seedLiaHistoryRepo(workDir);
 
       const result = await runEval(
-        "look for changes/last commits in the fx",
+        "look for changes/last commits in the lia",
         {
           cwd: workDir,
           timeoutSec: 180,
@@ -175,7 +175,7 @@ describe("eval: GitHub and repo routing", () => {
     "routes non-matching GitHub URL metadata through gh before web_search",
     async () => {
       workDir = createWorkDir();
-      seedGitRepo(workDir, "https://github.com/vercel-labs/fx.git");
+      seedGitRepo(workDir, "https://github.com/ap-justin/lia.git");
 
       const result = await runEval(
         "For https://github.com/vercel/next.js, use GitHub metadata to tell me how many open pull requests it currently has. Do not answer from the URL alone.",

@@ -16,9 +16,9 @@ pub const Bundle = struct {
     };
     pub const Capabilities = struct {
         gateway_prompt_caching: bool = false,
-        fx_search: bool = false,
+        lia_search: bool = false,
         vision_fallback: bool = false,
-        /// Whether a request carries fx's output limit.
+        /// Whether a request carries lia's output limit.
         sends_output_limit: bool = true,
     };
 
@@ -34,7 +34,7 @@ pub const Bundle = struct {
     model_catalog: ?model_catalog.Provider = null,
     permission_reviewer: ?auto_classifier.Provider = null,
     credits: ?gateway_provider.CreditsProvider = null,
-    fx_search: ?web_search_provider.Provider = null,
+    lia_search: ?web_search_provider.Provider = null,
 
     pub fn agent_stream_or_unavailable(self: Bundle) stream_provider.Provider {
         return self.agent_stream orelse stream_provider.unavailable_provider;

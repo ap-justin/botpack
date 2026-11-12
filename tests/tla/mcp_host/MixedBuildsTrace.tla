@@ -1,11 +1,11 @@
 ---- MODULE MixedBuildsTrace ----
 \* Trace wrapper for MixedBuilds.tla. tests/tla/drivers/mcp_host/mixed-builds.test.ts
-\* makes TraceObs from real `fx mcp` runs against a scratch HOME, with an older
+\* makes TraceObs from real `lia mcp` runs against a scratch HOME, with an older
 \* build's writes to credentials-v2.json played by the harness, as that build
 \* writes them:
-\*   run {cmd}      a command of this build: "get" (fx mcp list: a host
-\*                  starts and reads its store), "signin" (fx mcp login) or
-\*                  "logout" (fx mcp logout)
+\*   run {cmd}      a command of this build: "get" (lia mcp list: a host
+\*                  starts and reads its store), "signin" (lia mcp login) or
+\*                  "logout" (lia mcp logout)
 \*   older {op}     the older build: "save" (it refreshed and saved the login)
 \*                  or "remove" (its login ended, and it removed it)
 \*   observe {v2kind, v2, v3}  the files after it: v2kind "absent", "v1" or

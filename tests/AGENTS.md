@@ -12,7 +12,7 @@ Pick the lowest layer that proves the behavior, and extend the closest existing 
 | --- | --- |
 | A parser, policy, reducer, formatter, or state transition | An inline `test` block in the owning `src/` file |
 | CLI or ACP behavior of the built binary | A root `tests/e2e/*.test.ts` file |
-| fx against the official MCP client conformance suite | `tests/e2e/conformance/`, an isolated npm project |
+| lia against the official MCP client conformance suite | `tests/e2e/conformance/`, an isolated npm project |
 | Task quality or tool choice with real models | `tests/evals/` |
 | Saved inputs for a fuzz test | `tests/fuzz/corpus/<target>/`, with the target listed in `tests/fuzz/targets.json` |
 | A protocol or crash-safety design, checked with TLC | A folder under `tests/tla/` named after the module it models |
@@ -48,10 +48,10 @@ Only files that end in `.test.ts` at the root of `tests/e2e/` are E2E tests. CI 
 
 ## Write an E2E test
 
-- Build first with `zig build`. Tests run `zig-out/bin/fx` through `FX_BIN` from `tests/evals/eval-helpers.ts`, never an installed `fx`.
-- Give every test its own profile with `createIsolatedTestHome()` and remove it with `cleanupIsolatedTestHome()`. A test must never read or write the developer's `~/.fx`.
-- Keep the network local. Point fx at a fake model server with `startFakeGateway()` or `startDynamicFakeGateway()` from `fake-gateway.ts`, or the builders in `fixtures/chat-completions.ts`.
-- A new test must not play sound. Set `FX_SOUND=0` when you spawn fx.
+- Build first with `zig build`. Tests run `zig-out/bin/lia` through `LIA_BIN` from `tests/evals/eval-helpers.ts`, never an installed `lia`.
+- Give every test its own profile with `createIsolatedTestHome()` and remove it with `cleanupIsolatedTestHome()`. A test must never read or write the developer's `~/.lia`.
+- Keep the network local. Point lia at a fake model server with `startFakeGateway()` or `startDynamicFakeGateway()` from `fake-gateway.ts`, or the builders in `fixtures/chat-completions.ts`.
+- A new test must not play sound. Set `LIA_SOUND=0` when you spawn lia.
 - Fixtures are public. Use `/Users/example/` for home paths and never commit credentials. `scripts/check-public-surface.sh` rejects personal paths, real team IDs, and internal or personal project slugs.
 
 ## Wire an E2E file into CI
@@ -73,7 +73,7 @@ python3 -m scripts.pgso.corpus --manifest scripts/pgso/corpus.json --list   # fr
 
 ## Evals
 
-`tests/evals/` drives the agent through `fx ask --json` against real models. It needs `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN`, makes billed calls, and varies between runs, so it is not a pull request check. Do not move a deterministic check here; put it in `tests/e2e/` with a fake gateway.
+`tests/evals/` drives the agent through `lia ask --json` against real models. It needs `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN`, makes billed calls, and varies between runs, so it is not a pull request check. Do not move a deterministic check here; put it in `tests/e2e/` with a fake gateway.
 
 ## TLA+ models
 
@@ -81,8 +81,8 @@ Every TLA+ spec, its TLC checker, the Bun drivers that walk code along a spec, a
 
 - Name a model's folder after the module it describes: `session_manager/` for `src/core/session_manager/` and `mcp_host/` for `src/core/mcp_host/`.
 - Give each folder a `check.sh` that runs every config and exits non-zero when one misses its expected verdict. Configs that must fail, such as witnesses and planted mutations, are part of that contract, so encode their verdicts in `check.sh`. Source `../lib/tlc.sh` and list each config with its verdict for `tlc_verdicts`, rather than finding TLC yourself. A Python checker gets Java and the jar from `toolchain()` in `lib/tlc.py`.
-- Put Bun drivers in `tests/tla/drivers/<area>/`. They run the code under test, from `zig-out/bin/fx` or by relative import, and have TLC check each run. Use `drivers/lib/tlc.ts` to run TLC and `drivers/lib/context.ts` for the binary, the output folder, and the `tests/e2e/` helpers. Every fx process a driver starts sets `FX_SOUND=0`. Generated output goes to the temp folder or is ignored by git.
-- A model of code that has not landed says so at the top, and the drivers that need that code run only behind an explicit flag, such as `--next` or `FX_TLA_NEXT_MCP=1`. `tests/tla/README.md` lists them. Remove the flag in the change that lands the code.
+- Put Bun drivers in `tests/tla/drivers/<area>/`. They run the code under test, from `zig-out/bin/lia` or by relative import, and have TLC check each run. Use `drivers/lib/tlc.ts` to run TLC and `drivers/lib/context.ts` for the binary, the output folder, and the `tests/e2e/` helpers. Every lia process a driver starts sets `LIA_SOUND=0`. Generated output goes to the temp folder or is ignored by git.
+- A model of code that has not landed says so at the top, and the drivers that need that code run only behind an explicit flag, such as `--next` or `LIA_TLA_NEXT_MCP=1`. `tests/tla/README.md` lists them. Remove the flag in the change that lands the code.
 - When a change alters behavior that a spec models, update the spec in the same change and run its checker. CI runs the `mcp/` and `mcp_host/` models and their drivers on `main` and on pull requests that change the code they cover (`scripts/detect-ci-need.sh`), the `mcp_call/` model on `main` and on pull requests labeled `ci:tla-mcp-call`, and the `recovery/` and `agent_runtime/` models and their drivers on every pull request; run the others yourself.
 - A new model, checker, or driver gets a row in `tests/tla/README.md`.
 
@@ -98,6 +98,6 @@ Code comments point readers at the test or model that pins a behavior. Keep thos
 
 ## Before you finish
 
-- Run the check for what you changed: the E2E file, such as `FX_SOUND=0 bun test cli.test.ts` from `tests/e2e/`; the folder's `check.sh` under `tests/tla/`; or `zig build test` for inline Zig tests.
+- Run the check for what you changed: the E2E file, such as `LIA_SOUND=0 bun test cli.test.ts` from `tests/e2e/`; the folder's `check.sh` under `tests/tla/`; or `zig build test` for inline Zig tests.
 - After adding, removing, or renaming an E2E file, run the wiring checks above.
 - Do not run the full E2E suite locally as your development loop. CI runs it on the pull request, and a passing focused run does not replace that result.

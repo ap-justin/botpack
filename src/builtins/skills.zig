@@ -13,10 +13,10 @@ const Allocator = std.mem.Allocator;
 const RootSpec = skill_contract.RootSpec;
 
 /// Roots scanned at the workspace root and each ancestor directory below
-/// home, in precedence order. `.fx/skills` and `skills/` belong to the product;
+/// home, in precedence order. `.lia/skills` and `skills/` belong to the product;
 /// the rest are compatibility roots for other agent installs.
 const workspace_roots = [_]RootSpec{
-    .{ .source = .workspace_fx, .path = ".fx/skills" },
+    .{ .source = .workspace_lia, .path = ".lia/skills" },
     .{ .source = .workspace_shared, .path = "skills" },
     .{ .source = .workspace_opencode, .path = ".opencode/skills" },
     .{ .source = .workspace_codex, .path = ".codex/skills" },
@@ -36,7 +36,7 @@ const global_roots = [_]RootSpec{
 
 pub const root_policy: skill_contract.RootPolicy = .{
     .workspace_roots = &workspace_roots,
-    .managed_root_source = .global_fx,
+    .managed_root_source = .global_lia,
     .global_roots = &global_roots,
 };
 
@@ -56,7 +56,7 @@ pub fn loadVisibleSkillsForTool(
 }
 
 fn homeFromSkillsDir(skills_dir: []const u8) ?[]const u8 {
-    const suffix = "/.fx/skills";
+    const suffix = "/.lia/skills";
     if (!std.mem.endsWith(u8, skills_dir, suffix)) return null;
     return skills_dir[0 .. skills_dir.len - suffix.len];
 }
@@ -134,8 +134,8 @@ fn executeCommand(alloc: Allocator, command: Command, request: CommandRequest) !
         .remove => |name| removeCommandResult(alloc, request, name),
         .path => noticeFmt(
             alloc,
-            "fx workspace roots are auto-discovered from .fx/skills and skills/.\n" ++
-                "fx managed install root: {s}\n" ++
+            "lia workspace roots are auto-discovered from .lia/skills and skills/.\n" ++
+                "lia managed install root: {s}\n" ++
                 "compatibility roots are auto-discovered from workspace and home (.opencode/.codex/.claude/.agents/.claw).",
             .{request.skills_dir},
             false,
@@ -183,7 +183,7 @@ fn removeCommandResult(alloc: Allocator, request: CommandRequest, name: []const 
     };
 
     if (!skill.managed_install) {
-        return noticeFmt(alloc, "Skill '{s}' comes from {s}, not the fx managed install root. Remove it from {s}.", .{ name, skill.source_label, skill.path }, false);
+        return noticeFmt(alloc, "Skill '{s}' comes from {s}, not the lia managed install root. Remove it from {s}.", .{ name, skill.source_label, skill.path }, false);
     }
 
     removeSkill(request.skills_dir, std.Io.Dir.path.basename(skill.path)) catch {
@@ -267,7 +267,7 @@ pub fn createSkillTemplate(alloc: Allocator, skills_dir: []const u8, name: []con
 fn installFromGitHub(alloc: Allocator, skills_dir: []const u8, url: []const u8, filter: ?[]const u8) !InstallResult {
     try ensureDir(skills_dir);
 
-    const tmp_dir = try alloc.print("/tmp/fx-skill-install-{d}", .{io_mod.milliTimestamp()});
+    const tmp_dir = try alloc.print("/tmp/lia-skill-install-{d}", .{io_mod.milliTimestamp()});
     defer alloc.free(tmp_dir);
     defer std.Io.Dir.cwd().deleteTree(io_mod.getIo(), tmp_dir) catch {};
 
@@ -1173,7 +1173,7 @@ test "copySkillDir preserves the installed skill across allocation failures" {
 
 test "workspace skill roots scan the product root before compatibility roots" {
     const expected = [_]RootSpec{
-        .{ .source = .workspace_fx, .path = ".fx/skills" },
+        .{ .source = .workspace_lia, .path = ".lia/skills" },
         .{ .source = .workspace_shared, .path = "skills" },
         .{ .source = .workspace_opencode, .path = ".opencode/skills" },
         .{ .source = .workspace_codex, .path = ".codex/skills" },
@@ -1189,7 +1189,7 @@ test "workspace skill roots scan the product root before compatibility roots" {
     }
 
     for (workspace_roots) |spec| {
-        try std.testing.expect(spec.source != .global_fx);
+        try std.testing.expect(spec.source != .global_lia);
     }
 }
 
@@ -1209,7 +1209,7 @@ test "global skill roots cover compatibility installs only" {
     }
 
     for (global_roots) |spec| {
-        try std.testing.expect(spec.source != .global_fx);
+        try std.testing.expect(spec.source != .global_lia);
     }
 }
 
@@ -1979,8 +1979,8 @@ test "built-in skills path reports native workspace roots" {
 
     switch (result) {
         .notice => |notice| try std.testing.expectEqualStrings(
-            "fx workspace roots are auto-discovered from .fx/skills and skills/.\n" ++
-                "fx managed install root: /tmp/skills\n" ++
+            "lia workspace roots are auto-discovered from .lia/skills and skills/.\n" ++
+                "lia managed install root: /tmp/skills\n" ++
                 "compatibility roots are auto-discovered from workspace and home (.opencode/.codex/.claude/.agents/.claw).",
             notice.text,
         ),
@@ -2117,7 +2117,7 @@ test "built-in skills command creates and removes managed skills" {
         .name = "exact-skill",
         .info = .{
             .path = skill_dir,
-            .source_label = "global ~/.fx/skills",
+            .source_label = "global ~/.lia/skills",
             .managed_install = true,
         },
     }};
@@ -2167,7 +2167,7 @@ test "built-in skills command creates a missing managed parent root" {
 
     const root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
     defer alloc.free(root);
-    const skills_dir = try std.Io.Dir.path.join(alloc, &.{ root, "home", ".fx", "skills" });
+    const skills_dir = try std.Io.Dir.path.join(alloc, &.{ root, "home", ".lia", "skills" });
     defer alloc.free(skills_dir);
 
     var empty_ctx = StaticSkillCtx{ .skills = &.{} };
@@ -2206,7 +2206,7 @@ test "built-in skills command refuses to remove compatibility roots" {
 
     switch (result) {
         .notice => |notice| {
-            try std.testing.expect(std.mem.find(u8, notice.text, "not the fx managed install root") != null);
+            try std.testing.expect(std.mem.find(u8, notice.text, "not the lia managed install root") != null);
             try std.testing.expect(!notice.reload);
         },
         else => return error.TestExpectedEqual,

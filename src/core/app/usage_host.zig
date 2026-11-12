@@ -1,4 +1,4 @@
-//! fx's side of the usage module: HTTP through the gateway client, or the
+//! lia's side of the usage module: HTTP through the gateway client, or the
 //! JS host's `fetch` in WebAssembly, the clock, and which sign-in `/usage`
 //! reads with.
 
@@ -20,20 +20,20 @@ const Allocator = std.mem.Allocator;
 const vercel_api_origin = "https://api.vercel.com";
 /// Test-only: a file holding the current time in milliseconds, so the E2E
 /// driver can move `/usage`'s clock. Unset in normal use.
-const clock_file_env = "FX_TEST_USAGE_CLOCK_FILE";
+const clock_file_env = "LIA_TEST_USAGE_CLOCK_FILE";
 
 /// A host with no home directory, for a dashboard that `host` replaces once
 /// the home is known.
 pub const unset: usage.Host = .{ .fetch_fn = fetch, .now_fn = now, .io_fn = io, .home = "" };
 
-/// `home` is the user's home directory; the cache follows `$FX_HOME`.
+/// `home` is the user's home directory; the cache follows `$LIA_HOME`.
 pub fn host(home: []const u8) usage.Host {
     return .{
         .fetch_fn = fetch,
         .now_fn = now,
         .io_fn = io,
         .home = profile_paths.rootParent(home),
-        .fx_dir_name = profile_paths.rootName(),
+        .lia_dir_name = profile_paths.rootName(),
     };
 }
 
@@ -62,7 +62,7 @@ fn io(_: ?*anyopaque) std.Io {
 /// Room for a credential's display label.
 pub const LabelBuffer = [160]u8;
 
-/// The sign-in `/usage` reads with, or null when fx is not signed in to AI
+/// The sign-in `/usage` reads with, or null when lia is not signed in to AI
 /// Gateway. Borrows from `auth` and `label_buf`.
 pub fn credential(auth: *const auth_runtime.Runtime, label_buf: *LabelBuffer) ?usage.Credential {
     const current = auth.gatewayCredential() orelse {
@@ -90,7 +90,7 @@ pub fn missingReason(auth: *const auth_runtime.Runtime) usage.Unavailable {
 }
 
 /// The same mapping for a credential loaded without the auth runtime, as
-/// `fx usage` does. Borrows from `c` and `label_buf`.
+/// `lia usage` does. Borrows from `c` and `label_buf`.
 pub fn fromCredential(c: credentials.Credential, label_buf: *LabelBuffer) ?usage.Credential {
     return fromParts(c.source, c.token, c.gatewayTeam(), c.team_slug, c.account_id, label_buf);
 }
@@ -110,7 +110,7 @@ fn fromParts(
             .bearer = bearer,
             .team = team,
             .subject = account orelse team orelse "",
-            .label = std.mem.print(label_buf, "{s} (fx login)", .{team_slug orelse team orelse "no team"}) catch "fx login",
+            .label = std.mem.print(label_buf, "{s} (lia login)", .{team_slug orelse team orelse "no team"}) catch "lia login",
         },
         .stored_key, .ai_gateway_api_key => .{
             .scope = .api_key,
@@ -137,7 +137,7 @@ fn fetch(
     return send(alloc, request, cancel, null);
 }
 
-/// One usage GET: through fx's HTTP client natively, and through the JS
+/// One usage GET: through lia's HTTP client natively, and through the JS
 /// host's `fetch` in WebAssembly, pulsing `pulse` while it waits.
 fn send(
     alloc: Allocator,

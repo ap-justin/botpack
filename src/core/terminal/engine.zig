@@ -421,7 +421,7 @@ pub const Grid = struct {
     /// Resize the grid. Keeps top-left content, clips anything outside
     /// the new bounds, fills any grown area with blanks. Matches what a
     /// real terminal does when the pane shrinks or grows — content is
-    /// not auto-cleared, so the caller (fx) is responsible for
+    /// not auto-cleared, so the caller (lia) is responsible for
     /// repainting.
     pub fn resize(self: *Grid, cols: u16, rows: u16) !void {
         if (cols == 0 or rows == 0) return error.InvalidGridSize;
@@ -1734,7 +1734,7 @@ pub const Grid = struct {
 
     /// Produce a blank cell in the current erase-style — space
     /// glyph with default fg/flags but the cursor's active bg.
-    /// Real terminals extend the current bg into erased cells; fx's
+    /// Real terminals extend the current bg into erased cells; lia's
     /// user-message card relies on that behaviour to draw the bar
     /// without having to pad with literal spaces.
     fn blankCell(self: Grid) Cell {
@@ -4305,13 +4305,13 @@ test "presentation boundary resumes and steadies strikethrough" {
 test "presentation resume preserves OSC 8 parameters and close clears them" {
     var source = try Grid.init(testing.allocator, 4, 1);
     defer source.deinit();
-    try source.feed("\x1b]8;id=fx-42;https://example.com\x1b\\x");
+    try source.feed("\x1b]8;id=lia-42;https://example.com\x1b\\x");
 
     var resume_writer: std.Io.Writer.Allocating = .init(testing.allocator);
     defer resume_writer.deinit();
     try source.writePresentationResume(&resume_writer.writer);
     try testing.expectEqualStrings(
-        "\x1b]8;id=fx-42;https://example.com\x1b\\",
+        "\x1b]8;id=lia-42;https://example.com\x1b\\",
         resume_writer.written(),
     );
 
@@ -4334,8 +4334,8 @@ test "OSC 8 link identity survives row diffs and checkpoints" {
     var next = try previous.clone(alloc);
     defer next.deinit();
 
-    const first = "\x1b]8;id=fx-1;https://example.com\x1b\\";
-    const second = "\x1b]8;id=fx-2;https://example.com\x1b\\";
+    const first = "\x1b]8;id=lia-1;https://example.com\x1b\\";
+    const second = "\x1b]8;id=lia-2;https://example.com\x1b\\";
     const close = "\x1b]8;;\x1b\\";
     try next.feed("\x1b[1;1H" ++ first ++ "abc" ++ close ++
         "\x1b[2;1H" ++ first ++ "def" ++ close ++
@@ -4347,8 +4347,8 @@ test "OSC 8 link identity survives row diffs and checkpoints" {
     defer alloc.free(payload);
     var restored = try Grid.restoreCheckpoint(alloc, payload);
     defer restored.deinit();
-    try testing.expectEqualStrings("id=fx-1", restored.hyperlinkParams(restored.cellAt(2, 1).?.style.hyperlink_id).?);
-    try testing.expectEqualStrings("id=fx-2", restored.hyperlinkParams(restored.cellAt(3, 1).?.style.hyperlink_id).?);
+    try testing.expectEqualStrings("id=lia-1", restored.hyperlinkParams(restored.cellAt(2, 1).?.style.hyperlink_id).?);
+    try testing.expectEqualStrings("id=lia-2", restored.hyperlinkParams(restored.cellAt(3, 1).?.style.hyperlink_id).?);
 
     var writer: std.Io.Writer.Allocating = .init(alloc);
     defer writer.deinit();
@@ -4369,7 +4369,7 @@ test "scrolled repeated link IDs do not exhaust the hyperlink pool" {
     @memset(uri[prefix.len..], 'x');
     var line_buf: [2200]u8 = undefined;
     for (0..2300) |idx| {
-        const line = try std.mem.print(&line_buf, "\x1b]8;id=fx-{d};{s}\x1b\\x\x1b]8;;\x1b\\\r\n", .{ idx, uri[0..] });
+        const line = try std.mem.print(&line_buf, "\x1b]8;id=lia-{d};{s}\x1b\\x\x1b]8;;\x1b\\\r\n", .{ idx, uri[0..] });
         try grid.feed(line);
     }
     try testing.expect(grid.hyperlink_pool.items.len <= 256);
@@ -4383,18 +4383,18 @@ test "hyperlink compaction cadence does not rescan each near-full frame" {
     const uri = "https://example.com/x";
     var line_buf: [128]u8 = undefined;
     for (0..255) |idx| {
-        const line = try std.mem.print(&line_buf, "\x1b]8;id=fx-{d};{s}\x1b\\x\x1b]8;;\x1b\\", .{ idx, uri });
+        const line = try std.mem.print(&line_buf, "\x1b]8;id=lia-{d};{s}\x1b\\x\x1b]8;;\x1b\\", .{ idx, uri });
         try grid.feed(line);
     }
-    try grid.feed("\x1b]8;id=fx-dead;https://example.com/x\x1b\\\x1b]8;;\x1b\\");
+    try grid.feed("\x1b]8;id=lia-dead;https://example.com/x\x1b\\\x1b]8;;\x1b\\");
     try testing.expectEqual(@as(usize, 256), grid.hyperlink_pool.items.len);
 
-    try grid.feed("\x1b[1;1H\x1b]8;id=fx-next;https://example.com/x\x1b\\x\x1b]8;;\x1b\\");
+    try grid.feed("\x1b[1;1H\x1b]8;id=lia-next;https://example.com/x\x1b\\x\x1b]8;;\x1b\\");
     try testing.expectEqual(@as(usize, 256), grid.hyperlink_pool.items.len);
     const next_scan = grid.next_hyperlink_compaction_at;
     try testing.expect(next_scan > grid.hyperlink_pool.items.len);
 
-    try grid.feed("\x1b[1;2H\x1b]8;id=fx-next-2;https://example.com/x\x1b\\x\x1b]8;;\x1b\\");
+    try grid.feed("\x1b[1;2H\x1b]8;id=lia-next-2;https://example.com/x\x1b\\x\x1b]8;;\x1b\\");
     try testing.expectEqual(@as(usize, 257), grid.hyperlink_pool.items.len);
     try testing.expectEqual(next_scan, grid.next_hyperlink_compaction_at);
 }
@@ -4406,47 +4406,47 @@ test "hyperlink compaction allocation failure keeps cell links intact" {
     defer grid.deinit();
     var line_buf: [128]u8 = undefined;
     for (0..256) |idx| {
-        const line = try std.mem.print(&line_buf, "\x1b]8;id=fx-{d};https://example.com/x\x1b\\x\x1b]8;;\x1b\\", .{idx});
+        const line = try std.mem.print(&line_buf, "\x1b]8;id=lia-{d};https://example.com/x\x1b\\x\x1b]8;;\x1b\\", .{idx});
         try grid.feed(line);
     }
     try grid.osc_buffer.ensureTotalCapacity(alloc, 128);
     const before = grid.cellAt(1, 1).?.style.hyperlink_id;
     failing.fail_index = failing.alloc_index;
-    try testing.expectError(error.OutOfMemory, grid.feed("\x1b]8;id=fx-next;https://example.com/x\x1b\\"));
+    try testing.expectError(error.OutOfMemory, grid.feed("\x1b]8;id=lia-next;https://example.com/x\x1b\\"));
     try testing.expect(grid.atControlSequenceBoundary());
     try testing.expectEqual(@as(usize, 256), grid.hyperlink_pool.items.len);
     try testing.expectEqual(before, grid.cellAt(1, 1).?.style.hyperlink_id);
-    try testing.expectEqualStrings("id=fx-0", grid.hyperlinkParams(before).?);
+    try testing.expectEqualStrings("id=lia-0", grid.hyperlinkParams(before).?);
 
     failing.fail_index = std.math.maxInt(usize);
-    try grid.feed("\x1b]8;id=fx-next;https://example.com/x\x1b\\x");
-    try testing.expectEqualStrings("id=fx-next", grid.hyperlinkParams(grid.cellAt(1, 257).?.style.hyperlink_id).?);
+    try grid.feed("\x1b]8;id=lia-next;https://example.com/x\x1b\\x");
+    try testing.expectEqualStrings("id=lia-next", grid.hyperlinkParams(grid.cellAt(1, 257).?.style.hyperlink_id).?);
 }
 
 test "hyperlink compaction retains saved screen and cursor identities" {
     const alloc = testing.allocator;
     var grid = try Grid.init(alloc, 16, 3);
     defer grid.deinit();
-    try grid.feed("\x1b]8;id=fx-keep;https://example.com/keep\x1b\\K\x1b7\x1b]8;;\x1b\\");
+    try grid.feed("\x1b]8;id=lia-keep;https://example.com/keep\x1b\\K\x1b7\x1b]8;;\x1b\\");
     try grid.feed("\x1b[?1049h");
 
     var line_buf: [128]u8 = undefined;
     for (0..300) |idx| {
-        const line = try std.mem.print(&line_buf, "\x1b]8;id=fx-temp-{d};https://example.com/tmp\x1b\\x\x1b]8;;\x1b\\\r\n", .{idx});
+        const line = try std.mem.print(&line_buf, "\x1b]8;id=lia-temp-{d};https://example.com/tmp\x1b\\x\x1b]8;;\x1b\\\r\n", .{idx});
         try grid.feed(line);
     }
     try testing.expect(grid.hyperlink_pool.items.len <= 256);
     try grid.feed("\x1b[?1049l");
     const retained_id = grid.cellAt(1, 1).?.style.hyperlink_id;
     try testing.expectEqual(@as(u21, 'K'), grid.cellAt(1, 1).?.codepoint);
-    try testing.expectEqualStrings("id=fx-keep", grid.hyperlinkParams(retained_id).?);
+    try testing.expectEqualStrings("id=lia-keep", grid.hyperlinkParams(retained_id).?);
     try testing.expectEqual(retained_id, grid.saved_cursor.?.style.hyperlink_id);
 
     const payload = try grid.checkpointPayload(alloc);
     defer alloc.free(payload);
     var recovered = try Grid.restoreCheckpoint(alloc, payload);
     defer recovered.deinit();
-    try testing.expectEqualStrings("id=fx-keep", recovered.hyperlinkParams(recovered.cellAt(1, 1).?.style.hyperlink_id).?);
+    try testing.expectEqualStrings("id=lia-keep", recovered.hyperlinkParams(recovered.cellAt(1, 1).?.style.hyperlink_id).?);
 }
 
 test "OSC 8 parameter replacement is atomic on allocation failure" {
@@ -4454,13 +4454,13 @@ test "OSC 8 parameter replacement is atomic on allocation failure" {
     const alloc = failing.allocator();
     var source = try Grid.init(alloc, 4, 1);
     defer source.deinit();
-    try source.feed("\x1b]8;id=fx-old;https://example.com\x1b\\");
+    try source.feed("\x1b]8;id=lia-old;https://example.com\x1b\\");
     try source.osc_buffer.ensureTotalCapacity(alloc, 128);
 
     failing.fail_index = failing.alloc_index;
     try testing.expectError(
         error.OutOfMemory,
-        source.feed("\x1b]8;id=fx-new;https://example.com\x1b\\"),
+        source.feed("\x1b]8;id=lia-new;https://example.com\x1b\\"),
     );
     try testing.expect(source.atControlSequenceBoundary());
 
@@ -4468,21 +4468,21 @@ test "OSC 8 parameter replacement is atomic on allocation failure" {
     var old_resume: std.Io.Writer = .fixed(&old_resume_buf);
     try source.writePresentationResume(&old_resume);
     try testing.expectEqualStrings(
-        "\x1b]8;id=fx-old;https://example.com\x1b\\",
+        "\x1b]8;id=lia-old;https://example.com\x1b\\",
         old_resume.buffered(),
     );
 
     failing.fail_index = std.math.maxInt(usize);
-    try source.feed("\x1b]8;id=fx-new;https://example.com\x1b\\");
+    try source.feed("\x1b]8;id=lia-new;https://example.com\x1b\\");
     try testing.expectEqual(@as(usize, 2), source.hyperlink_pool.items.len);
-    try testing.expectEqualStrings("id=fx-old", source.hyperlinkParams(1).?);
-    try testing.expectEqualStrings("id=fx-new", source.hyperlinkParams(2).?);
+    try testing.expectEqualStrings("id=lia-old", source.hyperlinkParams(1).?);
+    try testing.expectEqualStrings("id=lia-new", source.hyperlinkParams(2).?);
 
     var new_resume_buf: [128]u8 = undefined;
     var new_resume: std.Io.Writer = .fixed(&new_resume_buf);
     try source.writePresentationResume(&new_resume);
     try testing.expectEqualStrings(
-        "\x1b]8;id=fx-new;https://example.com\x1b\\",
+        "\x1b]8;id=lia-new;https://example.com\x1b\\",
         new_resume.buffered(),
     );
 }

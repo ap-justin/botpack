@@ -24,8 +24,8 @@ const types = @import("../shared/types.zig");
 
 const Allocator = std.mem.Allocator;
 
-const launcher_mode = "--fx-internal-terminal-launcher";
-const control_mode = "--fx-internal-terminal-control";
+const launcher_mode = "--lia-internal-terminal-launcher";
+const control_mode = "--lia-internal-terminal-control";
 
 const max_sessions = managed_execution_contract.max_live_entries;
 
@@ -36,9 +36,9 @@ const launcher_config_bytes: usize = contracts.max_command_bytes * 6 +
     4096;
 const wait_poll_ns: u64 = 5 * std.time.ns_per_ms;
 const graceful_close_ms: i64 = 800;
-/// Total time terminals get to leave after a hangup when fx exits.
+/// Total time terminals get to leave after a hangup when lia exits.
 const exit_grace_ms: i64 = 500;
-/// Bound on joining terminal backend threads when fx exits.
+/// Bound on joining terminal backend threads when lia exits.
 const exit_join_ms: i64 = 500;
 const control_poll_ms: i32 = 50;
 const marker_frame_timeout_ms: i64 = 5_000;
@@ -661,7 +661,7 @@ const SupportedRegistry = struct {
     alloc: Allocator,
     tracker: WorkTracker,
     profile: *terminal_store.ProfileStore,
-    /// Durable owner identity of this fx process instance, borrowed for the
+    /// Durable owner identity of this lia process instance, borrowed for the
     /// registry's lifetime. See `terminal_store.formatOwnerIdentity`.
     host_identity: []const u8,
     mutex: std.Io.Mutex = .init,
@@ -827,7 +827,7 @@ const SupportedRegistry = struct {
             return;
         }
 
-        if (io_mod.getenv("FX_TEST_TERMINAL_FAIL_CANCELLATION_OPEN") != null) {
+        if (io_mod.getenv("LIA_TEST_TERMINAL_FAIL_CANCELLATION_OPEN") != null) {
             return error.InjectedCancellationOpenFailure;
         }
         const durable = try self.profile.open_terminal(session_id);
@@ -1274,7 +1274,7 @@ const SupportedRegistry = struct {
         ) catch return error.OutOfMemory;
     }
 
-    /// Records the terminals of this owner's earlier, now gone, fx process
+    /// Records the terminals of this owner's earlier, now gone, lia process
     /// instances as lost and finishes their interrupted closes. Terminals of a
     /// running instance, including this one, are left untouched.
     fn reconcileOwner(
@@ -1497,9 +1497,9 @@ const Session = struct {
     live_counted: bool = false,
     input_quiesced: bool = false,
     close_committed: bool = false,
-    /// Set when the owning fx process ends this terminal on exit. Its record
+    /// Set when the owning lia process ends this terminal on exit. Its record
     /// is then marked lost instead of exited, which a resume reports as
-    /// ended when fx exited.
+    /// ended when lia exited.
     ending_with_owner: bool = false,
     /// The process tree recorded when the owner's exit hangs this terminal
     /// up, so processes outside the shell's process group can be killed
@@ -1596,7 +1596,7 @@ const Session = struct {
     fn launch(self: *Session, request: contracts.StartRequest) !void {
         switch (request.backend) {
             .native => try self.launchNative(request),
-            // Only records written by earlier fx versions name tmux.
+            // Only records written by earlier lia versions name tmux.
             .tmux => return error.UnsupportedBackend,
         }
     }
@@ -1661,18 +1661,18 @@ const Session = struct {
         io_mod.getIo().random(&path_bytes);
         const path_suffix = std.fmt.bytesToHex(path_bytes, .lower);
         const control_path = try self.alloc.print(
-            "/tmp/fx-terminal-{s}.sock",
+            "/tmp/lia-terminal-{s}.sock",
             .{path_suffix},
         );
         defer self.alloc.free(control_path);
         const bootstrap_path = try self.alloc.print(
-            "/tmp/fx-terminal-{s}.bootstrap",
+            "/tmp/lia-terminal-{s}.bootstrap",
             .{path_suffix},
         );
         defer self.alloc.free(bootstrap_path);
         const command_path = if (request.command != null)
             try self.alloc.print(
-                "/tmp/fx-terminal-{s}.command",
+                "/tmp/lia-terminal-{s}.command",
                 .{path_suffix},
             )
         else
@@ -2661,7 +2661,7 @@ const Session = struct {
 
     fn commitStartupBoundary(self: *Session) void {
         if (self.command != null) {
-            maybeDelayForTest("FX_TEST_TERMINAL_COMMAND_BOUNDARY_DELAY_MS");
+            maybeDelayForTest("LIA_TEST_TERMINAL_COMMAND_BOUNDARY_DELAY_MS");
         }
         const zio = io_mod.getIo();
         self.mutex.lockUncancelable(zio);
@@ -3034,8 +3034,8 @@ fn writeAction(
     defer session.write_mutex.unlock(zio);
     if (cancelled.load(.acquire)) return error.Cancelled;
     if (request.lease == .use) {
-        signalTestBarrier("FX_TEST_TERMINAL_WRITE_BARRIER_PATH");
-        maybeDelayForTest("FX_TEST_TERMINAL_WRITE_DELAY_MS");
+        signalTestBarrier("LIA_TEST_TERMINAL_WRITE_BARRIER_PATH");
+        maybeDelayForTest("LIA_TEST_TERMINAL_WRITE_DELAY_MS");
     }
 
     const authorization = switch (request.lease) {
@@ -3367,7 +3367,7 @@ test "terminal signaling accepts a process group that exited during descendant d
 }
 
 fn failSignalStageForTest(stage: []const u8) bool {
-    const requested = io_mod.getenv("FX_TEST_TERMINAL_FAIL_SIGNAL_STAGE") orelse
+    const requested = io_mod.getenv("LIA_TEST_TERMINAL_FAIL_SIGNAL_STAGE") orelse
         return false;
     return std.mem.eql(u8, requested, stage);
 }
@@ -3710,7 +3710,7 @@ fn controlMain(session: *Session) void {
         session.output_thread = null;
     }
 
-    maybeDelayForTest("FX_TEST_TERMINAL_BACKEND_CLEANUP_DELAY_MS");
+    maybeDelayForTest("LIA_TEST_TERMINAL_BACKEND_CLEANUP_DELAY_MS");
 
     const zio = io_mod.getIo();
     session.write_mutex.lockUncancelable(zio);
@@ -4048,9 +4048,9 @@ const TestDurableFixture = struct {
             .{ .iterate = true, .follow_symlinks = false },
         ) };
         defer root.close();
-        var fx = try io_mod.openOrCreateVerifiedPrivateDir(&root, ".fx");
-        defer fx.close();
-        var sessions = try io_mod.openOrCreateVerifiedPrivateDir(&fx, "sessions");
+        var lia = try io_mod.openOrCreateVerifiedPrivateDir(&root, ".lia");
+        defer lia.close();
+        var sessions = try io_mod.openOrCreateVerifiedPrivateDir(&lia, "sessions");
         defer sessions.close();
         var owner = try io_mod.openOrCreateVerifiedPrivateDir(
             &sessions,

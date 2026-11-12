@@ -109,14 +109,14 @@ pub const Locations = struct {
 };
 
 pub const SkillSource = enum {
-    workspace_fx,
+    workspace_lia,
     workspace_shared,
     workspace_opencode,
     workspace_codex,
     workspace_claude,
     workspace_agents,
     workspace_claw,
-    global_fx,
+    global_lia,
     global_opencode,
     global_codex,
     global_claude,

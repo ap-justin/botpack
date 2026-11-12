@@ -1,5 +1,5 @@
 // What the mcp-v2-model scenarios share: private fixture folders outside
-// every repository, the real fx binary with a scratch HOME, fixture logs,
+// every repository, the real lia binary with a scratch HOME, fixture logs,
 // the credential files, loopback probes, and evidence files.
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -17,24 +17,24 @@ export function fixture(root: string, name: string): Fixture {
   const home = join(base, "home");
   const workspace = join(base, "workspace");
   const control = join(base, "control");
-  for (const dir of [join(home, ".fx"), workspace, control]) mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(join(home, ".fx", "settings.json"), "{}");
-  return { base, home, workspace, control, serverLog: join(base, "servers.jsonl"), traceLog: join(base, "fx-trace.log") };
+  for (const dir of [join(home, ".lia"), workspace, control]) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(home, ".lia", "settings.json"), "{}");
+  return { base, home, workspace, control, serverLog: join(base, "servers.jsonl"), traceLog: join(base, "lia-trace.log") };
 }
 
-/** fx's environment: scratch HOME, no Keychain, no browser, no sound, a fake gateway key. */
-export function fxEnv(f: Fixture, extra: Record<string, string> = {}): Record<string, string> {
+/** lia's environment: scratch HOME, no Keychain, no browser, no sound, a fake gateway key. */
+export function liaEnv(f: Fixture, extra: Record<string, string> = {}): Record<string, string> {
   return {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     HOME: f.home,
     TMPDIR: process.env.TMPDIR ?? "/tmp",
-    FX_DISABLE_KEYCHAIN: "1",
-    FX_NO_OPEN_BROWSER: "1",
-    FX_AUTO_UPGRADE: "0",
-    FX_SOUND: "0",
-    FX_TEST_SKIP_ONBOARDING: "1",
-    FX_E2E_DISABLE_DOTENV: "1",
-    FX_TRACE_LOG: f.traceLog,
+    LIA_DISABLE_KEYCHAIN: "1",
+    LIA_NO_OPEN_BROWSER: "1",
+    LIA_AUTO_UPGRADE: "0",
+    LIA_SOUND: "0",
+    LIA_TEST_SKIP_ONBOARDING: "1",
+    LIA_E2E_DISABLE_DOTENV: "1",
+    LIA_TRACE_LOG: f.traceLog,
     AI_GATEWAY_API_KEY: "fake-mcp-v2-model-key",
     ...extra,
   };
@@ -46,7 +46,7 @@ export function stdioServer(f: Fixture, name: string, extra: Record<string, stri
 }
 
 export function writeProfile(f: Fixture, servers: Record<string, unknown>) {
-  writeFileSync(join(f.home, ".fx", "mcp.json"), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 });
+  writeFileSync(join(f.home, ".lia", "mcp.json"), JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 });
 }
 export function writeProject(f: Fixture, servers: Record<string, unknown>) {
   writeFileSync(join(f.workspace, ".mcp.json"), JSON.stringify({ mcpServers: servers }, null, 2));
@@ -83,9 +83,9 @@ export async function startFake(f: Fixture, server: Record<string, unknown> = {}
 export const redemptions = (entries: ReturnType<Awaited<ReturnType<typeof startFake>>["entries"]>) =>
   entries.filter((e) => e.dir === "auth" && e.path?.endsWith("/token") && e.form?.grant_type === "authorization_code");
 
-/** `fx mcp login --no-browser web` with stdin left open, its output read as it comes. */
+/** `lia mcp login --no-browser web` with stdin left open, its output read as it comes. */
 export async function cliLogin(binary: string, f: Fixture) {
-  const child = Bun.spawn([binary, "mcp", "login", "--no-browser", "web"], { cwd: f.workspace, env: fxEnv(f), stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn([binary, "mcp", "login", "--no-browser", "web"], { cwd: f.workspace, env: liaEnv(f), stdin: "pipe", stdout: "pipe", stderr: "pipe" });
   let out = "", err = "";
   void (async () => { for await (const c of child.stdout) out += new TextDecoder().decode(c); })();
   void (async () => { for await (const c of child.stderr) err += new TextDecoder().decode(c); })();
@@ -99,7 +99,7 @@ export async function cliLogin(binary: string, f: Fixture) {
 export interface Ran { args: string[]; code: number; stdout: string; stderr: string; ms: number }
 
 /** Runs the binary once, with an explicit timeout; every run is appended to `runs.jsonl`. */
-export async function runFx(binary: string, f: Fixture, args: string[], env: Record<string, string>, timeoutMs = 30_000): Promise<Ran> {
+export async function runLia(binary: string, f: Fixture, args: string[], env: Record<string, string>, timeoutMs = 30_000): Promise<Ran> {
   const started = Date.now();
   const child = Bun.spawn([binary, ...args], { cwd: f.workspace, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
   const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
@@ -146,7 +146,7 @@ export async function probe(port: number, path = "/favicon.ico"): Promise<{ resu
 
 // ---- credentials ----
 
-export const credDir = (f: Fixture) => join(f.home, ".fx", "mcp-credentials");
+export const credDir = (f: Fixture) => join(f.home, ".lia", "mcp-credentials");
 export const storePath = (f: Fixture) => join(credDir(f), "credentials-v3.json");
 /** The store older builds keep, which this one never opens (MixedBuilds.tla). */
 export const olderStorePath = (f: Fixture) => join(credDir(f), "credentials-v2.json");

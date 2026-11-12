@@ -13,12 +13,12 @@ const magic = "FXCP";
 const version: u16 = 2;
 /// Version 3 has version 2's layout, and its JSON may name images instead of
 /// holding their bytes: ones the host stored (`inline_ref`), or ones the
-/// session dropped. Only a checkpoint that names one is version 3, so an fx
+/// session dropped. Only a checkpoint that names one is version 3, so a lia
 /// that reads only version 2 reports a newer checkpoint instead of an
 /// invalid one.
 const naming_version: u16 = 3;
 /// Version 4 has version 3's layout, and its history holds a turn with
-/// context notes or a saved runtime context (D93, D94), so an fx that reads
+/// context notes or a saved runtime context (D93, D94), so a lia that reads
 /// only up to version 3 reports a newer checkpoint instead of an invalid one.
 const notes_version: u16 = 4;
 /// Version 1 embedded inline image bytes as base64 inside a JSON-only payload.

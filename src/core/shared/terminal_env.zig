@@ -1,6 +1,6 @@
 //! The standard variables that describe the user's terminal: `NO_COLOR`
 //! (no-color.org) and `TERM=dumb`. Every output path asks these, so help,
-//! `fx ask`, and the interactive session agree.
+//! `lia ask`, and the interactive session agree.
 
 const std = @import("std");
 const io_mod = @import("io.zig");

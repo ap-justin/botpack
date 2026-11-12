@@ -1,27 +1,27 @@
 ------------------------------- MODULE Recovery -------------------------------
 (***************************************************************************)
-(* fx's recovery module for one request (src/core/recovery/recovery.zig),  *)
+(* lia's recovery module for one request (src/core/recovery/recovery.zig),  *)
 (* and the world around it.                                                *)
 (*                                                                         *)
-(* The module is a pure state machine: fx reports an event, step() returns *)
-(* a Plan, fx carries it out. Each reaction is folded into the world step  *)
+(* The module is a pure state machine: lia reports an event, step() returns *)
+(* a Plan, lia carries it out. Each reaction is folded into the world step  *)
 (* that triggers it, because step() is instantaneous and does no I/O.      *)
 (*                                                                         *)
 (* The module has one job: get a complete response for one request. Tools  *)
-(* and the turn loop belong to fx and are not modeled here. The world may  *)
+(* and the turn loop belong to lia and are not modeled here. The world may  *)
 (* inject at most MaxFaults disruptions (dropped requests, network loss,   *)
 (* a broken gateway, sign-in or quota trouble, crashes, closed windows)    *)
 (* and then heals, which is what lets Heals be checked.                    *)
 (*                                                                         *)
 (* The turn loop routes each request's network, gateway, and rate-limit    *)
-(* failures through the module, and fx saves the module's record with the  *)
-(* session, so a closed window or a crash resumes on the next launch. fx *)
+(* failures through the module, and lia saves the module's record with the  *)
+(* session, so a closed window or a crash resumes on the next launch. lia *)
 (* adds no stop of its own, so NeverGivesUp holds for every transient      *)
-(* failure fx reports, unclear ones included.                              *)
+(* failure lia reports, unclear ones included.                              *)
 (* tests/tla/drivers/recovery/driver.ts walks recovery.zig along           *)
 (* this model.                                                             *)
 (*                                                                         *)
-(* Bug selects one planted defect. Each is a bug fx has had or a promise   *)
+(* Bug selects one planted defect. Each is a bug lia has had or a promise   *)
 (* the API makes; check.sh names the rule that must catch it.              *)
 (***************************************************************************)
 EXTENDS Naturals
@@ -49,7 +49,7 @@ MaxAttempt == 3   \* attempts saturate here; status only distinguishes 1 from >1
 
 VARIABLES
     phase,          \* the request's phase inside the module
-    status,         \* the status line ("none" while fx is not running)
+    status,         \* the status line ("none" while lia is not running)
     inflight,       \* a send is outstanding
     flowing,        \* the current send's response has started (`responding`)
     attempt,        \* sends for this request (saturating)
@@ -64,8 +64,8 @@ VARIABLES
     gateway,        \* world: ok | broken
     needUser,       \* world: sign-in or quota trouble only the user can fix
     faults,         \* disruptions injected so far
-    alive,          \* the fx process is running
-    cancelled       \* the user pressed Esc or quit fx
+    alive,          \* the lia process is running
+    cancelled       \* the user pressed Esc or quit lia
 
 vars == <<phase, status, inflight, flowing, attempt, sameFail, lastSendWaited,
           savedInflight, savedClean, seenDeaths, deaths, cleanExit, net,
@@ -116,7 +116,7 @@ Init ==
 (* Plan fragments. Each sets phase, status, inflight, flowing, attempt,    *)
 (* lastSendWaited and savedInflight; callers fix every other variable.     *)
 
-\* save, send, status. `waited` records whether time passed (or fx was
+\* save, send, status. `waited` records whether time passed (or lia was
 \* relaunched, or the user acted) since the previous failure.
 SendNow(waited) ==
     /\ phase' = "working"
@@ -171,7 +171,7 @@ Responding ==
                    net, gateway, needUser, faults, alive, cancelled>>
 
 \* `tick` after a resend has shown its retry status for the hand-off time
-\* (recovery.zig handoff_ms): fx's thinking row takes the status line back
+\* (recovery.zig handoff_ms): lia's thinking row takes the status line back
 \* while the model works, since a model can think for a minute before its
 \* first byte. RecoveryTimed.tla says when.
 HandOff ==
@@ -272,7 +272,7 @@ Crash ==
     /\ UNCHANGED <<phase, attempt, sameFail, lastSendWaited, savedInflight,
                    savedClean, seenDeaths, net, gateway, needUser, cancelled>>
 
-\* SIGHUP or SIGTERM: fx sends `closing` and saves the plan before exiting.
+\* SIGHUP or SIGTERM: lia sends `closing` and saves the plan before exiting.
 Close ==
     /\ alive /\ phase \in Active /\ faults < MaxFaults
     /\ faults' = faults + 1
@@ -306,7 +306,7 @@ Relaunch ==
 -----------------------------------------------------------------------------
 (* The user.                                                               *)
 
-\* `user_cancel`: Esc, or quitting fx. The only way to end without success.
+\* `user_cancel`: Esc, or quitting lia. The only way to end without success.
 UserCancels ==
     /\ alive /\ phase \in Active
     /\ phase' = "done_cancel" /\ status' = "clear" /\ cancelled' = TRUE
@@ -340,7 +340,7 @@ Next ==
     \/ UserCancels \/ UserActs
     \/ Finished
 
-\* Time passes, answers arrive, the world heals, fx gets relaunched, and the
+\* Time passes, answers arrive, the world heals, lia gets relaunched, and the
 \* user eventually does what was asked. Faults, deaths and Esc are never forced.
 Fairness ==
     /\ WF_vars(Responding) /\ WF_vars(Respond) /\ WF_vars(TimerFires)
@@ -350,7 +350,7 @@ Fairness ==
 Spec == Init /\ [][Next]_vars /\ Fairness
 
 -----------------------------------------------------------------------------
-(* The rules the module and fx keep together.                             *)
+(* The rules the module and lia keep together.                             *)
 
 \* Only Esc or quitting ends a request without success.
 NeverGivesUp ==
@@ -364,7 +364,7 @@ Heals == <>(phase \in {"done_ok", "done_cancel"})
 NoFalseAlarm == (status \in Alarms) => faults > 0
 
 \* The status says what is really happening. A retry status clears once
-\* the answer flows, or earlier, when fx's thinking row takes the line back
+\* the answer flows, or earlier, when lia's thinking row takes the line back
 \* from a resend that has not failed (HandOff).
 StatusHonest ==
     alive =>

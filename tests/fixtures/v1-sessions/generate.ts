@@ -9,10 +9,10 @@
 // and ~/.fx/continue (what -c resumes), and manifest.json, which names each
 // kind's session ids, root first, and the workspace they were saved in. Every
 // kind is made in the same fixed home, so the paths v1 records stay the same.
-// FX_FIXTURE_KINDS=a,b makes only those kinds and keeps the others as they
+// LIA_FIXTURE_KINDS=a,b makes only those kinds and keeps the others as they
 // are, folders and manifest entries.
-process.env.FX_TLA_V1_WRITER ??= "v0.0.14";
-process.env.FX_TLA_CASE ??= "v1-fixtures";
+process.env.LIA_TLA_V1_WRITER ??= "v0.0.14";
+process.env.LIA_TLA_CASE ??= "v1-fixtures";
 
 import assert from "node:assert/strict";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -165,11 +165,11 @@ const KINDS: Record<string, Kind | { models: object[]; make: Kind }> = {
   },
 };
 
-const only = process.env.FX_FIXTURE_KINDS?.split(",").filter(Boolean);
+const only = process.env.LIA_FIXTURE_KINDS?.split(",").filter(Boolean);
 const manifest: { writer: string; workspace: string; kinds: Record<string, string[]> } = only
   ? JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"))
-  : { writer: process.env.FX_TLA_V1_WRITER, workspace: "", kinds: {} };
-assert(manifest.writer === process.env.FX_TLA_V1_WRITER, `the other kinds were made by ${manifest.writer}`);
+  : { writer: process.env.LIA_TLA_V1_WRITER, workspace: "", kinds: {} };
+assert(manifest.writer === process.env.LIA_TLA_V1_WRITER, `the other kinds were made by ${manifest.writer}`);
 for (const name of only ?? []) assert(name in KINDS, `no fixture kind ${name}`);
 for (const [kind, entry] of Object.entries(KINDS)) {
   if (only && !only.includes(kind)) continue;

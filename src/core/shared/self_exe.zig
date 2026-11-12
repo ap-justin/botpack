@@ -19,7 +19,7 @@ fn productionPathForReexec(alloc: Allocator) ![]u8 {
     return std.process.executablePathAlloc(io_mod.getIo(), alloc);
 }
 
-/// Returns an owned path another process can use to launch fx. Linux prefers
+/// Returns an owned path another process can use to launch lia. Linux prefers
 /// the on-disk path, falling back to `/proc/<pid>/exe` after replacement.
 pub fn pathForPeerReexec(alloc: Allocator) ![]u8 {
     if (try testProductExe(alloc)) |path| return path;
@@ -68,7 +68,7 @@ fn sameFile(left: []const u8, right: []const u8) !bool {
     return left_stat.inode == right_stat.inode;
 }
 
-/// Returns an owned absolute path to the installed fx binary that
+/// Returns an owned absolute path to the installed lia binary that
 /// `zig build test` launches, or null outside tests.
 fn testProductExe(alloc: Allocator) !?[]u8 {
     if (comptime !builtin.is_test) return null;
@@ -125,7 +125,7 @@ test "on-disk probe rejects a replaced binary so the peer path falls back" {
     defer tmp.cleanup();
     const dir_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, ".");
     defer alloc.free(dir_path);
-    const victim = try std.Io.Dir.path.join(alloc, &.{ dir_path, "fx-probe" });
+    const victim = try std.Io.Dir.path.join(alloc, &.{ dir_path, "lia-probe" });
     defer alloc.free(victim);
 
     {
@@ -138,5 +138,5 @@ test "on-disk probe rejects a replaced binary so the peer path falls back" {
     try std.testing.expect(!onDiskPathIsExecutable(victim));
 
     // Peer paths must be absolute.
-    try std.testing.expect(!onDiskPathIsExecutable("fx"));
+    try std.testing.expect(!onDiskPathIsExecutable("lia"));
 }

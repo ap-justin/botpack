@@ -178,9 +178,9 @@ test "optional typed args return payloads only for matching tags" {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
-    const args = try parseToolArgsObject(arena, "{\"name\":\"fx\",\"enabled\":true,\"count\":3,\"other\":1.25}");
+    const args = try parseToolArgsObject(arena, "{\"name\":\"lia\",\"enabled\":true,\"count\":3,\"other\":1.25}");
 
-    try std.testing.expectEqualStrings("fx", optionalStringArg(args, "name").?);
+    try std.testing.expectEqualStrings("lia", optionalStringArg(args, "name").?);
     try std.testing.expect(optionalStringArg(args, "missing") == null);
     try std.testing.expect(optionalStringArg(args, "enabled") == null);
 

@@ -24,13 +24,13 @@ if (installedPackage.version !== runnerVersion) {
 const runner = join(runnerRoot, "dist", "index.js");
 const client = resolve(packageRoot, "client.ts");
 const baseline = resolve(packageRoot, "expected-failures.yml");
-const fxBin = resolve(packageRoot, "../../../zig-out/bin/fx");
-if (!existsSync(fxBin)) {
+const liaBin = resolve(packageRoot, "../../../zig-out/bin/lia");
+if (!existsSync(liaBin)) {
   throw new Error(
-    `missing freshly built fx binary at ${fxBin}; run FX_SOUND=0 zig build from the repository root`,
+    `missing freshly built lia binary at ${liaBin}; run LIA_SOUND=0 zig build from the repository root`,
   );
 }
-const resultRoot = mkdtempSync(join(tmpdir(), "fx-mcp-conformance-results-"));
+const resultRoot = mkdtempSync(join(tmpdir(), "lia-mcp-conformance-results-"));
 console.log(
   `MCP conformance ${protocolVersion}, runner ${runnerVersion} (${runnerRevision})`,
 );

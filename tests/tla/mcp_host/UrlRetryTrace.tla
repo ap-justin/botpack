@@ -3,10 +3,10 @@
 \* of a client against a 2025-11-25 server that answers the first tools/call
 \* with -32042 (tests/tla/drivers/mcp_host/models.test.ts).
 \*   call {n}          the fixture has had n tools/call requests
-\*   required {}       fx shows the first URL, so the -32042 answer came
-\*   consent_shown {}  fx's terminal asks to open a URL
+\*   required {}       lia shows the first URL, so the -32042 answer came
+\*   consent_shown {}  lia's terminal asks to open a URL
 \*   accept {}         the harness chose Open URL for every URL
-\*   waiting_shown {}  fx's terminal shows "I completed it / Retry"
+\*   waiting_shown {}  lia's terminal shows "I completed it / Retry"
 \*   complete {url}    the fixture completed URL `url`
 \*   ignored {}        the fixture sent completions for an unknown id and
 \*                     for a URL already completed
@@ -14,7 +14,7 @@
 \*   cancel {}         the harness chose Cancel
 \*   result {}         the fixture answered the call with its result
 \*   end {how}         the call is over: "result", "declined", "cancelled"
-\* fx calling again on its own, at the signal, shows only as the next `call`.
+\* lia calling again on its own, at the signal, shows only as the next `call`.
 EXTENDS UrlRetry, TraceObs, Sequences
 
 VARIABLES i, bad
@@ -41,7 +41,7 @@ Step(rec) ==
       [] rec.event = "end" -> phase = "done" /\ ended = rec.data.how /\ UNCHANGED vars
       [] OTHER -> FALSE
 
-\* What fx does with no record: call again when the signal closes the question.
+\* What lia does with no record: call again when the signal closes the question.
 Hidden == AutoRetry
 
 TraceInit == Init /\ i = 0 /\ bad = Viol

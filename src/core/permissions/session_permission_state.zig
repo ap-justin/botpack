@@ -143,6 +143,7 @@ fn readIdentityField(canonical: []const u8, offset: *usize) ![]const u8 {
 
 fn parseV1CommandIdentity(canonical: []const u8) !V1CommandIdentity {
     var offset: usize = 0;
+    // Stored data: saved permission states depend on the fx name.
     if (!std.mem.eql(u8, try readIdentityField(canonical, &offset), "fx-permission-state-v1")) {
         return error.InvalidPermissionIdentity;
     }
@@ -187,6 +188,7 @@ pub fn commandKeyV2(
 ) !RuleKey {
     var out: std.Io.Writer.Allocating = .init(alloc);
     errdefer out.deinit();
+    // Stored data: saved permission rules depend on the fx name.
     try writeIdentityField(&out.writer, "fx-permission-state-v2");
     try writeIdentityField(&out.writer, command);
     try writeIdentityField(&out.writer, cwd);

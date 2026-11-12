@@ -61,7 +61,7 @@ pub fn recordToolCall(call: ToolCallMetric) void {
 }
 
 /// Records a model-catalog load, capability lookup, or image gate outcome so
-/// the /trace report can explain capability rejections without FX_TRACE.
+/// the /trace report can explain capability rejections without LIA_TRACE.
 pub fn recordModelCatalogEvent(failed: bool, kind: model_catalog_metrics.Kind, comptime fmt: []const u8, args: anytype) void {
     model_catalog_metrics.record(kind, failed, fmt, args);
 }

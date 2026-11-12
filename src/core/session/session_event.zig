@@ -26,7 +26,7 @@ pub const Digest = [Sha256.digest_length]u8;
 // CommittedFilePresentation.review_lines came after the last release that
 // wrote these frames, so no frame of any version carries it. The session
 // store keeps an edit's rows in a file_review item of their own, which older
-// fx versions skip, never inside the tool_result piece they read.
+// lia versions skip, never inside the tool_result piece they read.
 pub const conversation_schema_version: u8 = 3;
 
 /// Every historical frame version a reader must still accept. Writers always
@@ -224,7 +224,7 @@ pub const ConversationEvent = union(enum) {
     turn_completed: ConversationTurnCompleted,
     interrupted: ConversationInterruption,
     context_checkpoint: ConversationCheckpoint,
-    /// A system note fx added at a step boundary. Only a v2 session saves
+    /// A system note lia added at a step boundary. Only a v2 session saves
     /// one, as its `context_note` item (D93).
     context_note: ConversationContextNote,
     /// The runtime context a turn captured for the session, right after its
@@ -232,7 +232,7 @@ pub const ConversationEvent = union(enum) {
     /// item (D94).
     runtime_context: ConversationRuntimeContext,
     /// A settled model call, for Ctrl+O and never for the model. Only a v2
-    /// session saves one, as its `model_call` item, which an older fx leaves
+    /// session saves one, as its `model_call` item, which an older lia leaves
     /// out (D17).
     model_call: types.ModelCallRecord,
 };
@@ -332,7 +332,7 @@ fn rejectInvalidConversationEvent(comptime rule: []const u8) ConversationTransit
 /// The most steps a turn's call record may name, far past any real turn.
 const max_model_call_step: usize = 1 << 20;
 
-/// A call record read from a log fx does not control: every string short,
+/// A call record read from a log lia does not control: every string short,
 /// valid UTF-8 and free of control characters, and its numbers in range.
 fn validateModelCallRecord(record: types.ModelCallRecord) ConversationTransitionError!void {
     if (record.at_ms < 0) return rejectInvalidConversationEvent("model-call-time");
@@ -937,7 +937,7 @@ pub const HistoryTurnCommitted = struct {
 
 /// A usage snapshot that sessions saved before `/usage` read provider
 /// reports. Old logs still hold these; they replay as nothing but the
-/// session's last update, and fx no longer writes them.
+/// session's last update, and lia no longer writes them.
 pub const UsageCheckpointed = struct {};
 
 pub const RecoveryCheckpointSet = struct {

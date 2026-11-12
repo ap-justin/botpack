@@ -57,7 +57,7 @@ pub const web_search_unavailable_message = "web_search is unavailable: no local 
 pub const terminal_unavailable_message =
     "{\"error\":{\"tool\":\"shell\",\"code\":\"unsupported_host\",\"retryable\":false}}";
 const terminal_saved_session_required_message =
-    "TTY shell actions require a saved fx session.";
+    "TTY shell actions require a saved lia session.";
 const terminal_saved_session_required_suggestion =
     "Use shell.run with tty=false, or rerun without --no-save.";
 
@@ -318,7 +318,7 @@ pub const DispatchContext = struct {
     mcp_call_options: tool_mcp_runtime.CallOptions = .{},
     mcp_call_status_sink: ?*?tool_mcp_runtime.CallStatus = null,
     mcp_execution_error_sink: ?*?anyerror = null,
-    /// Lent to `fx mcp call` while this tool call runs; see
+    /// Lent to `lia mcp call` while this tool call runs; see
     /// `mcp_call_capability.zig`. Only the shell tool uses it.
     mcp_call_capability: ?mcp_call_capability.Capability = null,
     mcp_permission_rules: core_types.PermissionRuleSet = .{},
@@ -462,11 +462,11 @@ pub const Tool = struct {
     description: []const u8,
     model_schema: model_tool_schema.FunctionSchema,
     model_visible: bool = true,
-    /// fx's own discovery or bookkeeping step rather than work the user asked
+    /// lia's own discovery or bookkeeping step rather than work the user asked
     /// for. Hosts may hide these calls.
     internal: bool = false,
     write_provider_advertisement_fn: ?WriteProviderAdvertisementFn = null,
-    /// Set when the provider runs the tool instead of fx dispatch. Such a tool
+    /// Set when the provider runs the tool instead of lia dispatch. Such a tool
     /// never reaches a call-time permission check, so advertisement is its only
     /// enforcement point and requires an already-settled allow.
     provider_executed: bool = false,

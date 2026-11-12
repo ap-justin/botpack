@@ -230,7 +230,7 @@ test "processQueuedPrompt preserves finish precedence over malformed argument re
             .finish_reason = case.finish_reason,
             .omit_finish = case.omit_finish,
         };
-        // A cut-off reply with nothing usable is resent once with fx's limit;
+        // A cut-off reply with nothing usable is resent once with lia's limit;
         // the resend's own cut-off reply ends the turn.
         const completions = [_]FakeCompletion{ reply, reply };
         const requests: usize = if (case.expected == .length_limited) 2 else 1;
@@ -909,7 +909,7 @@ test "common Stop continues once with original history and joined presentation" 
     try expectBodyContains(
         &gateway,
         1,
-        "Continue the turn. fx hook context:\\nverify the answer",
+        "Continue the turn. lia hook context:\\nverify the answer",
     );
     try std.testing.expectEqualStrings(
         "candidate\nfinal",
@@ -940,7 +940,7 @@ test "common Stop continues once with original history and joined presentation" 
     try expectBodyNotContains(
         &follow_gateway,
         0,
-        "Continue the turn. fx hook context",
+        "Continue the turn. lia hook context",
     );
 }
 
@@ -1759,7 +1759,7 @@ test "two standalone compaction cuts retain matching request and finalization hi
     const last_call = toolCall("last_tool", "read_file", "{\"path\":\"b.txt\"}");
     const messages = [_]ChatMessage{
         .{ .role = .assistant, .content = "first candidate", .standalone_response = true },
-        .{ .role = .user, .content = "Continue the turn. fx hook context:\nverify" },
+        .{ .role = .user, .content = "Continue the turn. lia hook context:\nverify" },
         .{ .role = .assistant, .tool_calls = &.{first_call} },
         .{ .role = .tool, .content = "first result", .tool_call_id = first_call.id, .tool_name = first_call.name, .tool_result_status = .success },
         .{

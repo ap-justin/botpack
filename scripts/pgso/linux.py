@@ -1,4 +1,4 @@
-"""The Linux PGSO platforms: ld.lld links of the static musl fx, and ELF checks.
+"""The Linux PGSO platforms: ld.lld links of the static musl lia, and ELF checks.
 
 Zig links the static musl control with its own ld.lld. A `zig cc` link of the
 same object picks different inputs and flags, so the control build records
@@ -58,7 +58,7 @@ def external_control_strip_argv(
     # The link's `-s` already removes every symbol.
     return ()
 PROFILE_SECTIONS = ("__llvm_prf_cnts", "__llvm_prf_data")
-# The whole fx object's symbol table and the linker's removed-section list
+# The whole lia object's symbol table and the linker's removed-section list
 # exceed the default capture limit.
 LARGE_OUTPUT_CHARS = 256 * 1024 * 1024
 
@@ -315,7 +315,7 @@ def link_instrumented(
     # clang adds this reference on Linux; without it the static link drops the
     # runtime's registration and the instrumented binary writes no profile.
     keep_runtime = ("-u", "__llvm_profile_runtime")
-    if paths.selector == "fx":
+    if paths.selector == "lia":
         argv: Sequence[str] = relink_argv(
             toolchain,
             paths,
@@ -368,8 +368,8 @@ def public_api_flags(toolchain: Toolchain, paths: PipelinePaths) -> tuple[str, .
 
 
 def prepare_candidate_bitcode(toolchain: Toolchain, paths: PipelinePaths) -> None:
-    """Give each private fx function a symbol, so the symbol order can place it."""
-    if paths.selector != "fx":
+    """Give each private lia function a symbol, so the symbol order can place it."""
+    if paths.selector != "lia":
         return
     named = paths.profile_use_bitcode.with_name(paths.profile_use_bitcode.name + ".named")
     run_checked(
@@ -385,8 +385,8 @@ def prepare_candidate_bitcode(toolchain: Toolchain, paths: PipelinePaths) -> Non
 
 
 def candidate_object_flags(paths: PipelinePaths) -> tuple[str, ...]:
-    # lld orders whole sections, so each fx function needs its own.
-    return ("-function-sections",) if paths.selector == "fx" else ()
+    # lld orders whole sections, so each lia function needs its own.
+    return ("-function-sections",) if paths.selector == "lia" else ()
 
 
 def parse_function_symbols(text: str) -> dict[str, tuple[str, int, int]]:
@@ -629,7 +629,7 @@ def _link_ordered_candidate(toolchain: Toolchain, paths: PipelinePaths) -> None:
 
 def link_candidate_binary(toolchain: Toolchain, paths: PipelinePaths) -> None:
     """Link the candidate from `paths.profile_use_object`; both links strip with `-s`."""
-    if paths.selector == "fx":
+    if paths.selector == "lia":
         _link_ordered_candidate(toolchain, paths)
     else:
         run_checked(

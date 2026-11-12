@@ -22,7 +22,7 @@ from scripts.fuzz_nightly import (
 
 TARGET = Target(
     name="sse_framing",
-    module="fx",
+    module="lia",
     test="provider framing fuzzes chunk-invariant event data",
     iterations=1000,
 )
@@ -95,7 +95,7 @@ class RegistryTests(unittest.TestCase):
                 self.assertIn("testing.fuzz(", body)
                 in_session_manager = files[0].is_relative_to(session_manager)
                 self.assertEqual(target.module == "session_manager", in_session_manager)
-                if target.module == "fx":
+                if target.module == "lia":
                     self.assertIn(f'@import("{files[0].relative_to(src).as_posix()}")', fuzz_root)
 
 
@@ -248,7 +248,7 @@ class ReportTests(unittest.TestCase):
                 ])
             return ""
 
-        action = report(self.RESULT, repo="vercel-labs/fx", run_url="u", commit="c", gh=gh)
+        action = report(self.RESULT, repo="ap-justin/lia", run_url="u", commit="c", gh=gh)
 
         self.assertEqual("commented on #9", action)
         self.assertEqual(["issue", "comment", "9"], calls[-1][:3])
@@ -260,7 +260,7 @@ class ReportTests(unittest.TestCase):
             calls.append(list(args))
             return "[]" if args[:2] == ["issue", "list"] else ""
 
-        action = report(self.RESULT, repo="vercel-labs/fx", run_url="u", commit="c", gh=gh)
+        action = report(self.RESULT, repo="ap-justin/lia", run_url="u", commit="c", gh=gh)
 
         self.assertEqual("opened an issue", action)
         self.assertIn("Nightly fuzz failure: sse_framing", calls[-1])

@@ -739,7 +739,7 @@ pub const Runtime = struct {
     }
 
     /// Whether nothing in this host's tree can still post to its owner:
-    /// no child works and no message waits for one. `fx ask` and ACP finish
+    /// no child works and no message waits for one. `lia ask` and ACP finish
     /// only then.
     pub fn quiet(self: *Runtime) bool {
         return !self.anyWorking();
@@ -748,7 +748,7 @@ pub const Runtime = struct {
     pub const TreeWake = enum { mail, quiet, stopped };
     const cancel_poll: std.Io.Timeout = .{ .duration = .{ .raw = .fromMilliseconds(50), .clock = .awake } };
 
-    /// For a runtime that finishes only once its tree is quiet, as `fx ask`
+    /// For a runtime that finishes only once its tree is quiet, as `lia ask`
     /// does: blocks until mail is queued for `worker`, nothing in this host
     /// can still post, or `worker` is stopped. A child posts its report
     /// before it stops counting as working, so `quiet` never leaves one
@@ -880,7 +880,7 @@ pub const Runtime = struct {
     /// parent's next report or notice.
     const UserDrop = struct { child_id: []u8, count: usize, closed: bool = false };
 
-    /// fx is quitting: the works its quit cancels say so in their reports.
+    /// lia is quitting: the works its quit cancels say so in their reports.
     /// Call before the quit stops any of this host's children.
     pub fn noteQuitting(self: *Runtime) void {
         self.managed.noteQuitting();
@@ -1036,7 +1036,7 @@ pub const Runtime = struct {
             .completed => text orelse "The subagent ended its turn without a reply.",
             .failed => formatFailedResult(a, if (end.failure) |*failure| failure.view() else null, text),
             .cancelled => withPartial(a, cancelledSentence(end.end.cause), text),
-            .interrupted => withPartial(a, "fx stopped before it finished.", text),
+            .interrupted => withPartial(a, "lia stopped before it finished.", text),
             .lost => lost_result,
         };
     }
@@ -1600,8 +1600,8 @@ pub const Runtime = struct {
         rejected: model_contract.Result,
     };
 
-    /// Loads the profile a new child asks for, from the fx home and the
-    /// current directory, as `fx --profile` does. The result and any message
+    /// Loads the profile a new child asks for, from the lia home and the
+    /// current directory, as `lia --profile` does. The result and any message
     /// belong to `arena`.
     fn loadChildProfile(arena: Allocator, name: []const u8) !ChildProfile {
         const workspace_root = io_mod.realpathAlloc(arena, ".") catch null;
@@ -1900,7 +1900,7 @@ pub const Runtime = struct {
                     message.instructions orelse "",
                     active,
                 );
-                // Without one named it runs in fx's own main, which sets
+                // Without one named it runs in lia's own main, which sets
                 // nothing, so it has what its parent has.
                 try registry.setProfile(alloc, child_id, request.override().profile orelse profiles.main_name);
                 if (message.report) |rule| try registry.setReportRule(child_id, rule);
@@ -2043,7 +2043,7 @@ const MailboxFixture = struct {
     reports: std.ArrayList([]u8) = .empty,
     /// Each report's facts, in the same order.
     ends: std.ArrayList(child_state.EndFacts) = .empty,
-    /// When set, each report is also posted to this worker, as `fx ask`'s sink does.
+    /// When set, each report is also posted to this worker, as `lia ask`'s sink does.
     worker: ?*worker_runtime.WorkerRuntime = null,
 
     fn deinit(self: *MailboxFixture) void {
@@ -2295,7 +2295,7 @@ test "a user's stop drops the parent's messages waiting for a subagent, and its 
     try std.testing.expect(std.mem.find(u8, line, "The user stopped its turn before it finished.") != null);
 }
 
-test "a work fx's quit cancels says so in its report" {
+test "a work lia's quit cancels says so in its report" {
     const alloc = std.testing.allocator;
     var arena_state = std.heap.ArenaAllocator.init(alloc);
     defer arena_state.deinit();
@@ -2316,13 +2316,13 @@ test "a work fx's quit cancels says so in its report" {
     try waitUntilQuiet(runtime);
 
     try std.testing.expectEqual(@as(usize, 1), fixture.reportCount());
-    try std.testing.expectEqual(child_state.EndFacts{ .cause = .fx_quit }, fixture.ends.items[0]);
-    try std.testing.expect(std.mem.find(u8, fixture.reports.items[0], " cancelled fx quit before it finished.") != null);
+    try std.testing.expectEqual(child_state.EndFacts{ .cause = .lia_quit }, fixture.ends.items[0]);
+    try std.testing.expect(std.mem.find(u8, fixture.reports.items[0], " cancelled lia quit before it finished.") != null);
     // The log keeps the cause for a report posted after a restart.
     var lock = runtime.managed.state_store.acquireLock();
     defer lock.release();
     var registry = try runtime.managed.state_store.load(arena);
-    try std.testing.expectEqual(child_state.EndFacts{ .cause = .fx_quit }, registry.findPersistent("reviewer").?.last_end);
+    try std.testing.expectEqual(child_state.EndFacts{ .cause = .lia_quit }, registry.findPersistent("reviewer").?.last_end);
 }
 
 test "a user's stop of a work that owes no report tells the parent of its dropped messages" {
@@ -3168,7 +3168,7 @@ fn cancelledSentence(cause: ?child_state.Cause) []const u8 {
     const known = cause orelse return "Its turn was cancelled before it finished.";
     return switch (known) {
         .user_stop => "The user stopped its turn before it finished.",
-        .fx_quit => "fx quit before it finished.",
+        .lia_quit => "lia quit before it finished.",
         .user_close => "The user closed it before it finished. A later message to its name starts a new one.",
     };
 }
@@ -3180,7 +3180,7 @@ fn withPartial(a: Allocator, note: []const u8, partial: ?[]const u8) ![]const u8
 }
 
 /// A crash lost the work before the child started it (D33).
-const lost_result = "fx stopped before this message reached the subagent, so it never ran. Send it again if it is still needed.";
+const lost_result = "lia stopped before this message reached the subagent, so it never ran. Send it again if it is still needed.";
 
 test "terminal result projects every managed outcome without a lifecycle phase" {
     const completed = terminalResult(.{

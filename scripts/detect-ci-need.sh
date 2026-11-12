@@ -4,7 +4,7 @@
 # Usage: detect-ci-need.sh <base-revision> <head-revision>
 #
 # mcp: the TLA+ MCP models and drivers job model-checks tests/tla/mcp/ and
-# tests/tla/mcp_host/ and drives the MCP engine and fx along them, which takes
+# tests/tla/mcp_host/ and drives the MCP engine and lia along them, which takes
 # about 20 minutes. A pull request runs it only when it touches src/mcp/,
 # src/core/mcp_host/, src/core/mcp/, those models, their drivers in
 # tests/tla/drivers/mcp/, tests/tla/drivers/mcp_host/, and

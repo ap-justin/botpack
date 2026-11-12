@@ -579,7 +579,7 @@ const AcpContext = struct {
     fn toolContext(self: *AcpContext) tool_runtime.Context {
         const session = if (self.state.active_session) |*active| active else unreachable;
         const provider_capabilities = self.state.cfg.provider_set.select(session.provider).capabilities;
-        if (provider_capabilities.fx_search) {
+        if (provider_capabilities.lia_search) {
             self.state.web_search_runtime.configure(.{
                 .api_key = session.api_key,
                 .credential_source = session.credential_source,
@@ -655,7 +655,7 @@ const AcpContext = struct {
             .web_fetch_artifact_store = session.session_rt.webFetchArtifactStore(),
             .web_fetch_artifact_error = session.session_rt.webFetchArtifactError(),
             .web_search_runtime_ready = false,
-            .web_search_backend = if (provider_capabilities.fx_search) self.state.web_search_runtime.dispatchBackend() else null,
+            .web_search_backend = if (provider_capabilities.lia_search) self.state.web_search_runtime.dispatchBackend() else null,
             .model_capability_resolver = .{
                 .ctx = @ptrCast(self),
                 .resolve_fn = resolveModelCapabilities,
@@ -1786,20 +1786,20 @@ fn parsePromptInputWithFirstImageId(
 
     if (parsed.value != .object) return .{ .text = try alloc.dupe(u8, "") };
 
-    const continue_recovery = acp_types.fxMetaBool(parsed.value.object, "continueRecovery") orelse false;
-    const fresh_output = acp_types.fxMetaBool(parsed.value.object, "freshOutput") orelse false;
-    const input_id: ?[]const u8 = if (acp_types.fxMetaField(parsed.value.object, "inputId")) |value|
+    const continue_recovery = acp_types.liaMetaBool(parsed.value.object, "continueRecovery") orelse false;
+    const fresh_output = acp_types.liaMetaBool(parsed.value.object, "freshOutput") orelse false;
+    const input_id: ?[]const u8 = if (acp_types.liaMetaField(parsed.value.object, "inputId")) |value|
         if (value == .string and libfx_steering.validInputId(value.string)) value.string else null
     else
         null;
-    const input_accepted = acp_types.fxMetaBool(parsed.value.object, "inputAccepted") orelse false;
-    const turn_id: ?[]const u8 = if (acp_types.fxMetaField(parsed.value.object, "turnId")) |value|
+    const input_accepted = acp_types.liaMetaBool(parsed.value.object, "inputAccepted") orelse false;
+    const turn_id: ?[]const u8 = if (acp_types.liaMetaField(parsed.value.object, "turnId")) |value|
         if (value == .string and libfx_steering.validInputId(value.string)) value.string else null
     else
         null;
-    const rerun_value = acp_types.fxMetaField(parsed.value.object, "rerun");
+    const rerun_value = acp_types.liaMetaField(parsed.value.object, "rerun");
     // A JavaScript host gives a time it can hold as a number.
-    const yield_at_ms: ?i64 = if (acp_types.fxMetaInteger(parsed.value.object, "yieldAt")) |ms|
+    const yield_at_ms: ?i64 = if (acp_types.liaMetaInteger(parsed.value.object, "yieldAt")) |ms|
         if (ms > 0 and ms <= max_host_time_ms) ms else null
     else
         null;
@@ -1848,7 +1848,7 @@ fn parsePromptInputWithFirstImageId(
                 if (value != .string or !image_data.validSourceRef(value.string)) return error.InvalidPromptImage;
                 break :ref value.string;
             } else null;
-            const decoded = if (acp_types.fxMetaField(block.object, "attachment")) |attachment| bytes: {
+            const decoded = if (acp_types.liaMetaField(block.object, "attachment")) |attachment| bytes: {
                 if (block.object.get("data") != null) return error.InvalidPromptImage;
                 break :bytes try takePromptImageAttachment(alloc, attachments, attachment);
             } else if (block.object.get("data")) |data_value|
@@ -1859,7 +1859,7 @@ fn parsePromptInputWithFirstImageId(
             };
             errdefer alloc.free(decoded);
             // A host with an image store names the bytes it stored first.
-            const stored_name: ?session_codec.ImageName = if (acp_types.fxMetaField(block.object, "stored")) |value| name: {
+            const stored_name: ?session_codec.ImageName = if (acp_types.liaMetaField(block.object, "stored")) |value| name: {
                 if (value != .string or decoded.len == 0) return error.InvalidPromptImage;
                 break :name session_codec.imageName(value.string) orelse return error.InvalidPromptImage;
             } else null;
@@ -2088,7 +2088,7 @@ fn agentRuntimeDeps(ctx: *AcpContext) agent_runtime.AgentRuntimeDeps {
 }
 
 /// Drains steering at a turn boundary. ACP clients steer by sending
-/// `session/prompt` with `_meta.fx.steer` during a turn; each delivered message
+/// `session/prompt` with `_meta.lia.steer` during a turn; each delivered message
 /// is replayed as a user message where it joined the turn. A cancelled ACP
 /// turn stops instead of continuing with queued steering, and the steering
 /// prompt responses report what was dropped. A libfx turn continues past a
@@ -2968,7 +2968,7 @@ fn savePromptImages(raw_ctx: *anyopaque, alloc: std.mem.Allocator, images: []typ
 
 /// `AgentRuntimeDeps.append_turn_piece` for a journaled libfx session. The
 /// orchestrator calls it before any call in a batch runs: the calls reach the
-/// journal first, and a batch with a call fx runs itself waits until the host
+/// journal first, and a batch with a call lia runs itself waits until the host
 /// holds them, unless every such call runs ahead (see below). Finished pieces
 /// travel in `turn_progress` instead.
 fn appendJournalToolIntent(raw_ctx: *anyopaque, progress: agent_runtime.TurnProgress) !void {
@@ -3371,7 +3371,7 @@ fn pushEvent(raw_ctx: *anyopaque, event: worker_runtime.WorkerEvent) !void {
     const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
     switch (event) {
         .clear_route_recovery_status => try ctx.clearModelRecoveryStatus(),
-        // A libfx steer cuts a streaming reply short, as in the fx CLI, but
+        // A libfx steer cuts a streaming reply short, as in the lia CLI, but
         // waits once the model streams a tool call's arguments.
         .turn_phase_update => |update| if (ctx.state.cfg.minimal_kernel) {
             server.noteSteeringPhase(ctx.state, update.step_id, switch (update.phase) {
@@ -3637,7 +3637,7 @@ fn requestAcpElicitation(
 
     var id_buffer: [48]u8 = undefined;
     const url_id = if (input_request.mode == .url)
-        try std.mem.print(&id_buffer, "fx-{d}", .{outbound_id})
+        try std.mem.print(&id_buffer, "lia-{d}", .{outbound_id})
     else
         null;
     const legacy_source_id = if (origin.wire.isLegacy() and input_request.mode == .url)
@@ -3781,11 +3781,11 @@ fn formatAcpElicitationMessage(
 ) ![]u8 {
     return switch (request.mode) {
         .form => alloc.print(
-            "fx received a form request from MCP server {s}. {s}",
+            "lia received a form request from MCP server {s}. {s}",
             .{ server_name, request.message },
         ),
         .url => alloc.print(
-            "fx received a URL request from MCP server {s} for host {s}. {s}",
+            "lia received a URL request from MCP server {s} for host {s}. {s}",
             .{ server_name, request.url_host orelse "unknown", request.message },
         ),
         .unknown => error.McpInputRequired,
@@ -4094,7 +4094,7 @@ test "parsePromptInput handles empty prompt array" {
 test "parsePromptInput accepts explicit recovery continuation metadata" {
     const alloc = std.testing.allocator;
     const params =
-        "{\"sessionId\":\"s1\",\"prompt\":[],\"_meta\":{\"fx\":{\"continueRecovery\":true}}}";
+        "{\"sessionId\":\"s1\",\"prompt\":[],\"_meta\":{\"lia\":{\"continueRecovery\":true}}}";
     var result = try parsePromptInput(alloc, params);
     defer result.deinit(alloc);
     try std.testing.expectEqual(@as(usize, 0), result.text.len);
@@ -4106,7 +4106,7 @@ test "parsePromptInput accepts explicit recovery continuation metadata" {
 test "parsePromptInput reads whether a resume's host holds the turn's earlier output" {
     const alloc = std.testing.allocator;
     const params =
-        "{\"sessionId\":\"s1\",\"prompt\":[],\"_meta\":{\"fx\":{\"continueRecovery\":true,\"freshOutput\":true}}}";
+        "{\"sessionId\":\"s1\",\"prompt\":[],\"_meta\":{\"lia\":{\"continueRecovery\":true,\"freshOutput\":true}}}";
     var result = try parsePromptInput(alloc, params);
     defer result.deinit(alloc);
     try std.testing.expect(result.continue_recovery);
@@ -4116,7 +4116,7 @@ test "parsePromptInput reads whether a resume's host holds the turn's earlier ou
 test "parsePromptInput keeps the call ids a resume runs again and drops the rest" {
     const alloc = std.testing.allocator;
     const params =
-        "{\"sessionId\":\"s1\",\"prompt\":[],\"_meta\":{\"fx\":{\"continueRecovery\":true,\"rerun\":[\"call-1\",7,\"\",\"call-2\"]}}}";
+        "{\"sessionId\":\"s1\",\"prompt\":[],\"_meta\":{\"lia\":{\"continueRecovery\":true,\"rerun\":[\"call-1\",7,\"\",\"call-2\"]}}}";
     var result = try parsePromptInput(alloc, params);
     defer result.deinit(alloc);
     try std.testing.expect(result.continue_recovery);
@@ -4245,8 +4245,8 @@ const TestAttachmentStore = struct {
 test "parsePromptInput takes raw image bytes from a host attachment" {
     const alloc = std.testing.allocator;
     const cases = [_][]const u8{
-        "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"text\",\"text\":\"look\"},{\"type\":\"image\",\"mimeType\":\"image/png\",\"_meta\":{\"fx\":{\"attachment\":3}}}]}",
-        "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"text\",\"text\":\"look\"},{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"host:raw\",\"_meta\":{\"fx\":{\"attachment\":3}}}]}",
+        "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"text\",\"text\":\"look\"},{\"type\":\"image\",\"mimeType\":\"image/png\",\"_meta\":{\"lia\":{\"attachment\":3}}}]}",
+        "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"text\",\"text\":\"look\"},{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"host:raw\",\"_meta\":{\"lia\":{\"attachment\":3}}}]}",
     };
     for (cases, 0..) |params, index| {
         var attachments = TestAttachmentStore{ .id = 3, .bytes = "\x89PNG\r\n\x1a\nraw" };
@@ -4269,7 +4269,7 @@ test "parsePromptInput takes raw image bytes from a host attachment" {
 
 test "parsePromptInput rejects unusable image attachment references" {
     const alloc = std.testing.allocator;
-    const reference = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"host:original\",\"_meta\":{\"fx\":{\"attachment\":3}}}]}";
+    const reference = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"host:original\",\"_meta\":{\"lia\":{\"attachment\":3}}}]}";
 
     // Standard ACP hosts have no attachment store.
     try std.testing.expectError(error.UnsupportedPromptImage, parsePromptInput(alloc, reference));
@@ -4283,17 +4283,17 @@ test "parsePromptInput rejects unusable image attachment references" {
     var oversized = TestAttachmentStore{ .id = 3, .bytes = "x", .too_large = true };
     try std.testing.expectError(error.ImageTooLarge, parsePromptInputWithFirstImageId(alloc, reference, 1, oversized.store()));
 
-    const zero_id = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"_meta\":{\"fx\":{\"attachment\":0}}}]}";
+    const zero_id = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"_meta\":{\"lia\":{\"attachment\":0}}}]}";
     var unused = TestAttachmentStore{ .id = 0, .bytes = "x" };
     try std.testing.expectError(error.InvalidPromptImage, parsePromptInputWithFirstImageId(alloc, zero_id, 1, unused.store()));
     try std.testing.expectEqual(@as(usize, 0), unused.taken);
 
-    const ambiguous = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"host:original\",\"data\":\"aGVsbG8=\",\"_meta\":{\"fx\":{\"attachment\":3}}}]}";
+    const ambiguous = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"host:original\",\"data\":\"aGVsbG8=\",\"_meta\":{\"lia\":{\"attachment\":3}}}]}";
     var stored = TestAttachmentStore{ .id = 3, .bytes = "x" };
     try std.testing.expectError(error.InvalidPromptImage, parsePromptInputWithFirstImageId(alloc, ambiguous, 1, stored.store()));
     try std.testing.expectEqual(@as(usize, 0), stored.taken);
 
-    const invalid_ref = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"bad\\nref\",\"_meta\":{\"fx\":{\"attachment\":3}}}]}";
+    const invalid_ref = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"bad\\nref\",\"_meta\":{\"lia\":{\"attachment\":3}}}]}";
     try std.testing.expectError(error.InvalidPromptImage, parsePromptInputWithFirstImageId(alloc, invalid_ref, 1, stored.store()));
     try std.testing.expectEqual(@as(usize, 0), stored.taken);
 }
@@ -4601,7 +4601,7 @@ test "ACP stream adapter forwards raw Markdown and suppresses rendered duplicate
     };
     const operational_span =
         "\x1b[1mstatus\x1b[22m\n" ++
-        "\x1b]8;id=fx-1;https://example.com\x1b\\docs\x1b]8;;\x1b\\\n";
+        "\x1b]8;id=lia-1;https://example.com\x1b\\docs\x1b]8;;\x1b\\\n";
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
@@ -4756,7 +4756,7 @@ test "ACP tool updates preserve typed permission failures without truncation" {
 
 test "ACP plan mode validates registered tools against mode policy" {
     const alloc = std.testing.allocator;
-    var state = try initTestAcpState(alloc, "/tmp/fx-acp-plan-mode", .ask);
+    var state = try initTestAcpState(alloc, "/tmp/lia-acp-plan-mode", .ask);
     defer state.deinit();
     state.active_session.?.mode = "plan";
     var ctx = AcpContext{
@@ -4897,7 +4897,7 @@ fn initTestAcpState(alloc: Allocator, workspace_root: []const u8, mode: Permissi
         .api_key = api_key,
         .credential_source = .ai_gateway_api_key,
         .web_search_runtime = @import("../core/tooling/web_search_runtime.zig").Runtime.init(.{
-            .provider = cfg.provider_set.gateway.fx_search.?,
+            .provider = cfg.provider_set.gateway.lia_search.?,
         }),
         .active_session = .{
             .session_id = session_id,
@@ -4934,7 +4934,7 @@ test "stripAnsiAlloc returns the original slice for clean text and strips escape
 
 test "stripAnsiAlloc converts OSC-8 hyperlinks with params and BEL terminators" {
     const alloc = std.testing.allocator;
-    const with_params = try stripAnsiAlloc(alloc, "\x1b]8;id=fx-1;https://ziglang.org/download/\x1b\\Zig downloads\x1b]8;;\x1b\\ ready");
+    const with_params = try stripAnsiAlloc(alloc, "\x1b]8;id=lia-1;https://ziglang.org/download/\x1b\\Zig downloads\x1b]8;;\x1b\\ ready");
     defer alloc.free(with_params);
     try std.testing.expectEqualStrings("[Zig downloads](https://ziglang.org/download/) ready", with_params);
 
@@ -5633,7 +5633,7 @@ test "a rejected credential answers AUTH_REQUIRED and a forbidden one a generic 
         // Null: the prompt answers a generic error.
         auth_message: ?[]const u8,
     }{
-        .{ .status = .unauthorized, .auth_message = "fx login authentication failed · HTTP 401" },
+        .{ .status = .unauthorized, .auth_message = "lia login authentication failed · HTTP 401" },
         .{ .status = .forbidden, .auth_message = null },
         .{ .user_turn = false, .status = .unauthorized, .auth_message = null },
     };
@@ -6300,8 +6300,8 @@ test "ACP prompt agent config carries request options from active session" {
     const tool_ctx = ctx.toolContext();
     try std.testing.expect(!tool_ctx.web_search_runtime_ready);
     try std.testing.expect(tool_ctx.web_search_backend != null);
-    try std.testing.expect(state.web_search_runtime.provider.?.execute_fn == state.cfg.provider_set.gateway.fx_search.?.execute_fn);
-    try std.testing.expect(state.web_search_runtime.provider.?.preferred_backends_fn == state.cfg.provider_set.gateway.fx_search.?.preferred_backends_fn);
+    try std.testing.expect(state.web_search_runtime.provider.?.execute_fn == state.cfg.provider_set.gateway.lia_search.?.execute_fn);
+    try std.testing.expect(state.web_search_runtime.provider.?.preferred_backends_fn == state.cfg.provider_set.gateway.lia_search.?.preferred_backends_fn);
     try std.testing.expect(tool_ctx.web_fetch_runtime.? == &state.web_fetch_runtime);
     try std.testing.expectEqualStrings("team_123", tool_ctx.gateway_team.?);
     try std.testing.expectEqualStrings("team_123", state.web_search_runtime.gateway_team.?);

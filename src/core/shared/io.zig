@@ -473,24 +473,24 @@ fn liveLibcEnviron() ?RawEnviron {
     return @ptrCast(std.c.environ);
 }
 
-/// What fx tells the user when `homeDir` returns null, after a prefix such as
-/// `fx mcp: `.
+/// What lia tells the user when `homeDir` returns null, after a prefix such as
+/// `lia mcp: `.
 pub const no_home_dir_reason = "HOME is not set to an absolute path";
 
-/// The home directory fx keeps its own files under: `HOME` when it is an
-/// absolute path, otherwise `FX_HOME`'s parent, or null when `FX_HOME` is
-/// unset too. An empty or relative `HOME` counts as unset, so fx never builds
+/// The home directory lia keeps its own files under: `HOME` when it is an
+/// absolute path, otherwise `LIA_HOME`'s parent, or null when `LIA_HOME` is
+/// unset too. An empty or relative `HOME` counts as unset, so lia never builds
 /// profile paths relative to the current folder. Child processes still
 /// inherit `HOME` unchanged.
 pub fn homeDir() ?[]const u8 {
-    // With HOME unset, FX_HOME alone names fx's files, so its parent serves.
-    const home = getenv("HOME") orelse return profile_paths.fxHomeParent();
-    if (!std.Io.Dir.path.isAbsolute(home)) return profile_paths.fxHomeParent();
+    // With HOME unset, LIA_HOME alone names lia's files, so its parent serves.
+    const home = getenv("HOME") orelse return profile_paths.liaHomeParent();
+    if (!std.Io.Dir.path.isAbsolute(home)) return profile_paths.liaHomeParent();
     return home;
 }
 
 pub fn e2eFailIfDurableMutationAttempted() void {
-    const enabled = getenv("FX_TEST_FAIL_ON_DURABLE_MUTATION") orelse return;
+    const enabled = getenv("LIA_TEST_FAIL_ON_DURABLE_MUTATION") orelse return;
     if (!std.mem.eql(u8, enabled, "1")) return;
     std.process.exit(86);
 }
@@ -1209,7 +1209,7 @@ test "getenv returns null before setEnvironMap" {
     global_environ = null;
     defer global_environ = previous;
 
-    try std.testing.expect(getenv("FX_IO_TEST") == null);
+    try std.testing.expect(getenv("LIA_IO_TEST") == null);
 }
 
 test "getenv returns set value after setEnvironMap" {
@@ -1219,10 +1219,10 @@ test "getenv returns set value after setEnvironMap" {
 
     var environ = std.process.Environ.Map.init(std.testing.allocator);
     defer environ.deinit();
-    try environ.put("FX_IO_TEST", "present");
+    try environ.put("LIA_IO_TEST", "present");
 
     setEnvironMap(&environ);
-    try std.testing.expectEqualStrings("present", getenv("FX_IO_TEST").?);
+    try std.testing.expectEqualStrings("present", getenv("LIA_IO_TEST").?);
     global_environ = null;
 }
 
@@ -1253,11 +1253,11 @@ test "environMap returns borrowed process environment map" {
 
     var environ = std.process.Environ.Map.init(std.testing.allocator);
     defer environ.deinit();
-    try environ.put("FX_CORE2_IO_TEST", "present");
+    try environ.put("LIA_CORE2_IO_TEST", "present");
 
     setEnvironMap(&environ);
     const borrowed = environMap().?;
-    try std.testing.expectEqualStrings("present", borrowed.get("FX_CORE2_IO_TEST").?);
+    try std.testing.expectEqualStrings("present", borrowed.get("LIA_CORE2_IO_TEST").?);
     global_environ = null;
 }
 
@@ -1399,18 +1399,18 @@ test "libc environment lookups follow a host that grows the environment" {
     };
     // Enough new names that libc moves its array, as a host's writes do.
     while (set < count) : (set += 1) {
-        const written = try std.mem.print(names[set][0..31], "FX_IO_LIVE_ENV_{d}", .{set});
+        const written = try std.mem.print(names[set][0..31], "LIA_IO_LIVE_ENV_{d}", .{set});
         names[set][written.len] = 0;
         try std.testing.expectEqual(@as(c_int, 0), libc.setenv(&names[set], "live", 1));
     }
 
-    try std.testing.expectEqualStrings("live", getenv("FX_IO_LIVE_ENV_0").?);
-    try std.testing.expectEqualStrings("live", getenv("FX_IO_LIVE_ENV_199").?);
-    try std.testing.expect(getenv("FX_IO_LIVE_ENV_MISSING") == null);
+    try std.testing.expectEqualStrings("live", getenv("LIA_IO_LIVE_ENV_0").?);
+    try std.testing.expectEqualStrings("live", getenv("LIA_IO_LIVE_ENV_199").?);
+    try std.testing.expect(getenv("LIA_IO_LIVE_ENV_MISSING") == null);
 
     var cloned = try cloneEnvironMap(std.testing.allocator);
     defer cloned.deinit();
-    try std.testing.expectEqualStrings("live", cloned.get("FX_IO_LIVE_ENV_150").?);
+    try std.testing.expectEqualStrings("live", cloned.get("LIA_IO_LIVE_ENV_150").?);
 }
 
 test "readFileToEnd: file under cap returns full content" {
@@ -1893,10 +1893,10 @@ test "timed advisory lock reports unsupported without unlocked fallback" {
 }
 
 /// Holds each standard stream the parent left closed open on /dev/null,
-/// read-only, so no file fx opens later takes its number. A write meant for a
+/// read-only, so no file lia opens later takes its number. A write meant for a
 /// closed stdout then fails, instead of landing in that file, such as the
 /// session store's lock, and a read of a closed stdin ends at once. Call it
-/// before fx opens anything.
+/// before lia opens anything.
 pub fn reserveClosedStandardStreams() void {
     if (comptime !builtin.link_libc or builtin.target.os.tag == .windows) return;
     for ([_]std.c.fd_t{ 0, 1, 2 }) |fd| {

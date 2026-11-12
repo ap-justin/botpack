@@ -77,7 +77,7 @@ Close ==
     /\ status' = "closed"
     /\ fresh' = FALSE
 
-\* fx dies with the session open.
+\* lia dies with the session open.
 Crash ==
     /\ status = "open"
     /\ status' = "down"

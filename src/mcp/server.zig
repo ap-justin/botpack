@@ -58,7 +58,7 @@ const said_max = 96;
 /// Bytes of a progress note the host is shown, before "...".
 const note_max = 160;
 
-/// MCP versions a server named, joined with ", " to match how fx lists its
+/// MCP versions a server named, joined with ", " to match how lia lists its
 /// own. Only [0-9A-Za-z.-] is kept, since the text is the server's and
 /// reaches the user; a version that doesn't fit in `said_max` is left out.
 const Versions = struct {
@@ -127,7 +127,7 @@ pub const Options = struct {
     mrtr: mrtr_core.Config = .{},
     auth: auth_client.Options = .{},
     /// Listen for tool list changes once a 2026 server is ready, so the
-    /// catalog hears of them. fx turns it on.
+    /// catalog hears of them. lia turns it on.
     listen_tools: bool = false,
     subscription: subscription.Config = .{},
     timeouts: request.Timeouts = .{},
@@ -150,7 +150,7 @@ pub const Failure = union(enum) {
     needs_auth,
     /// Detection fell back to initialize after discovery got -32020, the
     /// server refused initialize with a modern code, and discovery got
-    /// -32020 again: the server refuses fx's request headers, as when a
+    /// -32020 again: the server refuses lia's request headers, as when a
     /// proxy drops them. `failedRefusal` has the server's message.
     headers_refused,
     /// Detection needed a refresh, and the authorization server gave no
@@ -325,7 +325,7 @@ pub const Server = struct {
     /// The answer an event points into, kept until the next `next`.
     held_answer: ?tools.Call = null,
     /// Set while requests end lost because an answer was over the message
-    /// limit: a stdio process fx killed for an oversized line, or an HTTP
+    /// limit: a stdio process lia killed for an oversized line, or an HTTP
     /// answer over `max_message`.
     losing_oversized: bool = false,
     /// The message of an invalid reply's answer, kept as long as the line it
@@ -1699,7 +1699,7 @@ pub const Server = struct {
         try r.stepRequest(.{ .response_received = .{ .id = id, .response = if (body == .result) .result else .peer_error } });
         l.used = false;
         r.noteVersions(body);
-        // A refusal that lists a version fx speaks: offer that one instead.
+        // A refusal that lists a version lia speaks: offer that one instead.
         if (r.nextOffer(body) != null) return r.sendInitialize();
         try r.keepInstructions(body);
         const event = era.classifyInitialize(r.detector.config, body);
@@ -2214,7 +2214,7 @@ pub const Server = struct {
     }
 
     /// The next version to offer when initialize was answered with `body`, if
-    /// it is a refusal that lists one fx speaks and hasn't offered yet. It is
+    /// it is a refusal that lists one lia speaks and hasn't offered yet. It is
     /// recorded as offered.
     fn nextOffer(r: *Server, body: @FieldType(wire.Response, "body")) ?u8 {
         if (r.detector.state != .initializing or body != .failure) return null;

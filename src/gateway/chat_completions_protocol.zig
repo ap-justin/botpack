@@ -87,7 +87,7 @@ fn contains_name(names: []const []const u8, name: []const u8) bool {
 
 fn validate_name(name: []const u8) Error!void {
     if (name.len == 0 or name.len > max_name_bytes) return error.InvalidToolName;
-    // fx advertises dotted built-in names as well as MCP names. Keep those
+    // lia advertises dotted built-in names as well as MCP names. Keep those
     // literal identities; do not invent aliases that core cannot resolve.
     for (name) |byte| if (!std.ascii.isAlphanumeric(byte) and byte != '_' and byte != '-' and byte != '.') return error.InvalidToolName;
 }
@@ -684,7 +684,7 @@ pub const Reducer = struct {
         try check_json_depth(data);
         var parsed = std.json.parseFromSlice(std.json.Value, self.alloc, data, .{ .duplicate_field_behavior = .@"error", .parse_numbers = false }) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
-            // Valid JSON that fx refuses ends the turn. Text that is not JSON
+            // Valid JSON that lia refuses ends the turn. Text that is not JSON
             // at all was damaged on the way, so the request is resent.
             error.DuplicateField => return error.InvalidChunk,
             else => return error.MalformedChatCompletionsChunk,
@@ -1326,7 +1326,7 @@ test "chat completions replay preserves sequence protected IDs affinity and cano
         const stripped = try build_request(alloc, request, .{ .provider = &other });
         defer alloc.free(stripped);
         try std.testing.expect(std.mem.find(u8, stripped, "reasoning") == null);
-        try std.testing.expect(std.mem.find(u8, stripped, "fx_") != null);
+        try std.testing.expect(std.mem.find(u8, stripped, "lia_") != null);
     }
     request.model = "another-model";
     const stripped = try build_request(alloc, request, .{ .provider = &provider });
@@ -1820,7 +1820,7 @@ test "chat completions history correlation preserves canonical IDs and JSON stri
     const messages = parsed.value.object.get("messages").?.array.items;
     const wire_call = messages[2].object.get("tool_calls").?.array.items[0].object;
     const wire_id = wire_call.get("id").?.string;
-    try std.testing.expect(std.mem.startsWith(u8, wire_id, "fx_"));
+    try std.testing.expect(std.mem.startsWith(u8, wire_id, "lia_"));
     try std.testing.expectEqualStrings(wire_id, messages[3].object.get("tool_call_id").?.string);
     try std.testing.expectEqualStrings(call.arguments_json, wire_call.get("function").?.object.get("arguments").?.string);
     try std.testing.expectEqualStrings("functions/read:0", call.id);

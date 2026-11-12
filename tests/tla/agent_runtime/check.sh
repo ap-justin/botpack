@@ -4,7 +4,7 @@
 # config's expected verdict.
 #
 # empty-reply.cfg and empty-reply-deep.cfg are the design and must pass.
-# empty-reply-today.cfg is fx before it, which ended an empty reply that
+# empty-reply-today.cfg is lia before it, which ended an empty reply that
 # stopped for `other` with "Done." (EverySeparateEmptyNudged). Each
 # empty-reply-mutation-*.cfg plants one defect, and the rule it names must
 # catch it:
@@ -16,7 +16,7 @@
 #   nudge-text        a reply with text that stops for other is nudged      NudgeOnlyAfterEmptyOther
 #   summarize-first   "Summarize what you just did." sent instead           EverySeparateEmptyNudged
 #
-# EmptyReplyTrace.tla checks turns of the built fx binary against the model;
+# EmptyReplyTrace.tla checks turns of the built lia binary against the model;
 # tests/tla/drivers/agent_runtime/driver.ts runs it.
 #
 # Needs Java 11+ and tla2tools.jar, as ../README.md describes.

@@ -14,7 +14,7 @@ pub const HelpStyle = command_specs.HelpStyle;
 
 const json_option = command_specs.OptionDoc{ .flag = "--json", .description = "Emit machine-readable JSON instead of text" };
 
-/// Options for `fx ask`. `cli_ask` parses against this list and its help is
+/// Options for `lia ask`. `cli_ask` parses against this list and its help is
 /// rendered from it, so the two can't disagree.
 /// Options for local commands that only take `--json`.
 pub const json_only_options = [_]command_specs.OptionDoc{json_option};
@@ -52,17 +52,17 @@ const workspace_subcommands = [_]command_specs.SubcommandDoc{
 
 const config_subcommands = [_]command_specs.SubcommandDoc{
     .{ .usage = "list", .description = "List the values set in each settings file (default)", .options = &config_options },
-    .{ .usage = "get <key>", .description = "Print the value fx uses for a setting", .options = &config_options },
-    .{ .usage = "set <key> <value>", .description = "Save a preference in ~/.fx/settings.json", .settable_key = true },
-    .{ .usage = "unset <key>", .description = "Remove a preference from ~/.fx/settings.json", .settable_key = true },
-    .{ .usage = "schema", .description = "Print the JSON Schema for ~/.fx/settings.json", .options = &config_schema_options },
+    .{ .usage = "get <key>", .description = "Print the value lia uses for a setting", .options = &config_options },
+    .{ .usage = "set <key> <value>", .description = "Save a preference in ~/.lia/settings.json", .settable_key = true },
+    .{ .usage = "unset <key>", .description = "Remove a preference from ~/.lia/settings.json", .settable_key = true },
+    .{ .usage = "schema", .description = "Print the JSON Schema for ~/.lia/settings.json", .options = &config_schema_options },
 };
 
 const config_schema_options = [_]command_specs.OptionDoc{
-    .{ .flag = "--project", .description = "Print the schema for a project .fx.json instead" },
+    .{ .flag = "--project", .description = "Print the schema for a project .lia.json instead" },
 };
 
-/// Every flag `fx config` parses: its own and `schema --project`.
+/// Every flag `lia config` parses: its own and `schema --project`.
 pub const config_parse_options = config_options ++ config_schema_options;
 
 const config_options = [_]command_specs.OptionDoc{
@@ -92,7 +92,7 @@ pub const pr_options = agentRunOptions("this request", .with_provider_order);
 
 const issue_options = agentRunOptions("this request", .with_provider_order);
 
-/// `fx mcp list` options; `fx mcp --help` shows them in its usage line.
+/// `lia mcp list` options; `lia mcp --help` shows them in its usage line.
 const mcp_subcommands = [_]command_specs.SubcommandDoc{
     .{ .usage = "list", .description = "List configured servers; never connects", .options = &mcp_list_options },
     .{ .usage = "show NAME", .description = "Connect to a server: status, version, and tools", .options = &mcp_show_options },
@@ -109,7 +109,7 @@ const mcp_subcommands = [_]command_specs.SubcommandDoc{
     .{ .usage = "reject NAME", .description = "Reject a project server" },
     .{
         .usage = "call TOOL [JSON | -]",
-        .description = "Run an MCP tool from a command fx's shell tool runs",
+        .description = "Run an MCP tool from a command lia's shell tool runs",
         .subcommands = &.{
             .{ .usage = "list SERVER", .description = "List a server's tools" },
             .{ .usage = "search QUERY...", .description = "Find the tools that match QUERY" },
@@ -118,13 +118,13 @@ const mcp_subcommands = [_]command_specs.SubcommandDoc{
     },
 };
 
-// The flags of the `fx mcp` and `/mcp` verbs, which `src/core/mcp_host/verbs.zig`
+// The flags of the `lia mcp` and `/mcp` verbs, which `src/core/mcp_host/verbs.zig`
 // parses and completion offers.
 
-/// `--global` names ~/.fx/mcp.json, the default, and `--project` the
+/// `--global` names ~/.lia/mcp.json, the default, and `--project` the
 /// project's .mcp.json. `--profile` is the older name for `--global`.
 pub const mcp_scope_options = [_]command_specs.OptionDoc{
-    .{ .flag = "--global", .description = "Use ~/.fx/mcp.json, the default" },
+    .{ .flag = "--global", .description = "Use ~/.lia/mcp.json, the default" },
     .{ .flag = "--profile", .description = "Older name for --global", .hidden = true },
     .{ .flag = "--project", .description = "Use the project's .mcp.json" },
 };
@@ -154,16 +154,16 @@ const builtin_providers = [_][]const u8{"gateway"};
 const ProviderOrder = enum { with_provider_order, without_provider_order };
 
 /// The flags that shape an agent run, the same on every command that runs the
-/// agent: `fx ask`, `fx pr`, `fx issue`, and `fx acp`. `scope` names what they
+/// agent: `lia ask`, `lia pr`, `lia issue`, and `lia acp`. `scope` names what they
 /// shape, such as "this request". `src/core/cli/agent_run_flags.zig` parses
-/// them. `fx acp` leaves out the provider-order flags, because ACP sessions
+/// them. `lia acp` leaves out the provider-order flags, because ACP sessions
 /// don't apply gateway provider routing.
 fn agentRunOptions(comptime scope: []const u8, comptime provider_order: ProviderOrder) [if (provider_order == .with_provider_order) 15 else 12]command_specs.OptionDoc {
     const all = [_]command_specs.OptionDoc{
         .{ .flag = "--permission-mode <mode>", .description = "Set the permission mode for " ++ scope ++ ": ask, auto, or full-access", .values = &permission_modes },
         .{ .flag = "--ask", .description = "Ask before each action that needs permission" },
         .{ .flag = "--auto", .description = "Automatically review unresolved permission requests" },
-        .{ .flag = "--full-access", .description = "Disable fx permission checks" },
+        .{ .flag = "--full-access", .description = "Disable lia permission checks" },
         .{ .flag = "--yolo", .description = "Alias for --full-access" },
         .{ .flag = "--provider <name>", .description = "Override the model provider for " ++ scope ++ " (gateway or a configured name)", .values = &builtin_providers },
         .{ .flag = "--model <id>", .description = "Override the model for " ++ scope },
@@ -190,7 +190,7 @@ pub const ask_options = agentRunOptions("this request", .with_provider_order) ++
     .{ .flag = "--quiet", .description = "Suppress assistant output" },
     .{ .flag = "--prompt-permissions", .description = "Prompt for Y/N permission approval when stdin is a TTY" },
     .{ .flag = "--timeout <seconds>", .description = "Time limit for each shell command the agent runs" },
-    .{ .flag = "--config <key=value>", .description = "Override a setting for this request, with the keys fx config set takes; repeatable" },
+    .{ .flag = "--config <key=value>", .description = "Override a setting for this request, with the keys lia config set takes; repeatable" },
     .{ .flag = "--no-save", .description = "Do not save the session; incompatible with --resume" },
     .{ .flag = "--no-color", .description = "Print the full-access warning on stderr without color; NO_COLOR or TERM=dumb also turns color off" },
     .{ .flag = "--resume <last|<id>>", .description = "Continue the last session or a session by id" },
@@ -265,9 +265,9 @@ pub const top_level_specs = [_]TopLevelSpec{
         .token = "setup",
         // Warns until it is removed.
         .hidden_from_top_level_help = true,
-        .replaced_by = "fx login vercel --api-key",
+        .replaced_by = "lia login vercel --api-key",
         .usage = "setup",
-        .summary = "Paste an AI Gateway API key (deprecated: use fx login vercel --api-key)",
+        .summary = "Paste an AI Gateway API key (deprecated: use lia login vercel --api-key)",
     },
     .{
         .kind = .status,
@@ -286,7 +286,7 @@ pub const top_level_specs = [_]TopLevelSpec{
             "Modes:",
             "  ask          Prompt before sensitive tool calls",
             "  auto         Apply rules, then review unresolved sensitive tool calls (default)",
-            "  full-access  Disable fx permission checks",
+            "  full-access  Disable lia permission checks",
             "",
             "Set the mode for one request with --permission-mode, or with --ask, --auto, or --full-access.",
         },
@@ -295,7 +295,7 @@ pub const top_level_specs = [_]TopLevelSpec{
         .kind = .mcp,
         .token = "mcp",
         .usage = "mcp <command> ...",
-        // `fx mcp -h` is the verbs' own help (`mcp_host/verbs.zig` writeUsage).
+        // `lia mcp -h` is the verbs' own help (`mcp_host/verbs.zig` writeUsage).
         .summary = "Manage MCP servers",
         .subcommands = &mcp_subcommands,
     },
@@ -356,8 +356,8 @@ pub const top_level_specs = [_]TopLevelSpec{
         .summary = "Show your provider's usage and spend",
         .options = &usage_options,
         .details = &.{
-            "With AI Gateway, reads its usage reports: with fx login, your spend on the team and your budget; with an API key, that key's spend.",
-            "Finished days are cached under ~/.fx and fetched at most once a day.",
+            "With AI Gateway, reads its usage reports: with lia login, your spend on the team and your budget; with an API key, that key's spend.",
+            "Finished days are cached under ~/.lia and fetched at most once a day.",
         },
     },
     .{
@@ -377,27 +377,27 @@ pub const top_level_specs = [_]TopLevelSpec{
         .usage = "completion bash|zsh|fish",
         .summary = "Print a shell completion script",
         .subcommands = &.{
-            .{ .usage = "bash", .description = "Load it with: eval \"$(fx completion bash)\"" },
-            .{ .usage = "zsh", .description = "Load it after compinit with: source <(fx completion zsh)" },
-            .{ .usage = "fish", .description = "Load it with: fx completion fish | source" },
+            .{ .usage = "bash", .description = "Load it with: eval \"$(lia completion bash)\"" },
+            .{ .usage = "zsh", .description = "Load it after compinit with: source <(lia completion zsh)" },
+            .{ .usage = "fish", .description = "Load it with: lia completion fish | source" },
         },
         .details = &.{
             "Add the load line to ~/.bashrc, ~/.zshrc, or ~/.config/fish/config.fish to keep it in new shells.",
-            "Tab completes commands, flags, setting keys after fx config get, set, and unset, and fixed flag values.",
+            "Tab completes commands, flags, setting keys after lia config get, set, and unset, and fixed flag values.",
         },
     },
     .{
         .kind = .config,
         .token = "config",
         .usage = "config [list|get <key>|set <key> <value>|unset <key>|schema [--project]] [--global|--workspace] [--show-origin] [--json]",
-        .summary = "Show and change fx settings",
+        .summary = "Show and change lia settings",
         .subcommands = &config_subcommands,
         .options = &config_options,
         .details = &.{
-            "Values come from .fx.json, ~/.fx/settings.json, and this workspace's override in it. When a key repeats, the last line is the one fx uses.",
-            "Keys are dotted, such as sound.turn_end. A flag or an FX_* variable can override a value for one run; fx status shows what a run uses.",
+            "Values come from .lia.json, ~/.lia/settings.json, and this workspace's override in it. When a key repeats, the last line is the one lia uses.",
+            "Keys are dotted, such as sound.turn_end. A flag or an LIA_* variable can override a value for one run; lia status shows what a run uses.",
             "set and unset change plain preferences for every workspace, such as fast_mode, effort, and sound.turn_end. Switches take true or false. Permission, model, provider, and account settings keep their own commands or flags.",
-            "schema prints a JSON Schema that editors use to complete and check ~/.fx/settings.json, and --project prints the one for .fx.json. A file whose \"$schema\" names https://fx.sh/schemas/settings.json or https://fx.sh/schemas/fx.json gets the same check.",
+            "schema prints a JSON Schema that editors use to complete and check ~/.lia/settings.json, and --project prints the one for .lia.json.",
         },
     },
 };
@@ -452,8 +452,8 @@ pub const launch_wide_options = [_]command_specs.OptionDoc{
     .{ .flag = "--no-additional-dirs", .description = "" },
 };
 
-/// The flags `fx` reads before a command, in the form the shared flag parser
-/// reads. `top_level_flags` documents them in `fx --help`, and a test checks
+/// The flags `lia` reads before a command, in the form the shared flag parser
+/// reads. `top_level_flags` documents them in `lia --help`, and a test checks
 /// that the two lists match. The usage line after a launch-flag mistake is
 /// built from this list.
 pub const launch_options = launch_wide_options ++ [_]command_specs.OptionDoc{
@@ -474,11 +474,11 @@ pub const launch_options = launch_wide_options ++ [_]command_specs.OptionDoc{
     .{ .flag = "--yolo", .description = "" },
 };
 
-/// `usage: fx [--context-limit <spec>] ... <command>`, from `launch_options`,
+/// `usage: lia [--context-limit <spec>] ... <command>`, from `launch_options`,
 /// with each `--x` and `--no-x` pair written as `[--x|--no-x]`.
 pub const launch_usage: []const u8 = blk: {
     @setEvalBranchQuota(20_000);
-    var out: []const u8 = "usage: fx";
+    var out: []const u8 = "usage: lia";
     var i: usize = 0;
     while (i < launch_options.len) : (i += 1) {
         const doc = launch_options[i];
@@ -549,27 +549,25 @@ pub const top_level_flags = [_]TopLevelFlag{
     },
     .{
         .usage = "-v, --version",
-        .description = "Print the fx version and exit",
+        .description = "Print the lia version and exit",
     },
 };
 
 pub const top_level_examples = [_]TopLevelExample{
-    .{ .command = "fx ask \"Explain the changes in this repository\"", .description = "Run one request and exit" },
-    .{ .command = "fx status --json", .description = "Inspect the current configuration as JSON" },
+    .{ .command = "lia ask \"Explain the changes in this repository\"", .description = "Run one request and exit" },
+    .{ .command = "lia status --json", .description = "Inspect the current configuration as JSON" },
 };
 
 pub const top_level_notes = [_][]const u8{
-    "Run `fx <command> --help` for command-specific usage and options.",
+    "Run `lia <command> --help` for command-specific usage and options.",
 };
 
-pub const top_level_resources = [_]TopLevelResource{
-    .{ .label = "Learn more about fx:", .value = "https://fx.sh/docs", .link = true },
-};
+pub const top_level_resources = [_]TopLevelResource{};
 
 pub const top_level_registry = TopLevelRegistry{
     .specs = top_level_specs[0..],
     .description = "Fast, native coding agent for the terminal.",
-    .interactive_hint = "fx is a command-line coding agent. Use `fx ask` to run one request, or `fx acp` to serve an editor over the Agent Client Protocol.",
+    .interactive_hint = "lia is a command-line coding agent. Use `lia ask` to run one request, or `lia acp` to serve an editor over the Agent Client Protocol.",
     .help_groups = top_level_help_groups[0..],
     .flags = top_level_flags[0..],
     .examples = top_level_examples[0..],
@@ -601,7 +599,7 @@ pub fn topLevelUsage(kind: TopLevelKind) []const u8 {
     return command_specs.topLevelUsage(top_level_registry, kind);
 }
 
-test "fx config help names settings by their current keys" {
+test "lia config help names settings by their current keys" {
     const settings_keys = @import("../core/config/settings_keys.zig");
     const spec = for (top_level_specs) |spec| {
         if (spec.kind == .config) break spec;
@@ -623,7 +621,7 @@ test "fx config help names settings by their current keys" {
     try std.testing.expect(checked > 0);
 }
 
-test "every launch flag appears in fx --help" {
+test "every launch flag appears in lia --help" {
     const cli_flags = @import("../core/cli/cli_flags.zig");
     outer: for (launch_options) |doc| {
         const name = cli_flags.flagName(doc);
@@ -639,7 +637,7 @@ test "every launch flag appears in fx --help" {
         return error.TestExpectedEqual;
     }
     // And the other way: help shows no launch flag the parser doesn't read,
-    // apart from help and version, which fx reads first.
+    // apart from help and version, which lia reads first.
     for (top_level_flags) |flag| {
         var parts = std.mem.splitSequence(u8, flag.usage, ", ");
         part: while (parts.next()) |part| {
@@ -657,7 +655,7 @@ test "every launch flag appears in fx --help" {
 }
 
 test "the launch usage line pairs each --no- spelling with its flag" {
-    try std.testing.expect(std.mem.startsWith(u8, launch_usage, "usage: fx [--context-limit <spec>] [--add-dir <path>] [--no-additional-dirs] "));
+    try std.testing.expect(std.mem.startsWith(u8, launch_usage, "usage: lia [--context-limit <spec>] [--add-dir <path>] [--no-additional-dirs] "));
     try std.testing.expect(std.mem.find(u8, launch_usage, " [--fast|--no-fast] ") != null);
     try std.testing.expect(std.mem.endsWith(u8, launch_usage, " <command>\n"));
 }

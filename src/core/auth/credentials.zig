@@ -30,8 +30,8 @@ pub fn parseAuthMode(value: ?[]const u8) AuthModeError!AuthMode {
 
 pub const CatalogPublicOnly = union(enum) {
     no_credential,
-    fx_login_team_required,
-    fx_login_refresh_required,
+    lia_login_team_required,
+    lia_login_refresh_required,
     credential_refresh_required: Source,
     credential_refresh_failed: Source,
     authenticated_credential_rejected: Source,
@@ -39,7 +39,7 @@ pub const CatalogPublicOnly = union(enum) {
     fn credentialSource(self: CatalogPublicOnly) ?Source {
         return switch (self) {
             .no_credential => null,
-            .fx_login_team_required, .fx_login_refresh_required => .fx_login,
+            .lia_login_team_required, .lia_login_refresh_required => .fx_login,
             .credential_refresh_required => |source| source,
             .credential_refresh_failed => |source| source,
             .authenticated_credential_rejected => |source| source,
@@ -163,7 +163,7 @@ pub const CatalogAccess = union(enum) {
 pub fn catalogAccessAt(credential: ?Credential, now_ms: i64) CatalogAccess {
     const selected = credential orelse return .{ .public_only = .no_credential };
     if (selected.source == .fx_login and selected.needsRefreshAt(now_ms)) {
-        return .{ .public_only = .fx_login_refresh_required };
+        return .{ .public_only = .lia_login_refresh_required };
     }
     if (sourceRefreshable(selected.source) and selected.needsRefreshAt(now_ms)) {
         return .{ .public_only = .{ .credential_refresh_required = selected.source } };
@@ -209,9 +209,9 @@ pub fn catalogAccessForCredentialAndAccount(
         .configured => return .{ .public_only = .no_credential },
         .fx_login => blk: {
             const team = team_context orelse
-                return .{ .public_only = .fx_login_team_required };
+                return .{ .public_only = .lia_login_team_required };
             if (!types.validGatewayTeam(team))
-                return .{ .public_only = .fx_login_team_required };
+                return .{ .public_only = .lia_login_team_required };
             break :blk .fx_login;
         },
     };
@@ -229,18 +229,18 @@ pub fn catalogAccessForCredentialAndAccount(
 pub const stored_key_backend_label = if (builtin.target.os.tag == .macos) "macOS Keychain" else "profile file";
 
 /// Both modes resolve the same source set; the mode selects only whether an expired
-/// fx login session is refreshed first.
+/// lia login session is refreshed first.
 pub const LoadMode = enum { stored, refresh_if_needed };
 
-const FxLoginRefreshMode = enum { if_needed, force };
+const LiaLoginRefreshMode = enum { if_needed, force };
 
-pub const missing_credential_message = "fx needs access to Vercel AI Gateway. Run fx login to sign in, fx login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.";
-pub const unreadable_store_message = "fx could not read the stored API key from " ++ stored_key_backend_label ++ ". A key may be saved but unreadable. Set FX_TRACE_LOG for the failing step, or set AI_GATEWAY_API_KEY.";
+pub const missing_credential_message = "lia needs access to Vercel AI Gateway. Run lia login to sign in, lia login vercel --api-key to use an API key, or set AI_GATEWAY_API_KEY.";
+pub const unreadable_store_message = "lia could not read the stored API key from " ++ stored_key_backend_label ++ ". A key may be saved but unreadable. Set LIA_TRACE_LOG for the failing step, or set AI_GATEWAY_API_KEY.";
 pub const host_managed_auth_message = "Authentication is managed by the host.";
 
-test "public credential guidance spells fx lowercase" {
-    try std.testing.expect(std.mem.startsWith(u8, missing_credential_message, "fx needs"));
-    try std.testing.expect(std.mem.startsWith(u8, unreadable_store_message, "fx could"));
+test "public credential guidance spells lia lowercase" {
+    try std.testing.expect(std.mem.startsWith(u8, missing_credential_message, "lia needs"));
+    try std.testing.expect(std.mem.startsWith(u8, unreadable_store_message, "lia could"));
 }
 
 test "auth mode accepts only local and host-managed process values" {
@@ -317,11 +317,11 @@ pub const StoredKeyReadStatus = enum {
     unavailable,
 };
 
-/// Why the fx login produced no credential. Only meaningful once resolution has
-/// reached the fx-login step and it stayed silent. `unavailable` means the
+/// Why the lia login produced no credential. Only meaningful once resolution has
+/// reached the lia-login step and it stayed silent. `unavailable` means the
 /// session could not be loaded or its refresh failed, which is different from
 /// having no session at all: the login exists and may still be repairable.
-pub const FxLoginReadStatus = enum {
+pub const LiaLoginReadStatus = enum {
     not_attempted,
     absent,
     unavailable,
@@ -335,7 +335,7 @@ pub const LoadFailure = struct {
 pub const Resolution = struct {
     credential: ?Credential = null,
     stored_key_status: StoredKeyReadStatus = .not_attempted,
-    fx_login_status: FxLoginReadStatus = .not_attempted,
+    lia_login_status: LiaLoginReadStatus = .not_attempted,
     failure: ?LoadFailure = null,
 };
 
@@ -420,18 +420,18 @@ pub fn resolvePreferring(
     // reason to abandon resolution: the sources on either side of it already
     // fall through on failure, and a rejected refresh token must not hide a
     // stored key that works. OutOfMemory stays fatal, as it does for them.
-    var fx_login_status: FxLoginReadStatus = .absent;
+    var lia_login_status: LiaLoginReadStatus = .absent;
     var failure: ?LoadFailure = null;
-    const fx_login = loadFxLoginForPrecedence(alloc, transport, mode) catch |err| blk: {
+    const fx_login = loadLiaLoginForPrecedence(alloc, transport, mode) catch |err| blk: {
         if (err == error.OutOfMemory) return err;
-        fx_login_status = .unavailable;
+        lia_login_status = .unavailable;
         failure = .{ .source = .fx_login, .err = err };
-        debug_trace.logf("auth", "fx login load failed mode={t} err={s}; using precedence", .{ mode, @errorName(err) });
+        debug_trace.logf("auth", "lia login load failed mode={t} err={s}; using precedence", .{ mode, @errorName(err) });
         break :blk null;
     };
     if (fx_login) |credential| return .{ .credential = credential };
 
-    if (secret_store.isDisabled()) return .{ .fx_login_status = fx_login_status, .failure = failure };
+    if (secret_store.isDisabled()) return .{ .lia_login_status = lia_login_status, .failure = failure };
 
     var status: StoredKeyReadStatus = .not_found;
     const stored = loadSource(alloc, transport, secret_store, .stored_key) catch |err| blk: {
@@ -441,13 +441,13 @@ pub fn resolvePreferring(
         debug_trace.logf("auth", "stored key load failed err={s} status={t}", .{ @errorName(err), status });
         break :blk null;
     };
-    if (stored) |credential| return .{ .credential = credential, .fx_login_status = fx_login_status };
-    return .{ .stored_key_status = status, .fx_login_status = fx_login_status, .failure = failure };
+    if (stored) |credential| return .{ .credential = credential, .lia_login_status = lia_login_status };
+    return .{ .stored_key_status = status, .lia_login_status = lia_login_status, .failure = failure };
 }
 
 fn missingExplicitResolution(source: Source) Resolution {
     return switch (source) {
-        .fx_login => .{ .fx_login_status = .absent },
+        .fx_login => .{ .lia_login_status = .absent },
         .stored_key => .{ .stored_key_status = .not_found },
         else => .{},
     };
@@ -455,7 +455,7 @@ fn missingExplicitResolution(source: Source) Resolution {
 
 fn unavailableExplicitResolution(source: Source, err: anyerror) Resolution {
     var resolution: Resolution = switch (source) {
-        .fx_login => .{ .fx_login_status = .unavailable },
+        .fx_login => .{ .lia_login_status = .unavailable },
         .stored_key => .{ .stored_key_status = .unavailable },
         else => .{},
     };
@@ -463,18 +463,18 @@ fn unavailableExplicitResolution(source: Source, err: anyerror) Resolution {
     return resolution;
 }
 
-fn loadFxLoginForPrecedence(
+fn loadLiaLoginForPrecedence(
     alloc: std.mem.Allocator,
     transport: oauth_transport.Provider,
     mode: LoadMode,
 ) !?Credential {
     return switch (mode) {
-        .stored => loadStoredFxLoginCredential(alloc),
-        .refresh_if_needed => loadFxLoginCredential(alloc, transport),
+        .stored => loadStoredLiaLoginCredential(alloc),
+        .refresh_if_needed => loadLiaLoginCredential(alloc, transport),
     };
 }
 
-/// `loadSource` always refreshes an expired fx login, which `.stored` mode
+/// `loadSource` always refreshes an expired lia login, which `.stored` mode
 /// forbids: a diagnostic must not rewrite the session file or make an OAuth
 /// request. Honour the mode for the preferred source too.
 fn loadPreferredSource(
@@ -486,8 +486,8 @@ fn loadPreferredSource(
 ) !?Credential {
     return switch (source) {
         .fx_login => switch (mode) {
-            .stored => loadStoredFxLoginCredential(alloc),
-            .refresh_if_needed => loadFxLoginCredential(alloc, transport),
+            .stored => loadStoredLiaLoginCredential(alloc),
+            .refresh_if_needed => loadLiaLoginCredential(alloc, transport),
         },
         else => loadSource(alloc, transport, secret_store, source),
     };
@@ -502,7 +502,7 @@ pub fn loadSource(
     return switch (source) {
         .vercel_oidc_token => loadEnvCredential(alloc, "VERCEL_OIDC_TOKEN", source),
         .ai_gateway_api_key => loadEnvCredential(alloc, "AI_GATEWAY_API_KEY", source),
-        .fx_login => loadFxLoginCredential(alloc, transport),
+        .fx_login => loadLiaLoginCredential(alloc, transport),
         .stored_key => loadStoredKeyCredential(alloc, secret_store),
         .host_managed, .configured => null,
     };
@@ -617,7 +617,7 @@ fn nonEmptyValue(value: ?[]const u8) ?[]const u8 {
     return raw;
 }
 
-pub fn loadFxLoginCredential(
+pub fn loadLiaLoginCredential(
     alloc: std.mem.Allocator,
     transport: oauth_transport.Provider,
 ) !?Credential {
@@ -626,30 +626,30 @@ pub fn loadFxLoginCredential(
     defer session.deinit(alloc);
 
     if (session.expired(io_mod.milliTimestamp())) {
-        return refreshFxLoginCredentialLocked(alloc, transport, .if_needed);
+        return refreshLiaLoginCredentialLocked(alloc, transport, .if_needed);
     }
 
     return takeCredentialFromSession(&session, null);
 }
 
-fn loadStoredFxLoginCredential(alloc: std.mem.Allocator) !?Credential {
+fn loadStoredLiaLoginCredential(alloc: std.mem.Allocator) !?Credential {
     try requireSourceStorage(.fx_login);
     var session = (try oauth_session.load(alloc)) orelse return null;
     defer session.deinit(alloc);
     return takeCredentialFromSession(&session, null);
 }
 
-pub fn refreshFxLoginCredential(
+pub fn refreshLiaLoginCredential(
     alloc: std.mem.Allocator,
     transport: oauth_transport.Provider,
 ) !?Credential {
-    return refreshFxLoginCredentialLocked(alloc, transport, .force);
+    return refreshLiaLoginCredentialLocked(alloc, transport, .force);
 }
 
-fn refreshFxLoginCredentialLocked(
+fn refreshLiaLoginCredentialLocked(
     alloc: std.mem.Allocator,
     transport: oauth_transport.Provider,
-    mode: FxLoginRefreshMode,
+    mode: LiaLoginRefreshMode,
 ) !?Credential {
     try requireSourceStorage(.fx_login);
     var mutation = (try oauth_session.beginExistingMutation()) orelse return null;
@@ -660,13 +660,13 @@ fn refreshFxLoginCredentialLocked(
 
     var refreshed_at_ms: ?i64 = null;
     if (mode == .force or session.expired(io_mod.milliTimestamp())) {
-        try refreshFxSession(alloc, transport, &mutation, &session);
+        try refreshLiaSession(alloc, transport, &mutation, &session);
         refreshed_at_ms = io_mod.milliTimestamp();
     }
     return takeCredentialFromSession(&session, refreshed_at_ms);
 }
 
-pub fn refreshFxSession(
+pub fn refreshLiaSession(
     alloc: std.mem.Allocator,
     transport: oauth_transport.Provider,
     mutation: *oauth_session.Mutation,
@@ -675,7 +675,7 @@ pub fn refreshFxSession(
     try mutation.requireWritable();
     const issuer_url = session.issuer;
     // Each request to the issuer has its whole budget from a fresh stamp, so
-    // another fx waits for this one however slowly the issuer answers.
+    // another lia waits for this one however slowly the issuer answers.
     mutation.restamp();
     var metadata = try oauth.discover(alloc, transport, issuer_url);
     defer metadata.deinit(alloc);
@@ -690,29 +690,29 @@ pub fn refreshFxSession(
         session.refresh_token,
     ) catch |err| {
         if (err == error.InvalidOAuthResponse) {
-            debug_trace.logf("auth", "retiring fx login session reason={s}", .{@errorName(err)});
-            try retire_fx_session(alloc, mutation);
+            debug_trace.logf("auth", "retiring lia login session reason={s}", .{@errorName(err)});
+            try retire_lia_session(alloc, mutation);
             return error.NoRefreshToken;
         }
         if (refresh_rejection_requires_sign_in(err)) {
-            debug_trace.logf("auth", "retiring terminal fx login session reason={s}", .{@errorName(err)});
-            try retire_fx_session(alloc, mutation);
+            debug_trace.logf("auth", "retiring terminal lia login session reason={s}", .{@errorName(err)});
+            try retire_lia_session(alloc, mutation);
         }
         return err;
     };
     defer refreshed.deinit(alloc);
 
     const rotated_refresh_token = refreshed.refresh_token orelse {
-        debug_trace.logf("auth", "retiring fx login session reason=NoRefreshToken", .{});
-        try retire_fx_session(alloc, mutation);
+        debug_trace.logf("auth", "retiring lia login session reason=NoRefreshToken", .{});
+        try retire_lia_session(alloc, mutation);
         return error.NoRefreshToken;
     };
     const expires_at_ms = oauth.expiryTimestampMs(
         io_mod.milliTimestamp(),
         refreshed.expires_in,
     ) catch |err| {
-        debug_trace.logf("auth", "retiring fx login session reason={s}", .{@errorName(err)});
-        try retire_fx_session(alloc, mutation);
+        debug_trace.logf("auth", "retiring lia login session reason={s}", .{@errorName(err)});
+        try retire_lia_session(alloc, mutation);
         return error.NoRefreshToken;
     };
 
@@ -728,9 +728,9 @@ pub fn refreshFxSession(
         .team_id = session.team_id,
     };
     mutation.save(alloc, replacement) catch |err| {
-        debug_trace.logf("auth", "retiring fx login session after refresh save failed err={s}", .{@errorName(err)});
-        retire_fx_session(alloc, mutation) catch |cleanup_err| {
-            debug_trace.logf("auth", "fx login session retirement failed err={s}", .{@errorName(cleanup_err)});
+        debug_trace.logf("auth", "retiring lia login session after refresh save failed err={s}", .{@errorName(err)});
+        retire_lia_session(alloc, mutation) catch |cleanup_err| {
+            debug_trace.logf("auth", "lia login session retirement failed err={s}", .{@errorName(cleanup_err)});
         };
         return error.OAuthSessionCleanupUncertain;
     };
@@ -765,7 +765,7 @@ fn refresh_rejection_requires_sign_in(err: anyerror) bool {
     };
 }
 
-fn retire_fx_session(
+fn retire_lia_session(
     alloc: std.mem.Allocator,
     mutation: *oauth_session.Mutation,
 ) !void {
@@ -800,7 +800,7 @@ pub fn sourceLabel(source: Source) []const u8 {
     return switch (source) {
         .vercel_oidc_token => "VERCEL_OIDC_TOKEN",
         .ai_gateway_api_key => "AI_GATEWAY_API_KEY",
-        .fx_login => "fx login",
+        .fx_login => "lia login",
         .stored_key => "stored API key (" ++ stored_key_backend_label ++ ")",
         .host_managed => "host managed",
         .configured => "configured provider",
@@ -820,13 +820,13 @@ test "stored key label discloses the backend that answered" {
 }
 
 test "missing credential messages use surface commands in preferred order" {
-    const cli_login = std.mem.find(u8, missing_credential_message, "fx login").?;
-    const cli_api_key = std.mem.find(u8, missing_credential_message, "fx login vercel --api-key").?;
+    const cli_login = std.mem.find(u8, missing_credential_message, "lia login").?;
+    const cli_api_key = std.mem.find(u8, missing_credential_message, "lia login vercel --api-key").?;
     const cli_env = std.mem.find(u8, missing_credential_message, "AI_GATEWAY_API_KEY").?;
 
     try std.testing.expect(cli_login < cli_api_key);
     try std.testing.expect(cli_api_key < cli_env);
-    try std.testing.expect(std.mem.find(u8, missing_credential_message, "fx setup") == null);
+    try std.testing.expect(std.mem.find(u8, missing_credential_message, "lia setup") == null);
     try std.testing.expect(std.mem.find(u8, missing_credential_message, "/login") == null);
     try std.testing.expect(std.mem.find(u8, missing_credential_message, "/provider") == null);
 }
@@ -843,7 +843,7 @@ test "credential gateway team prefers team id" {
     try std.testing.expectEqualStrings("team_123", credential.gatewayTeam().?);
 }
 
-test "selected fx login authorizes its team model catalog" {
+test "selected lia login authorizes its team model catalog" {
     var login = Credential{
         .token = try std.testing.allocator.dupe(u8, "login-token"),
         .source = .fx_login,
@@ -858,7 +858,7 @@ test "selected fx login authorizes its team model catalog" {
     try std.testing.expectEqualStrings("team_123", access.teamContext().?);
 }
 
-test "fx login catalog access requires a fresh credential and selected team" {
+test "lia login catalog access requires a fresh credential and selected team" {
     var login = Credential{
         .token = try std.testing.allocator.dupe(u8, "login-token"),
         .source = .fx_login,
@@ -867,13 +867,13 @@ test "fx login catalog access requires a fresh credential and selected team" {
     defer login.deinit(std.testing.allocator);
 
     const expired = catalogAccessAt(login, 10);
-    try std.testing.expectEqual(CatalogPublicOnlyReason.fx_login_refresh_required, expired.publicOnlyReason().?);
+    try std.testing.expectEqual(CatalogPublicOnlyReason.lia_login_refresh_required, expired.publicOnlyReason().?);
     try std.testing.expect(expired.authorizationCredential() == null);
     try std.testing.expect(expired.teamContext() == null);
 
     login.refresh_after_ms = null;
     const missing_team = catalogAccessAt(login, 10);
-    try std.testing.expectEqual(CatalogPublicOnlyReason.fx_login_team_required, missing_team.publicOnlyReason().?);
+    try std.testing.expectEqual(CatalogPublicOnlyReason.lia_login_team_required, missing_team.publicOnlyReason().?);
     try std.testing.expect(missing_team.authorizationCredential() == null);
     try std.testing.expect(missing_team.teamContext() == null);
 }
@@ -942,8 +942,8 @@ const CredentialTestEnv = struct {
     /// environment, `HOME` included, is absent for the duration of the test.
     /// The Keychain is force-disabled: it is keyed by service and account, not
     /// by `HOME`, so without this a fixture session written under a tmp HOME
-    /// migrates into the developer's real `FX_OAUTH_SESSION_V1` item and
-    /// destroys their fx login.
+    /// migrates into the developer's real `LIA_OAUTH_SESSION_V1` item and
+    /// destroys their lia login.
     fn install(alloc: std.mem.Allocator, entries: []const [2][]const u8) !*CredentialTestEnv {
         const self = try alloc.create(CredentialTestEnv);
         errdefer alloc.destroy(self);
@@ -953,7 +953,7 @@ const CredentialTestEnv = struct {
         };
         errdefer self.map.deinit();
 
-        try self.map.put("FX_DISABLE_KEYCHAIN", "1");
+        try self.map.put("LIA_DISABLE_KEYCHAIN", "1");
         for (entries) |entry| try self.map.put(entry[0], entry[1]);
         io_mod.setEnvironMap(&self.map);
         return self;
@@ -1068,13 +1068,13 @@ test "a remembered choice outranks the environment" {
     try std.testing.expectEqualStrings("api-key", credential.token);
 }
 
-test "a remembered fx login never refreshes in stored mode" {
+test "a remembered lia login never refreshes in stored mode" {
     const alloc = std.testing.allocator;
     const env = try CredentialTestEnv.install(alloc, &.{});
     defer env.deinit();
 
     // No session exists, so both modes resolve to nothing. What matters is the
-    // route taken: `.stored` must reach loadStoredFxLoginCredential, which never
+    // route taken: `.stored` must reach loadStoredLiaLoginCredential, which never
     // performs the network refresh that a diagnostic is forbidden from making.
     for ([_]LoadMode{ .stored, .refresh_if_needed }) |mode| {
         var resolution = try resolvePreferring(alloc, oauth_transport.unavailable_provider, host.unavailable_secret_store, mode, .fx_login);
@@ -1184,9 +1184,9 @@ test "credential resolution preserves unreadable store classification" {
     try std.testing.expectEqual(StoredKeyReadStatus.unavailable, resolution.stored_key_status);
 }
 
-test "a failed fx-login refresh falls through to the stored key" {
+test "a failed lia-login refresh falls through to the stored key" {
     const alloc = std.testing.allocator;
-    var fixture = try ExpiredFxLoginFixture.install(alloc);
+    var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
     var store_fixture = SecretStoreFixture{ .value = "stored-key-that-works" };
 
@@ -1202,13 +1202,13 @@ test "a failed fx-login refresh falls through to the stored key" {
     const credential = resolution.credential orelse return error.TestExpectedCredential;
     try std.testing.expectEqual(Source.stored_key, credential.source);
     try std.testing.expectEqualStrings("stored-key-that-works", credential.token);
-    try std.testing.expectEqual(FxLoginReadStatus.unavailable, resolution.fx_login_status);
+    try std.testing.expectEqual(LiaLoginReadStatus.unavailable, resolution.lia_login_status);
     try std.testing.expectEqual(@as(usize, 1), store_fixture.load_calls);
 }
 
-test "a failed fx-login refresh is still reported when nothing else resolves" {
+test "a failed lia-login refresh is still reported when nothing else resolves" {
     const alloc = std.testing.allocator;
-    var fixture = try ExpiredFxLoginFixture.install(alloc);
+    var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
     var store_fixture = SecretStoreFixture{};
 
@@ -1223,27 +1223,27 @@ test "a failed fx-login refresh is still reported when nothing else resolves" {
     defer if (resolution.credential) |*credential| credential.deinit(alloc);
 
     try std.testing.expect(resolution.credential == null);
-    try std.testing.expectEqual(FxLoginReadStatus.unavailable, resolution.fx_login_status);
+    try std.testing.expectEqual(LiaLoginReadStatus.unavailable, resolution.lia_login_status);
     try std.testing.expectEqual(StoredKeyReadStatus.not_found, resolution.stored_key_status);
 }
 
-/// A HOME holding an fx login whose session is expired and whose refresh token
+/// A HOME holding a lia login whose session is expired and whose refresh token
 /// the issuer rejects, which is what an expired or revoked login looks like on
 /// disk. Paired with `oauth_transport.unavailable_provider`, the refresh fails.
-const ExpiredFxLoginFixture = struct {
+const ExpiredLiaLoginFixture = struct {
     alloc: std.mem.Allocator,
     tmp: std.testing.TmpDir,
     env: *CredentialTestEnv,
     home: []u8,
 
-    fn install(alloc: std.mem.Allocator) !ExpiredFxLoginFixture {
+    fn install(alloc: std.mem.Allocator) !ExpiredLiaLoginFixture {
         var tmp = std.testing.tmpDir(.{});
         errdefer tmp.cleanup();
         const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "");
         errdefer alloc.free(home);
 
-        try tmp.dir.createDirPath(io_mod.getIo(), ".fx");
-        const auth_path = try std.Io.Dir.path.join(alloc, &.{ home, ".fx", "auth.json" });
+        try tmp.dir.createDirPath(io_mod.getIo(), ".lia");
+        const auth_path = try std.Io.Dir.path.join(alloc, &.{ home, ".lia", "auth.json" });
         defer alloc.free(auth_path);
         var file = try std.Io.Dir.createFileAbsolute(io_mod.getIo(), auth_path, .{
             .truncate = true,
@@ -1262,20 +1262,20 @@ const ExpiredFxLoginFixture = struct {
         return .{ .alloc = alloc, .tmp = tmp, .env = env, .home = home };
     }
 
-    fn deinit(self: *ExpiredFxLoginFixture) void {
+    fn deinit(self: *ExpiredLiaLoginFixture) void {
         self.env.deinit();
         self.alloc.free(self.home);
         self.tmp.cleanup();
     }
 };
 
-const FxLoginRefreshProbe = struct {
+const LiaLoginRefreshProbe = struct {
     token_disposition: oauth_transport.Disposition,
     token_body: []const u8,
     auth_path_to_make_read_only: ?[]const u8 = null,
     calls: usize = 0,
 
-    fn provider(self: *FxLoginRefreshProbe) oauth_transport.Provider {
+    fn provider(self: *LiaLoginRefreshProbe) oauth_transport.Provider {
         return .{ .context = self, .execute_fn = execute };
     }
 
@@ -1284,7 +1284,7 @@ const FxLoginRefreshProbe = struct {
         alloc: std.mem.Allocator,
         request: oauth_transport.Request,
     ) !oauth_transport.Response {
-        const self: *FxLoginRefreshProbe = @ptrCast(@alignCast(raw.?));
+        const self: *LiaLoginRefreshProbe = @ptrCast(@alignCast(raw.?));
         const response_body = switch (self.calls) {
             0 => blk: {
                 if (request.method != .get) return error.UnexpectedOAuthRequest;
@@ -1316,18 +1316,18 @@ const FxLoginRefreshProbe = struct {
     }
 };
 
-test "an invalid fx login refresh retires the rejected session" {
+test "an invalid lia login refresh retires the rejected session" {
     const alloc = std.testing.allocator;
-    var fixture = try ExpiredFxLoginFixture.install(alloc);
+    var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
-    var refresh = FxLoginRefreshProbe{
+    var refresh = LiaLoginRefreshProbe{
         .token_disposition = .rejected,
         .token_body = "{\"error\":\"invalid_grant\"}",
     };
 
     try std.testing.expectError(
         error.InvalidGrant,
-        refreshFxLoginCredential(alloc, refresh.provider()),
+        refreshLiaLoginCredential(alloc, refresh.provider()),
     );
     try std.testing.expectEqual(@as(usize, 2), refresh.calls);
 
@@ -1336,16 +1336,16 @@ test "an invalid fx login refresh retires the rejected session" {
     try std.testing.expect(persisted == null);
 }
 
-test "an fx login refresh without a rotated refresh token retires the session" {
+test "a lia login refresh without a rotated refresh token retires the session" {
     const alloc = std.testing.allocator;
-    var fixture = try ExpiredFxLoginFixture.install(alloc);
+    var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
-    var refresh = FxLoginRefreshProbe{
+    var refresh = LiaLoginRefreshProbe{
         .token_disposition = .accepted,
         .token_body = "{\"access_token\":\"new-access\",\"expires_in\":3600,\"scope\":\"openid offline_access\",\"token_type\":\"Bearer\"}",
     };
 
-    if (refreshFxLoginCredential(alloc, refresh.provider())) |maybe_credential| {
+    if (refreshLiaLoginCredential(alloc, refresh.provider())) |maybe_credential| {
         if (maybe_credential) |credential_value| {
             var credential = credential_value;
             credential.deinit(alloc);
@@ -1361,18 +1361,18 @@ test "an fx login refresh without a rotated refresh token retires the session" {
     try std.testing.expect(persisted == null);
 }
 
-test "a malformed successful fx login refresh retires the session" {
+test "a malformed successful lia login refresh retires the session" {
     const alloc = std.testing.allocator;
-    var fixture = try ExpiredFxLoginFixture.install(alloc);
+    var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
-    var refresh = FxLoginRefreshProbe{
+    var refresh = LiaLoginRefreshProbe{
         .token_disposition = .accepted,
         .token_body = "{}",
     };
 
     try std.testing.expectError(
         error.NoRefreshToken,
-        refreshFxLoginCredential(alloc, refresh.provider()),
+        refreshLiaLoginCredential(alloc, refresh.provider()),
     );
     try std.testing.expectEqual(@as(usize, 2), refresh.calls);
 
@@ -1381,13 +1381,13 @@ test "a malformed successful fx login refresh retires the session" {
     try std.testing.expect(persisted == null);
 }
 
-test "an fx login refresh retires the consumed token when durable replacement fails" {
+test "a lia login refresh retires the consumed token when durable replacement fails" {
     const alloc = std.testing.allocator;
-    var fixture = try ExpiredFxLoginFixture.install(alloc);
+    var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
-    const auth_path = try std.Io.Dir.path.join(alloc, &.{ fixture.home, ".fx", "auth.json" });
+    const auth_path = try std.Io.Dir.path.join(alloc, &.{ fixture.home, ".lia", "auth.json" });
     defer alloc.free(auth_path);
-    var refresh = FxLoginRefreshProbe{
+    var refresh = LiaLoginRefreshProbe{
         .token_disposition = .accepted,
         .token_body = "{\"access_token\":\"new-access\",\"refresh_token\":\"rotated-refresh\",\"expires_in\":3600,\"scope\":\"openid offline_access\",\"token_type\":\"Bearer\"}",
         .auth_path_to_make_read_only = auth_path,
@@ -1395,7 +1395,7 @@ test "an fx login refresh retires the consumed token when durable replacement fa
 
     try std.testing.expectError(
         error.OAuthSessionCleanupUncertain,
-        refreshFxLoginCredential(alloc, refresh.provider()),
+        refreshLiaLoginCredential(alloc, refresh.provider()),
     );
     try std.testing.expectEqual(@as(usize, 2), refresh.calls);
 
@@ -1404,9 +1404,9 @@ test "an fx login refresh retires the consumed token when durable replacement fa
     try std.testing.expect(persisted == null);
 }
 
-test "a disabled store still reports why the fx login was silent" {
+test "a disabled store still reports why the lia login was silent" {
     const alloc = std.testing.allocator;
-    var fixture = try ExpiredFxLoginFixture.install(alloc);
+    var fixture = try ExpiredLiaLoginFixture.install(alloc);
     defer fixture.deinit();
     var store_fixture = SecretStoreFixture{ .disabled = true };
 
@@ -1421,7 +1421,7 @@ test "a disabled store still reports why the fx login was silent" {
     defer if (resolution.credential) |*credential| credential.deinit(alloc);
 
     try std.testing.expect(resolution.credential == null);
-    try std.testing.expectEqual(FxLoginReadStatus.unavailable, resolution.fx_login_status);
+    try std.testing.expectEqual(LiaLoginReadStatus.unavailable, resolution.lia_login_status);
     try std.testing.expectEqual(StoredKeyReadStatus.not_attempted, resolution.stored_key_status);
 }
 
@@ -1447,7 +1447,7 @@ test "credential source presence reads metadata without parsing session secrets"
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), ".fx");
+    try tmp.dir.createDirPath(io_mod.getIo(), ".lia");
     const home = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "");
     defer alloc.free(home);
     const env = try CredentialTestEnv.install(alloc, &.{.{ "HOME", home }});
@@ -1463,7 +1463,7 @@ test "credential source presence reads metadata without parsing session secrets"
         var path_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const relative_path = try std.mem.print(
             &path_buffer,
-            ".fx/{s}",
+            ".lia/{s}",
             .{case.file_name},
         );
         var file = try tmp.dir.createFile(io_mod.getIo(), relative_path, .{

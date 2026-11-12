@@ -138,7 +138,7 @@ describe("prompt cache A/B helpers", () => {
   });
 
   test("the fixture is a repository on master with every file committed", () => {
-    const repo = mkdtempSync(join(tmpdir(), "fx-cache-ab-fixture-"));
+    const repo = mkdtempSync(join(tmpdir(), "lia-cache-ab-fixture-"));
     try {
       writeFixtureRepo(repo);
       const branch = Bun.spawnSync(["git", "-C", repo, "branch", "--show-current"]).stdout.toString().trim();
@@ -151,23 +151,23 @@ describe("prompt cache A/B helpers", () => {
   });
 
   test("the config names two absolute binaries, the models, and known scenarios", () => {
-    expect(() => loadCacheAbConfigFromEnv({})).toThrow("FX_CACHE_AB_MODELS");
-    expect(() => loadCacheAbConfigFromEnv({ FX_CACHE_AB_MODELS: "a/b", FX_CACHE_AB_BASELINE_BIN: "fx" })).toThrow("absolute");
+    expect(() => loadCacheAbConfigFromEnv({})).toThrow("LIA_CACHE_AB_MODELS");
+    expect(() => loadCacheAbConfigFromEnv({ LIA_CACHE_AB_MODELS: "a/b", LIA_CACHE_AB_BASELINE_BIN: "lia" })).toThrow("absolute");
     expect(() =>
       loadCacheAbConfigFromEnv({
-        FX_CACHE_AB_MODELS: "a/b",
-        FX_CACHE_AB_SCENARIOS: "nope",
-        FX_CACHE_AB_BASELINE_BIN: process.execPath,
-        FX_CACHE_AB_CANDIDATE_BIN: process.execPath,
+        LIA_CACHE_AB_MODELS: "a/b",
+        LIA_CACHE_AB_SCENARIOS: "nope",
+        LIA_CACHE_AB_BASELINE_BIN: process.execPath,
+        LIA_CACHE_AB_CANDIDATE_BIN: process.execPath,
       }),
     ).toThrow("unknown scenario");
   });
 });
 
-// Live: FX_CACHE_AB_BASELINE_BIN and FX_CACHE_AB_CANDIDATE_BIN name two fx
-// builds, FX_CACHE_AB_MODELS a comma-separated list of models. Billed calls.
+// Live: LIA_CACHE_AB_BASELINE_BIN and LIA_CACHE_AB_CANDIDATE_BIN name two lia
+// builds, LIA_CACHE_AB_MODELS a comma-separated list of models. Billed calls.
 const live =
-  !!process.env.FX_CACHE_AB_BASELINE_BIN && !!process.env.FX_CACHE_AB_CANDIDATE_BIN && !!process.env.FX_CACHE_AB_MODELS;
+  !!process.env.LIA_CACHE_AB_BASELINE_BIN && !!process.env.LIA_CACHE_AB_CANDIDATE_BIN && !!process.env.LIA_CACHE_AB_MODELS;
 
 describe.skipIf(!live)("prompt cache A/B (live models)", () => {
   test(

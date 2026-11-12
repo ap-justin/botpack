@@ -17,7 +17,7 @@ pub fn parseConfig(alloc: std.mem.Allocator, raw: ?[]const u8) !?Config {
     const parsed = try std.json.parseFromSlice(std.json.Value, alloc, raw orelse "{}", .{});
     defer parsed.deinit();
     if (parsed.value != .object) return error.InvalidHooks;
-    const hooks = parsed.value.object.get("hooks") orelse acp_types.fxMetaField(parsed.value.object, "hooks") orelse return null;
+    const hooks = parsed.value.object.get("hooks") orelse acp_types.liaMetaField(parsed.value.object, "hooks") orelse return null;
     if (hooks != .object) return error.InvalidHooks;
     const capture = hooks.object.get("captureContent") orelse return Config{};
     if (capture != .bool) return error.InvalidHooks;

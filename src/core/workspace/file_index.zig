@@ -863,7 +863,7 @@ fn loadGeneration(
     return .ready;
 }
 
-/// `<home>/.fx/file-index/<sha256>.idx`, or null without an absolute home
+/// `<home>/.lia/file-index/<sha256>.idx`, or null without an absolute home
 /// directory. The digest covers the roots and every variable that locates git
 /// config, so a listing built under one config is never reused under another.
 pub fn snapshotPath(alloc: Allocator, roots: []const []const u8) Allocator.Error!?[]const u8 {
@@ -891,7 +891,7 @@ fn snapshotPathIn(
     var sum: [sha256_digest_len]u8 = undefined;
     digest.final(&sum);
     const hex = std.fmt.bytesToHex(sum, .lower);
-    return alloc.print("{s}/.fx/file-index/{s}.idx", .{ home, &hex });
+    return alloc.print("{s}/.lia/file-index/{s}.idx", .{ home, &hex });
 }
 
 /// The trees for the available roots of a scope, in root order. Trees reused
@@ -3280,7 +3280,7 @@ test "persisted file index paints a stale preview and the real scan replaces it"
     // become git-authoritative, and a git failure would replace the walk.
     var random_suffix: [8]u8 = undefined;
     io_mod.getIo().random(&random_suffix);
-    const base = try alloc.print("/tmp/fx-fileidx-{s}", .{std.fmt.bytesToHex(random_suffix, .lower)});
+    const base = try alloc.print("/tmp/lia-fileidx-{s}", .{std.fmt.bytesToHex(random_suffix, .lower)});
     defer alloc.free(base);
     const zio = io_mod.getIo();
     var base_dir = try std.Io.Dir.openDirAbsolute(zio, "/", .{});
@@ -4338,5 +4338,5 @@ test "snapshot path changes with where git config is located" {
     const again = try snapshotPathIn(alloc, "/home/u", &roots, &cases[1]);
     defer alloc.free(again);
     try std.testing.expectEqualStrings(paths[1], again);
-    try std.testing.expect(std.mem.startsWith(u8, again, "/home/u/.fx/file-index/"));
+    try std.testing.expect(std.mem.startsWith(u8, again, "/home/u/.lia/file-index/"));
 }

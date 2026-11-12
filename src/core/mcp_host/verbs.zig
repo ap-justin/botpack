@@ -1,4 +1,4 @@
-//! The MCP verbs. `fx mcp` and `/mcp`
+//! The MCP verbs. `lia mcp` and `/mcp`
 //! parse, run, and print through here, so both say the same things. They
 //! differ only in their surface, which decides `--json`, how `login` waits,
 //! and the name hints use, and in the `Hosts` they hand in.
@@ -34,15 +34,15 @@ pub const Surface = enum {
 
     fn prog(s: Surface) []const u8 {
         return switch (s) {
-            .cli => "fx mcp",
+            .cli => "lia mcp",
             .shell => "/mcp",
         };
     }
 
-    /// `prog` after its article, as said aloud: "an fx mcp", "a /mcp".
+    /// `prog` after its article, as said aloud: "a lia mcp", "a /mcp".
     fn progWithArticle(s: Surface) []const u8 {
         return switch (s) {
-            .cli => "an fx mcp",
+            .cli => "a lia mcp",
             .shell => "a /mcp",
         };
     }
@@ -61,7 +61,7 @@ pub const Command = union(enum) {
     list: struct { json: bool = false },
     show: struct { name: []const u8, json: bool = false },
     /// `login`: sign in to a new HTTP server that needs a login.
-    /// `old_profile`: the older `--profile` named the file, so fx warns.
+    /// `old_profile`: the older `--profile` named the file, so lia warns.
     add: struct { name: []const u8, file: config_file.File, entry: config_file.Entry, login: bool = true, old_profile: bool = false },
     remove: struct { name: []const u8, file: ?config_file.File, old_profile: bool = false },
     login: struct { name: []const u8, browser: bool },
@@ -80,7 +80,7 @@ pub const Parsed = union(enum) {
     moved: []const u8,
 };
 
-/// Reads the arguments after `fx mcp` or `/mcp`. Slices point into `args`
+/// Reads the arguments after `lia mcp` or `/mcp`. Slices point into `args`
 /// or `arena`.
 pub fn parse(arena: Allocator, surface: Surface, args: []const []const u8) Allocator.Error!Parsed {
     const p = surface.prog();
@@ -90,9 +90,9 @@ pub fn parse(arena: Allocator, surface: Surface, args: []const []const u8) Alloc
         if (std.mem.eql(u8, old, "auth")) return moved(arena, "{s} auth is now {s} login NAME.", .{ p, p });
         if (std.mem.eql(u8, old, "trust")) return moved(arena, "{s} trust is now {s} approve NAME and {s} reject NAME.", .{ p, p, p });
         if (std.mem.eql(u8, old, "path")) return moved(arena, "{s} path is gone: {s} list shows each server's file.", .{ p, p });
-        if (std.mem.eql(u8, old, "reload")) return moved(arena, "{s} reload is gone: fx loads MCP config changes at your next prompt or /mcp command.", .{p});
+        if (std.mem.eql(u8, old, "reload")) return moved(arena, "{s} reload is gone: lia loads MCP config changes at your next prompt or /mcp command.", .{p});
         if (std.mem.eql(u8, old, "resource") or std.mem.eql(u8, old, "prompt"))
-            return moved(arena, "{s} {s} is gone: fx doesn't support MCP resources and prompts yet.", .{ p, old });
+            return moved(arena, "{s} {s} is gone: lia doesn't support MCP resources and prompts yet.", .{ p, old });
         const command = surface.progWithArticle();
         if (settings_messages.closest(old, &verb_names)) |near|
             return usage(arena, null, "'{f}' isn't {s} command; did you mean {s}?", .{ text_utils.terminalSafe(old), command, near });
@@ -178,7 +178,7 @@ pub fn parse(arena: Allocator, surface: Surface, args: []const []const u8) Alloc
                 if (pair_flag == .header) return usage(arena, verb, "--header is for HTTP servers; use --env for a command.", .{});
                 return .{ .command = .{ .add = .{ .name = name, .file = file, .entry = .{ .stdio = .{ .command = command[0], .args = command[1..], .env = pairs.items } }, .old_profile = old_profile } } };
             }
-            // fx knows Slack's address, as `add slack` did before.
+            // lia knows Slack's address, as `add slack` did before.
             const url = if (n.len == 1 and std.mem.eql(u8, name, "slack")) slack.server_url else url: {
                 if (n.len != 2) return usage(arena, verb, "{s} add needs a URL, or -- and a command.", .{p});
                 break :url n[1];
@@ -189,7 +189,7 @@ pub fn parse(arena: Allocator, surface: Surface, args: []const []const u8) Alloc
             return .{ .command = .{ .add = .{ .name = name, .file = file, .entry = .{ .http = .{ .url = url, .headers = pairs.items } }, .login = !no_login, .old_profile = old_profile } } };
         },
         .call => {
-            if (surface == .shell) return usage(arena, verb, "/mcp call runs only in a command that fx's shell tool runs: fx mcp call TOOL [JSON].", .{});
+            if (surface == .shell) return usage(arena, verb, "/mcp call runs only in a command that lia's shell tool runs: lia mcp call TOOL [JSON].", .{});
             if (n.len == 0) return usage(arena, verb, "{s} call needs a TOOL, or list, search, or help.", .{p});
             const first = n[0];
             const rest_names = n[1..];
@@ -235,8 +235,8 @@ fn isHelp(a: []const u8) bool {
 
 const Flag = enum { json, connect, global, profile, project, env, header, no_browser, no_login, all };
 
-// Each verb's flags, from the lists `fx mcp --help` and shell completion
-// show. `--global` picks ~/.fx/mcp.json; the older `--profile` still works.
+// Each verb's flags, from the lists `lia mcp --help` and shell completion
+// show. `--global` picks ~/.lia/mcp.json; the older `--profile` still works.
 const scope_options = builtin_commands.mcp_scope_options;
 const list_cli_options = builtin_commands.mcp_list_options;
 const list_shell_options = builtin_commands.mcp_list_shell_options;
@@ -295,7 +295,7 @@ const overview = [_][2][]const u8{
     .{ "logout NAME", "sign out and delete the login" },
     .{ "approve NAME | --all", "approve project servers from .mcp.json" },
     .{ "reject NAME", "reject a project server" },
-    .{ "call TOOL [JSON | -]", "run an MCP tool from a command fx runs" },
+    .{ "call TOOL [JSON | -]", "run an MCP tool from a command lia runs" },
     .{ "call list | search | help", "find MCP tools and their arguments" },
 };
 
@@ -319,7 +319,7 @@ pub fn writeUsage(w: *Writer, surface: Surface, verb: ?Verb) Writer.Error!void {
             \\usage: {s} add [--global | --project] [--no-login] [--header K=V]... NAME URL
             \\       {s} add [--global | --project] [--env K=V]... NAME -- COMMAND [ARGS...]
             \\       {s} add [--global | --project] [--no-login] slack
-            \\  --global    write ~/.fx/mcp.json, the default
+            \\  --global    write ~/.lia/mcp.json, the default
             \\  --project   write ./.mcp.json
             \\  --no-login  don't sign in to an HTTP server that needs a login
             \\
@@ -342,11 +342,11 @@ pub fn writeUsage(w: *Writer, surface: Surface, verb: ?Verb) Writer.Error!void {
             \\  list prints every tool of SERVER and search the tools that best
             \\  match QUERY, one per line: the name, a tab, and the description.
             \\  help prints the arguments TOOL takes and what it does.
-            \\  Works only in a command that fx's shell tool runs, while it runs, and
+            \\  Works only in a command that lia's shell tool runs, while it runs, and
             \\  asks permission as a direct call of TOOL would; list, search, and
             \\  help need none and show only the tools that agent may use.
             \\  Exits 0 on success, 1 when the call fails, 2 for a usage mistake,
-            \\  3 outside a running fx shell call, 4 when too many calls are
+            \\  3 outside a running lia shell call, 4 when too many calls are
             \\  running, 5 when permission is not granted, and 6 when the tool
             \\  returns an error.
             \\
@@ -379,11 +379,11 @@ pub const Context = struct {
     home: []const u8,
     workspace_root: []const u8,
     hosts: Hosts,
-    /// Ends a `show` still connecting, such as when fx quits.
+    /// Ends a `show` still connecting, such as when lia quits.
     cancel: ?*const std.atomic.Value(bool) = null,
 };
 
-/// Runs `fx mcp ARGS` or `/mcp ARGS` and returns the exit code: 0 for
+/// Runs `lia mcp ARGS` or `/mcp ARGS` and returns the exit code: 0 for
 /// success, 1 for a failure, 2 for a usage mistake. `call` has more; see
 /// `mcp_call_client.exit`.
 pub fn run(c: Context, args: []const []const u8) u8 {
@@ -400,8 +400,8 @@ pub fn run(c: Context, args: []const []const u8) u8 {
     return code;
 }
 
-/// `fx mcp list --json` and `show --json` report a usage error as the JSON
-/// other fx commands print for one, on stdout, so a script that asked for
+/// `lia mcp list --json` and `show --json` report a usage error as the JSON
+/// other lia commands print for one, on stdout, so a script that asked for
 /// JSON reads why it failed. Null when the line didn't ask for JSON.
 fn jsonUsageKind(surface: Surface, verb: ?Verb, args: []const []const u8) ?[]const u8 {
     if (surface != .cli) return null;
@@ -417,7 +417,7 @@ fn jsonUsageKind(surface: Surface, verb: ?Verb, args: []const []const u8) ?[]con
     return null;
 }
 
-/// The CLI's JSON usage failure, with the message's `fx mcp list: ` prefix
+/// The CLI's JSON usage failure, with the message's `lia mcp list: ` prefix
 /// dropped as the other commands drop it.
 fn writeJsonUsage(w: *std.Io.Writer, kind: []const u8, prefix: []const u8, message: []const u8) !void {
     const text = if (std.mem.startsWith(u8, message, prefix)) message[prefix.len..] else message;
@@ -450,8 +450,8 @@ fn runParsed(c: Context, arena: Allocator, args: []const []const u8) !u8 {
             return 2;
         },
     };
-    // Every verb but help and call reads or writes under `~/.fx`; call talks
-    // to the running fx over its socket. The shell passes an empty home when
+    // Every verb but help and call reads or writes under `~/.lia`; call talks
+    // to the running lia over its socket. The shell passes an empty home when
     // `io_mod.homeDir` has none, and a path built from it would land under
     // the current folder.
     switch (command) {
@@ -481,11 +481,11 @@ fn runParsed(c: Context, arena: Allocator, args: []const []const u8) !u8 {
     };
 }
 
-// How fx says an MCP file is unusable, after a subject such as "it" or
-// "~/.fx/mcp.json".
+// How lia says an MCP file is unusable, after a subject such as "it" or
+// "~/.lia/mcp.json".
 const not_plain_words = "isn't a plain file; replace it with one";
 const link_loop_words = "is a link that loops or passes through too many links; replace it with a plain file";
-const too_large_words = std.fmt.comptimePrint("is over {d} MB, the most fx reads; make it smaller", .{config_file.max_read_bytes / (1024 * 1024)});
+const too_large_words = std.fmt.comptimePrint("is over {d} MB, the most lia reads; make it smaller", .{config_file.max_read_bytes / (1024 * 1024)});
 
 /// Why a write to `path` failed; a link says what it points to.
 fn whyNot(arena: Allocator, err: anyerror, path: []const u8) ![]const u8 {
@@ -502,13 +502,13 @@ fn whyNot(arena: Allocator, err: anyerror, path: []const u8) ![]const u8 {
         // file such as a fifo.
         const stat = std.Io.Dir.cwd().statFile(io_mod.getIo(), path, .{ .follow_symlinks = false }) catch return describe(err);
         if (stat.kind != .file) return "it " ++ not_plain_words;
-        return "it has another hard link, and fx edits only a plain file; edit it by hand";
+        return "it has another hard link, and lia edits only a plain file; edit it by hand";
     };
     const target = try safe(arena, buffer[0..n]);
-    return try arena.print("it's a link to {s}, and fx edits only a plain file; edit {s} by hand", .{ target, target });
+    return try arena.print("it's a link to {s}, and lia edits only a plain file; edit {s} by hand", .{ target, target });
 }
 
-/// fx's words for an error, never its name.
+/// lia's words for an error, never its name.
 pub fn describe(err: anyerror) []const u8 {
     return switch (err) {
         error.OutOfMemory => "out of memory",
@@ -521,17 +521,17 @@ pub fn describe(err: anyerror) []const u8 {
         error.DurablePathUnsafe => "an MCP config file " ++ not_plain_words,
         error.SymLinkLoop => "an MCP config file " ++ link_loop_words,
         error.StreamTooLong => "an MCP config file " ++ too_large_words,
-        error.Timeout, error.LockTimeout => "another fx is changing the MCP config; try again",
-        error.McpConfigInvalidJson => profile_paths.displayText("~/.fx/mcp.json isn't valid JSON"),
-        error.McpConfigNotPlainFile => profile_paths.displayText("~/.fx/mcp.json " ++ not_plain_words),
-        error.McpConfigLinkLoop => profile_paths.displayText("~/.fx/mcp.json " ++ link_loop_words),
-        error.McpConfigTooLarge => profile_paths.displayText("~/.fx/mcp.json " ++ too_large_words),
-        error.McpConfigInvalidHeaders, error.McpConfigAuthorizationHeader => profile_paths.displayText("a server in ~/.fx/mcp.json has headers fx won't send; put a token in bearer_token_env, or sign in with login"),
-        else => if (isProfileConfigError(err)) profile_paths.displayText("~/.fx/mcp.json has a server entry fx can't read") else "something went wrong",
+        error.Timeout, error.LockTimeout => "another lia is changing the MCP config; try again",
+        error.McpConfigInvalidJson => profile_paths.displayText("~/.lia/mcp.json isn't valid JSON"),
+        error.McpConfigNotPlainFile => profile_paths.displayText("~/.lia/mcp.json " ++ not_plain_words),
+        error.McpConfigLinkLoop => profile_paths.displayText("~/.lia/mcp.json " ++ link_loop_words),
+        error.McpConfigTooLarge => profile_paths.displayText("~/.lia/mcp.json " ++ too_large_words),
+        error.McpConfigInvalidHeaders, error.McpConfigAuthorizationHeader => profile_paths.displayText("a server in ~/.lia/mcp.json has headers lia won't send; put a token in bearer_token_env, or sign in with login"),
+        else => if (isProfileConfigError(err)) profile_paths.displayText("~/.lia/mcp.json has a server entry lia can't read") else "something went wrong",
     };
 }
 
-/// fx's words for an error in ~/.fx/mcp.json itself, for a caller that would
+/// lia's words for an error in ~/.lia/mcp.json itself, for a caller that would
 /// otherwise print the error's name; null for any other error.
 pub fn profileConfigNotice(err: anyerror) ?[]const u8 {
     return if (isProfileConfigError(err)) describe(err) else null;
@@ -552,7 +552,7 @@ fn paths(c: Context, arena: Allocator) !Paths {
 
 fn fileLabel(file: config_file.File) []const u8 {
     return switch (file) {
-        .profile => profile_paths.displayText("~/.fx/mcp.json"),
+        .profile => profile_paths.displayText("~/.lia/mcp.json"),
         .project => ".mcp.json",
     };
 }
@@ -564,7 +564,7 @@ fn sourceFile(status: Status) config_file.File {
 fn list(c: Context, arena: Allocator, json: bool) !u8 {
     const host = try c.hosts.get(c.hosts.context, null);
     defer if (host) |h| c.hosts.release(c.hosts.context, h);
-    // A login another fx saved since counts before statuses are read.
+    // A login another lia saved since counts before statuses are read.
     if (host) |h| h.runtime.pickUpLogins() catch |err| debug_trace.logf("mcp", "MCP saved logins not checked err={s}", .{@errorName(err)});
     const statuses = if (host) |h| try h.runtime.statuses(arena) else &.{};
     if (host) |h| try writeNotes(c, h);
@@ -816,7 +816,7 @@ fn add(c: Context, arena: Allocator, name: []const u8, file: config_file.File, e
     return 0;
 }
 
-/// After `fx mcp add`: connects to the new server and, when it needs a
+/// After `lia mcp add`: connects to the new server and, when it needs a
 /// login, signs in the way `login` does, waiting for the browser. Without a
 /// browser to open, it names the command instead, since taking a pasted
 /// address back is `login`'s. The server stays added whatever happens here.
@@ -857,7 +857,7 @@ fn remove(c: Context, arena: Allocator, name: []const u8, only: ?config_file.Fil
         return 2;
     }
     if (!in_profile and !in_project) {
-        const where = if (only) |f| fileLabel(f) else profile_paths.displayText("~/.fx/mcp.json or .mcp.json");
+        const where = if (only) |f| fileLabel(f) else profile_paths.displayText("~/.lia/mcp.json or .mcp.json");
         try c.err.print("No MCP server named {s} in {s}.\n", .{ try safe(arena, name), where });
         return 1;
     }
@@ -888,7 +888,7 @@ fn remove(c: Context, arena: Allocator, name: []const u8, only: ?config_file.Fil
         };
     }
     c.hosts.changed(c.hosts.context);
-    // The server is gone from the config, but every fx that adds it back
+    // The server is gone from the config, but every lia that adds it back
     // would sign in with the login still saved.
     if (kept) |k| {
         var buffer: [320]u8 = undefined;
@@ -943,7 +943,7 @@ fn trust(c: Context, arena: Allocator, action: project_config.ProjectMcpAction) 
         const target = s.command orelse s.url orelse "";
         const how = if (s.command != null) "runs" else "connects to";
         if (action == .reject) {
-            try c.out.print("{s} {s}. fx won't start it in this project.\n", .{ verb, try safe(arena, s.name) });
+            try c.out.print("{s} {s}. lia won't start it in this project.\n", .{ verb, try safe(arena, s.name) });
         } else {
             try c.out.print("{s} {s}, which {s}: {s}\n", .{ verb, try safe(arena, s.name), how, try safe(arena, target) });
         }
@@ -954,7 +954,7 @@ fn trust(c: Context, arena: Allocator, action: project_config.ProjectMcpAction) 
 /// A sign-in or sign-out that changed nothing, since the saved sign-ins can't
 /// be read.
 fn unreadableLogins(c: Context, arena: Allocator, doing: []const u8, name: []const u8) !u8 {
-    try c.err.print("Can't {s} {s}: fx can't read the saved MCP sign-ins in {s}. A newer fx saved them, or they're damaged; fix or delete them, then try again.\n", .{
+    try c.err.print("Can't {s} {s}: lia can't read the saved MCP sign-ins in {s}. A newer lia saved them, or they're damaged; fix or delete them, then try again.\n", .{
         doing, try safe(arena, name), credentials.Store.detect(arena, c.home).place(),
     });
     return 1;
@@ -977,7 +977,7 @@ fn logout(c: Context, arena: Allocator, name: []const u8) !u8 {
     }
     const was = findStatus(try host.runtime.statuses(arena), name) orelse return missing(c, arena, name);
     const store = credentials.Store.detect(arena, c.home);
-    // There's a login to sign out of when one is saved, by this fx or
+    // There's a login to sign out of when one is saved, by this lia or
     // another, or this session holds one. A running server needn't have one.
     const saved = store.get(arena, server.credentialKey()) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
@@ -1060,10 +1060,10 @@ const Waiter = struct {
     }
 };
 
-/// Whether fx can open a browser here: not over SSH or with
-/// FX_NO_OPEN_BROWSER set, and off macOS only with a display.
+/// Whether lia can open a browser here: not over SSH or with
+/// LIA_NO_OPEN_BROWSER set, and off macOS only with a display.
 pub fn canOpenBrowser() bool {
-    if (io_mod.getenv("FX_NO_OPEN_BROWSER") != null or io_mod.getenv("SSH_CONNECTION") != null) return false;
+    if (io_mod.getenv("LIA_NO_OPEN_BROWSER") != null or io_mod.getenv("SSH_CONNECTION") != null) return false;
     return @import("builtin").target.os.tag == .macos or io_mod.getenv("DISPLAY") != null or io_mod.getenv("WAYLAND_DISPLAY") != null;
 }
 
@@ -1255,18 +1255,18 @@ test "parse reads every verb, with flags before --" {
     try testing.expectEqual(@as(?Verb, .call), (try parseCli(a, &.{ "call", "-h" })).command.help);
 }
 
-test "parse turns fx mcp call mistakes into usage" {
+test "parse turns lia mcp call mistakes into usage" {
     var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
     const cases = [_]struct { args: []const []const u8, message: []const u8 }{
-        .{ .args = &.{"call"}, .message = "fx mcp call needs a TOOL, or list, search, or help." },
-        .{ .args = &.{ "call", "t", "{}", "{}" }, .message = "fx mcp call needs a TOOL and at most one JSON argument." },
-        .{ .args = &.{ "call", "list" }, .message = "fx mcp call list needs one server NAME." },
-        .{ .args = &.{ "call", "list", "a", "b" }, .message = "fx mcp call list needs one server NAME." },
-        .{ .args = &.{ "call", "help" }, .message = "fx mcp call help needs one TOOL." },
-        .{ .args = &.{ "call", "help", "" }, .message = "fx mcp call help needs one TOOL." },
-        .{ .args = &.{ "call", "search", " " }, .message = "fx mcp call search needs a QUERY." },
+        .{ .args = &.{"call"}, .message = "lia mcp call needs a TOOL, or list, search, or help." },
+        .{ .args = &.{ "call", "t", "{}", "{}" }, .message = "lia mcp call needs a TOOL and at most one JSON argument." },
+        .{ .args = &.{ "call", "list" }, .message = "lia mcp call list needs one server NAME." },
+        .{ .args = &.{ "call", "list", "a", "b" }, .message = "lia mcp call list needs one server NAME." },
+        .{ .args = &.{ "call", "help" }, .message = "lia mcp call help needs one TOOL." },
+        .{ .args = &.{ "call", "help", "" }, .message = "lia mcp call help needs one TOOL." },
+        .{ .args = &.{ "call", "search", " " }, .message = "lia mcp call search needs a QUERY." },
     };
     for (cases) |case| try testing.expectEqualStrings(case.message, (try parseCli(a, case.args)).usage.message);
     try testing.expect((try parse(a, .shell, &.{ "call", "list", "linear" })).usage.message.len > 0);
@@ -1282,7 +1282,7 @@ test "list and show report a usage error as JSON only when the line asks for it"
 
     var out: std.Io.Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
-    try writeJsonUsage(&out.writer, "mcp_list", "fx mcp list: ", "fx mcp list: unknown flag --bogus");
+    try writeJsonUsage(&out.writer, "mcp_list", "lia mcp list: ", "lia mcp list: unknown flag --bogus");
     try testing.expectEqualStrings("{\"kind\":\"mcp_list\",\"error\":\"unknown flag --bogus\",\"code\":\"InvalidLocalSurfaceArgs\"}\n", out.written());
 }
 
@@ -1292,29 +1292,29 @@ test "parse turns mistakes into usage, and old verbs into pointers" {
     const a = arena_state.allocator();
 
     const cases = [_]struct { args: []const []const u8, message: []const u8 }{
-        .{ .args = &.{"nope"}, .message = "'nope' isn't an fx mcp command." },
-        .{ .args = &.{"lsit"}, .message = "'lsit' isn't an fx mcp command; did you mean list?" },
-        .{ .args = &.{"show"}, .message = "fx mcp show needs one server NAME." },
-        .{ .args = &.{ "show", "a", "b" }, .message = "fx mcp show needs one server NAME." },
+        .{ .args = &.{"nope"}, .message = "'nope' isn't a lia mcp command." },
+        .{ .args = &.{"lsit"}, .message = "'lsit' isn't a lia mcp command; did you mean list?" },
+        .{ .args = &.{"show"}, .message = "lia mcp show needs one server NAME." },
+        .{ .args = &.{ "show", "a", "b" }, .message = "lia mcp show needs one server NAME." },
         .{ .args = &.{ "add", "bad name", "https://w" }, .message = "'bad name' can't be a server name: use letters, digits, '-' and '_'." },
         .{ .args = &.{ "add", "web", "w.example" }, .message = "'w.example' isn't a URL. A stdio server's command goes after --." },
-        .{ .args = &.{ "add", "web" }, .message = "fx mcp add needs a URL, or -- and a command." },
-        .{ .args = &.{ "add", "web", "--" }, .message = "fx mcp add needs a command after --." },
+        .{ .args = &.{ "add", "web" }, .message = "lia mcp add needs a URL, or -- and a command." },
+        .{ .args = &.{ "add", "web", "--" }, .message = "lia mcp add needs a command after --." },
         .{ .args = &.{ "add", "--env", "A=1", "web", "https://w" }, .message = "--env is for stdio servers; use --header for HTTP." },
         .{ .args = &.{ "add", "--header", "A=1", "web", "--", "node" }, .message = "--header is for HTTP servers; use --env for a command." },
         .{ .args = &.{ "add", "--env", "noequals", "web", "--", "node" }, .message = "--env needs KEY=VALUE." },
         .{ .args = &.{ "remove", "--project", "--profile", "x" }, .message = "Use --project or --global, not both." },
         .{ .args = &.{ "add", "--global", "--project", "web", "https://w/mcp" }, .message = "Use --project or --global, not both." },
-        .{ .args = &.{ "approve", "--all", "x" }, .message = "fx mcp approve takes a NAME or --all, not both." },
-        .{ .args = &.{ "logout", "--json", "x" }, .message = "fx mcp logout: unknown flag --json" },
-        .{ .args = &.{ "show", "x", "--", "y" }, .message = "fx mcp show takes no command after --." },
+        .{ .args = &.{ "approve", "--all", "x" }, .message = "lia mcp approve takes a NAME or --all, not both." },
+        .{ .args = &.{ "logout", "--json", "x" }, .message = "lia mcp logout: unknown flag --json" },
+        .{ .args = &.{ "show", "x", "--", "y" }, .message = "lia mcp show takes no command after --." },
     };
     for (cases) |case| {
         const parsed = try parseCli(a, case.args);
         try testing.expectEqualStrings(case.message, parsed.usage.message);
     }
-    try testing.expectEqualStrings("fx mcp auth is now fx mcp login NAME.", (try parseCli(a, &.{ "auth", "x" })).moved);
-    try testing.expectEqualStrings("/mcp reload is gone: fx loads MCP config changes at your next prompt or /mcp command.", (try parse(a, .shell, &.{"reload"})).moved);
+    try testing.expectEqualStrings("lia mcp auth is now lia mcp login NAME.", (try parseCli(a, &.{ "auth", "x" })).moved);
+    try testing.expectEqualStrings("/mcp reload is gone: lia loads MCP config changes at your next prompt or /mcp command.", (try parse(a, .shell, &.{"reload"})).moved);
     try testing.expectEqualStrings("/mcp list: unknown flag --json", (try parse(a, .shell, &.{ "list", "--json" })).usage.message);
     try testing.expectEqualStrings("'nope' isn't a /mcp command.", (try parse(a, .shell, &.{"nope"})).usage.message);
 }
@@ -1344,7 +1344,7 @@ test "status words follow commands.md, held states first" {
     try testing.expectEqualStrings("waiting for approval", try statusText(a, s));
 }
 
-test "every verb that uses ~/.fx needs an absolute home" {
+test "every verb that uses ~/.lia needs an absolute home" {
     const NoHosts = struct {
         fn get(_: *anyopaque, _: ?runtime_mod.Notify) anyerror!?*Host {
             return null;
@@ -1385,43 +1385,43 @@ test "list lines up its columns and keeps hostile names inert" {
     var out: Writer.Allocating = .init(a);
     try writeList(&out.writer, a, &statuses);
     try testing.expectEqualStrings(
-        \\NAME      SOURCE          TRANSPORT  STATUS
-        \\context7  ~/.fx/mcp.json  http       ready, 2 tools
-        \\x\x1b[2J  .mcp.json       stdio      waiting for approval
+        \\NAME      SOURCE           TRANSPORT  STATUS
+        \\context7  ~/.lia/mcp.json  http       ready, 2 tools
+        \\x\x1b[2J  .mcp.json        stdio      waiting for approval
         \\
     , out.written());
 
     var json: Writer.Allocating = .init(a);
-    try writeListJson(&json.writer, statuses[0..1], .{ .profile = "/h/.fx/mcp.json", .project = "/w/.mcp.json" });
+    try writeListJson(&json.writer, statuses[0..1], .{ .profile = "/h/.lia/mcp.json", .project = "/w/.mcp.json" });
     try testing.expectEqualStrings(
-        \\{"servers":[{"name":"context7","source":"profile","file":"/h/.fx/mcp.json","transport":"http","status":"ready","error":null,"tools":2}]}
+        \\{"servers":[{"name":"context7","source":"profile","file":"/h/.lia/mcp.json","transport":"http","status":"ready","error":null,"tools":2}]}
         \\
     , json.written());
 }
 
-test "an MCP file fx can't read gets fx's words, and only mcp.json's own errors name it" {
+test "an MCP file lia can't read gets lia's words, and only mcp.json's own errors name it" {
     var arena_state: std.heap.ArenaAllocator = .init(testing.allocator);
     defer arena_state.deinit();
     const a = arena_state.allocator();
     try testing.expectEqualStrings(
-        profile_paths.displayText("~/.fx/mcp.json is a link that loops or passes through too many links; replace it with a plain file"),
+        profile_paths.displayText("~/.lia/mcp.json is a link that loops or passes through too many links; replace it with a plain file"),
         profileConfigNotice(error.McpConfigLinkLoop).?,
     );
     try testing.expectEqualStrings(
-        profile_paths.displayText("~/.fx/mcp.json is over 1 MB, the most fx reads; make it smaller"),
+        profile_paths.displayText("~/.lia/mcp.json is over 1 MB, the most lia reads; make it smaller"),
         profileConfigNotice(error.McpConfigTooLarge).?,
     );
     try testing.expectEqualStrings(
-        profile_paths.displayText("~/.fx/mcp.json isn't a plain file; replace it with one"),
+        profile_paths.displayText("~/.lia/mcp.json isn't a plain file; replace it with one"),
         profileConfigNotice(error.McpConfigNotPlainFile).?,
     );
-    try testing.expectEqualStrings(profile_paths.displayText("~/.fx/mcp.json isn't valid JSON"), profileConfigNotice(error.McpConfigInvalidJson).?);
+    try testing.expectEqualStrings(profile_paths.displayText("~/.lia/mcp.json isn't valid JSON"), profileConfigNotice(error.McpConfigInvalidJson).?);
     // The same failures from a file this can't name, such as the project's
     // .mcp.json, keep their own words.
     try testing.expect(profileConfigNotice(error.SymLinkLoop) == null);
     try testing.expect(profileConfigNotice(error.AccessDenied) == null);
     try testing.expectEqualStrings("an MCP config file is a link that loops or passes through too many links; replace it with a plain file", describe(error.SymLinkLoop));
-    try testing.expectEqualStrings("an MCP config file is over 1 MB, the most fx reads; make it smaller", describe(error.StreamTooLong));
+    try testing.expectEqualStrings("an MCP config file is over 1 MB, the most lia reads; make it smaller", describe(error.StreamTooLong));
     try testing.expectEqualStrings("it is a link that loops or passes through too many links; replace it with a plain file", try whyNot(a, error.SymLinkLoop, "/example/.mcp.json"));
-    try testing.expectEqualStrings("it is over 1 MB, the most fx reads; make it smaller", try whyNot(a, error.StreamTooLong, "/example/.mcp.json"));
+    try testing.expectEqualStrings("it is over 1 MB, the most lia reads; make it smaller", try whyNot(a, error.StreamTooLong, "/example/.mcp.json"));
 }

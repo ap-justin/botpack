@@ -1,10 +1,10 @@
 // Shared helpers for the Bun drivers under tests/tla/drivers/: find TLC and
 // Java the same way tests/tla/lib/tlc.sh does, run TLC on a model in a
-// scratch folder, and locate the fx binary under test.
+// scratch folder, and locate the lia binary under test.
 //
 // TLC comes from TLA2TOOLS_JAR or ~/.local/share/tla/tla2tools.jar. Java comes
-// from JAVA_HOME, Homebrew's OpenJDK, or PATH. The binary is FX_BIN, or
-// zig-out/bin/fx in this checkout. Output goes to FX_TLA_OUT, or a fresh folder
+// from JAVA_HOME, Homebrew's OpenJDK, or PATH. The binary is LIA_BIN, or
+// zig-out/bin/lia in this checkout. Output goes to LIA_TLA_OUT, or a fresh folder
 // under the system temp directory.
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -22,20 +22,20 @@ export function sha256Text(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
-/// The fx binary under test. Throws when it has not been built.
-export function fxBin(): string {
-  const bin = process.env.FX_BIN ?? join(REPO_ROOT, "zig-out", "bin", "fx");
-  if (!existsSync(bin)) throw new Error(`missing ${bin}; run zig build first or set FX_BIN`);
+/// The lia binary under test. Throws when it has not been built.
+export function liaBin(): string {
+  const bin = process.env.LIA_BIN ?? join(REPO_ROOT, "zig-out", "bin", "lia");
+  if (!existsSync(bin)) throw new Error(`missing ${bin}; run zig build first or set LIA_BIN`);
   return bin;
 }
 
 /// A new private output folder for one driver run, made by mkdtemp directly
-/// in FX_TLA_OUT or the system temp folder, so another user cannot plant a
+/// in LIA_TLA_OUT or the system temp folder, so another user cannot plant a
 /// file or link where output will be written. The caller owns its contents.
 export function outDir(name: string): string {
-  const base = process.env.FX_TLA_OUT;
+  const base = process.env.LIA_TLA_OUT;
   if (base) mkdirSync(base, { recursive: true });
-  return mkdtempSync(join(base ?? tmpdir(), `fx-tla-${name}-${utcStamp()}-`));
+  return mkdtempSync(join(base ?? tmpdir(), `lia-tla-${name}-${utcStamp()}-`));
 }
 
 export type Toolchain = { java: string; javaVersion: string; jar: string; jarSha256: string };

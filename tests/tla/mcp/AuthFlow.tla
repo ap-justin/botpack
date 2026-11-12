@@ -27,7 +27,7 @@ CONSTANTS
     None,                \* no issuer
     Scopes,
     MaxFlows,            \* sign-ins per run
-    MaxAuthorizations    \* authorization requests per sign-in; fx allows 3
+    MaxAuthorizations    \* authorization requests per sign-in; lia allows 3
 
 ASSUME MaxFlows \in Nat \ {0} /\ MaxAuthorizations \in Nat \ {0} /\ None \notin Issuers
 

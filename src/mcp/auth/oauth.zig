@@ -481,8 +481,8 @@ test "registration, and the client authentication it leads to" {
     defer arena.deinit();
     const a = arena.allocator();
     var out: std.Io.Writer.Allocating = .init(a);
-    try writeRegistration(&out.writer, "fx", "http://127.0.0.1:5000/callback");
-    try testing.expectEqualStrings("{\"client_name\":\"fx\",\"redirect_uris\":[\"http://127.0.0.1:5000/callback\"],\"grant_types\":[\"authorization_code\",\"refresh_token\"],\"response_types\":[\"code\"],\"token_endpoint_auth_method\":\"none\",\"application_type\":\"native\"}", out.written());
+    try writeRegistration(&out.writer, "lia", "http://127.0.0.1:5000/callback");
+    try testing.expectEqualStrings("{\"client_name\":\"lia\",\"redirect_uris\":[\"http://127.0.0.1:5000/callback\"],\"grant_types\":[\"authorization_code\",\"refresh_token\"],\"response_types\":[\"code\"],\"token_endpoint_auth_method\":\"none\",\"application_type\":\"native\"}", out.written());
     const r = try parseRegistration(a, "{\"client_id\":\"c\",\"client_secret\":\"s\",\"token_endpoint_auth_method\":\"client_secret_post\"}");
     try testing.expectEqual(Method.client_secret_post, chooseMethod(r.method, true, "[\"client_secret_basic\"]"));
     try testing.expectEqual(Method.none, chooseMethod(null, false, "[\"client_secret_basic\"]"));
@@ -566,7 +566,7 @@ test "a refresh answer refuses it only for a grant, client or token the server w
     try testing.expect(refreshRefusal(200, "{\"ok\":false}") == null);
     try testing.expect(refreshRefusal(400, "{\"error\":\"\"}") == null);
     try testing.expect(refreshRefusal(400, "{\"error\":7}") == null);
-    // What it names is fx's own copy of the code, with the status: the
+    // What it names is lia's own copy of the code, with the status: the
     // server's bytes never travel further.
     const body = "{\"error\":\"invalid_grant\",\"error_description\":\"Bearer at-secret\"}";
     const refusal = refreshRefusal(400, body).?;

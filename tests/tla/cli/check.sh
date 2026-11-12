@@ -1,6 +1,6 @@
 #!/bin/sh
 # Model-check LaunchSelection, the launch-time --model, --fast, --ultrafast,
-# and --effort handling of `fx` and `fx ask`, and require each config's
+# and --effort handling of `lia` and `lia ask`, and require each config's
 # expected verdict.
 #
 # proposed.cfg and current-holds.cfg must pass. Each current-*.cfg shows a

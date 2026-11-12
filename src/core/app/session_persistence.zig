@@ -861,8 +861,8 @@ pub const Persistence = struct {
     /// The request the resumed session's newest turn left unfinished, which
     /// `startPendingResume` sends again once the worker runs.
     pending_request_resume: ?types.RecoveryResume = null,
-    /// Plain `fx` checks, once its first frame is on screen, whether the
-    /// session `fx -c` opens left a turn unfinished.
+    /// Plain `lia` checks, once its first frame is on screen, whether the
+    /// session `lia -c` opens left a turn unfinished.
     interrupted_turn_hint_pending: bool = false,
     shutdown_failure: ?anyerror = null,
     /// On the heap, so the pointer every session keeps survives `App.init`

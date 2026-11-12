@@ -1,6 +1,6 @@
 ------------------------------ MODULE WiringTrace ------------------------------
 (***************************************************************************)
-(* Trace validation for Wiring.tla, from fx's `wiring` trace lines.        *)
+(* Trace validation for Wiring.tla, from lia's `wiring` trace lines.        *)
 (*                                                                         *)
 (* One trace line per step the adapter logs, in order (`Trace`, from       *)
 (* WiringData.tla): a record [a, s, e] with                                *)

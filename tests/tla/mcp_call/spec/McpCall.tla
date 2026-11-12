@@ -1,6 +1,6 @@
 ------------------------------- MODULE McpCall -------------------------------
 (***************************************************************************)
-(* The `fx mcp call` bridge: how a running fx session takes MCP tool calls *)
+(* The `lia mcp call` bridge: how a running lia session takes MCP tool calls *)
 (* from shell commands. It models the pure core `step(state, event)` in    *)
 (* src/core/mcp_host/mcp_call.zig. The shell around it is                 *)
 (* src/core/mcp_host/mcp_call_bridge.zig; design/FINISH.md lists what is   *)
@@ -17,8 +17,8 @@
 (*   - a client can disconnect at any step, and a reply can be lost;       *)
 (*   - the session can stop, and a subagent can end, mid-call;             *)
 (*   - the process can crash at any step, which drops all core state.      *)
-(* A second process is not modeled: the core lives in one fx process, and  *)
-(* a second fx process has its own bridge, socket, and tokens.             *)
+(* A second process is not modeled: the core lives in one lia process, and  *)
+(* a second lia process has its own bridge, socket, and tokens.             *)
 (*                                                                         *)
 (* open, registered, next, and entries are `abstract(state)` in the code.  *)
 (* out is the effects the step returned, and act is the event the step     *)

@@ -1,5 +1,5 @@
 ---- MODULE HostLifecycle ----
-\* fx's MCP host lifecycle, as the shell runs it.
+\* lia's MCP host lifecycle, as the shell runs it.
 \*
 \* Code (vercel-labs/fx):
 \*   - src/core/app/app_mcp_runtime.zig: loadHost, refreshHost (a check:
@@ -24,7 +24,7 @@
 \*     every engine in the program.
 \*
 \* The config files change through `/mcp` in this session or from outside
-\* it: `fx mcp` in a shell, another fx, an edit. `decision` is the files and
+\* it: `lia mcp` in a shell, another lia, an edit. `decision` is the files and
 \* `loaded` what the host last loaded; the host catches up at the next check.
 \*
 \* One host is one Runtime and its owner thread. A reload takes the changed
@@ -79,7 +79,7 @@ VARIABLES
     stopping,   \* SUBSET (Hosts \X Servers)
     termed,     \* SUBSET (Hosts \X Servers)
     framed,     \* the first frame was drawn
-    quit,       \* fx exited
+    quit,       \* lia exited
     shown,      \* the status line's MCP text, as last refreshed
     refreshed,  \* the step just taken was a status refresh
     heldAt,     \* ghost: [Hosts -> SUBSET Servers] held as of the last reload
@@ -240,7 +240,7 @@ Reload ==
     /\ refreshed' = FALSE
     /\ UNCHANGED <<decision, cur, alive, retired, leases, termed, framed, quit, shown, reloads>>
 
-\* A server whose stdin closed exits (also when fx quit meanwhile).
+\* A server whose stdin closed exits (also when lia quit meanwhile).
 Exit(h, s) ==
     /\ <<h, s>> \in stopping
     /\ stopping' = stopping \ {<<h, s>>}
@@ -248,7 +248,7 @@ Exit(h, s) ==
     /\ UNCHANGED <<decision, cur, alive, retired, leases, st, procs, termed, framed, quit, shown, heldAt, reloads, loaded>>
 
 \* destroyHost at process exit: every server of every host gets SIGTERM and
-\* nothing waits; fx is gone.
+\* nothing waits; lia is gone.
 Quit ==
     /\ ~quit
     /\ quit' = TRUE
@@ -282,7 +282,7 @@ Next ==
     \/ Reload
     \/ Quit
     \/ RefreshStatus
-    \* fx has exited and every server with it: nothing more happens.
+    \* lia has exited and every server with it: nothing more happens.
     \/ (quit /\ Live = {} /\ UNCHANGED vars)
 
 Fairness ==
@@ -328,7 +328,7 @@ OneProcessPerServer ==
 
 \* Only the server a reload changed stops: a running process leaves only
 \* when the host loads a change to its own server's config, when the engine
-\* gives up on it, or when fx quits. A change to the files alone stops
+\* gives up on it, or when lia quits. A change to the files alone stops
 \* nothing.
 KeptServersKeepRunning ==
     [][\A p \in procs : p \notin procs' =>

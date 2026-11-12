@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-export const FX_BIN = resolve(import.meta.dirname, "../../zig-out/bin/fx");
+export const LIA_BIN = resolve(import.meta.dirname, "../../zig-out/bin/lia");
 export const REPO_ROOT = resolve(import.meta.dirname, "../..");
 
 export const EVAL_MODELS = [
@@ -50,7 +50,7 @@ function loadDotEnv(): Record<string, string> {
 export function shouldLoadDotEnv(
   environment: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return environment.FX_E2E_DISABLE_DOTENV !== "1";
+  return environment.LIA_E2E_DISABLE_DOTENV !== "1";
 }
 
 const dotEnvVars = shouldLoadDotEnv() ? loadDotEnv() : {};
@@ -94,8 +94,8 @@ export interface EvalResult {
 
 export interface EvalOptions {
   /**
-   * Wall-clock budget for the whole run. fx is stopped when it runs out, and
-   * the same value is fx's default limit for shell commands.
+   * Wall-clock budget for the whole run. lia is stopped when it runs out, and
+   * the same value is lia's default limit for shell commands.
    */
   timeoutSec?: number;
   cwd?: string;
@@ -103,9 +103,9 @@ export interface EvalOptions {
   setup?: (dir: string) => Promise<void>;
 }
 
-const PREFIX = "fx-eval-";
-const HOME_PREFIX = "fx-eval-home-";
-const TEST_HOME_PREFIX = "fx-test-home-";
+const PREFIX = "lia-eval-";
+const HOME_PREFIX = "lia-eval-home-";
+const TEST_HOME_PREFIX = "lia-test-home-";
 
 export function createWorkDir(): string {
   return mkdtempSync(join(tmpdir(), PREFIX));
@@ -127,9 +127,9 @@ export function cleanupIsolatedTestHome(home: string): void {
 
 function createEvalHome(): string {
   const home = mkdtempSync(join(tmpdir(), HOME_PREFIX));
-  mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+  mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
   writeFileSync(
-    join(home, ".fx", "settings.json"),
+    join(home, ".lia", "settings.json"),
     JSON.stringify({
       permission_mode: "auto",
       permission: {
@@ -157,12 +157,12 @@ export function buildEvalProcessEnv(
     NO_COLOR: "1",
     HOME: home,
     PATH: process.env.PATH ?? "",
-    FX_MODEL: model,
+    LIA_MODEL: model,
   };
 }
 
 export function buildEvalArgs(prompt: string, timeoutSec: number): string[] {
-  // fx reads --timeout in seconds.
+  // lia reads --timeout in seconds.
   return [
     "ask",
     "--auto",
@@ -188,9 +188,9 @@ export async function runEval(
       await setup(workDir);
     }
 
-    if (!existsSync(FX_BIN)) {
+    if (!existsSync(LIA_BIN)) {
       throw new Error(
-        `fx binary not found at ${FX_BIN}. Run 'zig build' first.`,
+        `lia binary not found at ${LIA_BIN}. Run 'zig build' first.`,
       );
     }
 
@@ -203,7 +203,7 @@ export async function runEval(
       timedOut: boolean;
     }>((resolvePromise) => {
       const env = buildEvalProcessEnv(home, model);
-      const child = nodeSpawn(FX_BIN, args, {
+      const child = nodeSpawn(LIA_BIN, args, {
         env,
         cwd: workDir,
         stdio: ["pipe", "pipe", "pipe"],
@@ -217,7 +217,7 @@ export async function runEval(
 
       let timedOut = false;
       const timer = setTimeout(() => {
-        // fx may have exited already with its close event still pending.
+        // lia may have exited already with its close event still pending.
         timedOut =
           child.exitCode === null &&
           child.signalCode === null &&
@@ -237,7 +237,7 @@ export async function runEval(
 
     if (result.timedOut) {
       throw new Error(
-        `fx ask did not finish within ${timeoutSec}s\nstderr: ${result.stderr.slice(-1000)}`,
+        `lia ask did not finish within ${timeoutSec}s\nstderr: ${result.stderr.slice(-1000)}`,
       );
     }
 
@@ -246,7 +246,7 @@ export async function runEval(
       json = JSON.parse(result.stdout.trim());
     } catch {
       throw new Error(
-        `Failed to parse fx JSON output.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+        `Failed to parse lia JSON output.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
       );
     }
 
@@ -268,7 +268,7 @@ export async function runEval(
 
     if (json.error) {
       throw new Error(
-        `fx returned error: ${json.error}\nstderr: ${result.stderr.slice(-1000)}`,
+        `lia returned error: ${json.error}\nstderr: ${result.stderr.slice(-1000)}`,
       );
     }
 
@@ -449,9 +449,9 @@ export function assertFirstTerminalExecMatches(
   expect(pattern.test(first?.command_result?.command ?? "")).toBe(true);
 }
 
-// Generic fx CLI runner for deterministic command coverage.
+// Generic lia CLI runner for deterministic command coverage.
 
-export interface FxRunResult {
+export interface LiaRunResult {
   stdout: string;
   stderr: string;
   code: number | null;
@@ -464,12 +464,12 @@ export interface FxRunResult {
   processStateAfterClose: string;
 }
 
-function captureFxProcessState(): string {
+function captureLiaProcessState(): string {
   try {
     return execFileSync("ps", ["-axo", "pid,ppid,stat,etime,command"], {
       encoding: "utf8",
     }).split("\n").filter((line) =>
-      line.includes("/zig-out/bin/fx") ||
+      line.includes("/zig-out/bin/lia") ||
       line.includes("mcp-modern-") ||
       line.includes("mcp-legacy-") ||
       line.includes("bun test")
@@ -479,7 +479,7 @@ function captureFxProcessState(): string {
   }
 }
 
-export async function runFx(
+export async function runLia(
   args: string[],
   opts: {
     cwd?: string;
@@ -487,14 +487,14 @@ export async function runFx(
     stdin?: string | Uint8Array;
     timeoutMs?: number;
   } = {},
-): Promise<FxRunResult> {
-  if (!existsSync(FX_BIN)) {
-    throw new Error(`fx binary not found at ${FX_BIN}. Run 'zig build' first.`);
+): Promise<LiaRunResult> {
+  if (!existsSync(LIA_BIN)) {
+    throw new Error(`lia binary not found at ${LIA_BIN}. Run 'zig build' first.`);
   }
 
   const { cwd, timeoutMs = 15_000 } = opts;
 
-  return new Promise<FxRunResult>((resolvePromise) => {
+  return new Promise<LiaRunResult>((resolvePromise) => {
     const env: Record<string, string | undefined> = {
       ...dotEnvVars,
       ...process.env,
@@ -509,7 +509,7 @@ export async function runFx(
         env[key] = value;
       }
     }
-    const child = nodeSpawn(FX_BIN, args, {
+    const child = nodeSpawn(LIA_BIN, args, {
       env,
       cwd: cwd ?? REPO_ROOT,
       stdio: ["pipe", "pipe", "pipe"],
@@ -527,7 +527,7 @@ export async function runFx(
     let processStateAtTimeout = "";
     const timer = setTimeout(() => {
       timedOut = true;
-      processStateAtTimeout = captureFxProcessState();
+      processStateAtTimeout = captureLiaProcessState();
       killSent = child.kill("SIGKILL");
     }, timeoutMs);
 
@@ -543,7 +543,7 @@ export async function runFx(
         elapsedMs: performance.now() - startedAtMs,
         pid: child.pid ?? null,
         processStateAtTimeout,
-        processStateAfterClose: code === 0 && !timedOut ? "" : captureFxProcessState(),
+        processStateAfterClose: code === 0 && !timedOut ? "" : captureLiaProcessState(),
       });
     });
   });

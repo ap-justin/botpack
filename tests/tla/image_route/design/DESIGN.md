@@ -1,6 +1,6 @@
 # Design: image route
 
-How fx decides, for each model request, where images go: inline, through the vision tool, or nowhere with a notice. `CONTEXT.md` describes the code on `b0a90fd3a`. Line numbers here refer to that commit too, except those marked "this change", which refer to this branch.
+How lia decides, for each model request, where images go: inline, through the vision tool, or nowhere with a notice. `CONTEXT.md` describes the code on `b0a90fd3a`. Line numbers here refer to that commit too, except those marked "this change", which refer to this branch.
 
 `tests/tla/drivers/image_route/traceability.ts` reads this file. It requires every question below to be answered or listed as not applicable, every rule and law to have a row under Enforcement, and every entry there to name a check that exists.
 
@@ -31,14 +31,14 @@ How fx decides, for each model request, where images go: inline, through the vis
 - Q26: One core state per turn, turns run one at a time per session, and each subagent has its own.
 - Q27: No saved format or protocol changes. `ImageInputSupport` keeps its tags and moves its definition to `image_route.Support` (`model_capabilities.zig:37`, this change). Saved sessions resume unchanged, and their images now reach vision-only models.
 - Q29: `/model` info prints image support (`app_commands.zig:3048-3050`) and now shows `native` for vision-only models. The CLI, TUI, ACP, and libfx share the code. Older releases keep the old rule.
-- Q30: The gateway controls the tags over TLS. A repository cannot set capabilities, because project `.fx.json` accepts no profile-owned keys (`config_runtime.zig` `parseProjectSafeFields`). Tool output reaches the core only as a flag that images exist.
+- Q30: The gateway controls the tags over TLS. A repository cannot set capabilities, because project `.lia.json` accepts no profile-owned keys (`config_runtime.zig` `parseProjectSafeFields`). Tool output reaches the core only as a flag that images exist.
 - Q31: Nowhere. Core events and the trace line hold only model ids and tag names.
 - Q32: No. Images from permission-denied results still never leave the process (`vercel_protocol.zig:691-704`).
 - Q33: Dropping `file_input` from one condition (`model_capabilities.zig:100` on `b0a90fd3a`) fixes the first reported bug. The second, an earlier image blocking every turn, needs the shell to split a request's user images at the turn's own message (`orchestrator.zig` `requestUserImages`) and the core to treat earlier ones as it treats tool images.
 - Q34: The core extraction. Without it the reported bug is still fixed, but Q9's ordering fix has no function to check against a model. The design keeps it for that reason and for G6; see R10.
 - Q35: It reuses the resolver, `projectToolImageMessages`, and the wire encoder. It replaces `visionPolicy` and the inline re-resolve, so no parallel path remains, and it drops both inherited flaws: the `file-input` rule and the late re-resolve. Earlier images reuse the tool image rule (`held`) and the dropped-image note pattern rather than a rule of their own.
 - Q36: Nothing. No setting, override, or provider table.
-- Q37: `tests/e2e/file-tool-paths.test.ts` through the built binary, `sdk/tests/test-agent-images.mjs` through libfx on both backends, the drivers on the real core, the binary stage on `fx ask` turns of the built binary (`binary-to-spec.ts`), `tests/e2e/vision-route-fake-gateway.test.ts` for a resumed turn while the catalog is down, and a live run of the built binary against the gateway (`GOAL.md`, item 6).
+- Q37: `tests/e2e/file-tool-paths.test.ts` through the built binary, `sdk/tests/test-agent-images.mjs` through libfx on both backends, the drivers on the real core, the binary stage on `lia ask` turns of the built binary (`binary-to-spec.ts`), `tests/e2e/vision-route-fake-gateway.test.ts` for a resumed turn while the catalog is down, and a live run of the built binary against the gateway (`GOAL.md`, item 6).
 - Q38: The `vision_policy` trace line logs `image_support`, `route`, `mode`, `pending_images`, `tool_images`, and `earlier_images` for every request, and `image_gate` diagnostics record each failure (`orchestrator.zig:7357-7366`, this change).
 - Q39: Revert the change. No data needs migrating. Reverting `supportFromCatalog` alone (`image_route.zig:47-52`, this change) restores the old rule.
 
@@ -134,7 +134,7 @@ The turn loop in `processQueuedPromptLoop` is the only code that runs effects.
 
 A request's user images are split at the turn's own user message (`orchestrator.zig` `requestUserImages`): `user_images` are the ones attached this turn and `earlier_images` the ones earlier turns left in the history, counting only images the session still holds. Only `user_images` can fail a request (L7). `decision` gives earlier images the tool image rule (`held` in `image_route.zig`), so they go inline to a model listed with vision, through the vision tool's image references on the fallback route, and otherwise leave the request as one note each (`image_attachments.withholdEarlierImages`). A down catalog that withholds them tells the user once per turn (`catalogDownNotice`), and the turn asks the catalog before judging support unknown (L15).
 
-`binary-to-spec.ts` checks this through the built binary: each `fx ask` turn is recorded with the catalog view it saw, the flags the spec says the shell computes from the turn, and what its first request carried, and `BinaryImageRoute.tla` holds every turn to `DecideOut`. On the binary before this change it fails on exactly the text-only turns after an earlier image while the catalog is missing or down.
+`binary-to-spec.ts` checks this through the built binary: each `lia ask` turn is recorded with the catalog view it saw, the flags the spec says the shell computes from the turn, and what its first request carried, and `BinaryImageRoute.tla` holds every turn to `DecideOut`. On the binary before this change it fails on exactly the text-only turns after an earlier image while the catalog is missing or down.
 
 ### Mechanisms added, and the answers that required them
 

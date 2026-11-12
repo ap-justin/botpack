@@ -265,7 +265,7 @@ pub const ActiveSessionState = struct {
     title_task: ?*session_title_generation.Task = null,
     /// The session's MCP servers; null when it has none.
     mcp_host: ?*mcp_host.Host = null,
-    /// Session-scoped client system prompt, appended after fx's instructions.
+    /// Session-scoped client system prompt, appended after lia's instructions.
     /// Owned by the server allocator; empty when the client supplied none.
     client_system_prompt: []u8 = &.{},
     /// MCP identities shown for earlier tool calls, for session/load replay.
@@ -342,7 +342,7 @@ pub const ServerState = struct {
     cfg: Config,
     writer: jsonrpc.Writer,
     initialized: bool = false,
-    /// Selects fx's terminal or embedded base prompt for this connection.
+    /// Selects lia's terminal or embedded base prompt for this connection.
     terminal_ui: bool = true,
     client_fs_read: bool = false,
     client_fs_write: bool = false,
@@ -575,7 +575,7 @@ fn hostManagedCredential() credentials.Credential {
 /// False when the cached credential came from a saved sign-in or key that has
 /// since been removed, so the request reloads instead of sending a token the
 /// user has signed out of. The probe checks presence only: it takes no auth
-/// lock and reads no secret, so a request never waits on another fx
+/// lock and reads no secret, so a request never waits on another lia
 /// process refreshing. A store whose state cannot be determined keeps the
 /// cached credential, since the request itself will say if it is rejected.
 fn cachedCredentialStillStored(secret_store: host_contract.SecretStore, source: ?types.CredentialSource) bool {
@@ -610,7 +610,7 @@ test "a cached stored key is dropped only when the store says it is missing" {
     }
 }
 
-test "a cached fx login is checked by presence, not by reading the saved session" {
+test "a cached lia login is checked by presence, not by reading the saved session" {
     if (comptime @import("builtin").target.os.tag == .windows) return error.SkipZigTest;
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
@@ -620,21 +620,21 @@ test "a cached fx login is checked by presence, not by reading the saved session
     var env = std.process.Environ.Map.init(alloc);
     defer env.deinit();
     try env.put("HOME", home);
-    try env.put("FX_DISABLE_KEYCHAIN", "1");
+    try env.put("LIA_DISABLE_KEYCHAIN", "1");
     io_mod.setEnvironMap(&env);
     defer io_mod.resetEnvironForTest();
     const store = host_contract.unavailable_secret_store;
 
     try std.testing.expect(!cachedCredentialStillStored(store, .fx_login));
 
-    try tmp.dir.createDir(std.testing.io, ".fx", .fromMode(0o700));
+    try tmp.dir.createDir(std.testing.io, ".lia", .fromMode(0o700));
     // Present but unparseable: a load would fail, presence still says present.
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".fx/auth.json", .data = "not a session", .flags = .{ .permissions = .fromMode(0o600) } });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".lia/auth.json", .data = "not a session", .flags = .{ .permissions = .fromMode(0o600) } });
     try std.testing.expect(cachedCredentialStillStored(store, .fx_login));
 
     // Readable by others: presence is unavailable, not missing.
-    try tmp.dir.deleteFile(std.testing.io, ".fx/auth.json");
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".fx/auth.json", .data = "not a session", .flags = .{ .permissions = .fromMode(0o644) } });
+    try tmp.dir.deleteFile(std.testing.io, ".lia/auth.json");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".lia/auth.json", .data = "not a session", .flags = .{ .permissions = .fromMode(0o644) } });
     try std.testing.expect(cachedCredentialStillStored(store, .fx_login));
 }
 
@@ -1116,7 +1116,7 @@ pub fn runWithTransport(
         .cfg = cfg,
         .writer = writer_value,
         .web_search_runtime = web_search_runtime.Runtime.init(.{
-            .provider = cfg.provider_set.gateway.fx_search,
+            .provider = cfg.provider_set.gateway.lia_search,
         }),
         .terminal_client = terminal_client_runtime.Runtime.init(
             cfg.process_provider,
@@ -2036,7 +2036,7 @@ fn writePromptInProgress(state: *ServerState, alloc: Allocator, id: ?jsonrpc.Req
     });
 }
 
-/// Joins a `session/prompt` that sets `_meta.fx.steer` to the running turn at
+/// Joins a `session/prompt` that sets `_meta.lia.steer` to the running turn at
 /// its next safe boundary. The response is deferred until that turn ends. A
 /// prompt without the opt-in keeps the in-progress rejection. Steering closes
 /// only after the turn has fully returned, so joining the finishing worker
@@ -2048,7 +2048,7 @@ fn handleSteeringPrompt(state: *ServerState, alloc: Allocator, msg: *const jsonr
     const parsed = std.json.parseFromSlice(std.json.Value, alloc, params, .{}) catch
         return writePromptInProgress(state, alloc, msg.id);
     defer parsed.deinit();
-    if (parsed.value != .object or !(acp_types.fxMetaBool(parsed.value.object, "steer") orelse false)) {
+    if (parsed.value != .object or !(acp_types.liaMetaBool(parsed.value.object, "steer") orelse false)) {
         return writePromptInProgress(state, alloc, msg.id);
     }
     if (!try requireParsedActiveSessionTarget(state, alloc, msg.id, parsed.value)) return;
@@ -2201,7 +2201,7 @@ fn handleKernelRestore(
             .code = ErrorCode.invalid_params,
             // The host reports a newer checkpoint as it reports a newer journal.
             .message = if (err == error.UnsupportedCheckpointVersion)
-                "libfx checkpoint was written by a newer fx"
+                "libfx checkpoint was written by a newer lia"
             else
                 "Invalid or non-fresh libfx checkpoint",
         });
@@ -2327,7 +2327,7 @@ fn handleKernelJournalOpen(
         }),
         error.UnsupportedJournalVersion => return state.writer.writeError(alloc, msg.id, .{
             .code = ErrorCode.invalid_params,
-            .message = "libfx journal was written by a newer fx",
+            .message = "libfx journal was written by a newer lia",
         }),
         error.OutOfOrderJournalEvent => return state.writer.writeError(alloc, msg.id, .{
             .code = ErrorCode.invalid_params,
@@ -2696,7 +2696,7 @@ fn handleKernelSteer(
             },
         });
     };
-    // While the model streams a reply, the steer cuts it short, as in the fx
+    // While the model streams a reply, the steer cuts it short, as in the lia
     // CLI. The turn shows the steer when a boundary places it.
     if (active.steering.claimInterrupt(&active.cancel_flag)) {
         debug_trace.logf("acp", "libfx steer interrupts the streaming reply bytes={d}", .{text.string.len});
@@ -3030,8 +3030,8 @@ fn cloneMessage(alloc: Allocator, msg: *const jsonrpc.Message) !jsonrpc.Message 
 }
 
 const InitializeRequest = struct {
-    /// False when the client presents fx inside an application rather than a
-    /// terminal, set through `_meta.fx.terminal`.
+    /// False when the client presents lia inside an application rather than a
+    /// terminal, set through `_meta.lia.terminal`.
     terminal_ui: bool = true,
     client_fs_read: bool = false,
     client_fs_write: bool = false,
@@ -3069,7 +3069,7 @@ fn parseInitializeRequest(
         return error.InvalidInitializeParams;
 
     var request = InitializeRequest{
-        .terminal_ui = acp_types.fxMetaBool(parsed.value.object, "terminal") orelse true,
+        .terminal_ui = acp_types.liaMetaBool(parsed.value.object, "terminal") orelse true,
     };
     const capabilities = parsed.value.object.get("clientCapabilities") orelse
         return request;
@@ -3395,7 +3395,7 @@ fn handleInitialize(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Message
         .mcp_servers = state.cfg.allow_acp_mcp,
         .steering = !host_target.is_wasm and !state.cfg.minimal_kernel,
         .system_prompt = !host_target.is_wasm and !state.cfg.minimal_kernel,
-        // fx takes only what ACP v1 defines and fx's MCP engine speaks: stdio and
+        // lia takes only what ACP v1 defines and lia's MCP engine speaks: stdio and
         // HTTP.
         .mcp_over_acp = false,
         .mcp_sse = false,
@@ -3454,7 +3454,7 @@ pub fn validateHeldStartupOverrides(state: *ServerState, alloc: Allocator, msg: 
 
 /// The selected model's capabilities from `provider`'s catalog, loading it
 /// first if needed. A first load whose request cannot connect gives up after
-/// `gateway_provider.catalog_connect_wait_ms`, as `fx ask`'s does, so a
+/// `gateway_provider.catalog_connect_wait_ms`, as `lia ask`'s does, so a
 /// dead network doesn't hold up the reply for the 20 to 30 seconds its DNS
 /// lookup or connect takes to fail (`CapabilityResolver.resolveWithin`).
 fn resolveSelectedModelCapabilities(
@@ -4336,7 +4336,7 @@ fn handleSetConfigOption(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Me
 
 /// Loads the catalog when it is due, before a reply that lists its models. A
 /// due load whose request cannot connect gives up after
-/// `gateway_provider.catalog_connect_wait_ms` and keeps the catalog fx
+/// `gateway_provider.catalog_connect_wait_ms` and keeps the catalog lia
 /// already has (`CapabilityResolver.refreshWithin`), so a dead network does
 /// not hold up the reply, or the prompt sent after it, for the 20 to 30
 /// seconds its DNS lookup or connect takes to fail.
@@ -4727,7 +4727,7 @@ fn selectSessionMode(
 }
 
 /// Saves a chosen permission mode to the profile so new sessions, here and
-/// in other fx processes, start in it. Hosts without a profile keep it for
+/// in other lia processes, start in it. Hosts without a profile keep it for
 /// this process only.
 fn saveSessionPermissionMode(state: *ServerState, alloc: Allocator, mode: types.PermissionMode) void {
     state.permission_mode = mode;
@@ -4754,7 +4754,7 @@ pub const StartingMode = struct {
 };
 
 /// Reads the saved permission mode as it is now, so a running process
-/// follows a mode another fx process saved, and returns the registered mode
+/// follows a mode another lia process saved, and returns the registered mode
 /// that applies it, or the default mode when none does.
 pub fn loadStartingMode(state: *ServerState, alloc: Allocator) StartingMode {
     if (comptime !host_target.is_wasm) {
@@ -4769,7 +4769,7 @@ pub fn loadStartingMode(state: *ServerState, alloc: Allocator) StartingMode {
             }
         }
     }
-    // `fx acp --permission-mode` beats the saved mode, as FX_PERMISSION_MODE does.
+    // `lia acp --permission-mode` beats the saved mode, as LIA_PERMISSION_MODE does.
     if (state.cfg.permission_override) |mode| state.permission_mode = mode;
     return .{
         .id = state.cfg.mode_registry.startingModeId(state.permission_mode),
@@ -4841,9 +4841,9 @@ test "ACP notifications with absent id are not response targets" {
 
 test "ACP authenticate reads the method id" {
     const alloc = std.testing.allocator;
-    const id = try authenticateMethodId(alloc, "{\"methodId\":\"fx-login-api-key\"}");
+    const id = try authenticateMethodId(alloc, "{\"methodId\":\"lia-login-api-key\"}");
     defer alloc.free(id);
-    try std.testing.expectEqualStrings("fx-login-api-key", id);
+    try std.testing.expectEqualStrings("lia-login-api-key", id);
     try std.testing.expectError(error.InvalidParams, authenticateMethodId(alloc, null));
     try std.testing.expectError(error.InvalidParams, authenticateMethodId(alloc, "{}"));
     try std.testing.expectError(error.InvalidParams, authenticateMethodId(alloc, "{\"methodId\":1}"));
@@ -4874,14 +4874,14 @@ test "ACP authenticate accepts the agent and terminal method ids" {
         .cfg = undefined,
         .writer = jsonrpc.Writer.initCallback(&capture, LastFrame.write),
     };
-    for ([_][]const u8{ "fx-login", "fx-login-api-key" }) |method_id| {
+    for ([_][]const u8{ "lia-login", "lia-login-api-key" }) |method_id| {
         const params = try alloc.print("{{\"methodId\":\"{s}\"}}", .{method_id});
         defer alloc.free(params);
         var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "authenticate", .params_raw = params };
         try handleAuthenticate(&state, alloc, &msg);
         try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n", capture.bytes());
     }
-    var unknown = jsonrpc.Message{ .id = .{ .integer = 2 }, .method = "authenticate", .params_raw = "{\"methodId\":\"fx-login-codex\"}" };
+    var unknown = jsonrpc.Message{ .id = .{ .integer = 2 }, .method = "authenticate", .params_raw = "{\"methodId\":\"lia-login-codex\"}" };
     try handleAuthenticate(&state, alloc, &unknown);
     try std.testing.expect(std.mem.find(u8, capture.bytes(), "\"code\":-32602") != null);
 }
@@ -4951,7 +4951,7 @@ test "authenticate during a turn confirms the sign-in and leaves the turn's cred
     defer reapActivePrompt(&state, true);
     const borrowed = state.api_key;
 
-    var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "authenticate", .params_raw = "{\"methodId\":\"fx-login\"}" };
+    var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "authenticate", .params_raw = "{\"methodId\":\"lia-login\"}" };
     try handleAuthenticate(&state, alloc, &msg);
     try std.testing.expectEqualStrings("{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n", capture.bytes());
     try std.testing.expect(state.active_prompt != null);
@@ -5576,7 +5576,7 @@ test "a prompt that needs sign-in answers one AUTH_REQUIRED frame with its notic
     var writer = jsonrpc.Writer.initCallback(&capture, AnswerCapture.write);
 
     answerPrompt(&writer, alloc, .{ .integer = 7 }, .{ .auth_required = .{
-        .message = "fx login authentication failed · HTTP 401",
+        .message = "lia login authentication failed · HTTP 401",
         .offer = .{ .client_terminal_auth = true },
     } }, .{});
     try std.testing.expectEqual(@as(usize, 1), capture.frames.items.len);
@@ -5585,7 +5585,7 @@ test "a prompt that needs sign-in answers one AUTH_REQUIRED frame with its notic
     try std.testing.expectEqual(@as(i64, 7), parsed.value.object.get("id").?.integer);
     const err = parsed.value.object.get("error").?.object;
     try std.testing.expectEqual(@as(i64, ErrorCode.auth_required), err.get("code").?.integer);
-    try std.testing.expectEqualStrings("fx login authentication failed · HTTP 401", err.get("message").?.string);
+    try std.testing.expectEqualStrings("lia login authentication failed · HTTP 401", err.get("message").?.string);
     const methods = err.get("data").?.object.get("authMethods").?.array.items;
     try std.testing.expectEqual(@as(usize, 2), methods.len);
     try std.testing.expectEqualStrings(acp_types.agent_auth_method_id, methods[0].object.get("id").?.string);

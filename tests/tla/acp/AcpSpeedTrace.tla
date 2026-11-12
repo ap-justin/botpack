@@ -1,6 +1,6 @@
 ---------------------------- MODULE AcpSpeedTrace ----------------------------
 (***************************************************************************)
-(* Trace validation: replays one observed run of the real `fx acp` binary *)
+(* Trace validation: replays one observed run of the real `lia acp` binary *)
 (* against AcpSpeed. TraceLog comes from the generated AcpSpeedObs module. *)
 (* Each element is                                                         *)
 (*   [op, arg, ok, speed, hasView, view]                                   *)

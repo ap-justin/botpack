@@ -23,7 +23,7 @@ export function createConfiguredProviderFixture(respond?: (body: any) => Respons
   const home = realpathSync(createIsolatedTestHome());
   const workspace = join(home, "workspace");
   mkdirSync(workspace);
-  mkdirSync(join(home, ".fx"), { mode: 0o700 });
+  mkdirSync(join(home, ".lia"), { mode: 0o700 });
   const requests: Array<{ path: string; authorization: string | null; body: any }> = [];
   const server = Bun.serve({
     hostname: "127.0.0.1", port: 0,
@@ -35,23 +35,23 @@ export function createConfiguredProviderFixture(respond?: (body: any) => Respons
       return respond ? respond(body) : completion((body as any).model);
     },
   });
-  const settingsPath = join(home, ".fx", "settings.json");
+  const settingsPath = join(home, ".lia", "settings.json");
   const settings = {
     provider: "local", auto_upgrade: false, permission_mode: "ask",
     providers: {
       local: { protocol: "openai-chat-completions", base_url: `http://127.0.0.1:${server.port}/v1`, auth: { type: "none" }, model_metadata: { "local-model": { context_window: 262144, max_output_tokens: 8192, supports_tool_use: true } } },
-      remote: { protocol: "openai-chat-completions", base_url: `http://127.0.0.1:${server.port}/v1`, auth: { type: "bearer", env: "FX_TEST_PROVIDER_TOKEN" }, model_metadata: { "remote-model": { context_window: 262144, max_output_tokens: 8192, supports_tool_use: true } } },
+      remote: { protocol: "openai-chat-completions", base_url: `http://127.0.0.1:${server.port}/v1`, auth: { type: "bearer", env: "LIA_TEST_PROVIDER_TOKEN" }, model_metadata: { "remote-model": { context_window: 262144, max_output_tokens: 8192, supports_tool_use: true } } },
     },
     models: { local: "local-model", remote: "remote-model" },
   };
   const save = () => writeFileSync(settingsPath, JSON.stringify(settings), { mode: 0o600 });
   save();
   const env = {
-    HOME: home, FX_PROVIDER: undefined, FX_MODEL: undefined, FX_AUTH_MODE: undefined,
+    HOME: home, LIA_PROVIDER: undefined, LIA_MODEL: undefined, LIA_AUTH_MODE: undefined,
     AI_GATEWAY_API_KEY: "unrelated-gateway-token", VERCEL_OIDC_TOKEN: undefined,
-    FX_GATEWAY_CHAT_URL: `http://127.0.0.1:${server.port}/unexpected-gateway`,
-    FX_GATEWAY_BASE_URL: `http://127.0.0.1:${server.port}/unexpected-gateway`,
-    FX_TEST_PROVIDER_TOKEN: "own-provider-token", FX_AUTO_UPGRADE: "0", FX_SOUND: "0", NO_COLOR: "1",
+    LIA_GATEWAY_CHAT_URL: `http://127.0.0.1:${server.port}/unexpected-gateway`,
+    LIA_GATEWAY_BASE_URL: `http://127.0.0.1:${server.port}/unexpected-gateway`,
+    LIA_TEST_PROVIDER_TOKEN: "own-provider-token", LIA_AUTO_UPGRADE: "0", LIA_SOUND: "0", NO_COLOR: "1",
   };
   return { home, workspace, requests, env, settings, settingsPath, save, close() { server.stop(true); cleanupIsolatedTestHome(home); } };
 }

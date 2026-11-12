@@ -1,6 +1,6 @@
-// Drives the real fx binary with every shell call the TLA+ model covers and
-// records what fx actually did. No model calls: a local fake Gateway serves
-// exact argument bytes, so shapes such as invalid JSON reach fx unchanged.
+// Drives the real lia binary with every shell call the TLA+ model covers and
+// records what lia actually did. No model calls: a local fake Gateway serves
+// exact argument bytes, so shapes such as invalid JSON reach lia unchanged.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ObservedCall, ObservedTurn } from "./bridge";
@@ -25,7 +25,7 @@ const EQ_BASH_LINES = ["before", "=====", "a", "after"];
 const TYPED = "FXT_TYPED\n";
 const BASH = { kind: "executable", path: "/bin/bash" };
 
-/** fx's current advertised fields, with action. */
+/** lia's current advertised fields, with action. */
 function today(intent: string, sid: string): Record<string, unknown> {
   switch (intent) {
     case "run": return { action: "run", command: MARK };
@@ -104,7 +104,7 @@ function parts(body: string): any[] {
   return prompt.flatMap((m: any) => Array.isArray(m.content) ? m.content : []);
 }
 
-/** What fx did, read from the tool result body. */
+/** What lia did, read from the tool result body. */
 export function interpret(body: string, sid: string | null): Pick<ObservedCall, "executed" | "decoded" | "outcome"> {
   let value: any;
   try { value = JSON.parse(body); } catch { return { executed: null, decoded: "unknown", outcome: "unknown" }; }
@@ -128,7 +128,7 @@ export function interpret(body: string, sid: string | null): Pick<ObservedCall, 
   }
   const shell = /FXT:(bash|zsh)\b/.exec(output)?.[1];
   if (!shell) return { executed: true, decoded: "unknown", outcome: "ok" };
-  // Inside a fx TTY run the command's stdout is not a terminal, so read the backend.
+  // Inside a lia TTY run the command's stdout is not a terminal, so read the backend.
   const tty = value.backend === "tty";
   const decoded = shell === "bash" ? (tty ? "run_bash_tty" : "run_bash") : (tty ? "run_tty" : "run");
   return { executed: true, decoded, outcome: "ok" };
@@ -136,7 +136,7 @@ export function interpret(body: string, sid: string | null): Pick<ObservedCall, 
 
 function sessionResults(home: string): Map<string, string> {
   const results = new Map<string, string>();
-  const root = join(home, ".fx", "sessions", "v2");
+  const root = join(home, ".lia", "sessions", "v2");
   for (const id of existsSync(root) ? readdirSync(root) : []) {
     const log = join(root, id, "log.jsonl");
     if (!existsSync(log)) continue;
@@ -160,7 +160,7 @@ export async function runTurn(ctx: RunContext, spec: TurnSpec): Promise<Observed
   const slug = spec.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
   const root = mkdtempSync(join(ctx.artifacts, `${slug}-`));
   const home = join(root, "home"), cwd = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true, mode: 0o700 });
+  mkdirSync(join(home, ".lia"), { recursive: true, mode: 0o700 });
   mkdirSync(cwd);
   const needsSession = spec.calls.some((c) => SESSION_INTENTS.has(c.intent) || c.shape.startsWith("both_"));
   const offset = needsSession ? 1 : 0;
@@ -190,11 +190,11 @@ export async function runTurn(ctx: RunContext, spec: TurnSpec): Promise<Observed
   });
   const env = {
     PATH: "/usr/bin:/bin:/usr/sbin:/sbin", HOME: home, TMPDIR: root, SHELL: "/bin/zsh", LANG: "en_US.UTF-8",
-    AI_GATEWAY_API_KEY: "synthetic-shell-contract", FX_DISABLE_KEYCHAIN: "1", FX_E2E_DISABLE_DOTENV: "1",
-    FX_TEST_SKIP_ONBOARDING: "1", FX_SOUND: "0", FX_AUTO_UPGRADE: "0", FX_MODEL: helpers.FAKE_GATEWAY_MODEL,
-    FX_GATEWAY_BASE_URL: gateway.baseUrl, FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
-    FX_TRACE_LOG: join(root, "trace.log"), FX_TRACE_SCOPES: "tool,terminal",
+    AI_GATEWAY_API_KEY: "synthetic-shell-contract", LIA_DISABLE_KEYCHAIN: "1", LIA_E2E_DISABLE_DOTENV: "1",
+    LIA_TEST_SKIP_ONBOARDING: "1", LIA_SOUND: "0", LIA_AUTO_UPGRADE: "0", LIA_MODEL: helpers.FAKE_GATEWAY_MODEL,
+    LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+    LIA_TRACE_LOG: join(root, "trace.log"), LIA_TRACE_SCOPES: "tool,terminal",
   };
   const child = Bun.spawn([ctx.binary, "ask", "--json", "--full-access", "fixture"], {
     cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe",
@@ -221,13 +221,13 @@ export async function runTurn(ctx: RunContext, spec: TurnSpec): Promise<Observed
       resultBody,
     } as ObservedCall;
   });
-  // final: fx asked again after the last served call and got the final text.
-  // guard: fx stopped after the last served call and reported its loop guard.
+  // final: lia asked again after the last served call and got the final text.
+  // guard: lia stopped after the last served call and reported its loop guard.
   const askedAfterLast = requests.length > offset + sent.length;
-  // fx ask --json reports the stop as a stderr notice.
+  // lia ask --json reports the stop as a stderr notice.
   const guardReported = stderr.includes(LOOP_STOP) || stdout.includes(LOOP_STOP) ||
-    existsSync(join(home, ".fx", "sessions")) && readdirSync(join(home, ".fx", "sessions")).some((id) => {
-      const events = join(home, ".fx", "sessions", id, "events.jsonl");
+    existsSync(join(home, ".lia", "sessions")) && readdirSync(join(home, ".lia", "sessions")).some((id) => {
+      const events = join(home, ".lia", "sessions", id, "events.jsonl");
       return existsSync(events) && readFileSync(events, "utf8").includes(LOOP_STOP);
     });
   const ended: ObservedTurn["ended"] = expired || exitCode === null ? "unknown"

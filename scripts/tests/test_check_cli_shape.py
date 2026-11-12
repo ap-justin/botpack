@@ -62,7 +62,7 @@ fn wantsJson(args: []const []const u8) bool {
 
 test "tests may use odd arguments" {
     _ = "--Weird_Flag";
-    _ = "FX_ONLY_IN_TESTS";
+    _ = "LIA_ONLY_IN_TESTS";
     _ = std.mem.eql(u8, arg, "--only-in-tests");
     _ = .{ .text = "}" };
 }
@@ -104,13 +104,13 @@ fn handleSetConfigOption() void {
 """
 
 ENV = """\
-const model = io_mod.getenv("FX_MODEL");
+const model = io_mod.getenv("LIA_MODEL");
 const home = io_mod.getenv("HOME");
 """
 
 ENV_SETTINGS = """\
 pub fn collect(arena: Allocator) ![]Override {
-    if (getenv("FX_MODEL")) |value| try list.append(arena, .{ .variable = "FX_MODEL", .key = "model", .value = value });
+    if (getenv("LIA_MODEL")) |value| try list.append(arena, .{ .variable = "LIA_MODEL", .key = "model", .value = value });
     return list.toOwnedSlice(arena);
 }
 """
@@ -118,12 +118,12 @@ pub fn collect(arena: Allocator) ![]Override {
 
 def registry() -> dict:
     return {
-        "env": {"FX_MODEL": {"job": "setting-override", "stability": "stable"}},
+        "env": {"LIA_MODEL": {"job": "setting-override", "stability": "stable"}},
         "not_env": {},
         "external_env": ["HOME"],
         "hand_parsed_flags": {"--json": "picks the error format"},
         "run_options": {
-            "model": {"flag": "--model", "setting": "model", "env": "FX_MODEL", "acp": "model"},
+            "model": {"flag": "--model", "setting": "model", "env": "LIA_MODEL", "acp": "model"},
         },
         "exceptions": {"flag_names": {}, "setting_keys": {}},
     }
@@ -174,45 +174,45 @@ class CheckCliShapeTests(unittest.TestCase):
         self.assertEqual([], self.run_check())
 
     def test_unregistered_env_var_fails(self) -> None:
-        self.files["src/env.zig"] += 'const extra = io_mod.getenv("FX_FAST_DIFF");\n'
+        self.files["src/env.zig"] += 'const extra = io_mod.getenv("LIA_FAST_DIFF");\n'
         problems = self.run_check()
-        self.assertOnly(problems, "env", "FX_FAST_DIFF is not in")
+        self.assertOnly(problems, "env", "LIA_FAST_DIFF is not in")
         self.assertEqual(("src/env.zig", 3), (problems[0].path, problems[0].number))
 
     def test_env_name_read_through_a_constant_still_counts(self) -> None:
-        self.files["src/env.zig"] += 'const name = "FX_HIDDEN";\nconst value = io_mod.getenv(name);\n'
-        self.assertOnly(self.run_check(), "env", "FX_HIDDEN is not in")
+        self.files["src/env.zig"] += 'const name = "LIA_HIDDEN";\nconst value = io_mod.getenv(name);\n'
+        self.assertOnly(self.run_check(), "env", "LIA_HIDDEN is not in")
 
     def test_not_env_literal_is_accepted_and_stale_entries_fail(self) -> None:
-        self.files["src/env.zig"] += 'const service = "FX_KEYCHAIN_SERVICE";\n'
-        self.registry["not_env"] = {"FX_KEYCHAIN_SERVICE": "keychain service name"}
+        self.files["src/env.zig"] += 'const service = "LIA_KEYCHAIN_SERVICE";\n'
+        self.registry["not_env"] = {"LIA_KEYCHAIN_SERVICE": "keychain service name"}
         self.assertEqual([], self.run_check())
-        self.registry["not_env"]["FX_GONE"] = "no longer used"
-        self.assertOnly(self.run_check(), "env", "not_env lists FX_GONE")
+        self.registry["not_env"]["LIA_GONE"] = "no longer used"
+        self.assertOnly(self.run_check(), "env", "not_env lists LIA_GONE")
 
     def test_stale_and_malformed_env_entries_fail(self) -> None:
-        self.registry["env"]["FX_TEST_GONE"] = {"job": "test", "stability": "internal"}
-        self.assertOnly(self.run_check(), "env", "FX_TEST_GONE is registered but no longer appears")
-        del self.registry["env"]["FX_TEST_GONE"]
-        self.registry["env"]["FX_MODEL"]["job"] = "setting"
-        self.assertOnly(self.run_check(), "env", "FX_MODEL has job 'setting'")
+        self.registry["env"]["LIA_TEST_GONE"] = {"job": "test", "stability": "internal"}
+        self.assertOnly(self.run_check(), "env", "LIA_TEST_GONE is registered but no longer appears")
+        del self.registry["env"]["LIA_TEST_GONE"]
+        self.registry["env"]["LIA_MODEL"]["job"] = "setting"
+        self.assertOnly(self.run_check(), "env", "LIA_MODEL has job 'setting'")
 
     def test_test_hooks_and_only_test_hooks_use_the_test_prefix(self) -> None:
-        self.files["src/env.zig"] += 'const hook = io_mod.getenv("FX_E2E_GATEWAY_CHAT_URL");\n'
-        self.registry["env"]["FX_E2E_GATEWAY_CHAT_URL"] = {"job": "test", "stability": "internal"}
-        self.assertOnly(self.run_check(), "env", "FX_E2E_GATEWAY_CHAT_URL has job 'test'")
-        self.files["src/env.zig"] = self.files["src/env.zig"].replace("FX_E2E_", "FX_TEST_")
-        self.registry["env"]["FX_TEST_GATEWAY_CHAT_URL"] = self.registry["env"].pop("FX_E2E_GATEWAY_CHAT_URL")
+        self.files["src/env.zig"] += 'const hook = io_mod.getenv("LIA_E2E_GATEWAY_CHAT_URL");\n'
+        self.registry["env"]["LIA_E2E_GATEWAY_CHAT_URL"] = {"job": "test", "stability": "internal"}
+        self.assertOnly(self.run_check(), "env", "LIA_E2E_GATEWAY_CHAT_URL has job 'test'")
+        self.files["src/env.zig"] = self.files["src/env.zig"].replace("LIA_E2E_", "LIA_TEST_")
+        self.registry["env"]["LIA_TEST_GATEWAY_CHAT_URL"] = self.registry["env"].pop("LIA_E2E_GATEWAY_CHAT_URL")
         self.assertEqual([], self.run_check())
-        self.registry["env"]["FX_TEST_GATEWAY_CHAT_URL"]["job"] = "integration"
-        self.assertOnly(self.run_check(), "env", "FX_TEST_GATEWAY_CHAT_URL has job 'integration'")
+        self.registry["env"]["LIA_TEST_GATEWAY_CHAT_URL"]["job"] = "integration"
+        self.assertOnly(self.run_check(), "env", "LIA_TEST_GATEWAY_CHAT_URL has job 'integration'")
 
-    def test_overrides_fx_config_list_reports_are_stable(self) -> None:
-        self.registry["env"]["FX_MODEL"]["stability"] = "internal"
+    def test_overrides_lia_config_list_reports_are_stable(self) -> None:
+        self.registry["env"]["LIA_MODEL"]["stability"] = "internal"
         problems = self.run_check()
-        self.assertOnly(problems, "env", "FX_MODEL is an override fx config list reports")
+        self.assertOnly(problems, "env", "LIA_MODEL is an override lia config list reports")
         self.assertEqual((check_cli_shape.ENV_SETTINGS, 2), (problems[0].path, problems[0].number))
-        self.registry["env"]["FX_MODEL"]["stability"] = "stable"
+        self.registry["env"]["LIA_MODEL"]["stability"] = "stable"
         self.assertEqual([], self.run_check())
 
     def test_unprefixed_env_var_fails_unless_listed(self) -> None:
@@ -361,9 +361,9 @@ class CheckCliShapeTests(unittest.TestCase):
         )
         self.assertOnly(self.run_check(), "names", 'ACP config option "fast" needs a run_options row')
 
-    def test_old_spellings_must_go_once_fx_reaches_their_removal(self) -> None:
+    def test_old_spellings_must_go_once_lia_reaches_their_removal(self) -> None:
         self.edit(check_cli_shape.MAIN, '"0.0.14"', '"0.0.17"')
-        self.assertOnly(self.run_check(), "removal", "fx 0.0.17 drops the old spellings")
+        self.assertOnly(self.run_check(), "removal", "lia 0.0.17 drops the old spellings")
 
     def test_acp_set_config_option_id_needs_a_run_options_row(self) -> None:
         self.edit(check_cli_shape.ACP_SERVER, '"model")) {}\n', '"model")) {}\n    if (std.mem.eql(u8, config_id, "fast")) {}\n')
@@ -374,8 +374,8 @@ class CheckCliShapeTests(unittest.TestCase):
         self.assertOnly(self.run_check(), "names", "names flag --modle")
 
     def test_run_options_row_must_name_a_setting_override_variable(self) -> None:
-        self.registry["env"]["FX_MODEL"]["job"] = "internal"
-        self.assertOnly(self.run_check(), "names", "names FX_MODEL, which the registry doesn't list as a setting-override")
+        self.registry["env"]["LIA_MODEL"]["job"] = "internal"
+        self.assertOnly(self.run_check(), "names", "names LIA_MODEL, which the registry doesn't list as a setting-override")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-//! `fx config`: show the values set in fx's settings files in git's
+//! `lia config`: show the values set in lia's settings files in git's
 //! `key=value` format, and set or unset the plain preferences in the profile.
 
 const std = @import("std");
@@ -23,9 +23,9 @@ const tool_result_limits = @import("../tooling/tool_result_limits.zig");
 const Allocator = std.mem.Allocator;
 
 fn profileDisplay() []const u8 {
-    return profile_paths.displayText("~/.fx/settings.json");
+    return profile_paths.displayText("~/.lia/settings.json");
 }
-pub const project_display = ".fx.json";
+pub const project_display = ".lia.json";
 
 pub const Action = enum { list, get, set, unset, schema };
 
@@ -38,14 +38,14 @@ pub const Options = struct {
     scope: settings_entries.Scope = .all,
     show_origin: bool = false,
     format: output_contracts.OutputFormat = .text,
-    /// `schema --project`: describe `.fx.json` instead of `settings.json`.
+    /// `schema --project`: describe `.lia.json` instead of `settings.json`.
     project: bool = false,
 };
 
 const ConfigFlag = enum { global, workspace, show_origin, json, project };
 const config_flag_ids = cli_flags.idTable(ConfigFlag, &builtin_commands.config_parse_options);
 
-/// Parses `fx config [list|get <key>|set <key> <value>|unset <key>]` and its
+/// Parses `lia config [list|get <key>|set <key> <value>|unset <key>]` and its
 /// flags. On a key that names no setting, sets `unknown_key` to the part that
 /// isn't known; on other mistakes in the words, sets `problem` to what is
 /// wrong. A value may start with a dash, as `-5` does. Slices borrow from
@@ -75,22 +75,22 @@ pub fn parseArgs(
     };
 
     if (word_count == 0) {
-        if (options.project) return wordsProblem(problem, "--project goes with fx config schema");
+        if (options.project) return wordsProblem(problem, "--project goes with lia config schema");
         return options;
     }
     options.action = std.meta.stringToEnum(Action, words[0]) orelse
         return wordsProblem(problem, "the first word is list, get, set, unset, or schema");
-    if (options.project and options.action != .schema) return wordsProblem(problem, "--project goes with fx config schema");
+    if (options.project and options.action != .schema) return wordsProblem(problem, "--project goes with lia config schema");
     switch (options.action) {
         .list, .schema => if (word_count > 1) return wordsProblem(problem, "list and schema take no key"),
         .get, .unset => {
-            if (word_count < 2) return wordsProblem(problem, "get and unset need a key, as in fx config get fast_mode");
+            if (word_count < 2) return wordsProblem(problem, "get and unset need a key, as in lia config get fast_mode");
             if (word_count > 2) return wordsProblem(problem, "get and unset take one key");
         },
         .set => if (word_count < 3) return wordsProblem(problem, if (std.mem.findScalar(u8, words[word_count - 1], '=') != null)
-            "set takes the key and the value as two words, as in fx config set fast_mode true"
+            "set takes the key and the value as two words, as in lia config set fast_mode true"
         else
-            "set needs a key and a value, as in fx config set fast_mode true"),
+            "set needs a key and a value, as in lia config set fast_mode true"),
     }
     if (options.action == .list) return options;
     // The schema is already JSON and describes files, not one scope's values.
@@ -109,7 +109,7 @@ pub fn parseArgs(
     options.key = key;
     if (options.action == .get) return options;
 
-    // Writes go to the profile's top level only: fx treats preferences in a
+    // Writes go to the profile's top level only: lia treats preferences in a
     // workspace override as legacy and removes them when it saves.
     if (options.show_origin) return wordsProblem(problem, "--show-origin goes with list and get");
     if (options.scope == .workspace) return error.WorkspaceConfigWrite;
@@ -119,7 +119,7 @@ pub fn parseArgs(
 
 /// The plain preferences `set` and `unset` change, named by their dotted keys.
 /// Security and account keys aren't here on purpose: an agent can run
-/// `fx config` through its shell tool, so it must not be able to raise its own
+/// `lia config` through its shell tool, so it must not be able to raise its own
 /// permissions or swap the model behind permission reviews.
 const Writable = enum {
     auto_compact_percent,
@@ -148,14 +148,14 @@ pub const Change = struct {
 
 pub const WriteProblem = union(enum) {
     none,
-    /// The key isn't changed with `fx config`; what to use instead.
+    /// The key isn't changed with `lia config`; what to use instead.
     refused: []const u8,
     /// The value doesn't fit the key; what the key takes.
     invalid_value: []const u8,
 };
 
 /// The profile change `set` or `unset` makes for `options`. Sets `problem` and
-/// fails for a key `fx config` doesn't change or a value the key can't take.
+/// fails for a key `lia config` doesn't change or a value the key can't take.
 pub fn change(options: Options, problem: *WriteProblem) error{ RefusedConfigSetting, InvalidConfigValue }!Change {
     const key = options.key.?;
     const writable = std.meta.stringToEnum(Writable, key) orelse {
@@ -221,7 +221,7 @@ pub fn change(options: Options, problem: *WriteProblem) error{ RefusedConfigSett
     return .{ .patch = patch, .value = .{ .bool = enabled } };
 }
 
-const theme_values = "light, dark, or the name of a theme file in ~/.fx/themes";
+const theme_values = "light, dark, or the name of a theme file in ~/.lia/themes";
 
 fn invalid(problem: *WriteProblem, expected: []const u8) error{InvalidConfigValue} {
     problem.* = .{ .invalid_value = expected };
@@ -239,25 +239,25 @@ fn wordsProblem(problem: *?[]const u8, text: []const u8) error{InvalidConfigArgs
     return error.InvalidConfigArgs;
 }
 
-/// Whether `fx config set` and `unset` change `key`.
+/// Whether `lia config set` and `unset` change `key`.
 pub fn settable(key: []const u8) bool {
     return std.meta.stringToEnum(Writable, key) != null;
 }
 
-/// What to use instead of `fx config` for a setting it doesn't change.
+/// What to use instead of `lia config` for a setting it doesn't change.
 fn ownerHint(key: []const u8) []const u8 {
     const head = key[0 .. std.mem.findScalar(u8, key, '.') orelse key.len];
     const hints = [_]struct { keys: []const []const u8, hint: []const u8 }{
-        .{ .keys = &.{ "model", "models" }, .hint = profile_paths.displayText("use --model for one run, or edit ~/.fx/settings.json") },
-        .{ .keys = &.{"provider"}, .hint = "use fx provider <name>" },
-        .{ .keys = &.{"permission_mode"}, .hint = profile_paths.displayText("use --permission-mode for one run, or edit ~/.fx/settings.json") },
-        .{ .keys = &.{"credential_source"}, .hint = "use fx login" },
-        .{ .keys = &.{"review_model"}, .hint = profile_paths.displayText("edit ~/.fx/settings.json, or set FX_REVIEW_MODEL for one run") },
-        .{ .keys = &.{ "workspaces", "additional_directories" }, .hint = "use fx workspace" },
-        .{ .keys = &.{ "enabledMcpjsonServers", "disabledMcpjsonServers", "enableAllProjectMcpServers" }, .hint = "use fx mcp approve or reject" },
-        .{ .keys = &.{"context_limits"}, .hint = profile_paths.displayText("use --context-limit for one run, or edit ~/.fx/settings.json") },
-        .{ .keys = &.{"provider_order"}, .hint = profile_paths.displayText("use --provider-order for one run, or edit ~/.fx/settings.json") },
-        .{ .keys = &.{ "yolo_acknowledged", "fast_mode_model_bound", "skill_match_fuzzy" }, .hint = "fx manages it" },
+        .{ .keys = &.{ "model", "models" }, .hint = profile_paths.displayText("use --model for one run, or edit ~/.lia/settings.json") },
+        .{ .keys = &.{"provider"}, .hint = "use lia provider <name>" },
+        .{ .keys = &.{"permission_mode"}, .hint = profile_paths.displayText("use --permission-mode for one run, or edit ~/.lia/settings.json") },
+        .{ .keys = &.{"credential_source"}, .hint = "use lia login" },
+        .{ .keys = &.{"review_model"}, .hint = profile_paths.displayText("edit ~/.lia/settings.json, or set LIA_REVIEW_MODEL for one run") },
+        .{ .keys = &.{ "workspaces", "additional_directories" }, .hint = "use lia workspace" },
+        .{ .keys = &.{ "enabledMcpjsonServers", "disabledMcpjsonServers", "enableAllProjectMcpServers" }, .hint = "use lia mcp approve or reject" },
+        .{ .keys = &.{"context_limits"}, .hint = profile_paths.displayText("use --context-limit for one run, or edit ~/.lia/settings.json") },
+        .{ .keys = &.{"provider_order"}, .hint = profile_paths.displayText("use --provider-order for one run, or edit ~/.lia/settings.json") },
+        .{ .keys = &.{ "yolo_acknowledged", "fast_mode_model_bound", "skill_match_fuzzy" }, .hint = "lia manages it" },
         .{ .keys = &.{"sound"}, .hint = "set sound.turn_end, sound.attention_required, or sound.max" },
         .{ .keys = &.{"prompt_history"}, .hint = "set prompt_history.enabled" },
     };
@@ -266,12 +266,12 @@ fn ownerHint(key: []const u8) []const u8 {
             if (std.mem.eql(u8, name, head)) return entry.hint;
         }
     }
-    return profile_paths.displayText("edit ~/.fx/settings.json");
+    return profile_paths.displayText("edit ~/.lia/settings.json");
 }
 
-/// `can't change permission_mode with fx config; use --permission-mode ...` or
+/// `can't change permission_mode with lia config; use --permission-mode ...` or
 /// `invalid value for fast_mode: maybe (use true or false)`, where `via` names
-/// the surface, such as `fx config` or `--config`. Caller owns the result.
+/// the surface, such as `lia config` or `--config`. Caller owns the result.
 pub fn formatWriteProblem(alloc: Allocator, key: []const u8, value: ?[]const u8, problem: WriteProblem, via: []const u8) ![]u8 {
     return switch (problem) {
         .none => alloc.dupe(u8, key),
@@ -288,8 +288,8 @@ pub const OverrideProblem = union(enum) {
     write: struct { key: []const u8, value: []const u8, problem: WriteProblem },
 };
 
-/// Parses one `--config key=value` for `fx ask`, with the keys, values, and
-/// checks of `fx config set`. On failure, `problem` says why. Slices borrow
+/// Parses one `--config key=value` for `lia ask`, with the keys, values, and
+/// checks of `lia config set`. On failure, `problem` says why. Slices borrow
 /// from `text`.
 pub fn parseOverride(text: []const u8, problem: *OverrideProblem) error{InvalidConfigOverride}!config_runtime.SettingOverride {
     const at = std.mem.findScalar(u8, text, '=') orelse return overrideProblem(problem, .malformed);
@@ -324,7 +324,7 @@ pub const Loaded = struct {
     project: ?std.json.Parsed(std.json.Value) = null,
     entries: settings_entries.Entries,
     unknown: []output_contracts.ConfigUnknownSetting,
-    /// Holds the values of the `FX_*` entries.
+    /// Holds the values of the `LIA_*` entries.
     env: std.heap.ArenaAllocator,
 
     pub fn deinit(self: *Loaded, alloc: Allocator) void {
@@ -338,8 +338,8 @@ pub const Loaded = struct {
 };
 
 /// Reads the settings files in `paths` and collects the entries and unknown
-/// keys for `scope`. Without a scope, the `FX_*` setting overrides set in this
-/// process come last, as fx applies them. When a file can't be read or parsed,
+/// keys for `scope`. Without a scope, the `LIA_*` setting overrides set in this
+/// process come last, as lia applies them. When a file can't be read or parsed,
 /// sets `failed_file` to its display name and returns the error. Caller deinits
 /// the result.
 pub fn load(
@@ -405,17 +405,17 @@ pub fn load(
     };
 }
 
-/// A key's value in a run, as `fx config` reports it.
+/// A key's value in a run, as `lia config` reports it.
 pub const Effective = union(enum) {
-    /// fx resolves the key where `fx config` doesn't look, so it reports the
+    /// lia resolves the key where `lia config` doesn't look, so it reports the
     /// value the files set.
     unresolved,
-    /// fx uses no value, such as an unset theme.
+    /// lia uses no value, such as an unset theme.
     none,
     value: std.json.Value,
 };
 
-/// The keys `fx config` reads from the resolved state instead of the files.
+/// The keys `lia config` reads from the resolved state instead of the files.
 /// A test checks that each plain key is here or in `files_only_keys`.
 pub const resolved_keys = [_][]const u8{
     "auto_compact_percent", "cache_warming",
@@ -430,8 +430,8 @@ pub const resolved_keys = [_][]const u8{
     "theme",                "ultrafast_mode",
 };
 
-/// Keys `fx config` shows as the files set them: objects fx checks with its
-/// own rules, model choices, editor hints, and values fx manages itself.
+/// Keys `lia config` shows as the files set them: objects lia checks with its
+/// own rules, model choices, editor hints, and values lia manages itself.
 const files_only_keys = [_][]const u8{
     "$schema",                   "additional_directories",
     "context_limits",            "credential_source",
@@ -497,12 +497,12 @@ fn integer(arena: Allocator, value: usize) Allocator.Error!Effective {
     return .{ .value = .{ .number_string = try std.fmt.allocPrint(arena, "{d}", .{value}) } };
 }
 
-/// The entries `fx config get` looks a key up in when no scope is chosen.
-/// `set` holds the values the files and `FX_*` variables set, lowest
+/// The entries `lia config get` looks a key up in when no scope is chosen.
+/// `set` holds the values the files and `LIA_*` variables set, lowest
 /// precedence first. Every resolved key gets the value a run uses, labeled
 /// with the highest layer that sets that value, or `default` when none does,
-/// as when nothing sets it or fx rejects or ignores what a file says. A key
-/// fx doesn't resolve keeps its last entry in `set`. Everything is in `arena`.
+/// as when nothing sets it or lia rejects or ignores what a file says. A key
+/// lia doesn't resolve keeps its last entry in `set`. Everything is in `arena`.
 pub fn effectiveEntries(
     arena: Allocator,
     state: *const app_lifecycle.StartupState,
@@ -590,8 +590,8 @@ fn jsonEqual(a: std.json.Value, b: std.json.Value) bool {
     };
 }
 
-/// The provider the settings files choose, which `FX_MODEL` applies to unless
-/// `FX_PROVIDER` picks another.
+/// The provider the settings files choose, which `LIA_MODEL` applies to unless
+/// `LIA_PROVIDER` picks another.
 fn savedProvider(entries: []const settings_entries.Entry) model_provider.ProviderId {
     var index = entries.len;
     while (index > 0) {
@@ -607,7 +607,7 @@ fn unknownSetting(key: settings_keys.UnknownKey, file: []const u8) output_contra
 }
 
 /// Why a settings file couldn't be loaded, in words, as in
-/// `~/.fx/settings.json can't be read: permission denied`.
+/// `~/.lia/settings.json can't be read: permission denied`.
 pub fn loadFailureReason(err: anyerror) []const u8 {
     return switch (err) {
         error.StreamTooLong => "is larger than 64 KiB",
@@ -620,13 +620,13 @@ pub fn loadFailureReason(err: anyerror) []const u8 {
 }
 
 /// Why saving the profile's settings file failed, in words, with what to do
-/// where there is something, as in `failed to save ~/.fx/settings.json:
-/// another fx is saving settings; try again`.
+/// where there is something, as in `failed to save ~/.lia/settings.json:
+/// another lia is saving settings; try again`.
 pub fn saveFailureReason(err: anyerror) []const u8 {
     return switch (err) {
         error.DurablePathUnsafe => unsafe_settings_path,
         error.SettingsPrimaryTooLarge, error.FileTooBig => "it is larger than 64 KiB; remove settings you no longer use",
-        error.SettingsLockBusy => "another fx is saving settings; try again",
+        error.SettingsLockBusy => "another lia is saving settings; try again",
         error.AccessDenied, error.PermissionDenied => "permission denied",
         error.ReadOnlyFileSystem => "the disk is read-only",
         error.NoSpaceLeft => "the disk is full",
@@ -637,12 +637,12 @@ pub fn saveFailureReason(err: anyerror) []const u8 {
     };
 }
 
-const unsafe_settings_path = "fx keeps settings only in a regular file in a folder it owns, not through a symlink or a hard link";
+const unsafe_settings_path = "lia keeps settings only in a regular file in a folder it owns, not through a symlink or a hard link";
 
 test "settings failures name the cause in words" {
     try std.testing.expectEqualStrings("can't be read: permission denied", loadFailureReason(error.AccessDenied));
     try std.testing.expectEqualStrings("can't be read", loadFailureReason(error.Unexpected));
-    try std.testing.expectEqualStrings("another fx is saving settings; try again", saveFailureReason(error.SettingsLockBusy));
+    try std.testing.expectEqualStrings("another lia is saving settings; try again", saveFailureReason(error.SettingsLockBusy));
     try std.testing.expect(std.mem.find(u8, saveFailureReason(error.DurablePathUnsafe), "symlink") != null);
     try std.testing.expectEqualStrings("Unexpected", saveFailureReason(error.Unexpected));
 }
@@ -726,18 +726,18 @@ test "config set explains a bad value or a key it doesn't change" {
     const cases = [_]struct { args: []const [:0]const u8, err: anyerror, message: []const u8 }{
         .{ .args = &.{ "set", "fast_mode", "maybe" }, .err = error.InvalidConfigValue, .message = "invalid value for fast_mode: maybe (use true or false)" },
         .{ .args = &.{ "set", "max_tool_result_bytes", "12" }, .err = error.InvalidConfigValue, .message = "invalid value for max_tool_result_bytes: 12 (use a whole number of bytes, at least 1024)" },
-        .{ .args = &.{ "set", "permission_mode", "full-access" }, .err = error.RefusedConfigSetting, .message = "can't change permission_mode with fx config; use --permission-mode for one run, or edit ~/.fx/settings.json" },
-        .{ .args = &.{ "set", "permission.bash", "allow" }, .err = error.RefusedConfigSetting, .message = "can't change permission.bash with fx config; edit ~/.fx/settings.json" },
-        .{ .args = &.{ "unset", "review_model" }, .err = error.RefusedConfigSetting, .message = "can't change review_model with fx config; edit ~/.fx/settings.json, or set FX_REVIEW_MODEL for one run" },
-        .{ .args = &.{ "set", "models.gateway", "gpt" }, .err = error.RefusedConfigSetting, .message = "can't change models.gateway with fx config; use --model for one run, or edit ~/.fx/settings.json" },
-        .{ .args = &.{ "set", "model", "gpt" }, .err = error.RefusedConfigSetting, .message = "can't change model with fx config; use --model for one run, or edit ~/.fx/settings.json" },
-        .{ .args = &.{ "set", "yolo_acknowledged", "true" }, .err = error.RefusedConfigSetting, .message = "can't change yolo_acknowledged with fx config; fx manages it" },
+        .{ .args = &.{ "set", "permission_mode", "full-access" }, .err = error.RefusedConfigSetting, .message = "can't change permission_mode with lia config; use --permission-mode for one run, or edit ~/.lia/settings.json" },
+        .{ .args = &.{ "set", "permission.bash", "allow" }, .err = error.RefusedConfigSetting, .message = "can't change permission.bash with lia config; edit ~/.lia/settings.json" },
+        .{ .args = &.{ "unset", "review_model" }, .err = error.RefusedConfigSetting, .message = "can't change review_model with lia config; edit ~/.lia/settings.json, or set LIA_REVIEW_MODEL for one run" },
+        .{ .args = &.{ "set", "models.gateway", "gpt" }, .err = error.RefusedConfigSetting, .message = "can't change models.gateway with lia config; use --model for one run, or edit ~/.lia/settings.json" },
+        .{ .args = &.{ "set", "model", "gpt" }, .err = error.RefusedConfigSetting, .message = "can't change model with lia config; use --model for one run, or edit ~/.lia/settings.json" },
+        .{ .args = &.{ "set", "yolo_acknowledged", "true" }, .err = error.RefusedConfigSetting, .message = "can't change yolo_acknowledged with lia config; lia manages it" },
     };
     for (cases) |case| {
         const options = try parseForTest(case.args);
         var problem: WriteProblem = .none;
         try std.testing.expectError(case.err, change(options, &problem));
-        const message = try formatWriteProblem(alloc, options.key.?, options.value, problem, "fx config");
+        const message = try formatWriteProblem(alloc, options.key.?, options.value, problem, "lia config");
         defer alloc.free(message);
         try std.testing.expectEqualStrings(case.message, message);
     }
@@ -757,7 +757,7 @@ test "--config takes key=value with the keys and checks of config set" {
         .{ .text = "=on", .message = "--config needs key=value, such as --config fast_mode=on" },
         .{ .text = "fast_mdoe=on", .message = "unknown setting fast_mdoe (did you mean fast_mode?)" },
         .{ .text = "fast_mode=maybe", .message = "invalid value for fast_mode: maybe (use true or false)" },
-        .{ .text = "permission_mode=full-access", .message = "can't change permission_mode with --config; use --permission-mode for one run, or edit ~/.fx/settings.json" },
+        .{ .text = "permission_mode=full-access", .message = "can't change permission_mode with --config; use --permission-mode for one run, or edit ~/.lia/settings.json" },
     };
     for (cases) |case| {
         problem = .none;
@@ -814,9 +814,9 @@ test "load reads both files and keeps unknown keys for the scope" {
         .sub_path = "settings.json",
         .data = "{\"fast_mode\":true,\"fast_mdoe\":1,\"workspaces\":{\"/w\":{\"efort\":\"x\",\"effort\":\"high\"},\"/other\":{\"nope\":1}}}",
     });
-    try tmp.dir.writeFile(io, .{ .sub_path = ".fx.json", .data = "{\"max_agent_steps\":3,\"max_agent_step\":4}" });
+    try tmp.dir.writeFile(io, .{ .sub_path = ".lia.json", .data = "{\"max_agent_steps\":3,\"max_agent_step\":4}" });
     const settings_path = try @import("../shared/io.zig").dirRealpathAlloc(alloc, tmp.dir, "settings.json");
-    const project_path = try @import("../shared/io.zig").dirRealpathAlloc(alloc, tmp.dir, ".fx.json");
+    const project_path = try @import("../shared/io.zig").dirRealpathAlloc(alloc, tmp.dir, ".lia.json");
     var paths: config_runtime.Paths = .{
         .user_settings = settings_path,
         .workspace_settings = project_path,
@@ -832,7 +832,7 @@ test "load reads both files and keeps unknown keys for the scope" {
     try std.testing.expectEqualStrings("fast_mdoe", all.unknown[0].key.name);
     try std.testing.expectEqualStrings("fast_mode", all.unknown[0].suggestion.?);
     try std.testing.expectEqualStrings("efort", all.unknown[1].key.name);
-    try std.testing.expectEqualStrings(".fx.json", all.unknown[2].file);
+    try std.testing.expectEqualStrings(".lia.json", all.unknown[2].file);
 
     var global = try load(alloc, paths, "/w", .global, &failed);
     defer global.deinit(alloc);
@@ -840,7 +840,7 @@ test "load reads both files and keeps unknown keys for the scope" {
     try std.testing.expectEqualStrings("fast_mdoe", global.unknown[0].key.name);
 }
 
-test "load ends with the FX_* overrides fx applies, only without a scope" {
+test "load ends with the LIA_* overrides lia applies, only without a scope" {
     const alloc = std.testing.allocator;
     const io_mod = @import("../shared/io.zig");
     var tmp = std.testing.tmpDir(.{});
@@ -850,7 +850,7 @@ test "load ends with the FX_* overrides fx applies, only without a scope" {
     defer alloc.free(dir);
     var paths: config_runtime.Paths = .{
         .user_settings = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "settings.json"),
-        .workspace_settings = try std.mem.concat(alloc, u8, &.{ dir, "/missing.fx.json" }),
+        .workspace_settings = try std.mem.concat(alloc, u8, &.{ dir, "/missing.lia.json" }),
         .workspace_root = try alloc.dupe(u8, "/w"),
     };
     defer paths.deinit(alloc);
@@ -858,8 +858,8 @@ test "load ends with the FX_* overrides fx applies, only without a scope" {
     const restore = io_mod.environMap() orelse try env_settings.emptyTestEnviron();
     var env: std.process.Environ.Map = .init(alloc);
     defer env.deinit();
-    try env.put("FX_MAX_AGENT_STEPS", "9");
-    try env.put("FX_MODEL", "gpt-env");
+    try env.put("LIA_MAX_AGENT_STEPS", "9");
+    try env.put("LIA_MODEL", "gpt-env");
     io_mod.setEnvironMap(&env);
     defer io_mod.setEnvironMap(restore);
 
@@ -869,9 +869,9 @@ test "load ends with the FX_* overrides fx applies, only without a scope" {
     const steps = try settings_entries.lookup(alloc, all.entries.items, "max_agent_steps");
     defer alloc.free(steps);
     try std.testing.expectEqual(settings_entries.Origin.env, steps[0].origin);
-    try std.testing.expectEqualStrings("FX_MAX_AGENT_STEPS", steps[0].variable.?);
+    try std.testing.expectEqualStrings("LIA_MAX_AGENT_STEPS", steps[0].variable.?);
     try std.testing.expectEqual(@as(i64, 9), steps[0].value.integer);
-    // The saved provider decides which model FX_MODEL replaces.
+    // The saved provider decides which model LIA_MODEL replaces.
     const models = try settings_entries.lookup(alloc, all.entries.items, "models.gateway");
     defer alloc.free(models);
     try std.testing.expectEqualStrings("gpt-env", models[0].value.string);
@@ -888,7 +888,7 @@ test "load names the file it can't parse" {
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "settings.json", .data = "{\"fast_mode\":" });
     var paths: config_runtime.Paths = .{
         .user_settings = try @import("../shared/io.zig").dirRealpathAlloc(alloc, tmp.dir, "settings.json"),
-        .workspace_settings = try alloc.dupe(u8, "/nonexistent/.fx.json"),
+        .workspace_settings = try alloc.dupe(u8, "/nonexistent/.lia.json"),
         .workspace_root = try alloc.dupe(u8, "/w"),
     };
     defer paths.deinit(alloc);
@@ -904,7 +904,7 @@ test "load names the file it can't parse" {
     }
 }
 
-test "fx config set writes each key with the type the settings list gives it" {
+test "lia config set writes each key with the type the settings list gives it" {
     inline for (@typeInfo(Writable).@"enum".field_names) |path| {
         errdefer std.debug.print("key {s}\n", .{path});
         const dot = comptime std.mem.findScalar(u8, path, '.');
@@ -930,7 +930,7 @@ test "fx config set writes each key with the type the settings list gives it" {
     }
 }
 
-test "fx config schema takes only --project" {
+test "lia config schema takes only --project" {
     var unknown: ?settings_keys.UnknownPart = null;
     var problem: ?[]const u8 = null;
     const plain = try parseForTest(&.{"schema"});
@@ -947,12 +947,12 @@ test "fx config schema takes only --project" {
     }) |args| try std.testing.expectError(error.InvalidConfigArgs, parseArgs(args, &unknown, &problem));
 }
 
-test "fx config names what is wrong with its words" {
+test "lia config names what is wrong with its words" {
     var unknown: ?settings_keys.UnknownPart = null;
     for ([_]struct { args: []const [:0]const u8, problem: []const u8 }{
-        .{ .args = &.{ "set", "fast_mode" }, .problem = "set needs a key and a value, as in fx config set fast_mode true" },
-        .{ .args = &.{ "set", "fast_mode=true" }, .problem = "set takes the key and the value as two words, as in fx config set fast_mode true" },
-        .{ .args = &.{"get"}, .problem = "get and unset need a key, as in fx config get fast_mode" },
+        .{ .args = &.{ "set", "fast_mode" }, .problem = "set needs a key and a value, as in lia config set fast_mode true" },
+        .{ .args = &.{ "set", "fast_mode=true" }, .problem = "set takes the key and the value as two words, as in lia config set fast_mode true" },
+        .{ .args = &.{"get"}, .problem = "get and unset need a key, as in lia config get fast_mode" },
         .{ .args = &.{"sett"}, .problem = "the first word is list, get, set, unset, or schema" },
         .{ .args = &.{ "set", "theme", "--show-origin", "dark" }, .problem = "--show-origin goes with list and get" },
     }) |case| {

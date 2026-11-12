@@ -961,7 +961,7 @@ test "-32020 to the probe, as when a proxy drops request headers, falls back to 
 test "writes the detection messages" {
     var out: std.Io.Writer.Allocating = .init(testing.allocator);
     defer out.deinit();
-    const client: Client = .{ .info = .{ .name = "fx", .version = "1.0.0" } };
+    const client: Client = .{ .info = .{ .name = "lia", .version = "1.0.0" } };
     try writeDiscover(&out.writer, test_config, client, 0, 1);
     try out.writer.writeByte('\n');
     try writeInitialize(&out.writer, test_config, client, 0, 2);
@@ -970,9 +970,9 @@ test "writes the detection messages" {
     try testing.expectEqualStrings(
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server/discover\",\"params\":{\"_meta\":{\"progressToken\":1," ++
             "\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}," ++
-            "\"io.modelcontextprotocol/clientInfo\":{\"name\":\"fx\",\"version\":\"1.0.0\"}}}}\n" ++
+            "\"io.modelcontextprotocol/clientInfo\":{\"name\":\"lia\",\"version\":\"1.0.0\"}}}}\n" ++
             "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\",\"params\":{\"_meta\":{\"progressToken\":2}," ++
-            "\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"fx\",\"version\":\"1.0.0\"}}}\n" ++
+            "\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"lia\",\"version\":\"1.0.0\"}}}\n" ++
             "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}",
         out.written(),
     );
@@ -991,7 +991,7 @@ test "a refusal that lists legacy versions picks the newest one not yet offered"
     try testing.expectEqual(@as(?u8, null), nextOffer(config, bare, 0b001));
 }
 
-test "a refusal's list is read in fx's order of preference, not the server's" {
+test "a refusal's list is read in lia's order of preference, not the server's" {
     const refusal = (try wire.decode("{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32602,\"message\":\"x\"," ++
         "\"data\":{\"supported\":[\"2025-03-26\",\"2024-11-05\",\"2025-06-18\"]}}}")).response.body.failure;
     const config: Config = .{};
@@ -999,7 +999,7 @@ test "a refusal's list is read in fx's order of preference, not the server's" {
     try testing.expectEqual(@as(?u8, 2), nextOffer(config, refusal, 0b011));
 }
 
-test "a refusal whose only version fx speaks was already offered offers nothing more" {
+test "a refusal whose only version lia speaks was already offered offers nothing more" {
     const refusal = (try wire.decode("{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32602,\"message\":\"x\"," ++
         "\"data\":{\"supported\":[\"2025-06-18\",\"2024-11-05\"]}}}")).response.body.failure;
     try testing.expectEqual(@as(?u8, null), nextOffer(.{}, refusal, 0b011));

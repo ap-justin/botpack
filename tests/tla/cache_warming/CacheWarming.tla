@@ -3,7 +3,7 @@
 (* Claude cache warming (src/core/agent/runtime/cache_warming.zig and the  *)
 (* warmer in cache_warmer.zig). Anthropic keeps a prompt cache entry for   *)
 (* TTL after the start of the newest request that read or wrote it. While *)
-(* fx waits for the user, or for a long tool run, the warmer resends the   *)
+(* lia waits for the user, or for a long tool run, the warmer resends the   *)
 (* last real request with a one-token reply just before the entry expires, *)
 (* so the next real request reads the conversation instead of writing it   *)
 (* again. Pings stop Cap after the real request that armed them.           *)
@@ -135,7 +135,7 @@ Reset ==
     /\ UNCHANGED <<awake, sending, sendAge, touchAge, reqAge, pings, inflight,
                    pingAge, pingHit, cacheAge, slept, evicted, staleStop, writes>>
 
-\* fx closes the session: the warmer cancels its ping and stops.
+\* lia closes the session: the warmer cancels its ping and stops.
 Shutdown ==
     /\ awake
     /\ awake' = FALSE /\ armed' = FALSE /\ sending' = FALSE

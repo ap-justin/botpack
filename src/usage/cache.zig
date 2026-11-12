@@ -1,5 +1,5 @@
-//! The shared usage cache: one file per identity under `~/.fx/usage-cache/`.
-//! Every fx process reads it without a lock (writes land by rename) and
+//! The shared usage cache: one file per identity under `~/.lia/usage-cache/`.
+//! Every lia process reads it without a lock (writes land by rename) and
 //! writes it under an exclusive lock as read, merge, write, rename, so a
 //! newer answer is never replaced by an older one (`CacheNeverRegresses`).
 //!
@@ -18,13 +18,13 @@ pub const schema_version: u32 = 2;
 const max_file_bytes: usize = 4 * 1024 * 1024;
 
 /// Whose numbers an entry holds: SHA-256, in hex, of the sign-in kind, a
-/// stable subject (the API key, or the fx login account) and the team. The
+/// stable subject (the API key, or the lia login account) and the team. The
 /// subject never reaches the file.
 pub const Identity = [64]u8;
 
 pub fn identityOf(scope: report.Scope, subject: []const u8, team: []const u8) Identity {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx-usage-cache-v1\x00");
+    hash.update("lia-usage-cache-v1\x00");
     hash.update(@tagName(scope));
     hash.update("\x00");
     hash.update(subject);
@@ -185,9 +185,9 @@ fn fileName(buf: *[80]u8, identity: Identity, suffix: []const u8) []const u8 {
     return std.mem.print(buf, "{s}{s}", .{ &identity, suffix }) catch unreachable;
 }
 
-/// Reads the stored entry for `identity` from `fx_dir` (`~/.fx`), or null.
-pub fn read(gpa: Allocator, io: Io, fx_dir: Io.Dir, identity: Identity) ?Owned {
-    var dir = fx_dir.openDir(io, dir_name, .{}) catch return null;
+/// Reads the stored entry for `identity` from `lia_dir` (`~/.lia`), or null.
+pub fn read(gpa: Allocator, io: Io, lia_dir: Io.Dir, identity: Identity) ?Owned {
+    var dir = lia_dir.openDir(io, dir_name, .{}) catch return null;
     defer dir.close(io);
     var name_buf: [80]u8 = undefined;
     const bytes = dir.readFileAlloc(io, fileName(&name_buf, identity, ".json"), gpa, .limited(max_file_bytes)) catch return null;
@@ -210,12 +210,12 @@ pub fn own(gpa: Allocator, identity: Identity, entry: Entry) !Owned {
 /// stores less than it holds, even after the file was unreadable and a store
 /// started over from less. Never writes what `read` would reject, so a bad
 /// fetch leaves the file as it was. Returns the merged entry. Caller owns it.
-pub fn store(gpa: Allocator, io: Io, fx_dir: Io.Dir, identity: Identity, fetched: Entry, now_ms: i64, held: ?Entry) !Owned {
-    fx_dir.createDir(io, dir_name, .fromMode(0o700)) catch |err| switch (err) {
+pub fn store(gpa: Allocator, io: Io, lia_dir: Io.Dir, identity: Identity, fetched: Entry, now_ms: i64, held: ?Entry) !Owned {
+    lia_dir.createDir(io, dir_name, .fromMode(0o700)) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
     };
-    var dir = try fx_dir.openDir(io, dir_name, .{});
+    var dir = try lia_dir.openDir(io, dir_name, .{});
     defer dir.close(io);
 
     var name_buf: [80]u8 = undefined;
@@ -226,7 +226,7 @@ pub fn store(gpa: Allocator, io: Io, fx_dir: Io.Dir, identity: Identity, fetched
     });
     defer lock.close(io);
 
-    var stored = read(gpa, io, fx_dir, identity);
+    var stored = read(gpa, io, lia_dir, identity);
     defer if (stored) |*s| s.deinit();
     const base: Entry = if (stored) |s| (if (held) |h| merge(h, s.entry, now_ms) else s.entry) else held orelse .{};
     const merged = merge(base, fetched, now_ms);

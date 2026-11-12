@@ -39,7 +39,7 @@ pub const StartCapturedInput = struct {
     /// returns.
     extra_environment: []const command_runner.EnvironmentVariable = &.{},
     /// While this count is above zero, `startCaptured` waits past
-    /// `yield_time_ms`: the command is waiting on an `fx mcp call` whose
+    /// `yield_time_ms`: the command is waiting on a `lia mcp call` whose
     /// owner is this call, which must not end before the answer does.
     yield_hold: ?*const std.atomic.Value(u32) = null,
 };
@@ -1105,7 +1105,7 @@ pub const Runtime = struct {
 
     /// Process exit: force-kill every live command's process group instead of
     /// granting the cooperative termination grace, then wait only for each
-    /// worker thread to observe the kill so no command outlives fx.
+    /// worker thread to observe the kill so no command outlives lia.
     pub fn terminateForProcessExit(self: *Runtime) void {
         self.stopAllAndJoin(.force);
     }

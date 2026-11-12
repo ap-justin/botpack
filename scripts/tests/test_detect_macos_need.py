@@ -30,7 +30,7 @@ class DetectMacosNeedTests(unittest.TestCase):
         self.write(PLATFORM_LIST, '["listed.test.ts"]\n')
         self.write("src/plain.zig", "pub fn plain() void {}\n")
         self.write("src/mac.zig", "if (builtin.os.tag == .macos) {}\n")
-        self.write("README.md", "fx\n")
+        self.write("README.md", "lia\n")
         self.base = self.commit("base")
 
     def tearDown(self) -> None:
@@ -84,7 +84,7 @@ class DetectMacosNeedTests(unittest.TestCase):
         self.assertEqual({"needed": "false"}, outputs, text)
 
     def test_change_without_platform_behavior_skips_macos(self) -> None:
-        self.write("README.md", "fx docs\n")
+        self.write("README.md", "lia docs\n")
         self.write("src/plain.zig", "pub fn plain() u8 { return 1; }\n")
         self.write("src/windows.zig", "if (builtin.os.tag == .windows) {} else {}\n")
         self.write("src/linux_target.zig", "const name = .linux_x64;\n")

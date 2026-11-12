@@ -1,9 +1,9 @@
 ------------------------------ MODULE UsageModel ------------------------------
 (***************************************************************************)
-(* fx `/usage` refresh and shared cache (src/usage/policy.zig, cache.zig,  *)
+(* lia `/usage` refresh and shared cache (src/usage/policy.zig, cache.zig,  *)
 (* view.zig, usage.zig `Dashboard`), in ideal and non-ideal conditions.    *)
 (*                                                                         *)
-(* Several fx processes share one cache file per identity. A process may   *)
+(* Several lia processes share one cache file per identity. A process may   *)
 (* have the dashboard open, holds one identity and the entry it last read  *)
 (* or stored (`mem`), and runs at most one fetch at a time. A fetch always *)
 (* reads today, and reads the finished days of the 7d and month views only *)
@@ -15,8 +15,8 @@
 (* as empty), merge (today by fetch start, finished days by day), write by *)
 (* rename, and keep the result as the entry.                               *)
 (*                                                                         *)
-(* `now` is real time in ticks. fx reads the wall clock `Wall`, which is   *)
-(* `now + skew`; every timestamp fx stores or compares is wall time.       *)
+(* `now` is real time in ticks. lia reads the wall clock `Wall`, which is   *)
+(* `now + skew`; every timestamp lia stores or compares is wall time.       *)
 (*                                                                         *)
 (* A store also merges the storing process's own entry                    *)
 (* (`Dashboard.ownedEntryFor`), if it is for the same identity, so no      *)
@@ -24,7 +24,7 @@
 (*                                                                         *)
 (* HOSTILE adds failed fetches and processes killed at any point and       *)
 (* started again; CORRUPT adds a cache file something else made            *)
-(* unreadable (garbage, or another fx version's schema); SKEW > 0 adds one *)
+(* unreadable (garbage, or another lia version's schema); SKEW > 0 adds one *)
 (* backward wall-clock correction. MAXFAULTS bounds crashes, corruptions   *)
 (* and the clock jump together.                                            *)
 (***************************************************************************)
@@ -229,7 +229,7 @@ Fail(p) ==
     /\ IF open[p] THEN RedrawOne(p) ELSE UNCHANGED <<mem, shown>>
     /\ UNCHANGED <<now, skew, ident, open, lastStart, cache, corrupt, finCount, corruptions, faults>>
 
-\* SIGKILL, and a new fx starts in its place: closed, no fetch history, no
+\* SIGKILL, and a new lia starts in its place: closed, no fetch history, no
 \* entry in memory. A fetch in flight stores nothing (writes land by rename).
 Crash(p) ==
     /\ HOSTILE
@@ -298,7 +298,7 @@ Next ==
 
 Spec == Init /\ [][Next]_vars
 
-\* What the Bun driver replays against real fx: fx fires a due timer on its
+\* What the Bun driver replays against real lia: lia fires a due timer on its
 \* next loop pass, and a running TUI's sign-in cannot be switched.
 DriveNext ==
     IF \E p \in Procs : TimerDue(p)

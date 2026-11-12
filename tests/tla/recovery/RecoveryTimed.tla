@@ -1,16 +1,16 @@
 ---------------------------- MODULE RecoveryTimed ----------------------------
 (***************************************************************************)
 (* Recovery.tla on a discrete clock: one Tick is one second of the boot    *)
-(* clock, the `tick` fx delivers once a second (request_recovery.zig       *)
+(* clock, the `tick` lia delivers once a second (request_recovery.zig       *)
 (* waitForSend, and its ticker while a send is on the wire). The constants *)
 (* are small: Ceiling stands for the 30-second cap on every wait,          *)
 (* SendTicks for how long an answer may take once a send is on the wire,   *)
-(* HandoffTicks for how long a resend shows its retry status before fx's   *)
+(* HandoffTicks for how long a resend shows its retry status before lia's   *)
 (* thinking row takes the line back, and HealTicks for how soon a request  *)
 (* must end once the world is healthy.                                     *)
 (*                                                                         *)
 (* Carrying out a plan takes no time, so no tick falls between a save and  *)
-(* its send. Time while no fx process runs is not modeled: a relaunch      *)
+(* its send. Time while no lia process runs is not modeled: a relaunch      *)
 (* resends at once, so the downtime served as the wait. Backoff steps and  *)
 (* jitter are abstracted to any wait from 1 to Ceiling; recovery.zig's own *)
 (* tests pin their exact values.                                           *)
@@ -30,7 +30,7 @@ VARIABLES
     waitLeft,    \* ticks until the wait's deadline; 0 when not waiting
     fresh,       \* the status line changed since the last tick
     sendAge,     \* ticks the current send has been on the wire
-    healAge      \* ticks of a healthy world with fx running and nobody asked
+    healAge      \* ticks of a healthy world with lia running and nobody asked
 
 timeVars == <<waitLeft, fresh, sendAge, healAge>>
 tvars == <<vars, timeVars>>
@@ -82,7 +82,7 @@ HandOffDue ==
     /\ phase = "working" /\ inflight /\ ~flowing /\ status = "retrying"
     /\ sendAge + 1 >= HandoffTicks
 
-\* One second passes while fx runs the request. The answer to a send comes
+\* One second passes while lia runs the request. The answer to a send comes
 \* within SendTicks.
 Tick ==
     /\ alive /\ phase \in Active
@@ -132,18 +132,18 @@ TSpec == TInit /\ [][TNext]_tvars
 \* included (recovery.zig transientDelay).
 WaitBounded == waitLeft <= Ceiling
 
-\* While fx waits to resend, the countdown changes every tick, so the row
+\* While lia waits to resend, the countdown changes every tick, so the row
 \* never looks dead (recovery.zig onTick).
 StatusFresh == (alive /\ ~flowing /\ MustRefresh) => fresh
 
-\* A resend's retry status gives way to fx's thinking row within
+\* A resend's retry status gives way to lia's thinking row within
 \* HandoffTicks, so a model thinking in silence never sits under
 \* "Connection lost" (recovery.zig handoff_ms).
 HandsOff ==
     (alive /\ phase = "working" /\ inflight /\ ~flowing /\ status = "retrying")
         => sendAge < HandoffTicks
 
-\* Once the world is healthy, with fx running and nobody asked, the request
+\* Once the world is healthy, with lia running and nobody asked, the request
 \* ends within HealTicks: at most one wait at the ceiling, then one send.
 HealsWithin == (alive /\ phase \in Active) => healAge <= HealTicks
 

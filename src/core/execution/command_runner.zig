@@ -41,7 +41,7 @@ pub const Config = struct {
     /// profile command, or null when it was not admitted by a grant.
     shell_grant_epoch: ?u64 = null,
     /// Variables added to the command's environment after `AI_AGENT`,
-    /// such as the `fx mcp call` bridge's address. Borrowed for the run.
+    /// such as the `lia mcp call` bridge's address. Borrowed for the run.
     extra_environment: []const EnvironmentVariable = &.{},
 };
 
@@ -51,7 +51,7 @@ pub const EnvironmentVariable = struct {
 };
 
 const ai_agent_env = "AI_AGENT";
-const ai_agent_name = "fx";
+const ai_agent_name = "lia";
 
 pub fn applyAgentEnvironment(environment: *std.process.Environ.Map) !void {
     try environment.put(ai_agent_env, ai_agent_name);
@@ -67,8 +67,8 @@ pub const CallbackProjection = enum {
     raw,
 };
 
-const command_artifact_file_prefix = "fx-command-";
-const command_artifact_fallback_dir_name = "fx-command-output";
+const command_artifact_file_prefix = "lia-command-";
+const command_artifact_fallback_dir_name = "lia-command-output";
 const command_artifact_log_suffix = ".log";
 const command_artifact_stdout_suffix = ".stdout.log";
 const command_artifact_stderr_suffix = ".stderr.log";
@@ -98,7 +98,7 @@ pub const supports_foreground_session = builtin.link_libc and
     std.process.can_replace and
     builtin.target.os.tag != .windows and
     builtin.target.os.tag != .wasi;
-const foreground_session_token = "__fx_foreground_session__";
+const foreground_session_token = "__lia_foreground_session__";
 const foreground_session_ready_byte: u8 = 0x1e;
 const foreground_session_release_byte: u8 = 0x06;
 const foreground_session_setup_timeout_ms: i64 = 5000;
@@ -797,7 +797,7 @@ fn approvalResetResult(
         cwd,
         .{ .exit_code = 126 },
         "",
-        "fx did not run this command: the shell startup files changed after it was approved. Request it again to ask for approval.\n",
+        "lia did not run this command: the shell startup files changed after it was approved. Request it again to ask for approval.\n",
         null,
         false,
     );
@@ -1630,7 +1630,7 @@ fn executeProcessWithDetachedSession(
 
 /// Starts `argv` in a new session through the foreground supervisor, so it
 /// has no controlling terminal: an interactive login shell can neither stop
-/// on nor draw over the terminal fx runs in. The target's stdin is empty;
+/// on nor draw over the terminal lia runs in. The target's stdin is empty;
 /// stdout and stderr are pipes. `child.stdin` stays open as the supervisor's
 /// lifeline: closing it ends the session. The caller owns the child and ends
 /// the session with `finishDetachedSession`.
@@ -1690,7 +1690,7 @@ pub fn spawnDetachedSession(
 
 /// Ends a live session from `spawnDetachedSession` and returns how its
 /// supervisor exited. Closing the lifeline makes the supervisor stop the
-/// target and every descendant it tracks, then exit on its own. fx does not
+/// target and every descendant it tracks, then exit on its own. lia does not
 /// signal the supervisor first: it is a child subreaper, and on gVisor
 /// killing a subreaper that still has children ends the whole sandbox. Its
 /// process group is killed only if it is still running after
@@ -2194,7 +2194,7 @@ test "zsh user profile reports natural SIGTERM after alias-safe startup" {
         try zshrc.writeStreamingAll(
             io_mod.getIo(),
             "alias builtin='print -r -- INTERCEPTED'\n" ++
-                "TRAPDEBUG() { print -r -- \"$ZSH_DEBUG_CMD\" >> \"$FX_SIGTERM_DEBUG_LOG\"; }\n",
+                "TRAPDEBUG() { print -r -- \"$ZSH_DEBUG_CMD\" >> \"$LIA_SIGTERM_DEBUG_LOG\"; }\n",
         );
     }
     {
@@ -2205,7 +2205,7 @@ test "zsh user profile reports natural SIGTERM after alias-safe startup" {
         );
         defer wrapper.close(io_mod.getIo());
         const source = try arena.print(
-            "#!/bin/sh\nexport HOME={s}\nexport ZDOTDIR={s}\nexport FX_SIGTERM_DEBUG_LOG={s}\nexec /bin/zsh \"$@\"\n",
+            "#!/bin/sh\nexport HOME={s}\nexport ZDOTDIR={s}\nexport LIA_SIGTERM_DEBUG_LOG={s}\nexec /bin/zsh \"$@\"\n",
             .{ quoted_home, quoted_home, quoted_debug_log },
         );
         try wrapper.writeStreamingAll(io_mod.getIo(), source);
@@ -2637,8 +2637,8 @@ test "replay marker filter drops the marker however chunks split it" {
         .{ .input = "warning\n" ++ marker, .expected = "warning\n" },
         .{ .input = "ff" ++ marker ++ "f", .expected = "fff" },
         // Partial markers that never complete pass through unchanged.
-        .{ .input = "err\nfx-shell-snapshot\nfx-done\n", .expected = "err\nfx-shell-snapshot\nfx-done\n" },
-        .{ .input = "ends with fx-shell-snap", .expected = "ends with fx-shell-snap" },
+        .{ .input = "err\nlia-shell-snapshot\nlia-done\n", .expected = "err\nlia-shell-snapshot\nlia-done\n" },
+        .{ .input = "ends with lia-shell-snap", .expected = "ends with lia-shell-snap" },
     };
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
@@ -2705,12 +2705,12 @@ test "zsh commands keep words that start with = literal in every captured profil
     try std.testing.expectEqualStrings("loaded\nloaded\n", try readAbsoluteFile(arena, loads_path, 4096));
 }
 
-test "a startup file's builtin function never runs in place of fx's shell setup" {
+test "a startup file's builtin function never runs in place of lia's shell setup" {
     if (comptime !shell_snapshot.isSupported() or !supports_foreground_session) return;
     defer shell_snapshot.resetProcessOwnerForTest(shell_snapshot.real_capture_fn);
 
     // zsh and bash run a function before a builtin of the same name, so this
-    // one would run in place of every `\builtin` line fx adds. It leaves a log
+    // one would run in place of every `\builtin` line lia adds. It leaves a log
     // each time it runs.
     const rc = "builtin() { echo hijacked >> \"$HOME/hijack.log\"; }\n";
     const command = "echo before; echo ======; echo after";
@@ -3277,7 +3277,7 @@ const ProcessObserver = struct {
     fn statusFromTerm(
         term: std.process.Child.Term,
     ) command_contract.CommandStatus {
-        if (io_mod.getenv("FX_TEST_COMMAND_INDETERMINATE_AFTER_EXIT") != null) {
+        if (io_mod.getenv("LIA_TEST_COMMAND_INDETERMINATE_AFTER_EXIT") != null) {
             debug_trace.logf(
                 "core",
                 "command termination became indeterminate reason=injected_after_exit",
@@ -3782,7 +3782,7 @@ fn collectSpawnedProcess(
     );
     wait_pending = false;
     var output_incomplete = collected_output.output_incomplete;
-    if (io_mod.getenv("FX_TEST_COMMAND_OUTPUT_INCOMPLETE_AFTER_EXIT") != null) {
+    if (io_mod.getenv("LIA_TEST_COMMAND_OUTPUT_INCOMPLETE_AFTER_EXIT") != null) {
         recordOutputDrainFailure(
             &output_incomplete,
             "injected_after_exit",
@@ -4023,7 +4023,7 @@ test "raw process execution returns foreground output" {
     try std.testing.expect(!command_result.truncated);
 }
 
-test "commands receive fx agent environment" {
+test "commands receive lia agent environment" {
     const result = try executeCommand(
         .{ .max_command_output_bytes = 4096 },
         std.testing.allocator,
@@ -4035,7 +4035,7 @@ test "commands receive fx agent environment" {
     try std.testing.expect(std.mem.find(
         u8,
         result.output,
-        "<stdout>\nfx\n</stdout>",
+        "<stdout>\nlia\n</stdout>",
     ) != null);
 }
 
@@ -4045,20 +4045,20 @@ test "agent environment preserves the supplied environment without mutating it" 
     var environment = std.process.Environ.Map.init(std.testing.allocator);
     defer environment.deinit();
     try environment.put("AI_AGENT", "other-agent");
-    try environment.put("FX_AGENT_FIXTURE", "retained");
+    try environment.put("LIA_AGENT_FIXTURE", "retained");
 
     var scratch_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer scratch_state.deinit();
     const result = try executeProcessWithScript(
         scratch_state.allocator(),
         .{ .max_command_output_bytes = 4096 },
-        &.{ "/bin/sh", "-c", "printf '%s:%s' \"$AI_AGENT\" \"$FX_AGENT_FIXTURE\"" },
+        &.{ "/bin/sh", "-c", "printf '%s:%s' \"$AI_AGENT\" \"$LIA_AGENT_FIXTURE\"" },
         "/tmp",
         "",
         &environment,
     );
 
-    try std.testing.expectEqualStrings("fx:retained", result.stdout);
+    try std.testing.expectEqualStrings("lia:retained", result.stdout);
     try std.testing.expectEqualStrings("", result.stderr);
     try std.testing.expectEqualStrings("other-agent", environment.get("AI_AGENT").?);
 }
@@ -4552,7 +4552,7 @@ test "detached session preserves replacement failure with a zero output budget" 
 
     var scratch_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer scratch_state.deinit();
-    const argv = [_][]const u8{"/definitely/missing/fx-command-target"};
+    const argv = [_][]const u8{"/definitely/missing/lia-command-target"};
 
     try std.testing.expectError(
         error.FileNotFound,
@@ -6731,7 +6731,7 @@ test "runtime cancellation observed at the timeout deadline stays graceful" {
         defer alloc.free(quoted_term);
         // `wait` lets the trap run as soon as TERM arrives. A shell defers it
         // while a foreground `sleep` runs, and a `sleep` that starts after
-        // fx's last look at the process tree outlasts the grace period.
+        // lia's last look at the process tree outlasts the grace period.
         const command = try alloc.print(
             "trap 'printf TERM > {s}; sleep 3; exit 130' TERM; printf 'TIE-READY\n'; while :; do sleep 1 & wait $!; done",
             .{quoted_term},

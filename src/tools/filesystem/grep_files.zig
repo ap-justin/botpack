@@ -151,12 +151,12 @@ pub fn call(ctx: tool_dispatch.DispatchContext, erased: tool_dispatch.ToolInput)
 }
 
 // Only `tests/e2e/tui-interrupt-recovery.test.ts` sets
-// `FX_TEST_GREP_RELEASE`: a finished search then waits until the file it
+// `LIA_TEST_GREP_RELEASE`: a finished search then waits until the file it
 // names exists, so the test can cancel the turn while the tool is still
 // running. The libfx artifacts leave it out.
 fn holdForTest() void {
     if (comptime build_options.libfx) return;
-    const release_path = io_mod.getenv("FX_TEST_GREP_RELEASE") orelse return;
+    const release_path = io_mod.getenv("LIA_TEST_GREP_RELEASE") orelse return;
     while (true) : (io_mod.sleep(std.time.ns_per_ms)) {
         std.Io.Dir.accessAbsolute(io_mod.getIo(), release_path, .{}) catch continue;
         return;
@@ -676,7 +676,7 @@ fn dispatchGrepFilesRaw(alloc: Allocator, workspace_root: []const u8, args_json:
 }
 
 test "grep_files keeps only its result in the turn's allocator" {
-    // fx passes the turn's arena as `allocator`, so a scan left there stays
+    // lia passes the turn's arena as `allocator`, so a scan left there stays
     // until the turn ends and every search adds another.
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
@@ -961,7 +961,7 @@ test "grep_files reports stat failures after root resolution" {
 
 test "grep_files access denial returns structured recovery" {
     const alloc = std.testing.allocator;
-    const root = try alloc.print("/tmp/fx-grep-files-access-{d}", .{io_mod.nanoTimestamp()});
+    const root = try alloc.print("/tmp/lia-grep-files-access-{d}", .{io_mod.nanoTimestamp()});
     defer alloc.free(root);
     defer std.Io.Dir.cwd().deleteTree(io_mod.getIo(), root) catch {};
     try std.Io.Dir.cwd().createDirPath(io_mod.getIo(), root);

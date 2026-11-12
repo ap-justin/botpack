@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { fakeGatewayFinalText, fakeGatewayToolCall, startFakeGateway } from "../tests/e2e/fake-gateway";
 
 test("signed macOS variants preserve the image flow and native resource accounting", async () => {
-  const root = process.env.FX_SIGNED_COMPARE_DIR;
-  const probe = process.env.FX_SIGNED_RESOURCE_PROBE;
+  const root = process.env.LIA_SIGNED_COMPARE_DIR;
+  const probe = process.env.LIA_SIGNED_RESOURCE_PROBE;
   if (!root || !probe) throw new Error("signed comparison paths are required");
   const fixture = join(import.meta.dirname, "../tests/e2e/fixtures/mcp-modern-stdio.mjs");
   const model = "fixture/vision";
@@ -14,24 +14,24 @@ test("signed macOS variants preserve the image flow and native resource accounti
   writeFileSync(join(root, "memory-manifest.json"), JSON.stringify({
     fixture_sha256: new Bun.CryptoHasher("sha256").update(readFileSync(fixture)).digest("hex"),
     bun: Bun.version, model, samples_per_binary: 200, warmup_pairs: 3,
-    boundary: "native fx PID after decoded image reaches provider, before final response",
+    boundary: "native lia PID after decoded image reaches provider, before final response",
     accounting: "proc_pid_rusage; excludes the Bun gateway and MCP helper",
     order: "alternating AB/BA with reversed equal-length lanes", timeout_ms: 20_000,
     claim_limit: "resource screen, not a heap-leak proof",
   }, null, 2));
   for (let round = -3; round < 200; round++) {
     for (const label of round % 2 === 0 ? ["control", "candidate"] : ["candidate", "control"]) {
-      const dir = mkdtempSync(join(tmpdir(), "fx-signed-memory-"));
+      const dir = mkdtempSync(join(tmpdir(), "lia-signed-memory-"));
       const cohort = Math.abs(Math.floor(round / 2)) % 2;
       const lane = (label === "candidate" ? 1 : 0) ^ cohort;
-      const binary = join(root, `cohort-${cohort}`, `lane-${lane}`, "fx");
+      const binary = join(root, `cohort-${cohort}`, `lane-${lane}`, "lia");
       const profile = join(dir, "profile"), workspace = join(dir, "workspace");
-      mkdirSync(join(profile, ".fx"), { recursive: true });
+      mkdirSync(join(profile, ".lia"), { recursive: true });
       mkdirSync(workspace);
-      writeFileSync(join(profile, ".fx/settings.json"), "{}");
-      writeFileSync(join(profile, ".fx/mcp.json"), JSON.stringify({ mcp: { fixture: {
+      writeFileSync(join(profile, ".lia/settings.json"), "{}");
+      writeFileSync(join(profile, ".lia/mcp.json"), JSON.stringify({ mcp: { fixture: {
         type: "local", command: [process.execPath, fixture], enabled: true,
-        environment: { FX_MCP_MODE: "image_result" },
+        environment: { LIA_MCP_MODE: "image_result" },
       } } }));
       let childPid = 0;
       let sample: Record<string, number> | null = null;
@@ -49,10 +49,10 @@ test("signed macOS variants preserve the image flow and native resource accounti
         const child = Bun.spawn([binary, "ask", "--json", "--auto", "--no-save", "Get an image from the fixture"], {
           cwd: workspace, stdin: "ignore", stdout: "pipe", stderr: "pipe",
           env: { PATH: process.env.PATH ?? "", TMPDIR: dir, LANG: "en_US.UTF-8", TZ: "UTC",
-            HOME: profile, AI_GATEWAY_API_KEY: "fake-fixture-key", FX_AUTO_UPGRADE: "0", FX_SOUND: "0",
-            FX_DISABLE_KEYCHAIN: "1", FX_TEST_SKIP_ONBOARDING: "1", FX_PERMISSION_MODE: "auto", FX_MODEL: model,
-            FX_GATEWAY_BASE_URL: gateway.baseUrl, FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-            FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl },
+            HOME: profile, AI_GATEWAY_API_KEY: "fake-fixture-key", LIA_AUTO_UPGRADE: "0", LIA_SOUND: "0",
+            LIA_DISABLE_KEYCHAIN: "1", LIA_TEST_SKIP_ONBOARDING: "1", LIA_PERMISSION_MODE: "auto", LIA_MODEL: model,
+            LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+            LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl },
         });
         childPid = child.pid;
         const timer = setTimeout(() => child.kill("SIGKILL"), 20_000);

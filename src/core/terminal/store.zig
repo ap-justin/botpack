@@ -477,11 +477,11 @@ pub const ProfileStore = struct {
     process_provider: process_provider_mod.Provider,
     sessions_dir: io_mod.VerifiedDir,
     display_sessions_path: []u8,
-    /// `~/.fx`, kept open to reach the folders v2 sessions keep terminal
-    /// state in, in v1's layout: `~/.fx/terminal/{id}` (D45), or the side
+    /// `~/.lia`, kept open to reach the folders v2 sessions keep terminal
+    /// state in, in v1's layout: `~/.lia/terminal/{id}` (D45), or the side
     /// folder of a session not moved yet (D27, D47).
-    fx_dir: io_mod.VerifiedDir,
-    /// `~/.fx/terminal` and `~/.fx/session-files`, as `outside_roots`.
+    lia_dir: io_mod.VerifiedDir,
+    /// `~/.lia/terminal` and `~/.lia/session-files`, as `outside_roots`.
     display_outside_paths: [outside_roots.len][]u8,
     options: Options,
     mutex: std.Io.Mutex = .init,
@@ -509,13 +509,13 @@ pub const ProfileStore = struct {
             }),
         };
         defer home_dir.close();
-        var fx_dir = try io_mod.openOrCreateVerifiedPrivateDir(
+        var lia_dir = try io_mod.openOrCreateVerifiedPrivateDir(
             &home_dir,
             profile_paths.rootName(),
         );
-        errdefer fx_dir.close();
+        errdefer lia_dir.close();
         var sessions_dir = try io_mod.openOrCreateVerifiedPrivateDir(
-            &fx_dir,
+            &lia_dir,
             profile_paths.sessions_dir_name,
         );
         errdefer sessions_dir.close();
@@ -533,7 +533,7 @@ pub const ProfileStore = struct {
             .process_provider = process_provider,
             .sessions_dir = sessions_dir,
             .display_sessions_path = display_sessions_path,
-            .fx_dir = fx_dir,
+            .lia_dir = lia_dir,
             .display_outside_paths = display_outside_paths,
             .options = options,
         };
@@ -545,7 +545,7 @@ pub const ProfileStore = struct {
         self.alloc.free(self.display_sessions_path);
         for (self.display_outside_paths) |path| self.alloc.free(path);
         self.sessions_dir.close();
-        self.fx_dir.close();
+        self.lia_dir.close();
         self.* = undefined;
     }
 
@@ -645,13 +645,13 @@ pub const ProfileStore = struct {
     };
 
     /// Where v2 sessions keep terminal state outside the session manager,
-    /// in order: `~/.fx/terminal` (D45), then side folders not moved yet
+    /// in order: `~/.lia/terminal` (D45), then side folders not moved yet
     /// (D27, D47). A new owner folder is made only in the first.
     const outside_roots = [_][]const u8{ profile_paths.terminal_dir_name, profile_paths.session_files_dir_name };
 
     /// The folder an owner keeps its terminal state in: its v1 session
     /// folder, or a v2 session's folder outside the manager. `create` makes
-    /// `~/.fx/terminal/{id}` (`0700`) when the owner has none.
+    /// `~/.lia/terminal/{id}` (`0700`) when the owner has none.
     fn open_owner(self: *ProfileStore, owner_session_id: []const u8, create: bool) !OwnerFolder {
         const zio = io_mod.getIo();
         const options: std.Io.Dir.OpenOptions = .{ .iterate = true, .follow_symlinks = false };
@@ -683,11 +683,11 @@ pub const ProfileStore = struct {
         return .{ .dir = made.dir, .display_path = try session_layout.sessionDirPath(self.alloc, self.display_outside_paths[0], owner_session_id) };
     }
 
-    /// `~/.fx/{root_name}`, or null when nothing has made it yet. Opened
+    /// `~/.lia/{root_name}`, or null when nothing has made it yet. Opened
     /// for each use: it can appear after this store opened.
     fn open_outside_root(self: *ProfileStore, root_name: []const u8, create: bool) !?io_mod.VerifiedDir {
-        if (create) return try io_mod.openOrCreateVerifiedPrivateDir(&self.fx_dir, root_name);
-        return io_mod.openVerifiedPrivateDirIfPresent(&self.fx_dir, root_name);
+        if (create) return try io_mod.openOrCreateVerifiedPrivateDir(&self.lia_dir, root_name);
+        return io_mod.openVerifiedPrivateDirIfPresent(&self.lia_dir, root_name);
     }
 
     /// Every owner folder: v1 session folders, then the v2 folders of each
@@ -1015,7 +1015,7 @@ pub const ProfileStore = struct {
     }
 
     /// Reconciles the terminal records of the single owner session named by
-    /// `claim`, after authorizing it. A record owned by a running fx process
+    /// `claim`, after authorizing it. A record owned by a running lia process
     /// instance, including this one, is never modified. A record whose owner
     /// instance is gone is repaired and, if it still claims to be live,
     /// recorded as lost: nothing can reach its terminal any more. Other
@@ -1322,11 +1322,12 @@ pub const RecoveredList = struct {
     }
 };
 
-/// `Record.host_identity` names the fx process instance that owns a terminal:
+/// `Record.host_identity` names the lia process instance that owns a terminal:
 /// `fx-process-v1/<instance>/<pid>/<start token>`. The instance is random per
 /// process, and the pid and start token prove whether that process still runs.
 /// Records written by the retired terminal host daemon hold a bare instance id
-/// instead and are judged by their terminal process.
+/// instead and are judged by their terminal process. The fx name is stored
+/// data: saved terminal records depend on it.
 const owner_identity_prefix = "fx-process-v1/";
 const owner_instance_hex_len = 32;
 
@@ -2010,7 +2011,7 @@ fn proof_verifier(
     grant: contracts.AuthorityGrant,
 ) contracts.CheckpointChecksum {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.terminal.holder-proof.v2\x00");
+    hash.update("lia.terminal.holder-proof.v2\x00");
     hash.update(&proof.bytes);
     hash_u64(&hash, grant.generation.value);
     hash.update(@tagName(grant.actor));
@@ -2039,7 +2040,7 @@ fn close_initiator_verifier(
     claim: contracts.AuthorityClaim,
 ) contracts.CheckpointChecksum {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.terminal.close-initiator.v2\x00");
+    hash.update("lia.terminal.close-initiator.v2\x00");
     hash.update(&claim.proof.bytes);
     hash_u64(&hash, claim.generation.value);
     hash_text(&hash, @tagName(claim.actor));
@@ -2067,7 +2068,7 @@ fn owner_catalog_key(
     actor: contracts.ActorRole,
 ) [64]u8 {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.terminal.owner-catalog-key.v2\x00");
+    hash.update("lia.terminal.owner-catalog-key.v2\x00");
     hash.update(@tagName(actor));
     hash.update(@tagName(principal.transport_role));
     hash_text(&hash, principal.profile_user);
@@ -2082,7 +2083,7 @@ fn owner_catalog_verifier(
     claim: contracts.OwnerCatalogAuthorityClaim,
 ) contracts.CheckpointChecksum {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("fx.terminal.owner-catalog-proof.v2\x00");
+    hash.update("lia.terminal.owner-catalog-proof.v2\x00");
     hash.update(&claim.proof.bytes);
     hash.update(@tagName(claim.actor));
     hash.update(@tagName(claim.principal.transport_role));
@@ -2351,7 +2352,7 @@ pub fn loadOrCreateOwnerCatalogClaim(
     return operation.ownOwnerCatalogClaim(alloc, claim);
 }
 
-/// Reloads authority for the current fx owner without trusting caller-supplied
+/// Reloads authority for the current lia owner without trusting caller-supplied
 /// cwd, backend, or generation. Those facts are recovered from durable state;
 /// the active profile/session/workspace/transport identity must still match.
 pub fn reloadOwnerAuthorityClaim(
@@ -2443,7 +2444,7 @@ pub fn reloadHumanTakeoverAuthorityClaim(
     }, .humanTakeover());
 }
 
-/// Reloads a proof only through the managed-child capability of the durable fx
+/// Reloads a proof only through the managed-child capability of the durable lia
 /// session that owns it. A terminal id alone cannot select proof storage.
 pub fn reloadAuthorityClaim(
     alloc: Allocator,
@@ -5924,7 +5925,7 @@ fn testSignalProcess(
 test "a v2 session's terminal folder owns its terminal state, an unmoved side folder still counts, and every scan sees each owner once (D45)" {
     var fixture = try TestStoreFixture.init(std.testing.allocator, .{});
     defer fixture.deinit();
-    var root = io_mod.VerifiedDir{ .dir = try fixture.tmp.dir.openDir(std.testing.io, ".fx", .{ .iterate = true, .follow_symlinks = false }) };
+    var root = io_mod.VerifiedDir{ .dir = try fixture.tmp.dir.openDir(std.testing.io, ".lia", .{ .iterate = true, .follow_symlinks = false }) };
     defer root.close();
     // Made after the store opened: an older session's side folder (D27),
     // and one that also has a v1 folder.
@@ -5935,7 +5936,7 @@ test "a v2 session's terminal folder owns its terminal state, an unmoved side fo
         owner.close();
     }
 
-    // Only a new terminal makes a v2 owner's folder, in ~/.fx/terminal.
+    // Only a new terminal makes a v2 owner's folder, in ~/.lia/terminal.
     try std.testing.expectError(error.FileNotFound, fixture.profile.open_capability("v2-new-owner", false, false));
     try std.testing.expectError(error.FileNotFound, root.dir.statFile(std.testing.io, profile_paths.terminal_dir_name, .{}));
     var made = try fixture.profile.open_capability("v2-new-owner", false, true);
@@ -6010,9 +6011,9 @@ const TestStoreFixture = struct {
             .{ .iterate = true, .follow_symlinks = false },
         ) };
         defer root.close();
-        var fx = try io_mod.openOrCreateVerifiedPrivateDir(&root, ".fx");
-        defer fx.close();
-        var sessions = try io_mod.openOrCreateVerifiedPrivateDir(&fx, "sessions");
+        var lia = try io_mod.openOrCreateVerifiedPrivateDir(&root, ".lia");
+        defer lia.close();
+        var sessions = try io_mod.openOrCreateVerifiedPrivateDir(&lia, "sessions");
         defer sessions.close();
         var owner = try io_mod.openOrCreateVerifiedPrivateDir(
             &sessions,
@@ -7504,7 +7505,7 @@ test "human owner takeover proof is narrow and excludes agent writes" {
     );
 }
 
-test "human takeover lease is reclaimable only after its fx process owner is gone" {
+test "human takeover lease is reclaimable only after its lia process owner is gone" {
     const Match = struct {
         var result: process_identity.TokenMatch = .matched;
 

@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runFx } from "../evals/eval-helpers";
+import { runLia } from "../evals/eval-helpers";
 import { startIdleDropProxy, type IdleDrop } from "./fixtures/idle-drop-proxy";
 import {
   startContentLengthMcpHttpFixture,
@@ -66,18 +66,18 @@ function createRoot(
   operationTimeoutMs = 5_000,
   required = false,
 ) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), `fx-mcp-http-${label}-`)));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), `lia-mcp-http-${label}-`)));
   cleanupRoot = root;
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".lia"), { recursive: true });
   mkdirSync(workspace, { recursive: true });
   writeFileSync(
-    join(home, ".fx", "settings.json"),
+    join(home, ".lia", "settings.json"),
     JSON.stringify({}),
   );
   writeFileSync(
-    join(home, ".fx", "mcp.json"),
+    join(home, ".lia", "mcp.json"),
     JSON.stringify({
       mcp: {
         fixture: {
@@ -91,19 +91,19 @@ function createRoot(
       },
     }),
   );
-  return { root, home, workspace, traceLogPath: join(root, "fx-trace.log") };
+  return { root, home, workspace, traceLogPath: join(root, "lia-trace.log") };
 }
 
 function createEmptyRoot(label: string) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), `fx-mcp-http-${label}-`)));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), `lia-mcp-http-${label}-`)));
   cleanupRoot = root;
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".lia"), { recursive: true });
   mkdirSync(workspace, { recursive: true });
-  writeFileSync(join(home, ".fx", "settings.json"), JSON.stringify({}));
-  writeFileSync(join(home, ".fx", "mcp.json"), JSON.stringify({ mcp: {} }));
-  return { root, home, workspace, traceLogPath: join(root, "fx-trace.log") };
+  writeFileSync(join(home, ".lia", "settings.json"), JSON.stringify({}));
+  writeFileSync(join(home, ".lia", "mcp.json"), JSON.stringify({ mcp: {} }));
+  return { root, home, workspace, traceLogPath: join(root, "lia-trace.log") };
 }
 
 function fixtureEnv(
@@ -114,14 +114,14 @@ function fixtureEnv(
     HOME: root.home,
     AI_GATEWAY_API_KEY: "fake-mcp-http-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_AUTO_UPGRADE: "0",
-    FX_PERMISSION_MODE: "auto",
-    FX_GATEWAY_BASE_URL: activeGateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: activeGateway.chatUrl,
-    FX_TEST_GATEWAY_CHAT_URL: activeGateway.chatUrl,
-    FX_MODEL: MODEL,
-    FX_TRACE_LOG: root.traceLogPath,
-    FX_TRACE_SCOPES: "mcp",
+    LIA_AUTO_UPGRADE: "0",
+    LIA_PERMISSION_MODE: "auto",
+    LIA_GATEWAY_BASE_URL: activeGateway.baseUrl,
+    LIA_GATEWAY_CHAT_URL: activeGateway.chatUrl,
+    LIA_TEST_GATEWAY_CHAT_URL: activeGateway.chatUrl,
+    LIA_MODEL: MODEL,
+    LIA_TRACE_LOG: root.traceLogPath,
+    LIA_TRACE_SCOPES: "mcp",
   };
 }
 
@@ -159,15 +159,15 @@ function toolResultText(
 function preserveHttpFailure(
   label: string,
   root: ReturnType<typeof createRoot>,
-  result: Awaited<ReturnType<typeof runFx>>,
+  result: Awaited<ReturnType<typeof runLia>>,
   activeFixture: ReturnType<typeof startModernMcpHttpFixture>,
   activeGateway: ReturnType<typeof startFakeGateway>,
   force = false,
 ): void {
   if (result.code === 0 && !force) return;
   cleanupRoot = null;
-  writeFileSync(join(root.root, "fx-stdout.log"), result.stdout);
-  writeFileSync(join(root.root, "fx-stderr.log"), result.stderr);
+  writeFileSync(join(root.root, "lia-stdout.log"), result.stdout);
+  writeFileSync(join(root.root, "lia-stderr.log"), result.stderr);
   writeFileSync(
     join(root.root, "failure.json"),
     JSON.stringify({
@@ -177,7 +177,7 @@ function preserveHttpFailure(
       gatewayRequests: activeGateway.requests.map((request) => request.body),
     }, null, 2),
   );
-  throw new Error(`fx ${label} failed; retained artifacts: ${root.root}`);
+  throw new Error(`lia ${label} failed; retained artifacts: ${root.root}`);
 }
 
 function assertModernWire(
@@ -226,7 +226,7 @@ describe("modern MCP Streamable HTTP", () => {
       },
     });
     const root = createRoot("oauth-server-failure", { url: `http://127.0.0.1:${failing.port}/mcp` });
-    writeFileSync(join(root.home, ".fx", "mcp.json"), JSON.stringify({
+    writeFileSync(join(root.home, ".lia", "mcp.json"), JSON.stringify({
       mcp: {
         fixture: {
           type: "http",
@@ -241,19 +241,19 @@ describe("modern MCP Streamable HTTP", () => {
       fakeGatewayFinalText("Server failure observed."),
     ], { models: [{ id: MODEL, type: "language", tags: ["tool-use"] }] });
     try {
-      const result = await runFx(["ask", "--json", "--auto", "--no-save", "Find the fixture tools"], {
+      const result = await runLia(["ask", "--json", "--auto", "--no-save", "Find the fixture tools"], {
         cwd: root.workspace,
         env: {
           HOME: root.home,
-          FX_DISABLE_KEYCHAIN: "1",
-          FX_AUTO_UPGRADE: "0",
-          FX_TEST_SKIP_ONBOARDING: "1",
-          FX_SOUND: "0",
+          LIA_DISABLE_KEYCHAIN: "1",
+          LIA_AUTO_UPGRADE: "0",
+          LIA_TEST_SKIP_ONBOARDING: "1",
+          LIA_SOUND: "0",
           AI_GATEWAY_API_KEY: "local-fixture-key",
           VERCEL_OIDC_TOKEN: undefined,
-          FX_MODEL: MODEL,
-          FX_GATEWAY_BASE_URL: gateway.baseUrl,
-          FX_GATEWAY_CHAT_URL: gateway.chatUrl,
+          LIA_MODEL: MODEL,
+          LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+          LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
         },
         timeoutMs: 15_000,
       });
@@ -270,7 +270,7 @@ describe("modern MCP Streamable HTTP", () => {
     fixture = startModernMcpHttpFixture("legacy_session_required");
     const root = createRoot("mongodb-legacy-fallback", fixture);
 
-    const result = await runFx(
+    const result = await runLia(
       ["mcp", "show", "fixture"],
       {
         cwd: root.workspace,
@@ -278,9 +278,9 @@ describe("modern MCP Streamable HTTP", () => {
           HOME: root.home,
           AI_GATEWAY_API_KEY: undefined,
           VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
-          FX_TRACE_LOG: root.traceLogPath,
-          FX_TRACE_SCOPES: "mcp",
+          LIA_AUTO_UPGRADE: "0",
+          LIA_TRACE_LOG: root.traceLogPath,
+          LIA_TRACE_SCOPES: "mcp",
         },
         timeoutMs: 20_000,
       },
@@ -303,7 +303,7 @@ describe("modern MCP Streamable HTTP", () => {
     fixture = startModernMcpHttpFixture("legacy_plaintext_session_required");
     const root = createRoot("gitmcp-legacy-fallback", fixture);
 
-    const result = await runFx(
+    const result = await runLia(
       ["mcp", "show", "fixture"],
       {
         cwd: root.workspace,
@@ -311,9 +311,9 @@ describe("modern MCP Streamable HTTP", () => {
           HOME: root.home,
           AI_GATEWAY_API_KEY: undefined,
           VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
-          FX_TRACE_LOG: root.traceLogPath,
-          FX_TRACE_SCOPES: "mcp",
+          LIA_AUTO_UPGRADE: "0",
+          LIA_TRACE_LOG: root.traceLogPath,
+          LIA_TRACE_SCOPES: "mcp",
         },
         timeoutMs: 20_000,
       },
@@ -331,11 +331,11 @@ describe("modern MCP Streamable HTTP", () => {
     ]);
   }, 25_000);
 
-  test("a plain-text discovery rejection fails closed without aborting fx", async () => {
+  test("a plain-text discovery rejection fails closed without aborting lia", async () => {
     fixture = startModernMcpHttpFixture("legacy_plaintext_auth_rejection");
     const root = createRoot("plaintext-auth-rejection", fixture);
 
-    const result = await runFx(
+    const result = await runLia(
       ["mcp", "show", "fixture"],
       {
         cwd: root.workspace,
@@ -343,20 +343,20 @@ describe("modern MCP Streamable HTTP", () => {
           HOME: root.home,
           AI_GATEWAY_API_KEY: undefined,
           VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
-          FX_TRACE_LOG: root.traceLogPath,
-          FX_TRACE_SCOPES: "mcp",
+          LIA_AUTO_UPGRADE: "0",
+          LIA_TRACE_LOG: root.traceLogPath,
+          LIA_TRACE_SCOPES: "mcp",
         },
         timeoutMs: 20_000,
       },
     );
 
     // A 400 with a body that isn't JSON-RPC means a 2025 server (VER-04), so
-    // fx tries initialize; that fails too, and the server is left unusable.
+    // lia tries initialize; that fails too, and the server is left unusable.
     // With no WWW-Authenticate challenge there is no sign-in to offer.
     expect(result.code).toBe(1);
     expect(result.stdout).toContain("status     retrying");
-    expect(result.stdout).toContain("error      it refused or never answered fx's initialize request");
+    expect(result.stdout).toContain("error      it refused or never answered lia's initialize request");
     expect(result.stdout + result.stderr).not.toContain("InvalidJsonResponse");
     expect(result.stderr).not.toContain("panic");
     expect(fixture.requests.map((entry) => entry.message.method)).toEqual([
@@ -368,7 +368,7 @@ describe("modern MCP Streamable HTTP", () => {
   test("top-level mcp add persists HTTP and a later ask calls it", async () => {
     fixture = startModernMcpHttpFixture("json");
     const root = createEmptyRoot("top-level-add");
-    const added = await runFx(
+    const added = await runLia(
       ["mcp", "add", "fixture", fixture.url],
       {
         cwd: root.workspace,
@@ -376,24 +376,24 @@ describe("modern MCP Streamable HTTP", () => {
           HOME: root.home,
           AI_GATEWAY_API_KEY: undefined,
           VERCEL_OIDC_TOKEN: undefined,
-          FX_AUTO_UPGRADE: "0",
+          LIA_AUTO_UPGRADE: "0",
         },
       },
     );
     expect(added.code).toBe(0);
-    expect(added.stdout).toBe("Added fixture to ~/.fx/mcp.json.\n");
+    expect(added.stdout).toBe("Added fixture to ~/.lia/mcp.json.\n");
     const methods = (from: number) => fixture!.requests.slice(from).map((entry) => entry.message.method).filter((method) => method !== "subscriptions/listen");
     // add connects once to see whether the server needs a login; this one doesn't.
     expect(methods(0)).toEqual(["server/discover", "tools/list"]);
     // --no-login adds without contacting the server.
     const atAdd = fixture.requests.length;
-    const quiet = await runFx(
+    const quiet = await runLia(
       ["mcp", "add", "--no-login", "quiet", fixture.url],
-      { cwd: root.workspace, env: { HOME: root.home, AI_GATEWAY_API_KEY: undefined, VERCEL_OIDC_TOKEN: undefined, FX_AUTO_UPGRADE: "0" } },
+      { cwd: root.workspace, env: { HOME: root.home, AI_GATEWAY_API_KEY: undefined, VERCEL_OIDC_TOKEN: undefined, LIA_AUTO_UPGRADE: "0" } },
     );
     expect(quiet.code).toBe(0);
     expect(fixture.requests).toHaveLength(atAdd);
-    expect((await runFx(["mcp", "remove", "quiet"], { cwd: root.workspace, env: { HOME: root.home, FX_AUTO_UPGRADE: "0" } })).code).toBe(0);
+    expect((await runLia(["mcp", "remove", "quiet"], { cwd: root.workspace, env: { HOME: root.home, LIA_AUTO_UPGRADE: "0" } })).code).toBe(0);
 
     gateway = startFakeGateway([
       fakeGatewayToolCall("top_level_select", "mcp_select_tool", { name: TOOL_NAME }),
@@ -402,7 +402,7 @@ describe("modern MCP Streamable HTTP", () => {
     ], {
       models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
     });
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Use the HTTP MCP echo tool."],
       { cwd: root.workspace, env: fixtureEnv(root, gateway), timeoutMs: 20_000 },
     );
@@ -423,7 +423,7 @@ describe("modern MCP Streamable HTTP", () => {
       const root = createRoot(`content-length-${responseType}`, contentLengthFixture);
       gateway = startToolGateway(`Fixed-length ${responseType} complete.`);
 
-      const result = await runFx(
+      const result = await runLia(
         [
           "ask",
           "--json",
@@ -460,15 +460,15 @@ describe("modern MCP Streamable HTTP", () => {
   }
 
   // A load balancer drops a keep-alive connection once it sits idle, by
-  // resetting it or by closing it. fx keeps connections for the next request,
+  // resetting it or by closing it. lia keeps connections for the next request,
   // so each later call must find its connection gone and go out on a new one,
-  // once, instead of failing until fx restarts.
+  // once, instead of failing until lia restarts.
   for (const drop of ["reset", "close"] as const satisfies readonly IdleDrop[]) {
     test(`tool calls after the server ${drop === "reset" ? "reset" : "closed"} an idle connection go through, each once`, async () => {
       contentLengthFixture = await startContentLengthMcpHttpFixture("json");
       proxy = await startIdleDropProxy(contentLengthFixture.url, drop);
       const root = createRoot(`idle-${drop}`, proxy);
-      // Each call comes after the proxy dropped every connection fx kept.
+      // Each call comes after the proxy dropped every connection lia kept.
       const later = (id: string, text: string) => async () => {
         await Bun.sleep(600);
         return fakeGatewayToolCall(id, TOOL_NAME, { text });
@@ -483,7 +483,7 @@ describe("modern MCP Streamable HTTP", () => {
         models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
       });
 
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--json", "--auto", "--no-save", "Call the echo tool three times."],
         { cwd: root.workspace, env: fixtureEnv(root, gateway), timeoutMs: 30_000 },
       );
@@ -526,7 +526,7 @@ describe("modern MCP Streamable HTTP", () => {
       models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
     });
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Use the live MCP tool."],
       {
         cwd: root.workspace,
@@ -580,7 +580,7 @@ describe("modern MCP Streamable HTTP", () => {
       models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
     });
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Use the stale MCP tool."],
       {
         cwd: root.workspace,
@@ -629,7 +629,7 @@ describe("modern MCP Streamable HTTP", () => {
       models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
     });
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Use TTL after the unsupported filter."],
       {
         cwd: root.workspace,
@@ -664,7 +664,7 @@ describe("modern MCP Streamable HTTP", () => {
       models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
     });
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Use TTL after server cancellation."],
       {
         cwd: root.workspace,
@@ -702,7 +702,7 @@ describe("modern MCP Streamable HTTP", () => {
       models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
     });
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Use TTL after the unexpected filter."],
       {
         cwd: root.workspace,
@@ -746,7 +746,7 @@ describe("modern MCP Streamable HTTP", () => {
       models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
     });
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Do not send the invalidated tool."],
       {
         cwd: root.workspace,
@@ -759,7 +759,7 @@ describe("modern MCP Streamable HTTP", () => {
     const calls = fixture.requests.filter((entry) =>
       entry.message.method === "tools/call"
     );
-    // After list_changed the old tool is gone: fx re-fetches before the
+    // After list_changed the old tool is gone: lia re-fetches before the
     // call and refuses it unsent (CAT-05). Waits for N31.
     expect(calls.map((entry) => entry.message.params?.name)).toEqual(["fresh"]);
     expect(fixture.toolsListCalls).toBe(2);
@@ -796,7 +796,7 @@ describe("modern MCP Streamable HTTP", () => {
         models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
       });
 
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--json", "--auto", "--no-save", "Search the MCP cache."],
         {
           cwd: root.workspace,
@@ -835,7 +835,7 @@ describe("modern MCP Streamable HTTP", () => {
       models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
     });
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Search the delayed MCP catalog."],
       {
         cwd: root.workspace,
@@ -874,7 +874,7 @@ describe("modern MCP Streamable HTTP", () => {
       models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
     });
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Search the empty-cursor MCP catalog."],
       {
         cwd: root.workspace,
@@ -893,12 +893,12 @@ describe("modern MCP Streamable HTTP", () => {
   }, 30_000);
 
   for (const mode of ["json", "sse"] as ModernHttpMode[]) {
-    test(`fresh fx ask calls the request-scoped ${mode.toUpperCase()} fixture`, async () => {
+    test(`fresh lia ask calls the request-scoped ${mode.toUpperCase()} fixture`, async () => {
       fixture = startModernMcpHttpFixture(mode);
       const root = createRoot(`ask-${mode}`, fixture);
       gateway = startToolGateway(`${mode} MCP HTTP complete.`);
 
-      const result = await runFx(
+      const result = await runLia(
         ["ask", "--json", "--auto", "--no-save", `Call the ${mode} HTTP fixture.`],
         {
           cwd: root.workspace,
@@ -918,12 +918,12 @@ describe("modern MCP Streamable HTTP", () => {
     }, 30_000);
   }
 
-  test("fresh fx ask delegates unsupported input and output schema assertions", async () => {
+  test("fresh lia ask delegates unsupported input and output schema assertions", async () => {
     fixture = startModernMcpHttpFixture("server_authoritative_schema");
     const root = createRoot("server-authoritative-schema", fixture, 5_000, true);
     gateway = startToolGateway("Server-authoritative schema complete.");
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Call the schema fixture."],
       {
         cwd: root.workspace,
@@ -962,7 +962,7 @@ describe("modern MCP Streamable HTTP", () => {
     const root = createRoot("mixed-sse-delimiters", fixture, 1_000);
     gateway = startToolGateway("Mixed SSE delimiters complete.");
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Call the mixed SSE fixture."],
       {
         cwd: root.workspace,
@@ -989,7 +989,7 @@ describe("modern MCP Streamable HTTP", () => {
     fixture = startModernMcpHttpFixture("json");
     const root = createRoot("environment-headers", fixture);
     writeFileSync(
-      join(root.home, ".fx", "mcp.json"),
+      join(root.home, ".lia", "mcp.json"),
       JSON.stringify({
         mcp: {
           fixture: {
@@ -1003,7 +1003,7 @@ describe("modern MCP Streamable HTTP", () => {
     );
     gateway = startToolGateway("Environment-backed MCP complete.");
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Call the environment-backed fixture."],
       {
         cwd: root.workspace,
@@ -1031,7 +1031,7 @@ describe("modern MCP Streamable HTTP", () => {
     }
     expect(result.stdout).not.toContain("environment-bearer-secret");
     expect(result.stderr).not.toContain("environment-bearer-secret");
-    expect(readFileSync(join(root.home, ".fx", "mcp.json"), "utf8")).not
+    expect(readFileSync(join(root.home, ".lia", "mcp.json"), "utf8")).not
       .toContain("environment-bearer-secret");
   }, 30_000);
 
@@ -1039,7 +1039,7 @@ describe("modern MCP Streamable HTTP", () => {
     fixture = startModernMcpHttpFixture("json");
     const root = createRoot("workspace-expanded-headers", fixture);
     writeFileSync(
-      join(root.home, ".fx", "mcp.json"),
+      join(root.home, ".lia", "mcp.json"),
       JSON.stringify({ mcp: {} }),
     );
     writeFileSync(
@@ -1062,13 +1062,13 @@ describe("modern MCP Streamable HTTP", () => {
       ...fixtureEnv(root, gateway),
       WORKSPACE_HTTP_TOKEN: "workspace-http-secret",
     };
-    const trusted = await runFx(
+    const trusted = await runLia(
       ["mcp", "approve", "fixture"],
       { cwd: root.workspace, env },
     );
     expect(trusted.code).toBe(0);
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Call the workspace HTTP fixture."],
       {
         cwd: root.workspace,
@@ -1104,7 +1104,7 @@ describe("modern MCP Streamable HTTP", () => {
       models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
     });
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Do not call the invalid tool."],
       {
         cwd: root.workspace,
@@ -1127,7 +1127,7 @@ describe("modern MCP Streamable HTTP", () => {
     const root = createRoot("held-open-final", fixture, 1_000);
     gateway = startToolGateway("Held-open SSE complete.");
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Call the held-open HTTP fixture."],
       {
         cwd: root.workspace,
@@ -1151,11 +1151,11 @@ describe("modern MCP Streamable HTTP", () => {
     expect(fixture.cancelledCalls).toBe(1);
   }, 30_000);
 
-  test("fx closes a held-open SSE response once its answer arrives", async () => {
+  test("lia closes a held-open SSE response once its answer arrives", async () => {
     const heldOpen = startModernMcpHttpFixture("held_open_final");
     fixture = heldOpen;
     const root = createRoot("held-open-final-v2", heldOpen, 1_000);
-    // While the model answers, fx still runs and holds the tool's result: the
+    // While the model answers, lia still runs and holds the tool's result: the
     // stream the server never ended must be closed by then, not at exit.
     let closedWhileRunning = -1;
     gateway = startFakeGateway([
@@ -1170,7 +1170,7 @@ describe("modern MCP Streamable HTTP", () => {
       models: [{ id: MODEL, type: "language", tags: ["tool-use"] }],
     });
 
-    const result = await runFx(
+    const result = await runLia(
       ["ask", "--json", "--auto", "--no-save", "Call the held-open HTTP fixture."],
       {
         cwd: root.workspace,

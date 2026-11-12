@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FX_BIN, runFx } from "../evals/eval-helpers";
+import { LIA_BIN, runLia } from "../evals/eval-helpers";
 import {
   AUTO_EXA_WITHOUT_DURABLE_TOOLS_SERIALIZED_TOOL_NAMES,
   customProviderGuidanceState,
@@ -291,14 +291,14 @@ function createIsolatedRoot(
   webSearchPermission: PermissionAction = "allow",
   settings: Record<string, unknown> = {},
 ) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "fx-web-search-e2e-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "lia-web-search-e2e-")));
   const home = join(root, "home");
   const workspace = join(root, "workspace");
-  mkdirSync(join(home, ".fx"), { recursive: true });
+  mkdirSync(join(home, ".lia"), { recursive: true });
   mkdirSync(workspace, { recursive: true });
   const permission: Record<string, Record<string, string>> = {};
   if (webSearchPermission) permission.web_search = { "*": webSearchPermission };
-  writeFileSync(join(home, ".fx", "settings.json"), JSON.stringify({ ...settings, permission }));
+  writeFileSync(join(home, ".lia", "settings.json"), JSON.stringify({ ...settings, permission }));
   return { root, home, workspace: realpathSync(workspace) };
 }
 
@@ -311,17 +311,17 @@ function fakeGatewayEnv(
     HOME: root.home,
     AI_GATEWAY_API_KEY: "fake-e2e-key",
     VERCEL_OIDC_TOKEN: undefined,
-    FX_GATEWAY_BASE_URL: gateway.baseUrl,
-    FX_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
-    FX_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
-    FX_TEST_GATEWAY_CREDITS_URL: undefined,
-    FX_MODEL: OUTER_MODEL,
+    LIA_GATEWAY_BASE_URL: gateway.baseUrl,
+    LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
+    LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
+    LIA_TEST_GATEWAY_CREDITS_URL: undefined,
+    LIA_MODEL: OUTER_MODEL,
     ...extra,
   };
 }
 
-function parseFxJson(result: Awaited<ReturnType<typeof runFx>>) {
+function parseLiaJson(result: Awaited<ReturnType<typeof runLia>>) {
   expect(result.code).toBe(0);
   return JSON.parse(result.stdout.trim()) as {
     output: string;
@@ -387,7 +387,7 @@ class AcpClient {
         (entry): entry is [string, string] => entry[1] !== undefined,
       ),
     );
-    return new AcpClient(nodeSpawn(FX_BIN, ["acp"], {
+    return new AcpClient(nodeSpawn(LIA_BIN, ["acp"], {
       cwd,
       env: definedEnv,
       stdio: ["pipe", "pipe", "pipe"],
@@ -503,7 +503,7 @@ describe("web_search Gateway fixture", () => {
         outerText("The native search call was rejected."),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "--json", "--no-save", "Search the web for the latest Zig release."],
           {
             cwd: root.workspace,
@@ -512,7 +512,7 @@ describe("web_search Gateway fixture", () => {
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("native search call was rejected");
         expect(gateway.requests).toHaveLength(2);
         expect(gateway.requests[0].body).toContain("gateway.exa_search");
@@ -528,7 +528,7 @@ describe("web_search Gateway fixture", () => {
   );
 
   test(
-    "default fx ask unadvertised native web_search cannot start a worker",
+    "default lia ask unadvertised native web_search cannot start a worker",
     async () => {
       const root = createIsolatedRoot();
       const gateway = startFakeGateway([
@@ -536,7 +536,7 @@ describe("web_search Gateway fixture", () => {
         outerText("The native search call was rejected."),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "Search the web for the latest Zig release."],
           {
             cwd: root.workspace,
@@ -565,7 +565,7 @@ describe("web_search Gateway fixture", () => {
       const root = createIsolatedRoot(null);
       const gateway = startFakeGateway();
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "--json", "--no-save", "Search the web for the latest Zig release."],
           {
             cwd: root.workspace,
@@ -575,7 +575,7 @@ describe("web_search Gateway fixture", () => {
         );
 
         expect(result.code).toBe(0);
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("Zig downloads");
         expect(json.output).toContain(SOURCE_URL);
         expect(json.tool_calls).toHaveLength(0);
@@ -653,9 +653,9 @@ describe("web_search Gateway fixture", () => {
         ]),
         outerText("The saved search context is available."),
       ], model);
-      const env = fakeGatewayEnv(root, gateway, { FX_MODEL: model });
+      const env = fakeGatewayEnv(root, gateway, { LIA_MODEL: model });
       try {
-        const first = await runFx(
+        const first = await runLia(
           ["ask", "--auto", "--json", "Search the web for the latest Zig release."],
           { cwd: root.workspace, env, timeoutMs: TIMEOUT },
         );
@@ -665,7 +665,7 @@ describe("web_search Gateway fixture", () => {
         expect(saved.session_id).toMatch(/^[A-Za-z0-9_-]{12}$/);
         expect(gateway.requests).toHaveLength(1);
 
-        const resumed = await runFx(
+        const resumed = await runLia(
           ["ask", "--auto", "--json", "--resume", saved.session_id, "Summarize the saved search."],
           { cwd: root.workspace, env, timeoutMs: TIMEOUT },
         );
@@ -717,7 +717,7 @@ describe("web_search Gateway fixture", () => {
         malformedDirectProviderResult("exa_search"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "--json", "--no-save", "Search the web for the latest Zig release."],
           {
             cwd: root.workspace,
@@ -745,7 +745,7 @@ describe("web_search Gateway fixture", () => {
         malformedDirectProviderArguments("exa_search"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "--json", "--no-save", "Search the web for the latest Zig release."],
           {
             cwd: root.workspace,
@@ -775,13 +775,13 @@ describe("web_search Gateway fixture", () => {
       ]);
       const traceLog = join(root.root, "trace.log");
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "--json", "--no-save", "Write the requested file."],
           {
             cwd: root.workspace,
             env: fakeGatewayEnv(root, gateway, {
-              FX_TRACE_LOG: traceLog,
-              FX_TRACE_SCOPES: "agent,tool",
+              LIA_TRACE_LOG: traceLog,
+              LIA_TRACE_SCOPES: "agent,tool",
             }),
             timeoutMs: TIMEOUT,
           },
@@ -815,20 +815,20 @@ describe("web_search Gateway fixture", () => {
         outerFinalAnswer(),
       ], PARALLEL_OUTER_MODEL);
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "--json", "--no-save", "Search the web for the latest Zig release."],
           {
             cwd: root.workspace,
             env: fakeGatewayEnv(root, gateway, {
-              FX_MODEL: PARALLEL_OUTER_MODEL,
-              FX_WEB_SEARCH_BACKEND: "ai_gateway_parallel_search",
+              LIA_MODEL: PARALLEL_OUTER_MODEL,
+              LIA_WEB_SEARCH_BACKEND: "ai_gateway_parallel_search",
             }),
             timeoutMs: TIMEOUT,
           },
         );
 
         expect(result.code).toBe(0);
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.tool_calls).toHaveLength(0);
         expect(gateway.requests).toHaveLength(2);
         expect(gateway.requests[0].headers.get("ai-language-model-id")).toBe(PARALLEL_OUTER_MODEL);
@@ -868,18 +868,18 @@ describe("web_search Gateway fixture", () => {
         reasoning_options: [{ type: "effort", values: ["high"] }],
       });
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "--json", "--no-save", "Search the web for the latest Zig release."],
           {
             cwd: root.workspace,
             env: fakeGatewayEnv(root, gateway, {
-              FX_MODEL: "anthropic/claude-opus-4.6",
+              LIA_MODEL: "anthropic/claude-opus-4.6",
             }),
             timeoutMs: TIMEOUT,
           },
         );
 
-        parseFxJson(result);
+        parseLiaJson(result);
         expect(gateway.requests).toHaveLength(2);
         expect(gateway.requests[0].body).toContain('"name":"exa_search"');
         expect(gateway.requests[0].body).not.toContain('"name":"perplexity_search"');
@@ -897,7 +897,7 @@ describe("web_search Gateway fixture", () => {
   );
 
   test(
-    "fx ask preserves the exact GLM model while sending declared Fast",
+    "lia ask preserves the exact GLM model while sending declared Fast",
     async () => {
       const root = createIsolatedRoot("allow", {
         model: "zai/glm-5.2",
@@ -910,16 +910,16 @@ describe("web_search Gateway fixture", () => {
         fast_options: [{ type: "toggle" }],
       });
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "--json", "--no-save", "Reply with a short confirmation."],
           {
             cwd: root.workspace,
-            env: fakeGatewayEnv(root, gateway, { FX_MODEL: undefined }),
+            env: fakeGatewayEnv(root, gateway, { LIA_MODEL: undefined }),
             timeoutMs: TIMEOUT,
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.model).toBe("zai/glm-5.2");
         expect(gateway.requests).toHaveLength(1);
         expect(gateway.requests[0].headers.get("ai-language-model-id")).toBe(
@@ -955,18 +955,18 @@ describe("web_search Gateway fixture", () => {
         });
         const gateway = startFakeGateway([outerText("stale settings filtered")], testCase.model);
         try {
-          const result = await runFx(
+          const result = await runLia(
             ["ask", "--auto", "--json", "--no-save", "Reply with a short confirmation."],
             {
               cwd: root.workspace,
               env: fakeGatewayEnv(root, gateway, {
-                FX_MODEL: testCase.model,
+                LIA_MODEL: testCase.model,
               }),
               timeoutMs: TIMEOUT,
             },
           );
 
-          parseFxJson(result);
+          parseLiaJson(result);
           expect(gateway.requests).toHaveLength(1);
           const request = JSON.parse(gateway.requests[0].body);
           expect(request).not.toHaveProperty("reasoning");
@@ -975,7 +975,7 @@ describe("web_search Gateway fixture", () => {
           expect(gateway.requests[0].body).not.toContain('"thinking"');
 
           const stored = JSON.parse(
-            readFileSync(join(root.home, ".fx", "settings.json"), "utf8"),
+            readFileSync(join(root.home, ".lia", "settings.json"), "utf8"),
           );
           expect(stored.effort).toBe(testCase.effort);
           expect(stored.fast_mode).toBe(true);
@@ -994,12 +994,12 @@ describe("web_search Gateway fixture", () => {
       const root = createIsolatedRoot();
       const gateway = startFakeGateway();
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "--json", "--no-save", "Search the web for the latest Zig release."],
           {
             cwd: root.workspace,
             env: fakeGatewayEnv(root, gateway, {
-              FX_WEB_SEARCH_BACKEND: "parallel_search",
+              LIA_WEB_SEARCH_BACKEND: "parallel_search",
             }),
             timeoutMs: TIMEOUT,
           },
@@ -1022,7 +1022,7 @@ describe("web_search Gateway fixture", () => {
         const root = createIsolatedRoot(permission);
         const gateway = startFakeGateway([outerText("search capability unavailable")]);
         try {
-          const result = await runFx(
+          const result = await runLia(
             ["ask", "--auto", "--json", "--no-save", "Search current Zig release information."],
             {
               cwd: root.workspace,
@@ -1031,7 +1031,7 @@ describe("web_search Gateway fixture", () => {
             },
           );
 
-          const json = parseFxJson(result);
+          const json = parseLiaJson(result);
           expect(json.output).toContain("search capability unavailable");
           expect(json.tool_calls).toHaveLength(0);
           expect(gateway.requests).toHaveLength(1);
@@ -1068,7 +1068,7 @@ describe("web_search Gateway fixture", () => {
         outerText("zero search handled"),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "--auto", "--json", "--no-save", "Search only if needed."],
           {
             cwd: root.workspace,
@@ -1077,7 +1077,7 @@ describe("web_search Gateway fixture", () => {
           },
         );
 
-        const json = parseFxJson(result);
+        const json = parseLiaJson(result);
         expect(json.output).toContain("zero search handled");
         expect(json.tool_calls).toHaveLength(0);
         expect(gateway.requests).toHaveLength(2);
@@ -1092,7 +1092,7 @@ describe("web_search Gateway fixture", () => {
   );
 
   test(
-    "default fx ask applies environment model, permission, and step-limit overrides",
+    "default lia ask applies environment model, permission, and step-limit overrides",
     async () => {
       const root = createIsolatedRoot(null, {
         model: OUTER_MODEL,
@@ -1107,14 +1107,14 @@ describe("web_search Gateway fixture", () => {
         }]),
       ]);
       try {
-        const result = await runFx(
+        const result = await runLia(
           ["ask", "Write the environment override proof file."],
           {
             cwd: root.workspace,
             env: fakeGatewayEnv(root, gateway, {
-              FX_MODEL: PARALLEL_OUTER_MODEL,
-              FX_PERMISSION_MODE: "auto",
-              FX_MAX_AGENT_STEPS: "1",
+              LIA_MODEL: PARALLEL_OUTER_MODEL,
+              LIA_PERMISSION_MODE: "auto",
+              LIA_MAX_AGENT_STEPS: "1",
             }),
             timeoutMs: TIMEOUT,
           },
@@ -1173,7 +1173,7 @@ describe("web_search Gateway fixture", () => {
           kind: "search",
           status: "pending",
           rawInput: {},
-          _meta: { fx: { toolCall: { internal: false } } },
+          _meta: { lia: { toolCall: { internal: false } } },
         });
         expect(toolUpdates[1]?.sessionUpdate).toBe("tool_call_update");
         expect(toolUpdates[1]?.status).toBe("completed");

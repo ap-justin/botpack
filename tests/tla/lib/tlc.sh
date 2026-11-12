@@ -50,7 +50,7 @@ tlc_find() {
 
 tlc_verdicts() {
     tlc_find
-    tlc_work="$(mktemp -d "${TMPDIR:-/tmp}/fx-tla-$(basename "$(pwd)").XXXXXX")" || {
+    tlc_work="$(mktemp -d "${TMPDIR:-/tmp}/lia-tla-$(basename "$(pwd)").XXXXXX")" || {
         echo "cannot create a private folder under ${TMPDIR:-/tmp}" >&2
         exit 2
     }

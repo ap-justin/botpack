@@ -136,11 +136,11 @@ function isCanonicalBuiltin(name: string): boolean {
   );
 }
 
-function isFxOwnedSystemText(text: string): boolean {
+function isLiaOwnedSystemText(text: string): boolean {
   return text.startsWith("# Identity and context\n") ||
-    /^You are a (?:read-only )?(?:Explore|Plan|Verify|Web) subagent inside fx\./.test(text) ||
+    /^You are a (?:read-only )?(?:Explore|Plan|Verify|Web) subagent inside lia\./.test(text) ||
     text === WEB_SEARCH_GUIDANCE ||
-    text.startsWith("<fx-turn-context>") ||
+    text.startsWith("<lia-turn-context>") ||
     text.startsWith("Runtime context:");
 }
 
@@ -161,12 +161,12 @@ function collectDescriptions(value: unknown, result: string[] = []): string[] {
   return result;
 }
 
-export function fxOwnedGuidanceFragments(request: GatewayRequest): GuidanceFragment[] {
+export function liaOwnedGuidanceFragments(request: GatewayRequest): GuidanceFragment[] {
   const fragments: GuidanceFragment[] = [];
   for (const [index, message] of (request.prompt ?? []).entries()) {
     if (message.role !== "system") continue;
     const text = contentText(message.content);
-    if (isFxOwnedSystemText(text)) {
+    if (isLiaOwnedSystemText(text)) {
       fragments.push({ source: `system[${index}]`, text });
     }
   }
@@ -196,7 +196,7 @@ export function findUnavailableCapabilityReferences(
   request: GatewayRequest,
 ): CapabilityReferenceFinding[] {
   const advertised = canonicalAdvertisedToolNames(request);
-  const fragments = fxOwnedGuidanceFragments(request);
+  const fragments = liaOwnedGuidanceFragments(request);
   const findings: CapabilityReferenceFinding[] = [];
 
   for (const name of CANONICAL_BUILTIN_NAMES) {

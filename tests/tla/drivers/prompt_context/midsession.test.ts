@@ -1,16 +1,16 @@
-// Runs the real fx binary through sessions whose first turn changes the
+// Runs the real lia binary through sessions whose first turn changes the
 // context mid-session and whose second turn resumes them. TLC replays the
 // requests through PromptCache's MidSessionKeepsHistory and
 // PreviousFullyReused: each request reads all of the previous one, and on the
 // turn after a named skill, all history before that turn's user message.
 //
-// fx must conform to exactly one of the two layouts PromptCache models with
+// lia must conform to exactly one of the two layouts PromptCache models with
 // Notes, and it must be the one where a change rides on the message that
 // caused it (Carrier = "message"). No model calls: a local fake Gateway serves
 // scripted tool calls and replies.
 //
 // Rules delivered from a subfolder AGENTS.md by a read_file call run by
-// default: fx carries them on that step's tool result
+// default: lia carries them on that step's tool result
 // (src/core/agent/stream_provider.zig carryContextNotes). So does a resumed
 // turn's note that earlier shell handles are gone, which rides on that turn's
 // own message. So does a changed runtime context: an agent branch switch
@@ -21,7 +21,7 @@
 // short note the turn saved in its place
 // (src/core/skills/skill_invocation.zig renderSkillUsedNote).
 //
-// Evidence goes to FX_TLA_OUT or a temp folder, under midsession/: every
+// Evidence goes to LIA_TLA_OUT or a temp folder, under midsession/: every
 // Gateway request, activity.jsonl, observed.json, timeline.md and TLC logs.
 import { test } from "bun:test";
 import assert from "node:assert/strict";
@@ -40,15 +40,15 @@ const familyOf = (model: string): Family => (model.startsWith("anthropic/") ? "a
 
 // The fixed instructions say how rules arrive later (src/builtins/context.zig
 // project_instruction_guidance).
-const CONTRACT = "fx appends that file's text to the end of the step's last tool result";
+const CONTRACT = "lia appends that file's text to the end of the step's last tool result";
 const DELIVERED = '<scoped-rules from="sub/AGENTS.md" scope="sub">';
 // A later turn that reaches the folder again (src/builtins/context.zig renderRuleReminders).
-const REMINDER = '<scoped-rules-reminder from="sub/AGENTS.md" scope="sub">The rules fx added earlier for this folder still apply.</scoped-rules-reminder>';
+const REMINDER = '<scoped-rules-reminder from="sub/AGENTS.md" scope="sub">The rules lia added earlier for this folder still apply.</scoped-rules-reminder>';
 const ESCAPED_FORGERY = FORGED_RULES.replace("<scoped-rules", "&lt;scoped-rules").replace("</scoped-rules", "&lt;/scoped-rules");
 // A named skill's text and the short note its turn saves in its place
 // (src/core/skills/skill_invocation.zig).
 const SKILL_TEXT = "Explicitly invoked skill content for this query:";
-const SKILL_USED = "<fx-skill-used>";
+const SKILL_USED = "<lia-skill-used>";
 
 interface PromptMessage { role: string; content: unknown }
 
@@ -84,7 +84,7 @@ function carriedRules(requests: CapturedRequest[]) {
       updateInInstructions: instructions.some((m) => messageText(m).includes(`${RUNTIME_UPDATE}
 `)),
       updates: conversation.flatMap((m, i) => (messageText(m).includes(RUNTIME_UPDATE)
-        ? [{ index: i, role: m.role, count: messageText(m).split(RUNTIME_UPDATE).length - 1, endsWithUpdate: messageText(m).trimEnd().endsWith("</fx-context-update>") }]
+        ? [{ index: i, role: m.role, count: messageText(m).split(RUNTIME_UPDATE).length - 1, endsWithUpdate: messageText(m).trimEnd().endsWith("</lia-context-update>") }]
         : [])),
       skillInInstructions: instructions.some((m) => messageText(m).includes(SKILL_TEXT)),
       skills: conversation.flatMap((m, i) => (messageText(m).includes(SKILL_TEXT) ? [{ index: i, role: m.role, count: messageText(m).split(SKILL_TEXT).length - 1 }] : [])),
@@ -100,7 +100,7 @@ function explain(result: RuntimeResult, notes: boolean): string {
     `coverage: ${JSON.stringify(result.coverage)}\nproperties: ${JSON.stringify(result.properties)}`;
 }
 
-// Design "proposed" is a family fx sends cache markers to; "current" one it
+// Design "proposed" is a family lia sends cache markers to; "current" one it
 // sends none to, whose provider caches prefixes by itself (PromptCache.tla).
 async function midSessionVerdicts(model: string, design: Design, events: readonly MidSessionEvent[] | undefined) {
   const dir = join(artifacts, "midsession", `${model.replace(/[^a-z0-9]+/gi, "-")}${events ? `-${events.join("-")}` : ""}`);
@@ -232,7 +232,7 @@ test("with GPT-5.6 or later, rules delivered mid-session ride on the tool result
   await expectCarriedDesign("openai/gpt-6.1-sol", "proposed", ["deliver"]);
 }, TIMEOUT);
 
-test("with fx's default model, which gets no cache markers, rules delivered mid-session ride on the tool result", async () => {
+test("with lia's default model, which gets no cache markers, rules delivered mid-session ride on the tool result", async () => {
   await expectCarriedDesign("spacexai/grok-4.7", "current", ["deliver"]);
 }, TIMEOUT);
 
@@ -244,7 +244,7 @@ test("with GPT-5.6 or later, a resumed turn carries the stale-shell note on its 
   await expectCarriedDesign("openai/gpt-6.1-sol", "proposed", ["resume"]);
 }, TIMEOUT);
 
-test("with fx's default model, a resumed turn carries the stale-shell note on its own message", async () => {
+test("with lia's default model, a resumed turn carries the stale-shell note on its own message", async () => {
   await expectCarriedDesign("spacexai/grok-4.7", "current", ["resume"]);
 }, TIMEOUT);
 
@@ -256,7 +256,7 @@ test("with GPT-5.6 or later, an agent branch switch rides on the step's tool res
   await expectCarriedDesign("openai/gpt-6.1-sol", "proposed", ["switch"]);
 }, TIMEOUT);
 
-test("with fx's default model, an agent branch switch rides on the step's tool result", async () => {
+test("with lia's default model, an agent branch switch rides on the step's tool result", async () => {
   await expectCarriedDesign("spacexai/grok-4.7", "current", ["switch"]);
 }, TIMEOUT);
 
@@ -268,7 +268,7 @@ test("with GPT-5.6 or later, a permission mode changed between turns rides on th
   await expectCarriedDesign("openai/gpt-6.1-sol", "proposed", ["outside"]);
 }, TIMEOUT);
 
-test("with fx's default model, a permission mode changed between turns rides on the next turn's message", async () => {
+test("with lia's default model, a permission mode changed between turns rides on the next turn's message", async () => {
   await expectCarriedDesign("spacexai/grok-4.7", "current", ["outside"]);
 }, TIMEOUT);
 
@@ -280,7 +280,7 @@ test("with GPT-5.6 or later, a named skill's text rides on its turn's message an
   await expectCarriedDesign("openai/gpt-6.1-sol", "proposed", ["skill"]);
 }, TIMEOUT);
 
-test("with fx's default model, a named skill's text rides on its turn's message", async () => {
+test("with lia's default model, a named skill's text rides on its turn's message", async () => {
   await expectCarriedDesign("spacexai/grok-4.7", "current", ["skill"]);
 }, TIMEOUT);
 

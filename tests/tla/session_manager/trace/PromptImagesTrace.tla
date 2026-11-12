@@ -1,6 +1,6 @@
 ------------------------ MODULE PromptImagesTrace ------------------------
 (***************************************************************************)
-(* Checks a real fx run against PromptImages.tla (D89).                    *)
+(* Checks a real lia run against PromptImages.tla (D89).                    *)
 (*                                                                         *)
 (* tests/tla/drivers/session_manager/prompt-images.test.ts runs the built  *)
 (* binary and writes one line per thing it observed, each a step of the    *)

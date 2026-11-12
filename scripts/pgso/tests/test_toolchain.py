@@ -16,7 +16,7 @@ from scripts.pgso.toolchain import IR_SIZE_SCRIPT, Toolchain
 class PgsoToolchainTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory(
-            prefix="fx-pgso-toolchain-"
+            prefix="lia-pgso-toolchain-"
         )
         self.root = pathlib.Path(self.temporary_directory.name)
         self.llvm_bin = self.root / "llvm" / "bin"

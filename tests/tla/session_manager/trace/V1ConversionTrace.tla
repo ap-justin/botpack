@@ -1,8 +1,8 @@
 --------------------------- MODULE V1ConversionTrace ---------------------------
 (***************************************************************************)
-(* Trace validation for V1Conversion.tla from what real fx runs leave.    *)
+(* Trace validation for V1Conversion.tla from what real lia runs leave.    *)
 (*                                                                         *)
-(* A driver runs real fx processes one step at a time and observes the    *)
+(* A driver runs real lia processes one step at a time and observes the    *)
 (* result after each (`Obs`, from ConversionData.tla), a record with      *)
 (*   k      the step: create | write | hold | release (older-build v1     *)
 (*          writers), open | all | crash (a request, the last one killed  *)
