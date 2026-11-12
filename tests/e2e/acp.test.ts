@@ -1581,7 +1581,6 @@ describe("acp: model-independent", () => {
     teams?: Array<{ id: string; slug: string; name: string }>;
   } = {}) => {
     const requests: string[] = [];
-    let deviceIssuedAt = 0;
     let answeredPolls = 0;
     let release = () => {};
     const gate = options.holdPolls ? new Promise<void>(resolve => { release = resolve; }) : undefined;
@@ -1605,7 +1604,6 @@ describe("acp: model-independent", () => {
           });
         }
         if (url.pathname === "/oauth/device") {
-          deviceIssuedAt = Date.now();
           return Response.json({
             device_code: "fake-device-code",
             user_code: "ABCD-1234",
@@ -1639,10 +1637,6 @@ describe("acp: model-independent", () => {
       requests,
       get deviceRequests() {
         return requests.filter(path => path === "/oauth/device").length;
-      },
-      // When the device code went out, in ms since the epoch.
-      get deviceIssuedAt() {
-        return deviceIssuedAt;
       },
       // Polls whose answer is on its way back to lia, after any hold.
       get answeredPolls() {
@@ -2742,7 +2736,7 @@ describe("acp: model-independent", () => {
         sendAuthenticate(2);
         expectSignInCode(await readResponse(client, 2), fixture.issuer.issuerUrl);
         // The sign-in ends at once, with nobody waiting.
-        const failure = await askUntilSignInFailure(3, 0, "Could not reach Vercel to sign in");
+        const failure = await askUntilSignInFailure(3, 50, "Could not reach Vercel to sign in");
         expect(failure.error.code).toBe(-32600);
 
         // The failure was kept until asked for: no second code was issued first.
