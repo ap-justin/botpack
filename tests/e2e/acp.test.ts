@@ -1580,6 +1580,7 @@ describe("acp: model-independent", () => {
     teams?: Array<{ id: string; slug: string; name: string }>;
   } = {}) => {
     const requests: string[] = [];
+    let deviceIssuedAt = 0;
     let release = () => {};
     const gate = options.holdPolls ? new Promise<void>(resolve => { release = resolve; }) : undefined;
     let approved = !options.held;
@@ -1602,6 +1603,7 @@ describe("acp: model-independent", () => {
           });
         }
         if (url.pathname === "/oauth/device") {
+          deviceIssuedAt = Date.now();
           return Response.json({
             device_code: "fake-device-code",
             user_code: "ABCD-1234",
@@ -1634,6 +1636,10 @@ describe("acp: model-independent", () => {
       requests,
       get deviceRequests() {
         return requests.filter(path => path === "/oauth/device").length;
+      },
+      // When the device code went out, in ms since the epoch.
+      get deviceIssuedAt() {
+        return deviceIssuedAt;
       },
       approve() {
         approved = true;
@@ -2477,14 +2483,18 @@ describe("acp: model-independent", () => {
   test(
     "ACP lia-login reports a sign-in code that expired with nobody waiting",
     async () => {
-      const fixture = await startSignIn({ held: true, expiresIn: 2 });
+      const lifetimeS = 4;
+      const fixture = await startSignIn({ held: true, expiresIn: lifetimeS });
       try {
         sendAuthenticate(2);
         await readResponse(client, 2);
-        // Nothing approves the code. Past its two seconds the worker ends the
-        // sign-in with nobody waiting, and the next authenticate hears why,
-        // within the two seconds the failure is kept.
-        await Bun.sleep(3_000);
+        // Nothing approves the code. The worker ends the sign-in within its
+        // 100 ms tick of the code's expiry, and keeps the failure for another
+        // lifetime. Wait until the issuer's clock says the code has expired
+        // and the worker has had a second to end, then authenticate well
+        // inside the kept window.
+        const endedAt = fixture.issuer.deviceIssuedAt + lifetimeS * 1000 + 1000;
+        await waitForCondition("the sign-in code expired", () => Date.now() >= endedAt, TIMEOUT);
         sendAuthenticate(3);
         const expired = await readResponse(client, 3);
         expect(expired.error.code).toBe(-32600);
