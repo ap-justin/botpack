@@ -45,6 +45,8 @@ const stalledRequestIds = new Set();
 let buffer = Buffer.alloc(0);
 
 if (pidPath) writeFileSync(pidPath, String(process.pid));
+// Where the server started, for tests of the working directory it is given.
+if (process.env.LIA_MCP_CWD_CAPTURE) writeFileSync(process.env.LIA_MCP_CWD_CAPTURE, process.cwd());
 // Some servers keep running after their input closes, or ignore SIGTERM.
 if (process.env.LIA_MCP_IGNORE_EOF === "1") setInterval(() => {}, 1 << 30);
 if (process.env.LIA_MCP_IGNORE_TERM === "1") process.on("SIGTERM", () => {});
