@@ -5646,7 +5646,7 @@ test "a rejected credential answers AUTH_REQUIRED only for Gateway and a forbidd
     }{
         .{ .status = .unauthorized, .auth_message = "lia login authentication failed · HTTP 401" },
         // A configured provider's key is not one a sign-in can replace: the
-        // prompt answers the plain error that names the rejected key.
+        // prompt answers the plain error carrying the recorded notice.
         .{
             .provider = model_provider.parse("local").?,
             .source = .configured,
