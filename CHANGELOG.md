@@ -4,8 +4,8 @@
 
 ### Fixes
 
-- ACP sign-in works: `authenticate` with `lia-login` runs the same browser sign-in as `lia login`, saves the login and answers once it's done. A saved login answers at once. The connection keeps working during sign-in, and cancelling answers right away. When the browser can't open, the error carries the sign-in link and code.
-- A configured provider that rejects its key with HTTP 401 during a prompt now answers a plain error naming that key, instead of `AUTH_REQUIRED` with Vercel sign-in methods that can't replace it. Vercel AI Gateway logins still get the sign-in offer.
+- ACP sign-in works: `authenticate` with `lia-login` runs the same browser sign-in as `lia login`, saves the login and answers once it's done. With a saved login, it answers at once. The connection keeps working during sign-in, and cancelling answers right away. When the browser can't open, the error carries the sign-in link and code.
+- A configured provider that rejects its key with HTTP 401 during a prompt now answers with a plain error naming that key, instead of `AUTH_REQUIRED` with Vercel sign-in methods that can't replace it. Vercel AI Gateway logins still get the sign-in offer.
 
 ## lia 0.1.0
 
