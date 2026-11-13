@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LIA_BIN, runLia } from "../evals/eval-helpers";
+import { expectModelFirst } from "./config-options";
 import {
   acpSpawnEnv,
   fakeGatewayFinalText,
@@ -1016,6 +1017,40 @@ function speedOptions(result: { configOptions?: Array<{ id: string; currentValue
 }
 
 describe("ACP speed options", () => {
+  test(
+    "keeps the model picker first and gives Fast and Ultrafast their own categories",
+    async () => {
+      const root = createIsolatedRoot();
+      const gateway = startFakeGateway([], { models: speedCatalog() });
+      const client = AcpClient.create(root.workspace, fakeGatewayEnv(root, gateway));
+      try {
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const created = await client.request("session/new", { mcpServers: [] }, 2);
+        const sessionId = created.result.sessionId as string;
+        const present = ["provider", "fast", "ultrafast"];
+        expectModelFirst(created.result.configOptions, { present });
+        const categoryOf = (options: any[], id: string) => options.find((option) => option.id === id)?.category;
+        expect(categoryOf(created.result.configOptions, "fast")).toBe("_fast");
+        expect(categoryOf(created.result.configOptions, "ultrafast")).toBe("_ultrafast");
+
+        const fast = await client.request("session/set_config_option", { sessionId, configId: "fast", value: "true" }, 3);
+        expectModelFirst(fast.result.configOptions, { present });
+        expect(categoryOf(fast.result.configOptions, "fast")).toBe("_fast");
+        const ultra = await client.request("session/set_config_option", { sessionId, configId: "ultrafast", value: "true" }, 4);
+        expectModelFirst(ultra.result.configOptions, { present });
+        expect(categoryOf(ultra.result.configOptions, "ultrafast")).toBe("_ultrafast");
+      } finally {
+        try {
+          await client.close();
+        } finally {
+          gateway.stop();
+          rmSync(root.root, { recursive: true, force: true });
+        }
+      }
+    },
+    TIMEOUT,
+  );
+
   test(
     "lists Fast and Ultrafast only for models that offer them and keeps them exclusive",
     async () => {
