@@ -3,7 +3,7 @@ import { expect } from "bun:test";
 const CUSTOM_CATEGORIES: Record<string, string> = { provider: "_provider", fast: "_fast", ultrafast: "_ultrafast" };
 
 // ACP clients take the first `model`-category select as the model picker, so
-// `model` must lead the list and be the only select carrying that category.
+// `model` must lead the list and be the only option carrying that category.
 export function expectModelFirst(configOptions: any[] | undefined, { present = [] as string[] } = {}) {
   if (!Array.isArray(configOptions)) throw new Error(`configOptions is not an array: ${JSON.stringify(configOptions)}`);
   const ids = configOptions.map((option: any) => option.id);

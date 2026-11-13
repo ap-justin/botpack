@@ -1035,7 +1035,6 @@ describe("ACP speed options", () => {
         expectModelFirst(fast.result.configOptions, { present });
         const ultra = await client.request("session/set_config_option", { sessionId, configId: "ultrafast", value: "true" }, 4);
         expectModelFirst(ultra.result.configOptions, { present });
-        // A session is only restorable once it has a turn on disk.
         const saved = await client.prompt(sessionId, "Save this speed session.", 5);
         expect(JSON.stringify(saved)).toContain("saved");
         await client.close();
