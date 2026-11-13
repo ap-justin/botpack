@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, test } from "bun:test";
-import { expectModelFirst as expectModelFirstShared } from "./config-options";
+import { expectModelFirst } from "./config-options";
 import { createConfiguredProviderFixture, completion as configuredCompletion, toolCompletion as configuredToolCompletion } from "./fixtures/chat-completions";
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import {
@@ -687,7 +687,7 @@ test("ACP restores a configured-provider session under a Gateway default with no
         const restored = await client.request(method, { sessionId, cwd: fixture.workspace, mcpServers: [] }) as any;
         if (restored.error) throw new Error(`${method}: ${JSON.stringify(restored)}`);
         expect(restored.result.configOptions.find((option: any) => option.id === "provider").currentValue).toBe("remote");
-        expectModelFirstShared(restored.result.configOptions, { present: ["provider"] });
+        expectModelFirst(restored.result.configOptions, { present: ["provider"] });
 
         // The restored session is usable with its own provider's key.
         const before = fixture.requests.length;
@@ -707,7 +707,6 @@ test("ACP restores a configured-provider session under a Gateway default with no
 
 test("ACP lists the model picker before the provider and gives only the model option the model category", async () => {
   const fixture = createConfiguredProviderFixture();
-  const expectModelFirst = (configOptions: any[]) => expectModelFirstShared(configOptions, { present: ["provider"] });
   let sessionId = "";
   try {
     const first = await AcpClient.create({ cwd: fixture.workspace, env: fixture.env });
@@ -716,10 +715,10 @@ test("ACP lists the model picker before the provider and gives only the model op
       const created = await first.request("session/new", { cwd: fixture.workspace, mcpServers: [] }) as any;
       if (created.error) throw new Error(JSON.stringify(created));
       sessionId = created.result.sessionId;
-      expectModelFirst(created.result.configOptions);
+      expectModelFirst(created.result.configOptions, { present: ["provider"] });
       const switched = await first.request("session/set_config_option", { configId: "provider", value: "remote" }) as any;
       if (switched.error) throw new Error(JSON.stringify(switched));
-      expectModelFirst(switched.result.configOptions);
+      expectModelFirst(switched.result.configOptions, { present: ["provider"] });
       expect(switched.result.configOptions.find((option: any) => option.id === "provider").currentValue).toBe("remote");
       const prompted = await first.request("session/prompt", { prompt: [{ type: "text", text: "save this" }] }) as any;
       if (prompted.error) throw new Error(JSON.stringify(prompted));
@@ -729,7 +728,7 @@ test("ACP lists the model picker before the provider and gives only the model op
       await second.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
       const loaded = await second.request("session/load", { sessionId, cwd: fixture.workspace, mcpServers: [] }) as any;
       if (loaded.error) throw new Error(JSON.stringify(loaded));
-      expectModelFirst(loaded.result.configOptions);
+      expectModelFirst(loaded.result.configOptions, { present: ["provider"] });
     } finally { await second.close(); }
   } finally { fixture.close(); }
 }, 60000);
@@ -869,7 +868,7 @@ test.each(["empty", "unrelated"])("configured provider ACP preserves explicit mo
     expect(switched.result.configOptions.find((option: any) => option.id === "model").currentValue).toBe("remote-model");
     const selected = await client.request("session/set_config_option", { configId: "model", value: "unlisted-model" }) as any;
     if (selected.error) throw new Error(JSON.stringify(selected));
-    expectModelFirstShared(selected.result.configOptions, { present: ["provider", "mode"] });
+    expectModelFirst(selected.result.configOptions, { present: ["provider", "mode"] });
     const prompted = await client.request("session/prompt", { prompt: [{ type: "text", text: "hello" }] }) as any;
     if (prompted.error) throw new Error(JSON.stringify(prompted));
     expect(fixture.requests).toHaveLength(1);
@@ -11944,7 +11943,7 @@ describe("acp: model-independent", () => {
 
         const asked = await client.request("session/set_config_option", { configId: "mode", value: "ask" }, 3) as any;
         expect(asked.result.configOptions.find((option: any) => option.id === "mode").currentValue).toBe("ask");
-        expectModelFirstShared(asked.result.configOptions, { present: ["provider", "mode"] });
+        expectModelFirst(asked.result.configOptions, { present: ["provider", "mode"] });
         expect(savedMode()).toBe("ask");
 
         for (const [id, method, params] of [
@@ -12186,7 +12185,7 @@ describe("acp: model-backed protocol", () => {
         const modelOpt = resp.result.configOptions.find((o: any) => o.id === "model");
         expect(modelOpt).toBeDefined();
         expect(modelOpt.type).toBe("select");
-        expectModelFirstShared(resp.result.configOptions, { present: ["provider", "mode"] });
+        expectModelFirst(resp.result.configOptions, { present: ["provider", "mode"] });
 
         const modeOpt = resp.result.configOptions.find((o: any) => o.id === "mode");
         expect(modeOpt).toBeDefined();

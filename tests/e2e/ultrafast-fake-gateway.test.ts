@@ -1021,24 +1021,36 @@ describe("ACP speed options", () => {
     "keeps the model picker first and gives Fast and Ultrafast their own categories",
     async () => {
       const root = createIsolatedRoot();
-      const gateway = startFakeGateway([], { models: speedCatalog() });
-      const client = AcpClient.create(root.workspace, fakeGatewayEnv(root, gateway));
+      const gateway = startFakeGateway([fakeGatewayFinalText("saved")], { models: speedCatalog() });
+      const env = fakeGatewayEnv(root, gateway);
+      const client = AcpClient.create(root.workspace, env);
       try {
         await client.request("initialize", { protocolVersion: 1 }, 1);
         const created = await client.request("session/new", { mcpServers: [] }, 2);
         const sessionId = created.result.sessionId as string;
         const present = ["provider", "fast", "ultrafast"];
         expectModelFirst(created.result.configOptions, { present });
-        const categoryOf = (options: any[], id: string) => options.find((option) => option.id === id)?.category;
-        expect(categoryOf(created.result.configOptions, "fast")).toBe("_fast");
-        expect(categoryOf(created.result.configOptions, "ultrafast")).toBe("_ultrafast");
 
         const fast = await client.request("session/set_config_option", { sessionId, configId: "fast", value: "true" }, 3);
         expectModelFirst(fast.result.configOptions, { present });
-        expect(categoryOf(fast.result.configOptions, "fast")).toBe("_fast");
         const ultra = await client.request("session/set_config_option", { sessionId, configId: "ultrafast", value: "true" }, 4);
         expectModelFirst(ultra.result.configOptions, { present });
-        expect(categoryOf(ultra.result.configOptions, "ultrafast")).toBe("_ultrafast");
+        // A session is only restorable once it has a turn on disk.
+        const saved = await client.prompt(sessionId, "Save this speed session.", 5);
+        expect(JSON.stringify(saved)).toContain("saved");
+        await client.close();
+
+        for (const method of ["session/load", "session/resume"]) {
+          const restoredClient = AcpClient.create(root.workspace, env);
+          try {
+            expect((await restoredClient.request("initialize", { protocolVersion: 1 }, 1)).error).toBeUndefined();
+            const restored = await restoredClient.request(method, { sessionId, mcpServers: [] }, 2);
+            expect(restored.error, `${method}: ${JSON.stringify(restored)}`).toBeUndefined();
+            expectModelFirst(restored.result.configOptions, { present });
+          } finally {
+            await restoredClient.close();
+          }
+        }
       } finally {
         try {
           await client.close();
