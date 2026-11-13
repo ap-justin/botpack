@@ -2201,7 +2201,7 @@ pub fn fastConfigState(state: *server.ServerState) ?bool {
 }
 
 pub fn writeFastConfigOption(w: *std.Io.Writer, current: bool) !void {
-    try w.writeAll("{\"id\":\"fast\",\"name\":\"Fast Mode\",\"description\":\"Uses the model's fast lane\",\"category\":\"model\",\"type\":\"select\",\"currentValue\":");
+    try w.writeAll("{\"id\":\"fast\",\"name\":\"Fast Mode\",\"description\":\"Uses the model's fast lane\",\"category\":\"_fast\",\"type\":\"select\",\"currentValue\":");
     try writeJsonStr(if (current) "true" else "false", w);
     try w.writeAll(",\"options\":[{\"value\":\"false\",\"name\":\"off\"},{\"value\":\"true\",\"name\":\"on\"}]}");
 }
@@ -2237,7 +2237,7 @@ pub fn ultrafastConfigState(state: *server.ServerState) ?bool {
 }
 
 pub fn writeUltrafastConfigOption(w: *std.Io.Writer, current: bool) !void {
-    try w.writeAll("{\"id\":\"ultrafast\",\"name\":\"Ultrafast Mode\",\"description\":\"Uses the model's ultrafast Gateway lane\",\"category\":\"model\",\"type\":\"select\",\"currentValue\":");
+    try w.writeAll("{\"id\":\"ultrafast\",\"name\":\"Ultrafast Mode\",\"description\":\"Uses the model's ultrafast Gateway lane\",\"category\":\"_ultrafast\",\"type\":\"select\",\"currentValue\":");
     try writeJsonStr(if (current) "true" else "false", w);
     try w.writeAll(",\"options\":[{\"value\":\"false\",\"name\":\"off\"},{\"value\":\"true\",\"name\":\"on\"}]}");
 }
@@ -2341,12 +2341,21 @@ test "formatIso8601 produces known timestamp" {
     try std.testing.expectEqualStrings("1970-01-01T00:00:00Z", result);
 }
 
-test "writeProviderConfigOption keeps the model category for the model option alone" {
+test "only the model option carries the model category" {
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
     try writeProviderConfigOption(&out.writer, .gateway, &.{});
     try std.testing.expect(std.mem.find(u8, out.writer.buffered(), "\"category\":\"_provider\"") != null);
     try std.testing.expect(std.mem.find(u8, out.writer.buffered(), "\"category\":\"model\"") == null);
+    var model_out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer model_out.deinit();
+    try writeModelConfigOption(&model_out.writer, "gpt-4", null);
+    try std.testing.expect(std.mem.find(u8, model_out.writer.buffered(), "\"category\":\"model\"") != null);
+    var fast_out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer fast_out.deinit();
+    try writeFastConfigOption(&fast_out.writer, false);
+    try writeUltrafastConfigOption(&fast_out.writer, false);
+    try std.testing.expect(std.mem.find(u8, fast_out.writer.buffered(), "\"category\":\"model\"") == null);
 }
 
 test "writeModelConfigOption produces valid json with single model fallback" {

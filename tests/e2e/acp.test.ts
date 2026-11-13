@@ -707,7 +707,7 @@ test("ACP lists the model picker before the provider and gives only the model op
   const fixture = createConfiguredProviderFixture();
   const expectModelFirst = (configOptions: any[]) => {
     const modelSelects = configOptions.filter((option: any) => option.category === "model" && option.type === "select");
-    expect(modelSelects[0]?.id).toBe("model");
+    expect(modelSelects.map((option: any) => option.id)).toEqual(["model"]);
     expect(configOptions.findIndex((option: any) => option.id === "model")).toBeLessThan(configOptions.findIndex((option: any) => option.id === "provider"));
     expect(configOptions.find((option: any) => option.id === "provider").category).toBe("_provider");
   };
