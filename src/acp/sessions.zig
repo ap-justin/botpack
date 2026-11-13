@@ -578,15 +578,15 @@ fn writeNewSessionResponse(
     try out.writer.writeAll("{\"sessionId\":");
     try writeJsonStr(session_id, &out.writer);
     try out.writer.writeAll(",\"configOptions\":[");
-    if (comptime !host_target.is_wasm) {
-        try writeProviderConfigOption(&out.writer, state.active_session.?.provider, state.configured_providers.definitions);
-        try out.writer.writeAll(",");
-    }
     try writeModelConfigOption(
         &out.writer,
         state.active_session.?.model,
         state.capability_resolver.catalogEntries(),
     );
+    if (comptime !host_target.is_wasm) {
+        try out.writer.writeAll(",");
+        try writeProviderConfigOption(&out.writer, state.active_session.?.provider, state.configured_providers.definitions);
+    }
     try out.writer.writeAll(",");
     try writeModeConfigOption(
         &out.writer,
@@ -1125,15 +1125,15 @@ fn writeLoadSessionResponse(
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
     try out.writer.writeAll("{\"configOptions\":[");
-    if (comptime !host_target.is_wasm) {
-        try writeProviderConfigOption(&out.writer, state.active_session.?.provider, state.configured_providers.definitions);
-        try out.writer.writeAll(",");
-    }
     try writeModelConfigOption(
         &out.writer,
         model,
         state.capability_resolver.catalogEntries(),
     );
+    if (comptime !host_target.is_wasm) {
+        try out.writer.writeAll(",");
+        try writeProviderConfigOption(&out.writer, state.active_session.?.provider, state.configured_providers.definitions);
+    }
     try out.writer.writeAll(",");
     try writeModeConfigOption(
         &out.writer,
@@ -2112,7 +2112,7 @@ pub fn writeProviderConfigOption(
     current: model_provider.ProviderId,
     definitions: []const @import("../core/config/configured_provider.zig").Definition,
 ) !void {
-    try w.writeAll("{\"id\":\"provider\",\"name\":\"Provider\",\"category\":\"model\",\"type\":\"select\",\"currentValue\":");
+    try w.writeAll("{\"id\":\"provider\",\"name\":\"Provider\",\"category\":\"_provider\",\"type\":\"select\",\"currentValue\":");
     try writeJsonStr(current.label(), w);
     try w.writeAll(",\"options\":[{\"value\":\"gateway\",\"name\":\"Vercel AI Gateway\"}");
     if (comptime !host_target.is_wasm) {
@@ -2339,6 +2339,14 @@ test "formatIso8601 produces known timestamp" {
     const result = try formatIso8601(alloc, 0);
     defer alloc.free(result);
     try std.testing.expectEqualStrings("1970-01-01T00:00:00Z", result);
+}
+
+test "writeProviderConfigOption keeps the model category for the model option alone" {
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    try writeProviderConfigOption(&out.writer, .gateway, &.{});
+    try std.testing.expect(std.mem.find(u8, out.writer.buffered(), "\"category\":\"_provider\"") != null);
+    try std.testing.expect(std.mem.find(u8, out.writer.buffered(), "\"category\":\"model\"") == null);
 }
 
 test "writeModelConfigOption produces valid json with single model fallback" {

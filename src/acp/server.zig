@@ -4329,19 +4329,19 @@ fn handleSetConfigOption(state: *ServerState, alloc: Allocator, msg: *jsonrpc.Me
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
     try out.writer.writeAll("{\"configOptions\":[");
-    if (comptime !host_target.is_wasm) {
-        try sessions.writeProviderConfigOption(
-            &out.writer,
-            if (state.active_session) |session| session.provider else state.provider,
-            state.configured_providers.definitions,
-        );
-        try out.writer.writeAll(",");
-    }
     try sessions.writeModelConfigOption(
         &out.writer,
         current_model,
         state.capability_resolver.catalogEntries(),
     );
+    if (comptime !host_target.is_wasm) {
+        try out.writer.writeAll(",");
+        try sessions.writeProviderConfigOption(
+            &out.writer,
+            if (state.active_session) |session| session.provider else state.provider,
+            state.configured_providers.definitions,
+        );
+    }
     try out.writer.writeAll(",");
     try sessions.writeModeConfigOption(&out.writer, state.cfg.mode_registry, current_mode);
     if (sessions.effortConfigState(state)) |config| {

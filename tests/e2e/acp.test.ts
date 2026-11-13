@@ -703,6 +703,40 @@ test("ACP restores a configured-provider session under a Gateway default with no
   } finally { fixture.close(); }
 }, 60000);
 
+test("ACP lists the model picker before the provider and gives only the model option the model category", async () => {
+  const fixture = createConfiguredProviderFixture();
+  const expectModelFirst = (configOptions: any[]) => {
+    const modelSelects = configOptions.filter((option: any) => option.category === "model" && option.type === "select");
+    expect(modelSelects[0]?.id).toBe("model");
+    expect(configOptions.findIndex((option: any) => option.id === "model")).toBeLessThan(configOptions.findIndex((option: any) => option.id === "provider"));
+    expect(configOptions.find((option: any) => option.id === "provider").category).toBe("_provider");
+  };
+  let sessionId = "";
+  try {
+    const first = await AcpClient.create({ cwd: fixture.workspace, env: fixture.env });
+    try {
+      await first.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      const created = await first.request("session/new", { cwd: fixture.workspace, mcpServers: [] }) as any;
+      if (created.error) throw new Error(JSON.stringify(created));
+      sessionId = created.result.sessionId;
+      expectModelFirst(created.result.configOptions);
+      const switched = await first.request("session/set_config_option", { configId: "provider", value: "remote" }) as any;
+      if (switched.error) throw new Error(JSON.stringify(switched));
+      expectModelFirst(switched.result.configOptions);
+      expect(switched.result.configOptions.find((option: any) => option.id === "provider").currentValue).toBe("remote");
+      const prompted = await first.request("session/prompt", { prompt: [{ type: "text", text: "save this" }] }) as any;
+      if (prompted.error) throw new Error(JSON.stringify(prompted));
+    } finally { await first.close(); }
+    const second = await AcpClient.create({ cwd: fixture.workspace, env: fixture.env });
+    try {
+      await second.request("initialize", { protocolVersion: 1, clientCapabilities: {} });
+      const loaded = await second.request("session/load", { sessionId, cwd: fixture.workspace, mcpServers: [] }) as any;
+      if (loaded.error) throw new Error(JSON.stringify(loaded));
+      expectModelFirst(loaded.result.configOptions);
+    } finally { await second.close(); }
+  } finally { fixture.close(); }
+}, 60000);
+
 test("ACP load and resume of a configured-provider session without its key answer a plain error, not AUTH_REQUIRED", async () => {
   const fixture = createConfiguredProviderFixture();
   fixture.settings.provider = "remote";

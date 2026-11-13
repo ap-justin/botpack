@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- ACP clients that use the first `model` select as their model picker, such as OpenBot, now show the models instead of the provider. `session/new`, `session/load` and `session/set_config_option` list `model` before `provider`, and `provider` has the custom category `_provider`. `provider` still switches through `session/set_config_option`.
+
 ## lia 0.1.1
 
 ### Fixes
