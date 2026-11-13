@@ -264,8 +264,9 @@ const AcpContext = struct {
     content_filtered: bool = false,
     /// The recorded failure notice is the provider rejecting the credential
     /// (HTTP 401 after the refresh-and-replay attempt), so a failed turn
-    /// answers `AUTH_REQUIRED`. A 403 is not one: signing in again does not
-    /// lift a team restriction.
+    /// answers `AUTH_REQUIRED` when the provider can be signed in to, and
+    /// the plain error naming the rejected key otherwise. A 403 is not one:
+    /// signing in again does not lift a team restriction.
     credential_rejected: bool = false,
     auto_classifier: permission_auto_classifier.Classifier =
         permission_auto_classifier.Classifier.disabled(),
@@ -335,10 +336,14 @@ const AcpContext = struct {
     fn turnOutcome(self: *const AcpContext, session: *const server.ActiveSessionState) TerminalOutcome {
         if (!self.turn_failed) return .{ .stop_reason = self.stop_reason };
         const message = session.failureMessage();
-        if (self.credential_rejected and message.len > 0) return .{ .auth_required = .{
-            .message = message,
-            .offer = server.authOffer(self.state),
-        } };
+        if (self.credential_rejected and message.len > 0 and
+            server.credentialUnavailableAnswer(session.provider) == .sign_in)
+        {
+            return .{ .auth_required = .{
+                .message = message,
+                .offer = server.authOffer(self.state),
+            } };
+        }
         return .{ .rpc_error = .{
             .code = ErrorCode.internal_error,
             .message = if (message.len > 0) message else turn_failed_message,
@@ -5619,7 +5624,7 @@ test "a failed prompt answers its own failure, not an earlier prompt's HTTP erro
     try std.testing.expectEqualStrings(turn_failed_message, second_outcome.rpc_error.message);
 }
 
-test "a rejected credential answers AUTH_REQUIRED and a forbidden one a generic error" {
+test "a rejected credential answers AUTH_REQUIRED only for Gateway and a forbidden one a generic error" {
     const alloc = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -5633,11 +5638,21 @@ test "a rejected credential answers AUTH_REQUIRED and a forbidden one a generic 
 
     const cases = [_]struct {
         user_turn: bool = true,
+        provider: model_provider.ProviderId = .gateway,
+        source: types.CredentialSource = .fx_login,
         status: std.http.Status,
         // Null: the prompt answers a generic error.
         auth_message: ?[]const u8,
     }{
         .{ .status = .unauthorized, .auth_message = "lia login authentication failed · HTTP 401" },
+        // A configured provider's key is not one a sign-in can replace: the
+        // prompt answers the plain error that names the rejected key.
+        .{
+            .provider = model_provider.parse("local").?,
+            .source = .configured,
+            .status = .unauthorized,
+            .auth_message = null,
+        },
         .{ .status = .forbidden, .auth_message = null },
         .{ .user_turn = false, .status = .unauthorized, .auth_message = null },
     };
@@ -5649,8 +5664,9 @@ test "a rejected credential answers AUTH_REQUIRED and a forbidden one a generic 
             .current_prompt_input = if (case.user_turn) &prompt_input else null,
         };
         const deps = agentRuntimeDeps(&ctx);
+        session.provider = case.provider;
         ctx.resetTurnOutcome(session);
-        try deps.push_http_error(deps.ctx, case.status, "provider body secret", .fx_login);
+        try deps.push_http_error(deps.ctx, case.status, "provider body secret", case.source);
         try deps.finalize_turn(deps.ctx, 1, .failed, null);
 
         const outcome = ctx.turnOutcome(session);
@@ -5661,6 +5677,9 @@ test "a rejected credential answers AUTH_REQUIRED and a forbidden one a generic 
         } else {
             try std.testing.expect(outcome == .rpc_error);
             try std.testing.expectEqual(ErrorCode.internal_error, outcome.rpc_error.code);
+            if (case.source == .configured) {
+                try std.testing.expectEqualStrings("configured provider authentication failed · HTTP 401", outcome.rpc_error.message);
+            }
         }
     }
 }
