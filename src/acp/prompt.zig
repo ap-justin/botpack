@@ -265,7 +265,7 @@ const AcpContext = struct {
     /// The recorded failure notice is the provider rejecting the credential
     /// (HTTP 401 after the refresh-and-replay attempt), so a failed turn
     /// answers `AUTH_REQUIRED` when the provider can be signed in to, and
-    /// the plain error naming the rejected key otherwise. A 403 is not one:
+    /// the internal error carrying that notice otherwise. A 403 is not one:
     /// signing in again does not lift a team restriction.
     credential_rejected: bool = false,
     auto_classifier: permission_auto_classifier.Classifier =
