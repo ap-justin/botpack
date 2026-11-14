@@ -152,13 +152,9 @@ fn parseProviderOrderFlag(alloc: Allocator, raw: []const u8, previous: ?[][]cons
 
 pub const InteractiveLaunch = struct {
     modifiers: LaunchModifiers = .{},
-    /// `lia "<prompt>"`: parsed so the launch can be refused, and never sent.
-    /// Owned by the allocator that parsed the launch.
-    initial_prompt: ?[]u8 = null,
 
     pub fn deinit(self: *InteractiveLaunch, alloc: Allocator) void {
         self.modifiers.deinit(alloc);
-        if (self.initial_prompt) |prompt| alloc.free(prompt);
         self.* = undefined;
     }
 };
@@ -380,9 +376,6 @@ const RunDeps = struct {
 const GlobalLaunchArgs = struct {
     remaining: []const [:0]const u8,
     modifiers: LaunchModifiers = .{},
-    /// The one positional argument of `lia [flags] "<prompt>" [flags]`, borrowed
-    /// from the arguments. Only set by `parseLaunchFlags(.around_prompt)`.
-    prompt: ?[]const u8 = null,
 
     fn deinit(self: *GlobalLaunchArgs, alloc: Allocator) void {
         self.modifiers.deinit(alloc);
@@ -425,19 +418,8 @@ const launch_flag_ids = cli_flags.idTable(LaunchFlag, &builtin_commands.launch_o
 /// How `--model`, `--fast`, `--ultrafast`, and `--effort` reach the first turn
 /// is modeled in `tests/tla/cli/LaunchSelection.tla`.
 fn parseGlobalLaunchArgs(alloc: Allocator, args: []const [:0]const u8) !GlobalLaunchArgs {
-    return parseLaunchFlags(alloc, args, .before_command);
-}
-
-const LaunchFlagMode = enum {
-    /// `lia [flags] <command> ...`: stop at the first argument that isn't a
-    /// launch flag, since it and everything after belong to the command.
-    before_command,
-    /// `lia [flags] "<prompt>" [flags]`: launch flags anywhere, and exactly one
-    /// positional argument, the first prompt.
-    around_prompt,
-};
-
-fn parseLaunchFlags(alloc: Allocator, args: []const [:0]const u8, comptime mode: LaunchFlagMode) !GlobalLaunchArgs {
+    // `lia [flags] <command> ...`: stop at the first argument that isn't a
+    // launch flag, since it and everything after belong to the command.
     var overrides: std.ArrayList(config_runtime.context_limits.Override) = .empty;
     errdefer overrides.deinit(alloc);
     var directories: std.ArrayList([]u8) = .empty;
@@ -451,21 +433,10 @@ fn parseLaunchFlags(alloc: Allocator, args: []const [:0]const u8, comptime mode:
         if (modifiers.provider_order_override) |order| freeProviderOrderOverride(alloc, order);
     }
 
-    var prompt: ?[]const u8 = null;
-    var parser: cli_flags.Parser = switch (mode) {
-        .before_command => .initPrefix(&builtin_commands.launch_options, args),
-        .around_prompt => .init(&builtin_commands.launch_options, args),
-    };
+    var parser: cli_flags.Parser = .initPrefix(&builtin_commands.launch_options, args);
     while (try parser.next()) |item| {
-        // Prefix mode stops at positionals, so only the prompt mode sees one.
-        const match = switch (item) {
-            .option => |option| option,
-            .positional => |positional| {
-                if (prompt != null) return error.UnquotedPrompt;
-                prompt = positional;
-                continue;
-            },
-        };
+        // Prefix mode stops at positionals, so every item is an option.
+        const match = item.option;
         const value = match.value orelse "";
         switch (launch_flag_ids[match.index].?) {
             .context_limit => try overrides.append(alloc, try config_runtime.context_limits.parseOverride(value)),
@@ -510,7 +481,7 @@ fn parseLaunchFlags(alloc: Allocator, args: []const [:0]const u8, comptime mode:
     errdefer if (override_slice.len > 0) alloc.free(override_slice);
     modifiers.context_limit_overrides = override_slice;
     modifiers.additional_directories = try directories.toOwnedSlice(alloc);
-    return .{ .remaining = args[parser.index..], .modifiers = modifiers, .prompt = prompt };
+    return .{ .remaining = args[parser.index..], .modifiers = modifiers };
 }
 
 /// Returns the command that follows the supported global launch modifiers.
@@ -522,8 +493,6 @@ pub fn commandAfterGlobalLaunchArgs(args: []const [:0]const u8) ?[]const u8 {
 }
 
 /// Why the global flags in `args` failed to parse, or null when they parse.
-/// A flag after a first prompt, as in `lia "fix it" --jsno`, is past the
-/// launch prefix, so the whole line is checked as well.
 fn launchFlagFailure(args: []const [:0]const u8) ?cli_flags.Failure {
     var parser: cli_flags.Parser = .initPrefix(&builtin_commands.launch_options, args);
     while (parser.next() catch return parser.failure) |_| {}
@@ -565,28 +534,13 @@ fn writeLaunchWordProblem(
                 try writer.writeAll("\"<prompt>\"\n");
             }
         },
-        error.UnknownCommandTypo => {
-            try writer.print("lia: unknown command {f}", .{text_utils.terminalSafe(word)});
+        error.UpgradeRemoved => try writer.writeAll("lia: upgrade was removed; lia no longer updates itself\n"),
+        error.UnknownCommand => {
+            try writer.print("lia: unknown command: {f}", .{text_utils.terminalSafe(word)});
             if (launchWordSuggestion(command_catalog, word)) |suggestion| {
                 try writer.print(" (did you mean {s}?)", .{suggestion});
             }
             try writer.writeAll("\n");
-        },
-        error.EmptyLaunchPrompt => try writer.writeAll("lia: the prompt is empty\n"),
-        error.UnquotedPrompt => {
-            // The shell split the prompt into words; show them quoted.
-            try writer.writeAll("lia: put the prompt in quotes: lia \"");
-            var parser: cli_flags.Parser = .init(&builtin_commands.launch_options, args);
-            var first = true;
-            while (parser.next() catch null) |item| switch (item) {
-                .option => {},
-                .positional => |positional| {
-                    if (!first) try writer.writeByte(' ');
-                    try writer.writeAll(positional);
-                    first = false;
-                },
-            };
-            try writer.writeAll("\"\n");
         },
         else => {},
     }
@@ -713,27 +667,12 @@ pub fn parseInteractiveLaunch(
         .interactive => return .{ .interactive = .{
             .modifiers = global_args.takeModifiers(),
         } },
-        .unknown => |word| switch (classifyLaunchWord(command_catalog, word)) {
+        .unknown => |word| switch (classifyLaunchWord(word)) {
             .command_line => {},
             .print_flag => return error.PrintFlagUseAsk,
             .unknown_flag => return error.UnknownLaunchFlag,
-            .command_typo => return error.UnknownCommandTypo,
-            .prompt => {
-                // Read the whole line again so launch flags may also follow
-                // the prompt, as in `lia "fix the bug" --model x`.
-                var with_prompt = try parseLaunchFlags(alloc, args, .around_prompt);
-                errdefer with_prompt.deinit(alloc);
-                var initial_prompt: ?[]u8 = null;
-                if (with_prompt.prompt) |prompt| {
-                    if (std.mem.trim(u8, prompt, " \t\r\n").len == 0) return error.EmptyLaunchPrompt;
-                    initial_prompt = try alloc.dupe(u8, prompt);
-                }
-                global_args.deinit(alloc);
-                return .{ .interactive = .{
-                    .modifiers = with_prompt.takeModifiers(),
-                    .initial_prompt = initial_prompt,
-                } };
-            },
+            .unknown_command => return error.UnknownCommand,
+            .upgrade_removed => return error.UpgradeRemoved,
         },
         else => {},
     }
@@ -750,23 +689,22 @@ const LaunchWord = enum {
     /// `-p` or `--print`, the one-shot flag of other agents.
     print_flag,
     unknown_flag,
-    /// A near miss for a command name, such as `stauts`, or a flag name
-    /// typed without its dashes, such as `version`.
-    command_typo,
-    prompt,
+    /// Any other word, which may carry a near miss for a command name, such
+    /// as `stauts`, or a flag name typed without its dashes, such as `version`.
+    unknown_command,
+    /// `upgrade`, which lia no longer has.
+    upgrade_removed,
 };
 
-/// Decides what plain `lia` does with a first argument that isn't a command.
-fn classifyLaunchWord(command_catalog: CommandCatalog, word: []const u8) LaunchWord {
-    // `lia -- "-x"` lets a prompt start with a dash.
-    if (std.mem.eql(u8, word, "--")) return .prompt;
+/// Decides how plain `lia` answers a first argument that isn't a command.
+fn classifyLaunchWord(word: []const u8) LaunchWord {
     if (word.len > 0 and word[0] == '-') {
         if (isVersionFlag(word)) return .command_line;
         if (isPrintFlag(word)) return .print_flag;
         return .unknown_flag;
     }
-    if (launchWordSuggestion(command_catalog, word) != null) return .command_typo;
-    return .prompt;
+    if (std.mem.eql(u8, word, "upgrade")) return .upgrade_removed;
+    return .unknown_command;
 }
 
 fn isPrintFlag(arg: []const u8) bool {
@@ -776,7 +714,7 @@ fn isPrintFlag(arg: []const u8) bool {
 
 /// The command or flag a mistyped first word most likely meant, such as
 /// `status` for `stauts` or `--version` for `version`. Words of four letters
-/// or fewer allow one edit and longer words two, so a short prompt such as
+/// or fewer allow one edit and longer words two, so a short word such as
 /// `add` isn't taken for a typo of `acp`.
 fn launchWordSuggestion(command_catalog: CommandCatalog, word: []const u8) ?[]const u8 {
     // Flag names people type without their dashes.
@@ -786,7 +724,7 @@ fn launchWordSuggestion(command_catalog: CommandCatalog, word: []const u8) ?[]co
     for (bare_flags) |entry| {
         if (std.mem.eql(u8, word, entry.word)) return entry.flag;
     }
-    // Four letters or fewer get one edit, so a prompt word such as `add` isn't
+    // Four letters or fewer get one edit, so a short word such as `add` isn't
     // taken for a mistyped command.
     var nearest: cli_flags.Nearest = .{ .word = word, .max_edits = if (word.len <= 4) 1 else 2 };
     for (command_catalog.specs) |spec| {
@@ -943,7 +881,7 @@ fn runIfRequestedWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Con
         var writer: std.Io.Writer.Allocating = .init(alloc);
         defer writer.deinit();
         switch (err) {
-            error.PrintFlagUseAsk, error.UnknownCommandTypo, error.EmptyLaunchPrompt, error.UnquotedPrompt => {
+            error.PrintFlagUseAsk, error.UnknownCommand, error.UpgradeRemoved => {
                 try writeLaunchWordProblem(&writer.writer, cfg.command_catalog, args, err);
                 try writeStderr(deps, writer.written());
                 return usage_failure;
@@ -965,9 +903,11 @@ fn runIfRequestedWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Con
         return usage_failure;
     };
     switch (parsed_launch) {
-        .interactive => |launch| {
-            try writeMcpProfileWarningIfPresent(alloc, cfg, deps);
-            return .{ .interactive = launch };
+        .interactive => |value| {
+            var launch = value;
+            launch.deinit(alloc);
+            try writeTopLevelHelp(alloc, cfg.command_catalog, deps, cfg.version, .stdout);
+            return .handled_success;
         },
         .noninteractive => |value| {
             var noninteractive = value;
@@ -4819,57 +4759,34 @@ test "runIfRequested invalid json local flags write json error" {
     try std.testing.expect(std.mem.find(u8, capture.stdout.written(), "\"code\":\"InvalidLocalSurfaceArgs\"") != null);
 }
 
-test "runIfRequested takes one argument that isn't a command as the first prompt" {
-    const cases = [_]struct {
-        args: []const [:0]const u8,
-        prompt: []const u8,
-        model: ?[]const u8 = null,
-    }{
-        .{ .args = &.{@constCast("wat")}, .prompt = "wat" },
-        .{ .args = &.{@constCast("fix the login bug")}, .prompt = "fix the login bug" },
-        // Short words stay prompts rather than typos of short commands.
-        .{ .args = &.{@constCast("add")}, .prompt = "add" },
-        .{ .args = &.{ @constCast("--model"), @constCast("a"), @constCast("fix it") }, .prompt = "fix it", .model = "a" },
-        .{ .args = &.{ @constCast("fix it"), @constCast("--model=b") }, .prompt = "fix it", .model = "b" },
-        .{ .args = &.{ @constCast("--model=a"), @constCast("fix it"), @constCast("--model"), @constCast("b") }, .prompt = "fix it", .model = "b" },
-        .{ .args = &.{ @constCast("--"), @constCast("-p is a flag?") }, .prompt = "-p is a flag?" },
+test "runIfRequested prints the help for a bare lia, with or without launch flags" {
+    const cases = [_][]const [:0]const u8{
+        &.{},
+        &.{ @constCast("--model"), @constCast("a") },
     };
-    for (cases) |case| {
+    for (cases) |args| {
         var capture = CaptureOutput.init(std.testing.allocator);
         defer capture.deinit();
 
-        const result = try runIfRequestedWithDeps(std.testing.allocator, case.args, testConfig(), capture.deps());
-        var launch = switch (result) {
-            .interactive => |value| value,
-            else => return error.TestExpectedInteractiveLaunch,
-        };
-        defer launch.deinit(std.testing.allocator);
-        try std.testing.expectEqualStrings(case.prompt, launch.initial_prompt.?);
-        if (case.model) |model| {
-            try std.testing.expectEqualStrings(model, launch.modifiers.model_override.?);
-        } else {
-            try std.testing.expect(launch.modifiers.model_override == null);
-        }
+        const result = try runIfRequestedWithDeps(std.testing.allocator, args, testConfig(), capture.deps());
+        try std.testing.expectEqual(RunResult.handled_success, result);
+        try std.testing.expect(std.mem.find(u8, capture.stdout.written(), "usage") != null);
         try std.testing.expectEqualStrings("", capture.stderr.written());
     }
 }
 
-test "runIfRequested explains a first argument that is neither a command nor a prompt" {
+test "runIfRequested explains a first argument that is not a command" {
     const cases = [_]struct {
         args: []const [:0]const u8,
         stderr: []const u8,
     }{
-        .{
-            .args = &.{ @constCast("fix"), @constCast("the"), @constCast("login"), @constCast("bug") },
-            .stderr = "lia: put the prompt in quotes: lia \"fix the login bug\"\n",
-        },
-        .{
-            .args = &.{ @constCast("--fast"), @constCast("fix"), @constCast("it") },
-            .stderr = "lia: put the prompt in quotes: lia \"fix it\"\n",
-        },
-        .{ .args = &.{@constCast("stauts")}, .stderr = "lia: unknown command stauts (did you mean status?)\n" },
-        .{ .args = &.{ @constCast("sesions"), @constCast("--json") }, .stderr = "lia: unknown command sesions (did you mean sessions?)\n" },
-        .{ .args = &.{@constCast("version")}, .stderr = "lia: unknown command version (did you mean --version?)\n" },
+        .{ .args = &.{@constCast("wat")}, .stderr = "lia: unknown command: wat\n" },
+        .{ .args = &.{@constCast("fix the login bug")}, .stderr = "lia: unknown command: fix the login bug\n" },
+        .{ .args = &.{ @constCast("--fast"), @constCast("fix"), @constCast("it") }, .stderr = "lia: unknown command: fix\n" },
+        .{ .args = &.{@constCast("upgrade")}, .stderr = "lia: upgrade was removed; lia no longer updates itself\n" },
+        .{ .args = &.{@constCast("stauts")}, .stderr = "lia: unknown command: stauts (did you mean status?)\n" },
+        .{ .args = &.{ @constCast("sesions"), @constCast("--json") }, .stderr = "lia: unknown command: sesions (did you mean sessions?)\n" },
+        .{ .args = &.{@constCast("version")}, .stderr = "lia: unknown command: version (did you mean --version?)\n" },
         .{
             .args = &.{ @constCast("-p"), @constCast("fix the bug") },
             .stderr = "lia: -p isn't a lia flag; to run one request and exit, use lia ask \"fix the bug\"\n",
@@ -4882,7 +4799,6 @@ test "runIfRequested explains a first argument that is neither a command nor a p
             .args = &.{@constCast("--print=fix it")},
             .stderr = "lia: --print isn't a lia flag; to run one request and exit, use lia ask \"fix it\"\n",
         },
-        .{ .args = &.{@constCast(" ")}, .stderr = "lia: the prompt is empty\n" },
     };
     for (cases) |case| {
         var capture = CaptureOutput.init(std.testing.allocator);
@@ -4895,14 +4811,14 @@ test "runIfRequested explains a first argument that is neither a command nor a p
     }
 }
 
-test "runIfRequested suggests the nearest flag for an unknown one, before or after a prompt" {
+test "runIfRequested suggests the nearest flag for an unknown one, alone or after another flag" {
     const cases = [_]struct {
         args: []const [:0]const u8,
         first_line: []const u8,
     }{
         .{ .args = &.{ @constCast("--modle"), @constCast("x") }, .first_line = "lia: unknown flag --modle (did you mean --model?)\n" },
         .{ .args = &.{@constCast("--verison")}, .first_line = "lia: unknown flag --verison (did you mean --version?)\n" },
-        .{ .args = &.{ @constCast("fix it"), @constCast("--modle=x") }, .first_line = "lia: unknown flag --modle (did you mean --model?)\n" },
+        .{ .args = &.{ @constCast("--model"), @constCast("a"), @constCast("--modle=x") }, .first_line = "lia: unknown flag --modle (did you mean --model?)\n" },
     };
     for (cases) |case| {
         var capture = CaptureOutput.init(std.testing.allocator);

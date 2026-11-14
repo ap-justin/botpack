@@ -3639,12 +3639,11 @@ describe("cli: removed task and background commands", () => {
       for (const command of ["task", "tasks"]) {
         const result = await runLia([command], { env: NO_GATEWAY_AUTH });
         expect(result.code).toBe(2);
-        expect(result.stderr).toContain(`lia: unknown command ${command} (did you mean ask?)`);
+        expect(result.stderr).toContain(`lia: unknown command: ${command} (did you mean ask?)`);
       }
-      // A word that isn't close to a command is a first prompt for a session.
       const background = await runLia(["background"], { env: NO_GATEWAY_AUTH });
-      expect(background.code).toBe(1);
-      expect(background.stderr).toContain("lia: this build has no interactive terminal UI; use lia ask or lia acp");
+      expect(background.code).toBe(2);
+      expect(background.stderr).toBe("lia: unknown command: background\n");
     },
     TIMEOUT,
   );
@@ -4482,14 +4481,16 @@ describe("cli: session", () => {
 
 describe("cli: interactive startup", () => {
   test(
-    "lia explains a first argument it can't take as a command or a prompt",
+    "lia explains a first argument it can't take as a command",
     async () => {
       const cases: Array<[string[], string]> = [
-        [["fix", "the", "login", "bug"], 'lia: put the prompt in quotes: lia "fix the login bug"\n'],
-        [["stauts"], "lia: unknown command stauts (did you mean status?)\n"],
+        [["fix", "the", "login", "bug"], "lia: unknown command: fix\n"],
+        [["fix the login bug"], "lia: unknown command: fix the login bug\n"],
+        [["stauts"], "lia: unknown command: stauts (did you mean status?)\n"],
+        [["upgrade"], "lia: upgrade was removed; lia no longer updates itself\n"],
         [["-p", "fix the bug"], 'lia: -p isn\'t a lia flag; to run one request and exit, use lia ask "fix the bug"\n'],
         [["--print"], 'lia: --print isn\'t a lia flag; to run one request and exit, use lia ask "<prompt>"\n'],
-        [[""], "lia: the prompt is empty\n"],
+        [[""], "lia: unknown command: \n"],
       ];
       for (const [args, stderr] of cases) {
         const r = await runLia(args, { env: NO_GATEWAY_AUTH });
@@ -4497,7 +4498,7 @@ describe("cli: interactive startup", () => {
         expect(r.stdout).toBe("");
         expect(r.stderr).toBe(stderr);
       }
-      for (const args of [["--modle", "x"], ["fix it", "--modle=x"]]) {
+      for (const args of [["--modle", "x"], ["--model", "a", "--modle=x"]]) {
         const r = await runLia(args, { env: NO_GATEWAY_AUTH });
         expect(r.code, args.join(" ")).toBe(2);
         expect(r.stderr.split("\n")[0]).toBe("lia: unknown flag --modle (did you mean --model?)");
@@ -4507,21 +4508,15 @@ describe("cli: interactive startup", () => {
   );
 
   test(
-    "interactive startup without TTY exits one",
+    "bare lia prints the help and exits zero",
     async () => {
-      const cases = [
-        [],
-        ["fix the login bug"],
-        ["fix the login bug", "--model", "x"],
-      ];
-
-      for (const args of cases) {
-        const home = realpathSync(mkdtempSync(join(tmpdir(), "lia-e2e-no-tty-")));
+      for (const args of [[], ["--model", "x"]]) {
+        const home = realpathSync(mkdtempSync(join(tmpdir(), "lia-e2e-bare-")));
         try {
           const r = await runLia(args, { env: { HOME: home } });
-          expect(r.code).toBe(1);
-          expect(r.stdout).toBe("");
-          expect(r.stderr).toBe("lia: this build has no interactive terminal UI; use lia ask or lia acp\n");
+          expect(r.code).toBe(0);
+          expect(r.stdout).toContain("lia ask");
+          expect(r.stderr).toBe("");
           expect(readdirSync(home)).toEqual([]);
         } finally {
           rmSync(home, { recursive: true, force: true });
@@ -5535,10 +5530,9 @@ describe("cli: error handling", () => {
   test(
     "lia with a mistyped command exits 2",
     async () => {
-      // A word that isn't close to a command is a first prompt instead.
       const r = await runLia(["statsu"]);
       expect(r.code).toBe(2);
-      expect(r.stderr).toBe("lia: unknown command statsu (did you mean status?)\n");
+      expect(r.stderr).toBe("lia: unknown command: statsu (did you mean status?)\n");
     },
     TIMEOUT,
   );
@@ -5613,13 +5607,13 @@ describe("cli: workspace access", () => {
       expect(missing.stderr).not.toContain("InvalidFlag");
 
       // A repeated flag is not an error: the launch gets past parsing and
-      // stops only because this run has no terminal.
+      // prints the help.
       const duplicate = await runLia(
         ["--no-additional-dirs", "--no-additional-dirs"],
         { env: enabled },
       );
-      expect(duplicate.code).toBe(1);
-      expect(duplicate.stderr).toBe("lia: this build has no interactive terminal UI; use lia ask or lia acp\n");
+      expect(duplicate.code).toBe(0);
+      expect(duplicate.stderr).toBe("");
 
       const badMode = await runLia(["--permission-mode", "never"], { env: enabled });
       expect(badMode.code).toBe(2);
