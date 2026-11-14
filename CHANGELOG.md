@@ -6,6 +6,7 @@
 
 - Plain `lia` prints the help and exits 0. An unknown command answers `lia: unknown command: <word>` and exits 2, with a suggestion when one is close. `lia upgrade` says it was removed.
 - `lia logout` also deletes ChatGPT and Grok sign-in tokens (`chatgpt-auth.json` and `grok-auth.json` in the profile folder) that an older install left behind.
+- `lia ask --json --resume-id <id>` writes `--resume-id was removed; use --resume <id>` to stderr, as it does without `--json`, instead of failing with only `InvalidAskArgs` in the JSON.
 
 ## lia 0.1.1
 

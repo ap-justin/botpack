@@ -3615,6 +3615,7 @@ describe("cli: sessions", () => {
           kind: string;
           code: number;
           expectedError?: string;
+          stderrIncludes?: string;
         }> = [
           { args: ["session", "last", "--json"], kind: "session", code: 1 },
           {
@@ -3635,6 +3636,13 @@ describe("cli: sessions", () => {
             code: 2,
             expectedError: "InvalidAskArgs",
           },
+          {
+            args: ["ask", "--json", "--resume-id", "abc", "hello"],
+            kind: "ask",
+            code: 2,
+            expectedError: "InvalidAskArgs",
+            stderrIncludes: "--resume-id was removed; use --resume <id>",
+          },
         ];
 
         for (const item of cases) {
@@ -3649,6 +3657,7 @@ describe("cli: sessions", () => {
           expect(parsed.kind ?? item.kind).toBe(item.kind);
           expect(typeof parsed.error).toBe("string");
           if (item.expectedError) expect(parsed.error).toBe(item.expectedError);
+          if (item.stderrIncludes) expect(result.stderr).toContain(item.stderrIncludes);
           // The JSON field reports the status the process exits with.
           if (item.kind === "ask") expect(parsed.exit_code).toBe(item.code);
         }
