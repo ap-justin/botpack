@@ -38,7 +38,6 @@ test {
     _ = @import("core/workspace/file_index.zig");
     _ = @import("gateway/chat_completions_protocol.zig");
     _ = @import("gateway/client.zig");
-    _ = @import("gateway/responses_protocol.zig");
     _ = @import("gateway/sse.zig");
     _ = @import("tools/agent/ask_user_question.zig");
     _ = @import("tools/web/http_fetch.zig");

@@ -3886,9 +3886,7 @@ const error_type_names = [_][]const u8{
 };
 
 /// What an SSE `error` event says about the request: lia classifies what has a
-/// code and resends what is unclear. This differs from the Responses protocol
-/// (`responses_protocol.zig` `accept_failure`), which ends the turn for
-/// `provider_error` and for a missing code. The AI Gateway names a provider
+/// code and resends what is unclear. The AI Gateway names a provider
 /// route failure `provider_error` and pairs it with HTTP 503, and an event
 /// with neither a code nor a usable HTTP status is the same route failure
 /// that `captureProviderFailureDetail` labels `provider_error`, so here both
