@@ -2478,6 +2478,34 @@ describe("cli: logout", () => {
   );
 
   test(
+    "lia logout deletes ChatGPT and Grok sign-in tokens left by an older install",
+    async () => {
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-legacy-"));
+      try {
+        const root = join(realpathSync(home), ".lia");
+        mkdirSync(root, { recursive: true });
+        for (const name of ["chatgpt-auth.json", "chatgpt-auth.lock", "grok-auth.json", "grok-auth.lock"]) {
+          writeFileSync(join(root, name), "{}");
+        }
+        const env = { HOME: realpathSync(home), LIA_DISABLE_KEYCHAIN: "1" };
+        const logout = await runLia(["logout"], { env });
+
+        expect(logout.code).toBe(0);
+        expect(logout.stdout).toBe("Removed saved ChatGPT and Grok sign-in tokens left by an older install.\n");
+        expect(logout.stderr).toBe("");
+        for (const name of ["chatgpt-auth.json", "chatgpt-auth.lock", "grok-auth.json", "grok-auth.lock"]) {
+          expect(existsSync(join(root, name))).toBe(false);
+        }
+        const again = await runLia(["logout"], { env });
+        expect(again.stdout).toBe("No lia login session found.\n");
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "lia logout leaves an active API key unchanged when no login exists",
     async () => {
       const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-no-login-"));

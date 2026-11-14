@@ -10,6 +10,7 @@ const js_host_auth = @import("js_host_auth.zig");
 const oauth = @import("oauth.zig");
 const oauth_session = @import("oauth_session.zig");
 const oauth_transport = @import("oauth_transport.zig");
+const profile_paths = @import("../shared/profile_paths.zig");
 const secret = @import("secret.zig");
 const test_builtin_gateway = if (builtin.is_test)
     @import("../../builtins/gateway.zig")
@@ -903,6 +904,55 @@ pub fn logout(
         };
     }
     return result;
+}
+
+/// Sign-in files that fx's ChatGPT and Grok providers kept in the profile
+/// folder, and their lock files. lia has no such providers, but a profile
+/// copied from fx can still hold live refresh tokens in them.
+const legacy_login_files = [_][]const u8{
+    "chatgpt-auth.json",
+    "chatgpt-auth.lock",
+    "grok-auth.json",
+    "grok-auth.lock",
+};
+
+pub const LegacyLoginRemoval = struct {
+    removed: usize = 0,
+    failed: bool = false,
+};
+
+/// Deletes the leftover ChatGPT and Grok sign-in files from `dir`, the profile
+/// folder, and counts the sign-ins removed. A failed delete is reported and
+/// does not stop the others.
+fn removeLegacyLoginFiles(dir: *std.Io.Dir) LegacyLoginRemoval {
+    var result: LegacyLoginRemoval = .{};
+    for (legacy_login_files) |name| {
+        dir.deleteFile(io_mod.getIo(), name) catch |err| switch (err) {
+            error.FileNotFound => continue,
+            else => {
+                result.failed = true;
+                continue;
+            },
+        };
+        if (std.mem.endsWith(u8, name, ".json")) result.removed += 1;
+    }
+    return result;
+}
+
+/// Deletes the leftover ChatGPT and Grok sign-in tokens from the profile
+/// folder; see `legacy_login_files`.
+pub fn removeLegacyLogins() LegacyLoginRemoval {
+    if (comptime host_target.is_wasm) return .{};
+    const home = io_mod.homeDir() orelse return .{};
+    var home_dir = std.Io.Dir.openDirAbsolute(io_mod.getIo(), profile_paths.rootParent(home), .{}) catch |err| {
+        return .{ .failed = err != error.FileNotFound };
+    };
+    defer home_dir.close(io_mod.getIo());
+    var lia_dir = home_dir.openDir(io_mod.getIo(), profile_paths.rootName(), .{ .follow_symlinks = false }) catch |err| {
+        return .{ .failed = err != error.FileNotFound };
+    };
+    defer lia_dir.close(io_mod.getIo());
+    return removeLegacyLoginFiles(&lia_dir);
 }
 
 /// The outcome of deleting the saved lia login session, with the deleted
@@ -2706,4 +2756,23 @@ test "login browser opener respects environment tty and platform gates" {
     try std.testing.expect(!browserOpenEnabled(false, false, host.nativeForOs(.macos)));
     try std.testing.expect(!browserOpenEnabled(false, true, host.nativeForOs(.linux)));
     try std.testing.expect(browserOpenEnabled(false, true, host.nativeForOs(.macos)));
+}
+
+test "logout cleanup deletes leftover ChatGPT and Grok sign-ins and keeps the lia login" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    for ([_][]const u8{ "chatgpt-auth.json", "chatgpt-auth.lock", "grok-auth.json", "auth.json" }) |name| {
+        var file = try tmp.dir.createFile(std.testing.io, name, .{});
+        file.close(std.testing.io);
+    }
+
+    const first = removeLegacyLoginFiles(&tmp.dir);
+    try std.testing.expectEqual(@as(usize, 2), first.removed);
+    try std.testing.expect(!first.failed);
+    try tmp.dir.access(std.testing.io, "auth.json", .{});
+    try std.testing.expectError(error.FileNotFound, tmp.dir.access(std.testing.io, "chatgpt-auth.lock", .{}));
+
+    const second = removeLegacyLoginFiles(&tmp.dir);
+    try std.testing.expectEqual(@as(usize, 0), second.removed);
+    try std.testing.expect(!second.failed);
 }

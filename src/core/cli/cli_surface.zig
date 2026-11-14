@@ -1097,19 +1097,26 @@ fn runNonInteractiveWithDeps(
                     },
                 }
             }
+            const legacy = login_flow.removeLegacyLogins();
             if (result.local_durability_failed) {
                 try writeStderr(deps, "lia logout: failed to durably remove saved lia login\n");
             } else {
                 try writeStdout(
                     deps,
-                    if (result.session_deleted) "Signed out of lia.\n" else "No lia login session found.\n",
+                    if (result.session_deleted) "Signed out of lia.\n" else if (legacy.removed > 0) "" else "No lia login session found.\n",
                 );
+            }
+            if (legacy.removed > 0) {
+                try writeStdout(deps, "Removed saved ChatGPT and Grok sign-in tokens left by an older install.\n");
+            }
+            if (legacy.failed) {
+                try writeStderr(deps, "lia logout: failed to remove leftover ChatGPT and Grok sign-in tokens\n");
             }
             if (result.remote_revocation_failed) {
                 try writeStderr(deps, login_flow.remote_revocation_warning);
                 try writeStderr(deps, "\n");
             }
-            return if (result.local_durability_failed) .handled_failure else .handled_success;
+            return if (result.local_durability_failed or legacy.failed) .handled_failure else .handled_success;
         },
         .teams => |rest| {
             if (rest.len != 0) {
