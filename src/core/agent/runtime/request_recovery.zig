@@ -395,8 +395,8 @@ pub const RequestRecovery = struct {
     ///   `retrying` refresh never does.
     /// - Subagent children and the default deps drop the status.
     ///
-    /// Single-threaded builds, such as wasm, tick from the transport's
-    /// cooperative pulse on the turn loop's own thread instead.
+    /// Single-threaded builds tick from the transport's cooperative pulse on
+    /// the turn loop's own thread instead.
     pub fn beginSend(self: *RequestRecovery) void {
         if (comptime builtin.single_threaded) {
             self.next_beat_ms = self.nowMs() +| tick_ms;

@@ -889,9 +889,9 @@ pub fn logout(
     return result;
 }
 
-/// Sign-in files that fx's ChatGPT and Grok providers kept in the profile
-/// folder, and their lock files. lia has no such providers, but a profile
-/// copied from fx can still hold live refresh tokens in them.
+/// Sign-in files that an older install's ChatGPT and Grok providers kept in
+/// the profile folder, and their lock files. lia has no such providers, but
+/// an older profile can still hold live refresh tokens in them.
 const legacy_login_files = [_][]const u8{
     "chatgpt-auth.json",
     "chatgpt-auth.lock",

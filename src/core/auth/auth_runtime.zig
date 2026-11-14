@@ -183,8 +183,8 @@ pub const FailureSnapshot = struct {
 /// already recovers from.
 const request_path_verified_window_ms: u32 = 30_000;
 const source_none: u8 = std.math.maxInt(u8);
-// u32 keeps the stamp atomic-loadable on 32-bit wasm; wrapping subtraction
-// keeps window comparisons correct across the ~49 day wrap.
+// Wrapping subtraction keeps window comparisons correct across the ~49 day
+// wrap of the u32 stamp.
 var request_path_verified_ms = std.atomic.Value(u32).init(0);
 var request_path_verified_source = std.atomic.Value(u8).init(source_none);
 

@@ -610,7 +610,7 @@ pub fn captureInlineImageBytes(
 }
 
 /// Captures caller-supplied image bytes for sessions without a filesystem
-/// snapshot backend (libfx kernel sessions on native and wasm). Applies the
+/// snapshot backend. Applies the
 /// same size, media-type, and digest validation as the filesystem capture,
 /// but retains the decoded bytes on the attachment itself so request building
 /// and checkpoint serialization never touch a filesystem.

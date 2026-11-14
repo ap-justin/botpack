@@ -224,10 +224,6 @@ const AcpContext = struct {
     captured_model: ?[]const u8 = null,
     current_prompt_input: ?*ParsedPromptInput = null,
     observer: ?*observation.Observer = null,
-    /// The web host's steering as this turn saw it: open at least once, and
-    /// closed by the turn itself at its finalizing boundary. Steering that
-    /// was open and that the host closed is the user's cancel; a host that
-    /// never opened steering cancels nothing this way.
     fn deinitPublishedToolCalls(self: *AcpContext) void {
         var keys = self.published_tool_calls.keyIterator();
         while (keys.next()) |key| self.alloc.free(key.*);

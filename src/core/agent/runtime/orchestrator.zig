@@ -5415,8 +5415,7 @@ fn clearRecoveryCheckpoint(deps: *const AgentRuntimeDeps, comptime why: []const 
 /// Ends a cancelled turn as interrupted. Committing that turn also closes its
 /// durable checkpoint, so the checkpoint is cleared only when no commit follows:
 /// the turn was already saved, or saving it failed after it started. A clear
-/// before the commit would end the turn twice in a libfx journal and drop the
-/// turn id a host uses to skip a retried prompt.
+/// before the commit would end the turn twice.
 fn persistCancelledTurn(
     deps: *const AgentRuntimeDeps,
     finalization: *TurnFinalizationGuard,
