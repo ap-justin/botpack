@@ -20,7 +20,6 @@ const session_store = @import("../core/session/session_store.zig");
 const session_adapter = @import("../core/session/session_adapter.zig");
 const session_store_paths = @import("../core/session/session_store_paths.zig");
 const session_child_store = @import("../core/session/session_child_store.zig");
-const js_host_session_store = @import("../core/session/js_host_session_store.zig");
 const session_runtime = @import("../core/session/session.zig");
 const agent_execution_memory = @import("../core/agent/execution_memory.zig");
 const tool_dispatch = @import("../core/tooling/tool_dispatch.zig");
@@ -37,7 +36,6 @@ const model_catalog = @import("../core/gateway/model_catalog.zig");
 const model_capabilities = @import("../core/config/model_capabilities.zig");
 const provider_set = @import("../core/gateway/provider_set.zig");
 const host = @import("../core/hosts/host.zig");
-const host_target = @import("../core/hosts/target.zig");
 const image_attachments = @import("../core/images/image_attachments.zig");
 const credentials = @import("../core/auth/credentials.zig");
 const model_provider = @import("../core/config/model_provider.zig");
@@ -52,28 +50,6 @@ else
 const Allocator = std.mem.Allocator;
 const ErrorCode = jsonrpc.ErrorCode;
 const writeJsonStr = jsonrpc.writeJsonStr;
-
-/// The session id a `libfx/new` request names, or null when it names none.
-/// The id reaches gateway headers, so it must pass the session layout rules.
-/// Caller owns the returned slice.
-fn requestedLibfxSessionId(alloc: Allocator, params_raw: ?[]const u8) error{ InvalidSessionId, OutOfMemory }!?[]u8 {
-    const raw = params_raw orelse return null;
-    const parsed = std.json.parseFromSlice(std.json.Value, alloc, raw, .{}) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidSessionId,
-    };
-    defer parsed.deinit();
-    if (parsed.value != .object) return error.InvalidSessionId;
-    const value = parsed.value.object.get("sessionId") orelse return null;
-    switch (value) {
-        .null => return null,
-        .string => |id| {
-            session_store_paths.validateSessionId(id) catch return error.InvalidSessionId;
-            return try alloc.dupe(u8, id);
-        },
-        else => return error.InvalidSessionId,
-    }
-}
 
 test "hook configuration OOM is not converted to an ACP parameter error" {
     const Fixture = struct {
@@ -96,301 +72,16 @@ test "hook configuration OOM is not converted to an ACP parameter error" {
         }
     };
     const Handler = *const fn (*server.ServerState, Allocator, *jsonrpc.Message) anyerror!void;
-    const handlers = if (comptime host_target.is_wasm) [_]Handler{ handleNewLibfxSession, handleNewWasmSession, handleLoadWasmSession } else [_]Handler{ handleNewLibfxSession, handleNewSession, handleLoadSession, handleResumeSession };
+    const handlers = [_]Handler{ handleNewSession, handleLoadSession, handleResumeSession };
     for (handlers) |handler| {
         var fixture: Fixture = .{};
         const alloc: Allocator = .{ .ptr = &fixture, .vtable = &.{ .alloc = Fixture.allocate, .resize = Allocator.noResize, .remap = Allocator.noRemap, .free = Fixture.free } };
-        if (handler == handleNewLibfxSession) {
-            // That handler parses the optional session ID first, even for {}.
-            // Fail the first hooks allocation, not an allocation in that parse.
-            fixture.fail_index = std.math.maxInt(usize);
-            try std.testing.expect(try requestedLibfxSessionId(alloc, "{}") == null);
-            fixture.fail_index = fixture.alloc_index;
-            fixture.alloc_index = 0;
-        }
         var state: server.ServerState = undefined;
         state.writer = jsonrpc.Writer.initCallback(&fixture, Fixture.write);
         var message: jsonrpc.Message = .{ .params_raw = "{}" };
         try std.testing.expectError(error.OutOfMemory, handler(&state, alloc, &message));
         try std.testing.expectEqual(@as(usize, 0), fixture.writes);
     }
-}
-
-pub fn handleNewLibfxSession(
-    state: *server.ServerState,
-    alloc: Allocator,
-    msg: *jsonrpc.Message,
-) !void {
-    // Checked before the running turn ends and the active session is
-    // released, so a bad request leaves both in place.
-    const requested = requestedLibfxSessionId(alloc, msg.params_raw) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.InvalidSessionId => return state.writer.writeError(alloc, msg.id, .{
-            .code = ErrorCode.invalid_params,
-            .message = "Invalid sessionId",
-        }),
-    };
-    var requested_owned = requested != null;
-    defer if (requested_owned) alloc.free(requested.?);
-    const observer_hooks = libfx_hooks.parseConfig(alloc, msg.params_raw) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.invalid_params, .message = "Invalid hooks" }),
-    };
-    // The turn's thread reads the session released below.
-    server.cancelAndReapActivePrompt(state);
-    try server.releaseActiveSession(state);
-    requested_owned = false;
-    const session_id = requested orelse try session_store.generateSessionId(alloc);
-    var session_id_owned = true;
-    defer if (session_id_owned) alloc.free(session_id);
-    // As in `startV2Session`: applied once the session is active.
-    const picked_model = acp_sign_in.modelForSession(state, state.workspace_root);
-    var picked_model_owned = true;
-    defer if (picked_model_owned) if (picked_model) |picked| picked.deinit(state.alloc);
-    const model = try alloc.dupe(u8, if (picked_model) |picked| picked.selected else state.selected_model);
-    var model_owned = true;
-    defer if (model_owned) alloc.free(model);
-    var session_rt = session_runtime.SessionRuntime.init(state.cfg.max_history_turns);
-    var session_rt_owned = true;
-    defer if (session_rt_owned) session_rt.deinit(alloc);
-
-    const start = server.loadStartingMode(state, alloc);
-    state.active_session = .{
-        .observer_hooks = observer_hooks,
-        .session_id = session_id,
-        .model = model,
-        .provider = state.provider,
-        .mode = start.id,
-        .workspace_root = state.workspace_root,
-        .api_key = state.api_key,
-        .credential_source = state.credential_source,
-        .account_id = state.account_id,
-        .agent_step_limit = state.agent_step_limit,
-        .max_tool_result_bytes = state.max_tool_result_bytes,
-        .fast_mode = state.fast_mode,
-        .ultrafast_mode = state.ultrafast_mode,
-        .effort = state.effort,
-        .first_call_tool_choice = state.first_call_tool_choice,
-        .permission_mode = start.permission_mode,
-        .permission_rules = state.permission_rules,
-        .session_rt = session_rt,
-        .cancel_flag = std.atomic.Value(bool).init(false),
-        .pending_prompt_id = null,
-    };
-    session_id_owned = false;
-    model_owned = false;
-    session_rt_owned = false;
-    picked_model_owned = false;
-    acp_sign_in.sessionActivated(state, picked_model);
-    try writeNewSessionResponse(state, alloc, msg, session_id, observer_hooks);
-}
-
-pub fn handleNewWasmSession(state: *server.ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
-    const observer_hooks = libfx_hooks.parseConfig(alloc, msg.params_raw) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.invalid_params, .message = "Invalid hooks" }),
-    };
-    try server.releaseActiveSession(state);
-
-    var durable = try freshAcpState(state, alloc, state.workspace_root);
-    var durable_owned = true;
-    defer if (durable_owned) durable.deinit(alloc);
-    const session_id = try alloc.dupe(u8, durable.id);
-    var session_id_owned = true;
-    defer if (session_id_owned) alloc.free(session_id);
-    const model = try alloc.dupe(u8, durable.preferences.model);
-    var model_owned = true;
-    defer if (model_owned) alloc.free(model);
-    var session_rt = session_runtime.SessionRuntime.init(state.cfg.max_history_turns);
-    var session_rt_owned = true;
-    defer if (session_rt_owned) session_rt.deinit(alloc);
-    const revision = js_host_session_store.commit(alloc, durable, null) catch
-        return state.writer.writeError(alloc, msg.id, .{
-            .code = ErrorCode.internal_error,
-            .message = "Failed to create session",
-        });
-    var revision_owned = true;
-    defer if (revision_owned) alloc.free(revision);
-
-    const start = server.loadStartingMode(state, alloc);
-    state.active_session = .{
-        .session_id = session_id,
-        .wasm_state = durable,
-        .wasm_revision = revision,
-        .model = model,
-        .provider = durable.preferences.provider,
-        .mode = start.id,
-        .workspace_root = state.workspace_root,
-        .api_key = state.api_key,
-        .credential_source = state.credential_source,
-        .credential_refresh_after_ms = state.credential_refresh_after_ms,
-        .account_id = state.account_id,
-        .agent_step_limit = state.agent_step_limit,
-        .max_tool_result_bytes = state.max_tool_result_bytes,
-        .fast_mode = state.fast_mode,
-        .ultrafast_mode = state.ultrafast_mode,
-        .effort = state.effort,
-        .first_call_tool_choice = state.first_call_tool_choice,
-        .permission_mode = start.permission_mode,
-        .permission_rules = state.permission_rules,
-        .session_rt = session_rt,
-        .cancel_flag = std.atomic.Value(bool).init(false),
-        .pending_prompt_id = null,
-    };
-    durable_owned = false;
-    revision_owned = false;
-    session_id_owned = false;
-    model_owned = false;
-    session_rt_owned = false;
-
-    try writeNewSessionResponse(state, alloc, msg, session_id, observer_hooks);
-}
-
-pub fn commitWasmSessionLocked(alloc: Allocator, session: *server.ActiveSessionState) !void {
-    const base = if (session.wasm_state) |*value| value else return error.SessionPersistenceUnavailable;
-    var next = try base.dupe(alloc);
-    var next_owned = true;
-    defer if (next_owned) next.deinit(alloc);
-    const history = try session.session_rt.snapshotHistory(alloc);
-    types.freeHistoryTurnSlice(alloc, next.history);
-    next.history = history;
-    const permission_state = try session.session_rt.snapshotPermissionState(alloc);
-    next.permission_state.deinit(alloc);
-    next.permission_state = permission_state;
-    next.context_history_start = 0;
-    next.conversation_language = session.session_rt.languageSnapshot();
-    next.updated_at_ms = io_mod.milliTimestamp();
-    const model = try alloc.dupe(u8, session.model);
-    alloc.free(next.preferences.model);
-    next.preferences.model = model;
-    next.preferences.provider = session.provider;
-    next.preferences.effort = session.effort;
-    next.preferences.fast_mode = session.fast_mode;
-    // Ultrafast keeps its durable baseline, not the process-local request.
-
-    const revision = try js_host_session_store.commit(alloc, next, session.wasm_revision);
-    if (session.wasm_revision) |old| alloc.free(old);
-    session.wasm_revision = revision;
-    base.deinit(alloc);
-    session.wasm_state = next;
-    next_owned = false;
-}
-
-pub fn commitWasmSession(alloc: Allocator, session: *server.ActiveSessionState) !void {
-    session.session_write_mutex.lockUncancelable(io_mod.getIo());
-    defer session.session_write_mutex.unlock(io_mod.getIo());
-    try commitWasmSessionLocked(alloc, session);
-}
-
-pub fn commitWasmUltrafastPreference(alloc: Allocator, session: *server.ActiveSessionState, ultrafast: bool) !void {
-    session.session_write_mutex.lockUncancelable(io_mod.getIo());
-    defer session.session_write_mutex.unlock(io_mod.getIo());
-    const durable = if (session.wasm_state) |*value| value else return error.SessionPersistenceUnavailable;
-    const previous = durable.preferences.ultrafast_mode;
-    durable.preferences.ultrafast_mode = ultrafast;
-    commitWasmSessionLocked(alloc, session) catch |err| {
-        durable.preferences.ultrafast_mode = previous;
-        return err;
-    };
-    session.ultrafast_mode = ultrafast;
-}
-
-test "ACP ultrafast WASM saves preserve baselines and failed preference writes roll back" {
-    if (comptime host_target.is_wasm) return error.SkipZigTest;
-    const Host = struct {
-        var status: i32 = 0;
-        var stored_ultrafast: bool = false;
-        var expected_revision_matched: bool = false;
-
-        fn commit(
-            _: [*]const u8,
-            _: usize,
-            bytes: [*]const u8,
-            length: usize,
-            expected: [*]const u8,
-            expected_len: usize,
-            revision: [*]u8,
-            capacity: usize,
-            revision_len: *usize,
-        ) callconv(.c) i32 {
-            expected_revision_matched = std.mem.eql(u8, expected[0..expected_len], "next");
-            if (status != 0) return status;
-            var reader = std.Io.Reader.fixed(bytes[0..length]);
-            var saved = session_codec.decodeState(std.testing.allocator, &reader, .{}) catch return -1;
-            defer saved.deinit(std.testing.allocator);
-            stored_ultrafast = saved.preferences.ultrafast_mode;
-            if (capacity < 4) return -1;
-            @memcpy(revision[0..4], "next");
-            revision_len.* = 4;
-            return 0;
-        }
-    };
-    @export(&Host.commit, .{ .name = "fx_session_commit" });
-    Host.status = 0;
-    Host.stored_ultrafast = false;
-    Host.expected_revision_matched = false;
-    const alloc = std.testing.allocator;
-    var state = server.ServerState{
-        .alloc = alloc,
-        .cfg = acpSessionTestConfig(),
-        .writer = jsonrpc.Writer.init(),
-        .configured_model = @constCast("openai/test"),
-        .configured_ultrafast_mode = true,
-    };
-    var active = server.ActiveSessionState{
-        .session_id = @constCast("wasm-test"),
-        .wasm_state = try freshAcpState(&state, alloc, "/workspace"),
-        .model = @constCast("openai/test"),
-        .mode = "default",
-        .workspace_root = "/workspace",
-        .api_key = "",
-        .agent_step_limit = 1,
-        .max_tool_result_bytes = 1024,
-        .fast_mode = false,
-        .ultrafast_mode = false,
-        .effort = .auto,
-        .first_call_tool_choice = .auto,
-        .permission_mode = .ask,
-        .permission_rules = .{},
-        .session_rt = session_runtime.SessionRuntime.init(4),
-        .cancel_flag = .init(false),
-        .pending_prompt_id = null,
-    };
-    defer active.session_rt.deinit(alloc);
-    defer active.wasm_state.?.deinit(alloc);
-    defer if (active.wasm_revision) |revision| alloc.free(revision);
-    try commitWasmSession(alloc, &active);
-    try std.testing.expect(Host.stored_ultrafast);
-    try std.testing.expect(active.wasm_state.?.preferences.ultrafast_mode);
-    try std.testing.expect(!active.ultrafast_mode);
-    try commitWasmUltrafastPreference(alloc, &active, false);
-    try std.testing.expect(!Host.stored_ultrafast);
-    try std.testing.expect(!active.wasm_state.?.preferences.ultrafast_mode);
-    for ([_]i32{ -2, -1 }) |status| {
-        Host.status = status;
-        try std.testing.expectError(
-            if (status == -2) error.SessionRevisionConflict else error.SessionStoreUnavailable,
-            commitWasmUltrafastPreference(alloc, &active, true),
-        );
-        try std.testing.expect(!active.ultrafast_mode);
-        try std.testing.expect(!active.wasm_state.?.preferences.ultrafast_mode);
-        try std.testing.expect(!Host.stored_ultrafast);
-        try std.testing.expect(Host.expected_revision_matched);
-        try std.testing.expectEqualStrings("next", active.wasm_revision.?);
-    }
-    Host.status = 0;
-    try commitWasmUltrafastPreference(alloc, &active, true);
-    try std.testing.expect(active.ultrafast_mode);
-    try std.testing.expect(active.wasm_state.?.preferences.ultrafast_mode);
-    Host.status = -2;
-    try std.testing.expectError(error.SessionRevisionConflict, commitWasmUltrafastPreference(alloc, &active, false));
-    try std.testing.expect(active.ultrafast_mode);
-    try std.testing.expect(active.wasm_state.?.preferences.ultrafast_mode);
-    try std.testing.expect(Host.stored_ultrafast);
-    Host.status = 0;
-    active.ultrafast_mode = false;
-    try commitWasmSession(alloc, &active);
-    try std.testing.expect(Host.stored_ultrafast);
 }
 
 pub fn handleNewSession(state: *server.ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
@@ -578,10 +269,8 @@ fn writeNewSessionResponse(
     try out.writer.writeAll("{\"sessionId\":");
     try writeJsonStr(session_id, &out.writer);
     try out.writer.writeAll(",\"configOptions\":[");
-    if (comptime !host_target.is_wasm) {
-        try writeProviderConfigOption(&out.writer, state.active_session.?.provider, state.configured_providers.definitions);
-        try out.writer.writeAll(",");
-    }
+    try writeProviderConfigOption(&out.writer, state.active_session.?.provider, state.configured_providers.definitions);
+    try out.writer.writeAll(",");
     try writeModelConfigOption(
         &out.writer,
         state.active_session.?.model,
@@ -616,140 +305,6 @@ fn writeNewSessionResponse(
     try state.writer.writeResponse(alloc, msg.id, out.writer.buffered());
 
     try sendAvailableCommands(state, alloc, session_id, "[]");
-}
-
-pub fn handleLoadWasmSession(state: *server.ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
-    const observer_hooks = libfx_hooks.parseConfig(alloc, msg.params_raw) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.invalid_params, .message = "Invalid hooks" }),
-    };
-    const params = msg.params_raw orelse return state.writer.writeError(alloc, msg.id, .{
-        .code = ErrorCode.invalid_params,
-        .message = "Missing params",
-    });
-    const parsed = std.json.parseFromSlice(std.json.Value, alloc, params, .{}) catch
-        return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.invalid_params, .message = "Invalid params" });
-    defer parsed.deinit();
-    const session_id = if (parsed.value == .object)
-        if (parsed.value.object.get("sessionId")) |value|
-            if (value == .string) value.string else return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.invalid_params, .message = "Missing sessionId" })
-        else
-            return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.invalid_params, .message = "Missing sessionId" })
-    else
-        return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.invalid_params, .message = "Missing sessionId" });
-
-    if (state.active_session) |*active| {
-        if (sameSessionId(active.session_id, session_id)) {
-            var sources: runtime_tool_presentation.ReplayedSavedOutputSources = .{};
-            defer sources.deinit(alloc);
-            for (active.session_rt.agent.history.items) |turn| try sendHistoryTurnAsUpdates(state, alloc, session_id, &sources, turn);
-            try sendActiveSessionInfoUpdate(state, alloc);
-            return writeLoadSessionResponse(state, alloc, msg, active.model, observer_hooks);
-        }
-    }
-
-    var loaded = (js_host_session_store.load(alloc, session_id) catch
-        return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.internal_error, .message = "Session could not be loaded" })) orelse
-        return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.invalid_params, .message = "Session not found" });
-    var loaded_owned = true;
-    defer if (loaded_owned) loaded.deinit(alloc);
-    const sid_copy = try alloc.dupe(u8, loaded.state.id);
-    var sid_owned = true;
-    defer if (sid_owned) alloc.free(sid_copy);
-    if (loaded.state.preferences.provider != .gateway) {
-        return state.writer.writeError(alloc, msg.id, .{
-            .code = ErrorCode.invalid_request,
-            .message = "Subscription models are unavailable in this WASM runtime",
-        });
-    }
-    const model_copy = try alloc.dupe(u8, loaded.state.preferences.model);
-    var model_owned = true;
-    defer if (model_owned) alloc.free(model_copy);
-    var session_rt = session_runtime.SessionRuntime.init(state.cfg.max_history_turns);
-    var session_rt_owned = true;
-    defer if (session_rt_owned) session_rt.deinit(alloc);
-    try session_rt.restoreWithPermissionState(
-        alloc,
-        loaded.state.conversation_language,
-        loaded.state.history,
-        loaded.state.permission_state,
-    );
-
-    try server.releaseActiveSession(state);
-    const start = server.loadStartingMode(state, alloc);
-    state.active_session = .{
-        .session_id = sid_copy,
-        .wasm_state = loaded.state,
-        .wasm_revision = loaded.revision,
-        .model = model_copy,
-        .provider = loaded.state.preferences.provider,
-        .mode = start.id,
-        .workspace_root = state.workspace_root,
-        .api_key = state.api_key,
-        .credential_source = state.credential_source,
-        .credential_refresh_after_ms = state.credential_refresh_after_ms,
-        .account_id = state.account_id,
-        .agent_step_limit = state.agent_step_limit,
-        .max_tool_result_bytes = state.max_tool_result_bytes,
-        .fast_mode = loaded.state.preferences.fast_mode,
-        .ultrafast_mode = restoredUltrafastMode(state, loaded.state.preferences.ultrafast_mode),
-        .effort = loaded.state.preferences.effort,
-        .first_call_tool_choice = state.first_call_tool_choice,
-        .permission_mode = start.permission_mode,
-        .permission_rules = state.permission_rules,
-        .session_rt = session_rt,
-        .cancel_flag = std.atomic.Value(bool).init(false),
-        .pending_prompt_id = null,
-    };
-    loaded_owned = false;
-    sid_owned = false;
-    model_owned = false;
-    session_rt_owned = false;
-    var sources: runtime_tool_presentation.ReplayedSavedOutputSources = .{};
-    defer sources.deinit(alloc);
-    for (state.active_session.?.session_rt.agent.history.items) |turn| try sendHistoryTurnAsUpdates(state, alloc, session_id, &sources, turn);
-    try sendActiveSessionInfoUpdate(state, alloc);
-    try writeLoadSessionResponse(state, alloc, msg, state.active_session.?.model, observer_hooks);
-}
-
-pub fn handleListWasmSessions(state: *server.ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
-    const entries = js_host_session_store.list(alloc) catch
-        return state.writer.writeResponse(alloc, msg.id, "{\"sessions\":[]}");
-    defer {
-        for (entries) |*entry| entry.deinit(alloc);
-        alloc.free(entries);
-    }
-    var out: std.Io.Writer.Allocating = .init(alloc);
-    defer out.deinit();
-    try out.writer.writeAll("{\"sessions\":[");
-    for (entries, 0..) |entry, index| {
-        if (index > 0) try out.writer.writeByte(',');
-        try out.writer.writeAll("{\"sessionId\":");
-        try writeJsonStr(entry.id, &out.writer);
-        try out.writer.writeAll(",\"cwd\":");
-        try writeJsonStr(state.workspace_root, &out.writer);
-        try out.writer.writeAll(",\"updatedAt\":");
-        const iso = try formatIso8601(alloc, entry.updated_at_ms);
-        defer alloc.free(iso);
-        try writeJsonStr(iso, &out.writer);
-        try out.writer.writeByte('}');
-    }
-    try out.writer.writeAll("]}");
-    try state.writer.writeResponse(alloc, msg.id, out.writer.buffered());
-}
-
-pub fn handleRemoveWasmSession(state: *server.ServerState, alloc: Allocator, msg: *jsonrpc.Message) !void {
-    const params = msg.params_raw orelse return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.invalid_params, .message = "Missing params" });
-    const parsed = std.json.parseFromSlice(std.json.Value, alloc, params, .{}) catch
-        return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.invalid_params, .message = "Invalid params" });
-    defer parsed.deinit();
-    const value = if (parsed.value == .object) parsed.value.object.get("sessionId") else null;
-    const session_id = if (value) |id| if (id == .string) id.string else return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.invalid_params, .message = "Missing sessionId" }) else return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.invalid_params, .message = "Missing sessionId" });
-    js_host_session_store.remove(session_id) catch return state.writer.writeError(alloc, msg.id, .{ .code = ErrorCode.internal_error, .message = "Failed to remove session" });
-    if (state.active_session) |*active| {
-        if (sameSessionId(active.session_id, session_id)) try server.releaseActiveSession(state);
-    }
-    try state.writer.writeResponse(alloc, msg.id, "null");
 }
 
 const RestoreKind = enum {
@@ -1125,10 +680,8 @@ fn writeLoadSessionResponse(
     var out: std.Io.Writer.Allocating = .init(alloc);
     defer out.deinit();
     try out.writer.writeAll("{\"configOptions\":[");
-    if (comptime !host_target.is_wasm) {
-        try writeProviderConfigOption(&out.writer, state.active_session.?.provider, state.configured_providers.definitions);
-        try out.writer.writeAll(",");
-    }
+    try writeProviderConfigOption(&out.writer, state.active_session.?.provider, state.configured_providers.definitions);
+    try out.writer.writeAll(",");
     try writeModelConfigOption(
         &out.writer,
         model,
@@ -1161,42 +714,6 @@ fn writeLoadSessionResponse(
     try out.writer.writeByte('}');
 
     try state.writer.writeResponse(alloc, msg.id, out.writer.buffered());
-}
-
-fn freshAcpState(
-    state: *server.ServerState,
-    alloc: Allocator,
-    workspace_root: []const u8,
-) !session_codec.DurableSessionState {
-    const now = io_mod.milliTimestamp();
-    const id = try session_store.generateSessionId(alloc);
-    errdefer alloc.free(id);
-    const origin = try alloc.dupe(u8, workspace_root);
-    errdefer alloc.free(origin);
-    const workspace = try alloc.dupe(u8, workspace_root);
-    errdefer alloc.free(workspace);
-    const model = try alloc.dupe(u8, state.configured_model);
-    errdefer alloc.free(model);
-    const history = try alloc.alloc(types.HistoryTurn, 0);
-    errdefer alloc.free(history);
-    return .{
-        .id = id,
-        .origin_workspace_root = origin,
-        .workspace_root = workspace,
-        .created_at_ms = now,
-        .updated_at_ms = now,
-        .conversation_language = session_runtime.ConversationLanguage.default(),
-        .preferences = .{
-            .provider = state.provider,
-            .model = model,
-            .effort = state.effort,
-            .fast_mode = state.fast_mode,
-            .ultrafast_mode = state.configured_ultrafast_mode,
-        },
-        .history = history,
-        .total_input_tokens = 0,
-        .total_output_tokens = 0,
-    };
 }
 
 fn restoredUltrafastMode(state: *const server.ServerState, preference: bool) bool {
@@ -1852,7 +1369,6 @@ fn planToolCallFrame(
 }
 
 fn activeSessionHost(state: *server.ServerState) ?*mcp_host.Host {
-    if (comptime host_target.is_wasm) return null;
     const session = if (state.active_session) |*active| active else return null;
     return session.mcp_host;
 }
@@ -1967,7 +1483,6 @@ fn sendSteeringHistoryChunk(state: *server.ServerState, alloc: Allocator, sessio
         acp_types.generateMessageId(&message_id),
         text,
         null,
-        null,
     );
     try out.writer.writeAll("}");
     try state.writer.writeNotification(alloc, "session/update", out.writer.buffered());
@@ -2012,9 +1527,7 @@ pub fn sendActiveSessionInfoUpdate(state: *server.ServerState, alloc: Allocator)
         metadata.deinit(alloc);
         metadata = .{ .present = true, .title = title };
     };
-    const updated_at_ms = if (active.wasm_state) |durable|
-        durable.updated_at_ms
-    else if (v2_info) |info|
+    const updated_at_ms = if (v2_info) |info|
         // Not saved yet: a new session has no line before its first prompt.
         if (info.updated_ms > 0) info.updated_ms else io_mod.milliTimestamp()
     else
@@ -2115,14 +1628,12 @@ pub fn writeProviderConfigOption(
     try w.writeAll("{\"id\":\"provider\",\"name\":\"Provider\",\"category\":\"model\",\"type\":\"select\",\"currentValue\":");
     try writeJsonStr(current.label(), w);
     try w.writeAll(",\"options\":[{\"value\":\"gateway\",\"name\":\"Vercel AI Gateway\"}");
-    if (comptime !host_target.is_wasm) {
-        for (definitions) |definition| {
-            try w.writeAll(",{\"value\":");
-            try writeJsonStr(definition.id, w);
-            try w.writeAll(",\"name\":");
-            try writeJsonStr(definition.id, w);
-            try w.writeAll("}");
-        }
+    for (definitions) |definition| {
+        try w.writeAll(",{\"value\":");
+        try writeJsonStr(definition.id, w);
+        try w.writeAll(",\"name\":");
+        try writeJsonStr(definition.id, w);
+        try w.writeAll("}");
     }
     try w.writeAll("]}");
 }
@@ -3050,7 +2561,6 @@ test "ACP ultrafast new load and resume preserve configured baselines" {
             defer state.deinit();
             state.cfg.auth_mode = .host_managed;
             state.credential_source = .host_managed;
-            state.cfg.minimal_kernel = true;
             state.cfg.allow_acp_mcp = false;
             state.cfg.home_override = home_path;
             state.configured_ultrafast_mode = baseline;
@@ -3136,92 +2646,6 @@ test "a loaded or resumed session is the first session after a sign-in: it spend
     }
 }
 
-test "libfx/new is the first session after a sign-in: it takes its folder's model and spends the sign-in's folder" {
-    const alloc = std.testing.allocator;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
-    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
-    const home_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
-    defer alloc.free(home_path);
-    const workspace_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
-    defer alloc.free(workspace_path);
-    const env = try AcpSessionTestHome.install(alloc, home_path);
-    defer env.deinit();
-    var capture = try tmp.dir.createFile(io_mod.getIo(), "libfx.jsonl", .{ .read = true });
-    defer capture.close(io_mod.getIo());
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
-    const settings = try arena.print("{{\"workspaces\":{{\"{s}\":{{\"models\":{{\"gateway\":\"openai/z-libfx-folder\"}}}}}}}}", .{workspace_path});
-    try tmp.dir.writeFile(io_mod.getIo(), .{ .sub_path = "home/.lia/settings.json", .data = settings });
-    var state = try initAcpSessionTestState(arena, workspace_path, capture);
-    defer state.deinit();
-    state.cfg.home_override = home_path;
-    state.provider = .gateway;
-    state.sign_in_root = try arena.dupe(u8, "/the-folder-the-sign-in-read");
-
-    var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "libfx/new", .params_raw = "{}" };
-    try handleNewLibfxSession(&state, arena, &msg);
-
-    try std.testing.expectEqualStrings("openai/z-libfx-folder", state.active_session.?.model);
-    try std.testing.expectEqualStrings("openai/z-libfx-folder", state.selected_model);
-    try std.testing.expectEqualStrings("openai/z-libfx-folder", state.configured_model);
-    try std.testing.expect(state.sign_in_root == null);
-}
-
-test "a libfx/new that fails leaves the running turn, the connection's model and the sign-in's folder for the next session" {
-    const alloc = std.testing.allocator;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
-    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
-    const home_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
-    defer alloc.free(home_path);
-    const workspace_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
-    defer alloc.free(workspace_path);
-    const env = try AcpSessionTestHome.install(alloc, home_path);
-    defer env.deinit();
-    var capture = try tmp.dir.createFile(io_mod.getIo(), "libfx.jsonl", .{ .read = true });
-    defer capture.close(io_mod.getIo());
-    const settings = try alloc.print("{{\"workspaces\":{{\"{s}\":{{\"models\":{{\"gateway\":\"openai/z-libfx-folder\"}}}}}}}}", .{workspace_path});
-    defer alloc.free(settings);
-    try tmp.dir.writeFile(io_mod.getIo(), .{ .sub_path = "home/.lia/settings.json", .data = settings });
-    var state = try initAcpSessionTestState(alloc, workspace_path, capture);
-    defer state.deinit();
-    state.cfg.home_override = home_path;
-    state.provider = .gateway;
-    // libfx/new is served only by the minimal kernel, whose cancel also ends
-    // the session's steering.
-    state.cfg.minimal_kernel = true;
-
-    var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "libfx/new", .params_raw = "{}" };
-    try handleNewLibfxSession(&state, alloc, &msg);
-    // A sign-in made while that session is open.
-    state.sign_in_root = try alloc.dupe(u8, "/the-folder-the-sign-in-read");
-    var turn = SessionReadingTurn.init(&state);
-    try server.startPromptForTest(&state, SessionReadingTurn.run, .{&turn});
-    defer server.cancelAndReapActivePrompt(&state);
-
-    for ([_][]const u8{ "{\"sessionId\":\"a/b\"}", "{\"hooks\":42}" }) |params| {
-        msg = .{ .id = .{ .integer = 2 }, .method = "libfx/new", .params_raw = params };
-        try handleNewLibfxSession(&state, alloc, &msg);
-        try std.testing.expect(state.active_prompt != null);
-        try std.testing.expect(!state.active_session.?.cancel_flag.load(.seq_cst));
-        try std.testing.expectEqual(turn.session_id.ptr, state.active_session.?.session_id.ptr);
-        try std.testing.expectEqualStrings("test/model", state.selected_model);
-        try std.testing.expectEqualStrings("test/model", state.configured_model);
-        try std.testing.expectEqualStrings("/the-folder-the-sign-in-read", state.sign_in_root orelse "");
-    }
-    msg = .{ .id = .{ .integer = 3 }, .method = "libfx/new", .params_raw = "{}" };
-    try handleNewLibfxSession(&state, alloc, &msg);
-    try std.testing.expect(state.active_prompt == null);
-    try std.testing.expect(!turn.gave_up);
-    try std.testing.expectEqualStrings("test/model", turn.seenModel());
-    try std.testing.expectEqualStrings("openai/z-libfx-folder", state.selected_model);
-    try std.testing.expect(state.sign_in_root == null);
-}
-
 /// A turn that reads its session as a prompt's thread does: the model and
 /// id it borrowed at the start, and `state.active_session` re-read unlocked
 /// until that session is cancelled. It gives up after `give_up_ms`, so a
@@ -3259,60 +2683,7 @@ const SessionReadingTurn = struct {
         const session = if (self.state.active_session) |*active| active else return;
         self.ended_in_own_session = std.mem.eql(u8, session.session_id, self.session_id);
     }
-
-    fn seenModel(self: *const SessionReadingTurn) []const u8 {
-        return self.seen_model[0..self.seen_model_len];
-    }
 };
-
-test "libfx/new ends the running turn before it frees the turn's session, then takes the sign-in folder's model" {
-    const alloc = std.testing.allocator;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
-    try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
-    const home_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
-    defer alloc.free(home_path);
-    const workspace_path = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
-    defer alloc.free(workspace_path);
-    const env = try AcpSessionTestHome.install(alloc, home_path);
-    defer env.deinit();
-    var capture = try tmp.dir.createFile(io_mod.getIo(), "libfx.jsonl", .{ .read = true });
-    defer capture.close(io_mod.getIo());
-    const settings = try alloc.print("{{\"workspaces\":{{\"{s}\":{{\"models\":{{\"gateway\":\"openai/z-libfx-folder\"}}}}}}}}", .{workspace_path});
-    defer alloc.free(settings);
-    try tmp.dir.writeFile(io_mod.getIo(), .{ .sub_path = "home/.lia/settings.json", .data = settings });
-    // Not an arena: the session's strings are really freed, so a turn that
-    // reads them after the free sees the allocator's poison.
-    var state = try initAcpSessionTestState(alloc, workspace_path, capture);
-    defer state.deinit();
-    state.cfg.home_override = home_path;
-    state.provider = .gateway;
-    // libfx/new is served only by the minimal kernel, whose cancel also ends
-    // the session's steering.
-    state.cfg.minimal_kernel = true;
-
-    var msg = jsonrpc.Message{ .id = .{ .integer = 1 }, .method = "libfx/new", .params_raw = "{}" };
-    try handleNewLibfxSession(&state, alloc, &msg);
-    // A sign-in made while that session is open.
-    state.sign_in_root = try alloc.dupe(u8, "/the-folder-the-sign-in-read");
-    var turn = SessionReadingTurn.init(&state);
-    try server.startPromptForTest(&state, SessionReadingTurn.run, .{&turn});
-    defer server.cancelAndReapActivePrompt(&state);
-
-    msg.id = .{ .integer = 2 };
-    try handleNewLibfxSession(&state, alloc, &msg);
-    const turn_ended = state.active_prompt == null;
-    server.cancelAndReapActivePrompt(&state);
-
-    try std.testing.expect(!turn.gave_up);
-    try std.testing.expectEqualStrings("test/model", turn.seenModel());
-    try std.testing.expect(turn.ended_in_own_session);
-    try std.testing.expect(turn_ended);
-    try std.testing.expectEqualStrings("openai/z-libfx-folder", state.active_session.?.model);
-    try std.testing.expectEqualStrings("openai/z-libfx-folder", state.selected_model);
-    try std.testing.expect(state.sign_in_root == null);
-}
 
 test "ACP host-disabled new load and resume skip project MCP effects" {
     const alloc = std.testing.allocator;
@@ -3691,9 +3062,6 @@ test "session/new during a turn, after a sign-in, ends the turn and adopts the s
         var state = try initAcpSessionTestState(arena, workspace_path, capture);
         defer state.deinit();
         state.initialized = true;
-        // A libfx core loads no startup catalog, so the held overrides
-        // validate without a network.
-        state.cfg.minimal_kernel = true;
         state.cfg.allow_acp_mcp = false;
         state.cfg.home_override = home_path;
         state.sessions_v2 = try session_adapter.Store.open(arena, home_path);
@@ -3842,33 +3210,4 @@ test "an unknown session asks for sign-in only while a Gateway default still has
         }
     }
     try std.testing.expectEqual(@as(usize, 3), answers);
-}
-
-test "libfx/new uses a valid host session id and generates one when none is named" {
-    const alloc = std.testing.allocator;
-    const id = (try requestedLibfxSessionId(alloc, "{\"sessionId\":\"wrun_01M3X0485FF9GX5ZA6FWMGR503\"}")).?;
-    defer alloc.free(id);
-    try std.testing.expectEqualStrings("wrun_01M3X0485FF9GX5ZA6FWMGR503", id);
-    try std.testing.expect((try requestedLibfxSessionId(alloc, null)) == null);
-    try std.testing.expect((try requestedLibfxSessionId(alloc, "{}")) == null);
-    try std.testing.expect((try requestedLibfxSessionId(alloc, "{\"sessionId\":null}")) == null);
-}
-
-test "libfx/new rejects a session id that is not header and path safe" {
-    const alloc = std.testing.allocator;
-    const bad = [_][]const u8{
-        "{\"sessionId\":\"\"}",
-        "{\"sessionId\":\"..\"}",
-        "{\"sessionId\":\"a/b\"}",
-        "{\"sessionId\":\"a b\"}",
-        "{\"sessionId\":\"a\\r\\nx-injected: 1\"}",
-        "{\"sessionId\":42}",
-        "[]",
-        "{",
-    };
-    for (bad) |params| {
-        try std.testing.expectError(error.InvalidSessionId, requestedLibfxSessionId(alloc, params));
-    }
-    const long = "{\"sessionId\":\"" ++ text_utils.repeat("a", 256) ++ "\"}";
-    try std.testing.expectError(error.InvalidSessionId, requestedLibfxSessionId(alloc, long));
 }

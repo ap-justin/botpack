@@ -186,7 +186,6 @@ function keychainEnv(home: string, account: string, issuer: string) {
     VERCEL_OIDC_TOKEN: undefined,
     LIA_DISABLE_KEYCHAIN: undefined,
     LIA_TEST_SKIP_ONBOARDING: "1",
-    LIA_AUTO_UPGRADE: "0",
     LIA_TEST_OAUTH_ISSUER_URL: issuer,
     LIA_TRACE_LOG: join(home, "oauth-keychain-trace.log"),
     LIA_TRACE_SCOPES: "auth,keychain",

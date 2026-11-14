@@ -936,6 +936,14 @@ pub fn validateModel(model: []const u8) !void {
 /// the gateway's provider identifiers (for example `anthropic`, `bedrock`,
 /// `vertexAnthropic`; case matters).
 pub const max_provider_order_entries: usize = 8;
+/// The `provider_order` that opts out of lia's default routing, as the one
+/// slug `auto` in a list. Settings also take it as the string `auto`.
+pub const auto_provider_order = "auto";
+
+/// Whether `order` is exactly `auto_provider_order`.
+pub fn isAutoProviderOrder(order: []const []const u8) bool {
+    return order.len == 1 and std.mem.eql(u8, order[0], auto_provider_order);
+}
 pub const max_provider_slug_bytes: usize = 64;
 
 pub fn validateProviderSlug(slug: []const u8) bool {
@@ -2129,12 +2137,16 @@ fn validateKnownSettingsObject(
     if (object.get("context_limits")) |value| {
         _ = context_limits.parseJsonObject(value) catch return error.InvalidSettingsFormat;
     }
-    if (object.get("provider_order")) |value| {
+    if (object.get("provider_order")) |value| order: {
+        if (value == .string and std.mem.eql(u8, value.string, auto_provider_order)) break :order;
         // An empty array explicitly clears an inherited routing list.
         if (value != .array or value.array.items.len > max_provider_order_entries) {
             return error.InvalidSettingsFormat;
         }
         for (value.array.items, 0..) |item, index| {
+            if (item == .string and std.mem.eql(u8, item.string, auto_provider_order) and value.array.items.len > 1) {
+                return error.InvalidSettingsFormat;
+            }
             if (item != .string or !validateProviderSlug(item.string)) return error.InvalidSettingsFormat;
             for (value.array.items[0..index]) |previous| {
                 if (previous == .string and std.mem.eql(u8, item.string, previous.string)) {

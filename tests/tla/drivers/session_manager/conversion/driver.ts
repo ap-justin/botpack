@@ -104,7 +104,7 @@ export function fixture(label: string, at?: string, models?: object[]) {
       LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
       // The older releases that write v1 read these names for the same hooks.
       LIA_E2E_GATEWAY_CHAT_URL: gateway.chatUrl, LIA_E2E_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
-      LIA_MODEL: FAKE_GATEWAY_MODEL, LIA_PERMISSION_MODE: "full-access", LIA_AUTO_UPGRADE: "0", LIA_SOUND: "0", NO_COLOR: "1",
+      LIA_MODEL: FAKE_GATEWAY_MODEL, LIA_PERMISSION_MODE: "full-access", LIA_SOUND: "0", NO_COLOR: "1",
       // A v1 writer build that still has the store switch writes v1 even when
       // the driver's own environment sets it; tmux passes that environment on.
       ...(v2 ? {} : { LIA_SESSIONS_V2: "0" }),

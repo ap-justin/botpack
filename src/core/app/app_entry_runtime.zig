@@ -11,7 +11,6 @@ const process_provider = @import("../execution/process_provider.zig");
 const gateway_provider = @import("../gateway/gateway_provider.zig");
 const provider_set = @import("../gateway/provider_set.zig");
 const host = @import("../hosts/host.zig");
-const host_target = @import("../hosts/target.zig");
 const io_mod = @import("../shared/io.zig");
 const prompt_policy = @import("../config/prompt_policy.zig");
 const skill_contract = @import("../skills/skill_contract.zig");
@@ -87,10 +86,7 @@ const GetenvFn = *const fn (?*anyopaque, []const u8) ?[]const u8;
 const WriteFn = *const fn (?*anyopaque, []const u8) anyerror!void;
 const RunDeps = struct {
     cli_ctx: ?*anyopaque = null,
-    run_if_requested: RunIfRequestedFn = if (host_target.is_wasm)
-        unavailableCliDispatch
-    else
-        runIfRequestedDefault,
+    run_if_requested: RunIfRequestedFn = runIfRequestedDefault,
     env_ctx: ?*anyopaque = null,
     getenv: GetenvFn = getenvDefault,
     stderr_ctx: ?*anyopaque = null,
@@ -130,10 +126,6 @@ fn beforeInteractiveResultFromRunResult(deps: RunDeps, alloc: Allocator, run_res
         .handled_failure => return .{ .exit = 1 },
         .handled_exit => |code| return if (code == 0) .returned else .{ .exit = code },
     }
-}
-
-fn unavailableCliDispatch(_: ?*anyopaque, _: Allocator, _: []const [:0]const u8, _: cli_surface.Config) anyerror!cli_surface.RunResult {
-    return error.UnknownCliCommand;
 }
 
 fn cliSurfaceConfig(cfg: Config) cli_surface.Config {

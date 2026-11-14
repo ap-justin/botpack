@@ -4,12 +4,11 @@ const builtin = @import("builtin");
 const credentials = @import("credentials.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
 const host = @import("../hosts/host.zig");
-const host_target = @import("../hosts/target.zig");
 const io_mod = @import("../shared/io.zig");
-const js_host_auth = @import("js_host_auth.zig");
 const oauth = @import("oauth.zig");
 const oauth_session = @import("oauth_session.zig");
 const oauth_transport = @import("oauth_transport.zig");
+const profile_paths = @import("../shared/profile_paths.zig");
 const secret = @import("secret.zig");
 const test_builtin_gateway = if (builtin.is_test)
     @import("../../builtins/gateway.zig")
@@ -340,12 +339,6 @@ pub const SignInRuntime = struct {
         alloc: Allocator,
         transport: oauth_transport.Provider,
     ) !bool {
-        if (comptime host_target.is_wasm) {
-            const prepared = try prepareLogin(alloc, transport);
-            return self.startPrepared(alloc, prepared, .{
-                .oauth_transport = transport,
-            });
-        }
         return self.startPreparedWithMode(alloc, null, .{ .oauth_transport = transport }, false);
     }
 
@@ -364,7 +357,7 @@ pub const SignInRuntime = struct {
         prepared: PreparedLogin,
         deps: SignInRuntimeDeps,
     ) !bool {
-        return self.startPreparedWithMode(alloc, prepared, deps, host_target.is_wasm);
+        return self.startPreparedWithMode(alloc, prepared, deps, false);
     }
 
     fn startPreparedCooperative(
@@ -430,9 +423,7 @@ pub const SignInRuntime = struct {
         self.thread = null;
         self.mutex.unlock(io_mod.getIo());
 
-        if (comptime !host_target.is_wasm) {
-            if (thread) |handle| handle.join();
-        }
+        if (thread) |handle| handle.join();
         self.clearFlow(alloc);
         return cancelled;
     }
@@ -491,9 +482,7 @@ pub const SignInRuntime = struct {
         self.mutex.unlock(io_mod.getIo());
         if (!terminal) return .none;
 
-        if (comptime !host_target.is_wasm) {
-            if (thread) |handle| handle.join();
-        }
+        if (thread) |handle| handle.join();
         self.clearFlow(alloc);
 
         self.mutex.lockUncancelable(io_mod.getIo());
@@ -558,11 +547,6 @@ pub const SignInRuntime = struct {
         defer token.deinit(alloc);
 
         self.completeToken(alloc, &token);
-    }
-
-    pub fn pulse(self: *Self, alloc: Allocator) void {
-        if (comptime !host_target.is_wasm) return;
-        self.pulseCooperative(alloc);
     }
 
     fn pulseCooperative(self: *Self, alloc: Allocator) void {
@@ -905,6 +889,54 @@ pub fn logout(
     return result;
 }
 
+/// Sign-in files that an older install's ChatGPT and Grok providers kept in
+/// the profile folder, and their lock files. lia has no such providers, but
+/// an older profile can still hold live refresh tokens in them.
+const legacy_login_files = [_][]const u8{
+    "chatgpt-auth.json",
+    "chatgpt-auth.lock",
+    "grok-auth.json",
+    "grok-auth.lock",
+};
+
+pub const LegacyLoginRemoval = struct {
+    removed: usize = 0,
+    failed: bool = false,
+};
+
+/// Deletes the leftover ChatGPT and Grok sign-in files from `dir`, the profile
+/// folder, and counts the sign-ins removed. A failed delete is reported and
+/// does not stop the others.
+fn removeLegacyLoginFiles(dir: *std.Io.Dir) LegacyLoginRemoval {
+    var result: LegacyLoginRemoval = .{};
+    for (legacy_login_files) |name| {
+        dir.deleteFile(io_mod.getIo(), name) catch |err| switch (err) {
+            error.FileNotFound => continue,
+            else => {
+                result.failed = true;
+                continue;
+            },
+        };
+        if (std.mem.endsWith(u8, name, ".json")) result.removed += 1;
+    }
+    return result;
+}
+
+/// Deletes the leftover ChatGPT and Grok sign-in tokens from the profile
+/// folder; see `legacy_login_files`.
+pub fn removeLegacyLogins() LegacyLoginRemoval {
+    const home = io_mod.homeDir() orelse return .{};
+    var home_dir = std.Io.Dir.openDirAbsolute(io_mod.getIo(), profile_paths.rootParent(home), .{}) catch |err| {
+        return .{ .failed = err != error.FileNotFound };
+    };
+    defer home_dir.close(io_mod.getIo());
+    var lia_dir = home_dir.openDir(io_mod.getIo(), profile_paths.rootName(), .{ .follow_symlinks = false }) catch |err| {
+        return .{ .failed = err != error.FileNotFound };
+    };
+    defer lia_dir.close(io_mod.getIo());
+    return removeLegacyLoginFiles(&lia_dir);
+}
+
 /// The outcome of deleting the saved lia login session, with the deleted
 /// session kept so its tokens can still be revoked.
 pub const LocalLogout = struct {
@@ -1003,10 +1035,7 @@ pub const LoginPollDeps = struct {
         std.Io.Clock.Timestamp,
     ) anyerror!oauth.PollResult = realPollDeviceToken,
     sleep_ms: *const fn (?*anyopaque, u64) void = realSleepMs,
-    wait_for_enter: *const fn (?*anyopaque, u64) bool = if (host_target.is_wasm)
-        unavailableWaitForEnter
-    else
-        realWaitForEnter,
+    wait_for_enter: *const fn (?*anyopaque, u64) bool = realWaitForEnter,
     url_opener: host.UrlOpener = host.unavailable_url_opener,
     is_cancelled: *const fn (?*anyopaque) bool = neverCancelled,
     cancel_flag: ?*std.atomic.Value(bool) = null,
@@ -1214,10 +1243,6 @@ fn realSleepMs(_: ?*anyopaque, ms: u64) void {
     io_mod.sleep(ms *| std.time.ns_per_ms);
 }
 
-fn unavailableWaitForEnter(_: ?*anyopaque, _: u64) bool {
-    return false;
-}
-
 fn realWaitForEnter(_: ?*anyopaque, timeout_ms: u64) bool {
     var fds = [_]std.posix.pollfd{.{
         .fd = std.posix.STDIN_FILENO,
@@ -1248,7 +1273,6 @@ fn fetchTeams(
     access_token: []const u8,
     issuer_url: []const u8,
 ) !std.ArrayList(Team) {
-    if (comptime host_target.is_wasm) return fetchTeamsFromJsHost(alloc, access_token, issuer_url);
     const e2e_endpoint = if (oauth_session.isLoopbackE2EIssuer(issuer_url))
         try alloc.print("{s}/v2/teams", .{issuer_url})
     else
@@ -1265,24 +1289,6 @@ fn fetchTeams(
         .authorization = auth_header,
         .max_response_bytes = teams_response_max_bytes,
     });
-    defer response.deinit(alloc);
-    if (response.disposition != .accepted) return error.TeamRequestFailed;
-    return parseTeams(alloc, response.body);
-}
-
-fn fetchTeamsFromJsHost(
-    alloc: Allocator,
-    access_token: []const u8,
-    issuer_url: []const u8,
-) !std.ArrayList(Team) {
-    const e2e_endpoint = if (oauth_session.isLoopbackE2EIssuer(issuer_url))
-        try alloc.print("{s}/v2/teams", .{issuer_url})
-    else
-        null;
-    defer if (e2e_endpoint) |endpoint| alloc.free(endpoint);
-    const endpoint = e2e_endpoint orelse teams_endpoint;
-
-    var response = try js_host_auth.executeBearerGet(alloc, endpoint, access_token);
     defer response.deinit(alloc);
     if (response.disposition != .accepted) return error.TeamRequestFailed;
     return parseTeams(alloc, response.body);
@@ -2706,4 +2712,23 @@ test "login browser opener respects environment tty and platform gates" {
     try std.testing.expect(!browserOpenEnabled(false, false, host.nativeForOs(.macos)));
     try std.testing.expect(!browserOpenEnabled(false, true, host.nativeForOs(.linux)));
     try std.testing.expect(browserOpenEnabled(false, true, host.nativeForOs(.macos)));
+}
+
+test "logout cleanup deletes leftover ChatGPT and Grok sign-ins and keeps the lia login" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    for ([_][]const u8{ "chatgpt-auth.json", "chatgpt-auth.lock", "grok-auth.json", "auth.json" }) |name| {
+        var file = try tmp.dir.createFile(std.testing.io, name, .{});
+        file.close(std.testing.io);
+    }
+
+    const first = removeLegacyLoginFiles(&tmp.dir);
+    try std.testing.expectEqual(@as(usize, 2), first.removed);
+    try std.testing.expect(!first.failed);
+    try tmp.dir.access(std.testing.io, "auth.json", .{});
+    try std.testing.expectError(error.FileNotFound, tmp.dir.access(std.testing.io, "chatgpt-auth.lock", .{}));
+
+    const second = removeLegacyLoginFiles(&tmp.dir);
+    try std.testing.expectEqual(@as(usize, 0), second.removed);
+    try std.testing.expect(!second.failed);
 }

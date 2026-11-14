@@ -1490,7 +1490,6 @@ describe.skipIf(!HAS_API_KEY)("eval: auto permission reliability", () => {
                 HOME: root.home,
                 PATH: `${root.bin}:${process.env.PATH ?? "/usr/bin:/bin"}`,
                 LIA_MODEL: MODEL,
-                LIA_AUTO_UPGRADE: "0",
                 LIA_GATEWAY_BASE_URL: gateway.baseUrl,
                 LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
                 LIA_TRACE_LOG: tracePath,

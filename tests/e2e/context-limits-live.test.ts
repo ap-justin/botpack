@@ -60,7 +60,6 @@ describe.skipIf(!LIVE_ENABLED || !HAS_API_KEY)("live source context limits", () 
             env: {
               HOME: home,
               LIA_MODEL: MODEL,
-              LIA_AUTO_UPGRADE: "0",
               LIA_GATEWAY_BASE_URL: undefined,
               LIA_GATEWAY_CHAT_URL: undefined,
               LIA_TEST_GATEWAY_CHAT_URL: undefined,

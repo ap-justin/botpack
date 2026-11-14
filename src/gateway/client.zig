@@ -12,11 +12,9 @@ const io_mod = @import("../core/shared/io.zig");
 const select_watch = @import("../core/shared/select_watch.zig");
 const mem_utils = @import("../core/shared/mem_utils.zig");
 const types = @import("../core/shared/types.zig");
-const atomic_value = @import("../core/mcp/atomic_value.zig");
 const json_comparison = @import("../core/shared/json_comparison.zig");
 const sse = @import("sse.zig");
 const json_depth = @import("json_depth.zig");
-const host_stream_provider = @import("host_stream_provider.zig");
 const open_job = @import("open_job.zig");
 const text_utils = @import("../core/shared/text_utils.zig");
 
@@ -310,42 +308,6 @@ pub fn fetchUsageGet(
         }),
         &operation,
     );
-}
-
-/// The same GET as `fetchUsageGet`, through a host transport instead of
-/// lia's own HTTP client: the JS host in WebAssembly, which cannot open
-/// sockets. Pulses `cooperative_pulse` while the host has nothing ready.
-/// Redirects are the host's: `fetch` follows them and drops `authorization`
-/// when one leaves the origin.
-pub fn fetchUsageGetThroughHost(
-    alloc: std.mem.Allocator,
-    transport: host_stream_provider.Transport,
-    bearer: []const u8,
-    gateway_team: ?[]const u8,
-    account: UsageAccount,
-    url: []const u8,
-    cancel_flag: *std.atomic.Value(bool),
-    cooperative_pulse: ?agent_stream_provider.CooperativePulse,
-) !GetResult {
-    const authorization = try alloc.print("Bearer {s}", .{bearer});
-    defer secret.zeroAndFree(alloc, authorization);
-    var headers_buf: [5]std.http.Header = undefined;
-    headers_buf[0] = .{ .name = "authorization", .value = authorization };
-    const extra = usageExtraHeaders(headers_buf[1..5], gateway_team, account);
-    const response = try host_stream_provider.get(
-        alloc,
-        transport,
-        url,
-        headers_buf[0 .. 1 + extra.len],
-        usage_response_max_bytes,
-        cancel_flag,
-        std.Io.Clock.Timestamp.fromNow(io_mod.getIo(), .{
-            .clock = .awake,
-            .raw = .fromMilliseconds(usage_request_timeout_ms),
-        }),
-        cooperative_pulse,
-    );
-    return .{ .status = response.status, .body = response.body };
 }
 
 /// The headers a usage GET sends besides `authorization`: the AI Gateway
@@ -1002,10 +964,9 @@ const ConnectedRequestWatch = struct {
     phase: std.atomic.Value(Phase) = .init(.sending),
     response_head_deadline: std.Io.Clock.Timestamp = undefined,
     /// Last byte progress in the streaming phase (awake clock, ms). Written by
-    /// the consume loop, read by the watcher thread. wasm32-safe via the
-    /// project's portable atomic wrapper (wide atomics do not exist there);
-    /// millisecond precision is ample for second-scale stall thresholds.
-    last_progress_ms: atomic_value.Value(i64) = .init(0),
+    /// the consume loop, read by the watcher thread. Millisecond precision is
+    /// ample for second-scale stall thresholds.
+    last_progress_ms: std.atomic.Value(i64) = .init(0),
     timing: ResponseHeadTiming,
 
     fn init(timing: ResponseHeadTiming) ConnectedRequestWatch {
@@ -3925,9 +3886,7 @@ const error_type_names = [_][]const u8{
 };
 
 /// What an SSE `error` event says about the request: lia classifies what has a
-/// code and resends what is unclear. This differs from the Responses protocol
-/// (`responses_protocol.zig` `accept_failure`), which ends the turn for
-/// `provider_error` and for a missing code. The AI Gateway names a provider
+/// code and resends what is unclear. The AI Gateway names a provider
 /// route failure `provider_error` and pairs it with HTTP 503, and an event
 /// with neither a code nor a usable HTTP status is the same route failure
 /// that `captureProviderFailureDetail` labels `provider_error`, so here both

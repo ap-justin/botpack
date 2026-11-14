@@ -23,7 +23,7 @@ function fixture(label: string) {
     LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
     LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
     LIA_MODEL: FAKE_GATEWAY_MODEL, LIA_PERMISSION_MODE: "full-access",
-    LIA_AUTO_UPGRADE: "0", LIA_SOUND: "0", NO_COLOR: "1", LIA_TRACE_LOG: trace, LIA_TRACE_SCOPES: "wiring",
+    LIA_SOUND: "0", NO_COLOR: "1", LIA_TRACE_LOG: trace, LIA_TRACE_SCOPES: "wiring",
   });
   function start(gateway: any, args: string[]) {
     const argv = ["ask", "--json", "--auto", ...args];

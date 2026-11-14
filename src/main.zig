@@ -24,7 +24,6 @@ const provider_set = @import("core/gateway/provider_set.zig");
 const builtin_mcp = @import("builtins/mcp.zig");
 const builtin_modes = @import("builtins/modes.zig");
 const builtin_skills = @import("builtins/skills.zig");
-const host_target = @import("core/hosts/target.zig");
 const native_host = @import("core/hosts/native.zig");
 const cli_surface = @import("core/cli/cli_surface.zig");
 const command_runner = @import("core/execution/command_runner.zig");
@@ -57,7 +56,7 @@ const ignored_list_entries = [_][]const u8{
 const default_context_registry = context_contract.Registry{ .default_provider = builtin_context.provider };
 
 comptime {
-    if (!builtin.is_test and !host_target.is_wasm) {
+    if (!builtin.is_test) {
         @export(&main, .{ .name = "main" });
     }
 }
@@ -789,8 +788,6 @@ test "terminal help styling respects terminal capability and color opt-outs" {
 }
 
 test {
-    _ = @import("core/agent/runtime/journal.zig");
-    _ = @import("acp/libfx_journal.zig");
     _ = @import("mcp/mcp.zig");
     _ = @import("core/mcp_host/runtime.zig");
     _ = @import("core/mcp_host/wire_tests.zig");
@@ -848,7 +845,6 @@ test {
     _ = @import("core/cli/doctor_runtime.zig");
     _ = @import("core/auth/login_flow.zig");
     _ = @import("core/auth/provider_catalog.zig");
-    _ = @import("gateway/responses_protocol.zig");
     _ = credentials;
     _ = @import("core/auth/oauth.zig");
     _ = @import("core/auth/oauth_session.zig");
@@ -958,7 +954,6 @@ test {
     _ = @import("core/shared/types.zig");
     _ = @import("core/agent/worker_runtime.zig");
     _ = @import("gateway/client.zig");
-    _ = @import("gateway/host_stream_provider.zig");
     _ = @import("gateway/open_job.zig");
     _ = @import("gateway/vercel_failure_diagnostics.zig");
 }

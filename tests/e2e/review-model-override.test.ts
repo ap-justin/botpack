@@ -101,7 +101,6 @@ function overrideEnv(
     LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
     LIA_MODEL: MODEL,
     LIA_PERMISSION_MODE: "auto",
-    LIA_AUTO_UPGRADE: "0",
     NO_COLOR: "1",
     ...extra,
   };

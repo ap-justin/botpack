@@ -189,7 +189,7 @@ async function runCohort(inputs: Inputs, cohort: Cohort): Promise<Record<Scenari
             const result = await runCommand(argv, { cwd: workspace, env: {
               PATH: process.env.PATH ?? "", TMPDIR: fixture, LANG: "en_US.UTF-8", TZ: "UTC", HOME: home,
               AI_GATEWAY_API_KEY: "synthetic-memory-fixture", VERCEL_OIDC_TOKEN: "",
-              LIA_DISABLE_KEYCHAIN: "1", LIA_SOUND: "0", LIA_AUTO_UPGRADE: "0", LIA_TEST_SKIP_ONBOARDING: "1",
+              LIA_DISABLE_KEYCHAIN: "1", LIA_SOUND: "0", LIA_TEST_SKIP_ONBOARDING: "1",
               LIA_E2E_DISABLE_DOTENV: "1", LIA_MODEL: FAKE_GATEWAY_MODEL,
               LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,

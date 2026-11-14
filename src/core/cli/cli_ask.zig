@@ -1309,6 +1309,9 @@ fn runWithDeps(alloc: Allocator, args: []const [:0]const u8, cfg: Config, deps: 
         },
         error.InvalidAskArgs => {
             if (hasJsonFlag(args)) {
+                // The JSON result names only the error, so the reason, such as
+                // a removed flag's replacement, goes to stderr.
+                try writeAskUsageProblem(alloc, deps, problem);
                 const json = try renderErrorJsonResult(alloc, @errorName(err), output_contracts.usage_exit_code);
                 defer alloc.free(json);
                 try deps.write_stdout(deps.stdout_ctx, json);

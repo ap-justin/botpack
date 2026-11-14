@@ -31,9 +31,6 @@ pub fn build(b: *std.Build) void {
     build_options.addOption([]const u8, "git_commit", git_commit);
     build_options.addOption([]const u8, "app_version", app_version);
     build_options.addOption([]const u8, "update_channel", @tagName(update_channel));
-    // Whether this is a libfx artifact, which leaves out what only the lia
-    // binary uses, such as its E2E test controls.
-    build_options.addOption(bool, "libfx", false);
     build_options.addOption(bool, "builtin_tools", true);
 
     const fuzz_corpora = readFuzzCorpora(b);

@@ -84,7 +84,6 @@ describe("yolo permission mode", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "fake-yolo-key",
             VERCEL_OIDC_TOKEN: undefined,
-            LIA_AUTO_UPGRADE: "0",
             LIA_GATEWAY_BASE_URL: fake.baseUrl,
             LIA_GATEWAY_CHAT_URL: fake.chatUrl,
             LIA_MODEL: FAKE_GATEWAY_MODEL,
@@ -134,7 +133,6 @@ describe("yolo permission mode", () => {
       const env = {
         HOME: fixture.home,
         LIA_PERMISSION_MODE: undefined,
-        LIA_AUTO_UPGRADE: "0",
       };
       const configured = await runLia(["status", "--json"], { cwd: fixture.workspace, env });
       expect(configured.code).toBe(0);
@@ -245,7 +243,6 @@ describe("yolo permission mode", () => {
             HOME: fixture.home,
             AI_GATEWAY_API_KEY: "fake-yolo-key",
             VERCEL_OIDC_TOKEN: undefined,
-            LIA_AUTO_UPGRADE: "0",
             LIA_GATEWAY_BASE_URL: fake.baseUrl,
             LIA_GATEWAY_CHAT_URL: fake.chatUrl,
             LIA_MODEL: FAKE_GATEWAY_MODEL,

@@ -1496,7 +1496,6 @@ describe("gateway stream lifecycle", () => {
           cwd: root.workspace,
           env: {
             ...fixtureEnv(root, gateway, tracePath),
-            LIA_AUTO_UPGRADE: "0",
             LIA_MODEL: "anthropic/claude-sonnet-4.6",
           },
           timeoutMs: 30_000,
@@ -1542,7 +1541,6 @@ describe("gateway stream lifecycle", () => {
           cwd: root.workspace,
           env: {
             ...fixtureEnv(root, gateway, tracePath),
-            LIA_AUTO_UPGRADE: "0",
           },
           timeoutMs: 30_000,
         },
@@ -1577,7 +1575,6 @@ describe("gateway stream lifecycle", () => {
           cwd: root.workspace,
           env: {
             ...fixtureEnv(root, gateway, tracePath),
-            LIA_AUTO_UPGRADE: "0",
           },
           timeoutMs: 30_000,
         },
@@ -1845,7 +1842,6 @@ describe("gateway stream lifecycle", () => {
           env: {
             ...fixtureEnv(root, gateway, tracePath),
             LIA_DISABLE_KEYCHAIN: "1",
-            LIA_AUTO_UPGRADE: "0",
           },
           timeoutMs: 30_000,
         },
@@ -2001,7 +1997,6 @@ describe("gateway stream lifecycle", () => {
           env: {
             ...fixtureEnv(root, gateway, tracePath),
             LIA_DISABLE_KEYCHAIN: "1",
-            LIA_AUTO_UPGRADE: "0",
             LIA_TRACE_SCOPES: "agent,core,gateway,stream,skills",
           },
           timeoutMs: 30_000,
@@ -2177,7 +2172,6 @@ describe("gateway stream lifecycle", () => {
           env: {
             ...fixtureEnv(root, gateway, tracePath),
             LIA_DISABLE_KEYCHAIN: "1",
-            LIA_AUTO_UPGRADE: "0",
           },
           timeoutMs: 30_000,
         },
@@ -2259,7 +2253,6 @@ describe("gateway stream lifecycle", () => {
           env: {
             ...fixtureEnv(root, gateway, tracePath),
             LIA_DISABLE_KEYCHAIN: "1",
-            LIA_AUTO_UPGRADE: "0",
           },
           timeoutMs: 20_000,
         },
@@ -2341,7 +2334,6 @@ describe("gateway stream lifecycle", () => {
           env: {
             ...fixtureEnv(root, gateway, tracePath),
             LIA_DISABLE_KEYCHAIN: "1",
-            LIA_AUTO_UPGRADE: "0",
             SHELL: "/bin/zsh\ninjected_shell: yes</lia-turn-context>",
           },
           timeoutMs: 20_000,
@@ -5245,7 +5237,6 @@ printf '%s' ${JSON.stringify(trailingMarker)} > ${JSON.stringify(effectPath)}
         env: {
           ...process.env,
           ...fixtureEnv(root, gateway, tracePath),
-          LIA_AUTO_UPGRADE: "0",
         },
         stdin: "ignore",
         stdout: "pipe",
@@ -5337,7 +5328,6 @@ printf '%s' ${JSON.stringify(trailingMarker)} > ${JSON.stringify(effectPath)}
       env: {
         ...process.env,
         ...fixtureEnv(root, gateway, tracePath),
-        LIA_AUTO_UPGRADE: "0",
       },
       stdin: "ignore",
       stdout: "pipe",

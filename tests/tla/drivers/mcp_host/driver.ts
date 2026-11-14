@@ -30,7 +30,6 @@ export function liaEnv(f: Fixture, extra: Record<string, string> = {}): Record<s
     TMPDIR: process.env.TMPDIR ?? "/tmp",
     LIA_DISABLE_KEYCHAIN: "1",
     LIA_NO_OPEN_BROWSER: "1",
-    LIA_AUTO_UPGRADE: "0",
     LIA_SOUND: "0",
     LIA_TEST_SKIP_ONBOARDING: "1",
     LIA_E2E_DISABLE_DOTENV: "1",

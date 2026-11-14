@@ -8,7 +8,6 @@ const tool_set_contract = @import("../core/tooling/tool_set.zig");
 const text_utils = @import("../core/shared/text_utils.zig");
 const debug_trace = @import("../core/shared/debug_trace.zig");
 const builtin_tools = @import("../builtins/tools.zig");
-const host_target = @import("../core/hosts/target.zig");
 const types = @import("../core/shared/types.zig");
 const catalog_state = @import("../core/mcp/catalog_state.zig");
 const json_decode = @import("../core/shared/json_decode.zig");
@@ -89,8 +88,6 @@ pub fn describeToolCall(
 }
 
 pub fn activeToolSet(state: *const server.ServerState) tool_set_contract.ToolSet {
-    if (state.host_tools.tools.len > 0) return state.host_tools.toolSet();
-    if (comptime host_target.is_wasm) return tool_set_contract.empty;
     return if (state.cfg.allow_native_tools) builtin_tools.advertisement_set else tool_set_contract.empty;
 }
 

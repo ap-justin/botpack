@@ -53,7 +53,7 @@ const NO_GATEWAY_AUTH = {
 const NO_SETTING_ENV = Object.fromEntries(
   [
     "LIA_PROVIDER", "LIA_MODEL", "LIA_ULTRAFAST", "LIA_REVIEW_MODEL", "LIA_PROVIDER_ORDER", "LIA_PROVIDER_STRICT",
-    "LIA_PERMISSION_MODE", "LIA_MAX_AGENT_STEPS", "LIA_AUTO_COMPACT_PERCENT", "LIA_THEME", "LIA_SOUND", "LIA_AUTO_UPGRADE",
+    "LIA_PERMISSION_MODE", "LIA_MAX_AGENT_STEPS", "LIA_AUTO_COMPACT_PERCENT", "LIA_THEME", "LIA_SOUND",
   ].map((name) => [name, undefined]),
 );
 const MISSING_AUTH_MESSAGE =
@@ -594,7 +594,6 @@ describe("cli: output errors", () => {
               PATH: process.env.PATH,
               HOME: home,
               LIA_SOUND: "0",
-              LIA_AUTO_UPGRADE: "0",
               LIA_DISABLE_KEYCHAIN: "1",
               LIA_TRACE_LOG: tracePath,
               LIA_TRACE_SCOPES: "core",
@@ -639,7 +638,6 @@ describe("cli: output errors", () => {
               AI_GATEWAY_API_KEY: "closed-stdout-key",
               LIA_MODEL: FAKE_GATEWAY_MODEL,
               LIA_DISABLE_KEYCHAIN: "1",
-              LIA_AUTO_UPGRADE: "0",
               LIA_SOUND: "0",
               LIA_GATEWAY_BASE_URL: gateway.baseUrl,
               LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
@@ -697,7 +695,7 @@ describe("cli: closed output pipe", () => {
     async () => {
       const home = createIsolatedTestHome();
       try {
-        const env = { PATH: process.env.PATH, HOME: home, LIA_SOUND: "0", LIA_AUTO_UPGRADE: "0", LIA_DISABLE_KEYCHAIN: "1" };
+        const env = { PATH: process.env.PATH, HOME: home, LIA_SOUND: "0", LIA_DISABLE_KEYCHAIN: "1" };
         // `lia --version` ends before lia's I/O starts, so SIGPIPE ends it;
         // `lia status` gets the closed pipe as a failed write.
         for (const args of [["--version"], ["status"]]) {
@@ -729,7 +727,6 @@ describe("cli: closed output pipe", () => {
             AI_GATEWAY_API_KEY: "reader-gone-key",
             LIA_MODEL: FAKE_GATEWAY_MODEL,
             LIA_DISABLE_KEYCHAIN: "1",
-            LIA_AUTO_UPGRADE: "0",
             LIA_SOUND: "0",
             LIA_GATEWAY_BASE_URL: gateway.baseUrl,
             LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
@@ -772,7 +769,6 @@ describe("cli: status", () => {
           AI_GATEWAY_API_KEY: "mcp-config-diagnostic-key",
           VERCEL_OIDC_TOKEN: undefined,
           LIA_DISABLE_KEYCHAIN: "1",
-          LIA_AUTO_UPGRADE: "0",
           LIA_MODEL: FAKE_GATEWAY_MODEL,
           LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
         };
@@ -932,6 +928,10 @@ describe("cli: status", () => {
         expect(schema.properties.permission_mode.enum).toEqual(["ask", "auto", "full-access", "yolo"]);
         expect(schema.properties.auto_compact_percent).toMatchObject({ type: "integer", minimum: 10, maximum: 80 });
         expect(schema.properties.statusLine.deprecated).toBe(true);
+        expect(schema.properties.provider_order.oneOf).toEqual([
+          { type: "array", items: { type: "string" }, maxItems: 8 },
+          { const: "auto" },
+        ]);
         expect(schema.properties.workspaces.additionalProperties).toEqual({ $ref: "#/$defs/workspace" });
         expect(schema.properties.additional_directories).toBeUndefined();
         expect(schema.$defs.workspace.properties.additional_directories.type).toBe("array");
@@ -941,6 +941,7 @@ describe("cli: status", () => {
         expect(project.code).toBe(0);
         const projectSchema = JSON.parse(project.stdout);
         expect(projectSchema.$id).toBeUndefined();
+        expect(projectSchema.properties.provider_order.oneOf).toEqual(schema.properties.provider_order.oneOf);
         expect(Object.keys(projectSchema.properties)).toEqual([
           "$schema",
           "context",
@@ -954,6 +955,50 @@ describe("cli: status", () => {
         expect(misplaced.code).toBe(2);
         expect(misplaced.stdout).toBe("");
         expect(misplaced.stderr).toContain("usage: lia config [list|get <key>|set <key> <value>|unset <key>|schema [--project]]");
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "provider_order auto is a settings.json string, mixing auto with slugs is rejected",
+    async () => {
+      const home = realpathSync(mkdtempSync(join(tmpdir(), "lia-e2e-provider-order-auto-")));
+      try {
+        mkdirSync(join(home, ".lia"), { recursive: true });
+        const settingsPath = join(home, ".lia", "settings.json");
+        const env = { ...NO_GATEWAY_AUTH, ...NO_SETTING_ENV, HOME: home, LIA_DISABLE_KEYCHAIN: "1" };
+
+        writeFileSync(settingsPath, '{"provider_order":"auto"}\n', { mode: 0o600 });
+        const list = await runLia(["config", "list", "--show-origin"], { env });
+        expect(list.code).toBe(0);
+        expect(list.stdout).toContain("file:~/.lia/settings.json\tprovider_order=auto\n");
+
+        // lia config never writes provider_order, auto included.
+        const set = await runLia(["config", "set", "provider_order", "auto"], { env });
+        expect([set.code, set.stdout]).toEqual([2, ""]);
+        expect(set.stderr).toBe(
+          "lia config: can't change provider_order with lia config; use --provider-order for one run, or edit ~/.lia/settings.json\n",
+        );
+        expect(readFileSync(settingsPath, "utf8")).toBe('{"provider_order":"auto"}\n');
+
+        // Any other bare string, and auto inside a list, make the file malformed.
+        for (const bad of ['"azure"', '["auto","azure"]']) {
+          writeFileSync(settingsPath, `{"provider_order":${bad}}\n`, { mode: 0o600 });
+          const get = await runLia(["config", "get", "provider_order"], { env });
+          expect([get.code, get.stdout, get.stderr]).toEqual([1, "", "lia: config user: malformed_settings\n"]);
+        }
+
+        // --provider-order takes auto alone; the mixed form fails in flag parsing.
+        const mixed = await runLia(["ask", "--provider-order", "auto,azure", "hi"], { env });
+        expect([mixed.code, mixed.stdout]).toEqual([2, ""]);
+        expect(mixed.stderr).toStartWith("lia ask: invalid value for --provider-order: auto,azure\nusage: lia ask");
+        writeFileSync(settingsPath, "{}\n", { mode: 0o600 });
+        const alone = await runLia(["ask", "--provider-order", "auto", "hi"], { env });
+        expect(alone.stderr).not.toContain("invalid value for --provider-order");
+        expect(alone.stderr).toContain("lia needs access to Vercel AI Gateway");
       } finally {
         rmSync(home, { recursive: true, force: true });
       }
@@ -2478,6 +2523,90 @@ describe("cli: logout", () => {
   );
 
   test(
+    "lia logout deletes ChatGPT and Grok sign-in tokens left by an older install",
+    async () => {
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-legacy-"));
+      try {
+        const root = join(realpathSync(home), ".lia");
+        mkdirSync(root, { recursive: true });
+        for (const name of ["chatgpt-auth.json", "chatgpt-auth.lock", "grok-auth.json", "grok-auth.lock"]) {
+          writeFileSync(join(root, name), "{}");
+        }
+        const env = { HOME: realpathSync(home), LIA_DISABLE_KEYCHAIN: "1" };
+        const logout = await runLia(["logout"], { env });
+
+        expect(logout.code).toBe(0);
+        expect(logout.stdout).toBe("Removed saved ChatGPT and Grok sign-in tokens left by an older install.\n");
+        expect(logout.stderr).toBe("");
+        for (const name of ["chatgpt-auth.json", "chatgpt-auth.lock", "grok-auth.json", "grok-auth.lock"]) {
+          expect(existsSync(join(root, name))).toBe(false);
+        }
+        const again = await runLia(["logout"], { env });
+        expect(again.stdout).toBe("No lia login session found.\n");
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "lia logout fails when leftover ChatGPT and Grok sign-in tokens cannot be deleted",
+    async () => {
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-legacy-failure-"));
+      const root = join(realpathSync(home), ".lia");
+      try {
+        mkdirSync(root, { recursive: true });
+        // A directory in a token's place cannot be deleted as a file.
+        mkdirSync(join(root, "chatgpt-auth.json", "inner"), { recursive: true });
+        writeFileSync(join(root, "grok-auth.json"), "{}");
+        const env = { HOME: realpathSync(home), LIA_DISABLE_KEYCHAIN: "1" };
+        const logout = await runLia(["logout"], { env });
+
+        expect(logout.code).toBe(1);
+        // The token that could be deleted is still reported.
+        expect(logout.stdout).toBe("Removed saved ChatGPT and Grok sign-in tokens left by an older install.\n");
+        expect(logout.stderr).toBe("lia logout: failed to remove leftover ChatGPT and Grok sign-in tokens\n");
+        expect(existsSync(join(root, "chatgpt-auth.json"))).toBe(true);
+        expect(existsSync(join(root, "grok-auth.json"))).toBe(false);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "lia logout removes leftover ChatGPT and Grok tokens alongside a saved lia login",
+    async () => {
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-legacy-with-login-"));
+      const issuer = startLogoutIssuer([200, 200]);
+      const root = join(realpathSync(home), ".lia");
+      try {
+        writeSeededLiaAuth(home, undefined, issuer.issuerUrl);
+        const legacy = ["chatgpt-auth.json", "chatgpt-auth.lock", "grok-auth.json", "grok-auth.lock"];
+        for (const name of legacy) writeFileSync(join(root, name), "{}");
+
+        const logout = await runLia(["logout"], {
+          env: { ...NO_GATEWAY_AUTH, HOME: realpathSync(home), LIA_DISABLE_KEYCHAIN: "1" },
+        });
+
+        expect(logout.code).toBe(0);
+        expect(logout.stdout).toBe(
+          "Signed out of lia.\nRemoved saved ChatGPT and Grok sign-in tokens left by an older install.\n",
+        );
+        expect(logout.stderr).toBe("");
+        expect(existsSync(join(root, "auth.json"))).toBe(false);
+        for (const name of legacy) expect(existsSync(join(root, name))).toBe(false);
+      } finally {
+        issuer.stop();
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "lia logout leaves an active API key unchanged when no login exists",
     async () => {
       const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-no-login-"));
@@ -2776,7 +2905,6 @@ describe("cli: Keychain authentication", () => {
               LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_MODEL: FAKE_GATEWAY_MODEL,
-              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: TIMEOUT,
           },
@@ -2881,7 +3009,6 @@ describe("cli: missing durable home", () => {
         const baseEnv = {
           HOME: home,
           VERCEL_OIDC_TOKEN: undefined,
-          LIA_AUTO_UPGRADE: "0",
           LIA_DISABLE_KEYCHAIN: "1",
         };
 
@@ -3587,6 +3714,7 @@ describe("cli: sessions", () => {
           kind: string;
           code: number;
           expectedError?: string;
+          stderrIncludes?: string;
         }> = [
           { args: ["session", "last", "--json"], kind: "session", code: 1 },
           {
@@ -3607,6 +3735,13 @@ describe("cli: sessions", () => {
             code: 2,
             expectedError: "InvalidAskArgs",
           },
+          {
+            args: ["ask", "--json", "--resume-id", "abc", "hello"],
+            kind: "ask",
+            code: 2,
+            expectedError: "InvalidAskArgs",
+            stderrIncludes: "--resume-id was removed; use --resume <id>",
+          },
         ];
 
         for (const item of cases) {
@@ -3621,6 +3756,7 @@ describe("cli: sessions", () => {
           expect(parsed.kind ?? item.kind).toBe(item.kind);
           expect(typeof parsed.error).toBe("string");
           if (item.expectedError) expect(parsed.error).toBe(item.expectedError);
+          if (item.stderrIncludes) expect(result.stderr).toContain(item.stderrIncludes);
           // The JSON field reports the status the process exits with.
           if (item.kind === "ask") expect(parsed.exit_code).toBe(item.code);
         }
@@ -3639,12 +3775,11 @@ describe("cli: removed task and background commands", () => {
       for (const command of ["task", "tasks"]) {
         const result = await runLia([command], { env: NO_GATEWAY_AUTH });
         expect(result.code).toBe(2);
-        expect(result.stderr).toContain(`lia: unknown command ${command} (did you mean ask?)`);
+        expect(result.stderr).toContain(`lia: unknown command: ${command} (did you mean ask?)`);
       }
-      // A word that isn't close to a command is a first prompt for a session.
       const background = await runLia(["background"], { env: NO_GATEWAY_AUTH });
-      expect(background.code).toBe(1);
-      expect(background.stderr).toContain("lia: this build has no interactive terminal UI; use lia ask or lia acp");
+      expect(background.code).toBe(2);
+      expect(background.stderr).toBe("lia: unknown command: background\n");
     },
     TIMEOUT,
   );
@@ -3689,7 +3824,6 @@ function modelsGatewayEnv(home: string, modelsUrl: string) {
     VERCEL_OIDC_TOKEN: undefined,
     HOME: home,
     LIA_DISABLE_KEYCHAIN: "1",
-    LIA_AUTO_UPGRADE: "0",
     LIA_TEST_GATEWAY_MODELS_URL: modelsUrl,
   };
 }
@@ -4204,7 +4338,6 @@ describe("cli: models", () => {
               ...scenario.authEnv,
               HOME: realpathSync(home),
               LIA_DISABLE_KEYCHAIN: "1",
-              LIA_AUTO_UPGRADE: "0",
               LIA_GATEWAY_BASE_URL: `http://127.0.0.1:${server.port}`,
               LIA_TEST_GATEWAY_MODELS_URL: undefined,
               LIA_TRACE_LOG: tracePath,
@@ -4482,14 +4615,16 @@ describe("cli: session", () => {
 
 describe("cli: interactive startup", () => {
   test(
-    "lia explains a first argument it can't take as a command or a prompt",
+    "lia explains a first argument it can't take as a command",
     async () => {
       const cases: Array<[string[], string]> = [
-        [["fix", "the", "login", "bug"], 'lia: put the prompt in quotes: lia "fix the login bug"\n'],
-        [["stauts"], "lia: unknown command stauts (did you mean status?)\n"],
+        [["fix", "the", "login", "bug"], "lia: unknown command: fix\n"],
+        [["fix the login bug"], "lia: unknown command: fix the login bug\n"],
+        [["stauts"], "lia: unknown command: stauts (did you mean status?)\n"],
+        [["upgrade"], "lia: upgrade was removed; lia no longer updates itself\n"],
         [["-p", "fix the bug"], 'lia: -p isn\'t a lia flag; to run one request and exit, use lia ask "fix the bug"\n'],
         [["--print"], 'lia: --print isn\'t a lia flag; to run one request and exit, use lia ask "<prompt>"\n'],
-        [[""], "lia: the prompt is empty\n"],
+        [[""], "lia: unknown command: \n"],
       ];
       for (const [args, stderr] of cases) {
         const r = await runLia(args, { env: NO_GATEWAY_AUTH });
@@ -4497,7 +4632,7 @@ describe("cli: interactive startup", () => {
         expect(r.stdout).toBe("");
         expect(r.stderr).toBe(stderr);
       }
-      for (const args of [["--modle", "x"], ["fix it", "--modle=x"]]) {
+      for (const args of [["--modle", "x"], ["--model", "a", "--modle=x"]]) {
         const r = await runLia(args, { env: NO_GATEWAY_AUTH });
         expect(r.code, args.join(" ")).toBe(2);
         expect(r.stderr.split("\n")[0]).toBe("lia: unknown flag --modle (did you mean --model?)");
@@ -4507,21 +4642,17 @@ describe("cli: interactive startup", () => {
   );
 
   test(
-    "interactive startup without TTY exits one",
+    "bare lia prints the help and exits zero",
     async () => {
-      const cases = [
-        [],
-        ["fix the login bug"],
-        ["fix the login bug", "--model", "x"],
-      ];
-
-      for (const args of cases) {
-        const home = realpathSync(mkdtempSync(join(tmpdir(), "lia-e2e-no-tty-")));
+      for (const args of [[], ["--model", "x"]]) {
+        const home = realpathSync(mkdtempSync(join(tmpdir(), "lia-e2e-bare-")));
         try {
           const r = await runLia(args, { env: { HOME: home } });
-          expect(r.code).toBe(1);
-          expect(r.stdout).toBe("");
-          expect(r.stderr).toBe("lia: this build has no interactive terminal UI; use lia ask or lia acp\n");
+          expect(r.code).toBe(0);
+          expect(r.stdout).toContain("Fast, native coding agent for the terminal.");
+          expect(r.stdout).toContain("Usage:\n");
+          expect(r.stdout).toContain("lia ask");
+          expect(r.stderr).toBe("");
           expect(readdirSync(home)).toEqual([]);
         } finally {
           rmSync(home, { recursive: true, force: true });
@@ -4641,7 +4772,6 @@ describe("cli: ask success", () => {
               LIA_GATEWAY_BASE_URL: gateway.baseUrl,
               LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_MODEL: FAKE_GATEWAY_MODEL,
-              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: TIMEOUT,
           },
@@ -4707,7 +4837,6 @@ describe("cli: ask success", () => {
                 LIA_GATEWAY_BASE_URL: gateway.baseUrl,
                 LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
                 LIA_MODEL: FAKE_GATEWAY_MODEL,
-                LIA_AUTO_UPGRADE: "0",
               },
               stdin: prompt,
               timeoutMs: 60_000,
@@ -4978,7 +5107,6 @@ describe("cli: ask success", () => {
               LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
               LIA_MODEL: FAKE_GATEWAY_MODEL,
-              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: 60_000,
           },
@@ -5045,7 +5173,6 @@ describe("cli: ask success", () => {
               LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_MODEL: FAKE_GATEWAY_MODEL,
-              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: 60_000,
           },
@@ -5086,7 +5213,6 @@ describe("cli: ask success", () => {
               LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_MODEL: FAKE_GATEWAY_MODEL,
-              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: 60_000,
           },
@@ -5125,7 +5251,6 @@ describe("cli: ask success", () => {
               LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_MODEL: FAKE_GATEWAY_MODEL,
-              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: 60_000,
           },
@@ -5205,7 +5330,6 @@ describe("cli: ask success", () => {
           LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
           LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
           LIA_MODEL: FAKE_GATEWAY_MODEL,
-          LIA_AUTO_UPGRADE: "0",
         };
 
         const first = await runLia(
@@ -5292,7 +5416,6 @@ describe("cli: ask success", () => {
           LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
           LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
           LIA_MODEL: FAKE_GATEWAY_MODEL,
-          LIA_AUTO_UPGRADE: "0",
         };
 
         const unrelated = await runLia(
@@ -5479,7 +5602,6 @@ describe("cli: error handling", () => {
           LIA_GATEWAY_BASE_URL: gateway.baseUrl,
           LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
           LIA_MODEL: FAKE_GATEWAY_MODEL,
-          LIA_AUTO_UPGRADE: "0",
         };
 
         const rejected = await runLia(["ask", "--definitely-unknown"], {
@@ -5535,10 +5657,9 @@ describe("cli: error handling", () => {
   test(
     "lia with a mistyped command exits 2",
     async () => {
-      // A word that isn't close to a command is a first prompt instead.
       const r = await runLia(["statsu"]);
       expect(r.code).toBe(2);
-      expect(r.stderr).toBe("lia: unknown command statsu (did you mean status?)\n");
+      expect(r.stderr).toBe("lia: unknown command: statsu (did you mean status?)\n");
     },
     TIMEOUT,
   );
@@ -5560,7 +5681,6 @@ describe("cli: error handling", () => {
           LIA_GATEWAY_BASE_URL: gateway.baseUrl,
           LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
           LIA_MODEL: FAKE_GATEWAY_MODEL,
-          LIA_AUTO_UPGRADE: "0",
         };
 
         for (const args of [
@@ -5613,13 +5733,15 @@ describe("cli: workspace access", () => {
       expect(missing.stderr).not.toContain("InvalidFlag");
 
       // A repeated flag is not an error: the launch gets past parsing and
-      // stops only because this run has no terminal.
+      // prints the help.
       const duplicate = await runLia(
         ["--no-additional-dirs", "--no-additional-dirs"],
         { env: enabled },
       );
-      expect(duplicate.code).toBe(1);
-      expect(duplicate.stderr).toBe("lia: this build has no interactive terminal UI; use lia ask or lia acp\n");
+      expect(duplicate.code).toBe(0);
+      expect(duplicate.stdout).toContain("Fast, native coding agent for the terminal.");
+      expect(duplicate.stdout).toContain("lia ask");
+      expect(duplicate.stderr).toBe("");
 
       const badMode = await runLia(["--permission-mode", "never"], { env: enabled });
       expect(badMode.code).toBe(2);
@@ -6085,7 +6207,6 @@ describe("cli: MCP profile", () => {
           AI_GATEWAY_API_KEY: "mcp-unreadable-key",
           VERCEL_OIDC_TOKEN: undefined,
           LIA_DISABLE_KEYCHAIN: "1",
-          LIA_AUTO_UPGRADE: "0",
           LIA_MODEL: FAKE_GATEWAY_MODEL,
           LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
         };

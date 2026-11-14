@@ -6,13 +6,11 @@
 const std = @import("std");
 const model_provider = @import("../config/model_provider.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
-const host_target = @import("../hosts/target.zig");
 const image_attachments = @import("../images/image_attachments.zig");
 const io_mod = @import("../shared/io.zig");
 const list_window = @import("../shared/list_window.zig");
 const session_catalog = @import("../session/session_catalog.zig");
 const session_codec = @import("../session/session_codec.zig");
-const js_host_session_store = @import("../session/js_host_session_store.zig");
 const session_title_generation = @import("../session/session_title_generation.zig");
 const session_adapter = @import("../session/session_adapter.zig");
 const session_store = @import("../session/session_store.zig");
@@ -705,75 +703,6 @@ pub fn resumePageLimitForRows(rows: u16) usize {
     return @max(@as(usize, rows -| 7), session_store.default_resume_page_limit);
 }
 
-pub const JsHostSessionStore = struct {
-    ctx: ?*anyopaque = null,
-    load_fn: *const fn (?*anyopaque, Allocator, []const u8) anyerror!?js_host_session_store.Loaded = if (host_target.is_wasm) loadDefault else loadUnavailable,
-    commit_fn: *const fn (?*anyopaque, Allocator, session_codec.DurableSessionState, ?[]const u8) anyerror![]u8 = if (host_target.is_wasm) commitDefault else commitUnavailable,
-    list_fn: *const fn (?*anyopaque, Allocator) anyerror![]js_host_session_store.Metadata = if (host_target.is_wasm) listDefault else listUnavailable,
-
-    pub fn load(self: JsHostSessionStore, alloc: Allocator, id: []const u8) !?js_host_session_store.Loaded {
-        return self.load_fn(self.ctx, alloc, id);
-    }
-
-    pub fn commit(
-        self: JsHostSessionStore,
-        alloc: Allocator,
-        state: session_codec.DurableSessionState,
-        expected_revision: ?[]const u8,
-    ) ![]u8 {
-        return self.commit_fn(self.ctx, alloc, state, expected_revision);
-    }
-
-    pub fn list(self: JsHostSessionStore, alloc: Allocator) ![]js_host_session_store.Metadata {
-        return self.list_fn(self.ctx, alloc);
-    }
-
-    fn loadDefault(_: ?*anyopaque, alloc: Allocator, id: []const u8) !?js_host_session_store.Loaded {
-        return js_host_session_store.load(alloc, id);
-    }
-
-    fn commitDefault(
-        _: ?*anyopaque,
-        alloc: Allocator,
-        state: session_codec.DurableSessionState,
-        expected_revision: ?[]const u8,
-    ) ![]u8 {
-        return js_host_session_store.commit(alloc, state, expected_revision);
-    }
-
-    fn listDefault(_: ?*anyopaque, alloc: Allocator) ![]js_host_session_store.Metadata {
-        return js_host_session_store.list(alloc);
-    }
-
-    fn loadUnavailable(_: ?*anyopaque, _: Allocator, _: []const u8) !?js_host_session_store.Loaded {
-        return error.SessionStoreUnavailable;
-    }
-
-    fn commitUnavailable(
-        _: ?*anyopaque,
-        _: Allocator,
-        _: session_codec.DurableSessionState,
-        _: ?[]const u8,
-    ) ![]u8 {
-        return error.SessionStoreUnavailable;
-    }
-
-    fn listUnavailable(_: ?*anyopaque, _: Allocator) ![]js_host_session_store.Metadata {
-        return error.SessionStoreUnavailable;
-    }
-};
-
-const JsHostSessionOwner = struct {
-    state: session_codec.DurableSessionState,
-    revision: ?[]u8,
-
-    pub fn deinit(self: *JsHostSessionOwner, alloc: Allocator) void {
-        self.state.deinit(alloc);
-        if (self.revision) |revision| alloc.free(revision);
-        self.* = undefined;
-    }
-};
-
 pub const PendingCancelledCommand = struct {
     lifecycle_id: types.ToolLifecycleId,
     command_artifact_handle: ?[]u8 = null,
@@ -837,8 +766,6 @@ pub const Persistence = struct {
     /// session closes; the new session starts with it.
     next_session_preferences: ?session_codec.DurableSessionPreferences = null,
     fast_mode_model_bound: bool = false,
-    js_host_store: JsHostSessionStore = .{},
-    js_host_session: ?JsHostSessionOwner = null,
     process_provider_override: ?model_provider.ProviderId = null,
     process_model_override: ?[]u8 = null,
     process_effort_override: ?types.ReasoningEffort = null,
@@ -874,7 +801,7 @@ pub const Persistence = struct {
     /// in a static release-binary template.
     pub fn initInto(storage: *Persistence) void {
         comptime {
-            if (@typeInfo(Persistence).@"struct".field_names.len != 31) {
+            if (@typeInfo(Persistence).@"struct".field_names.len != 29) {
                 @compileError("update Persistence.initInto for the changed field set");
             }
         }
@@ -886,8 +813,6 @@ pub const Persistence = struct {
         storage.session_preferences = null;
         storage.next_session_preferences = null;
         storage.fast_mode_model_bound = false;
-        storage.js_host_store = .{};
-        storage.js_host_session = null;
         storage.process_provider_override = null;
         storage.process_model_override = null;
         storage.process_effort_override = null;
@@ -947,7 +872,6 @@ pub const Persistence = struct {
         if (self.workspace_preferences) |*preferences| preferences.deinit(alloc);
         if (self.session_preferences) |*preferences| preferences.deinit(alloc);
         if (self.next_session_preferences) |*preferences| preferences.deinit(alloc);
-        if (self.js_host_session) |*owner| owner.deinit(alloc);
         if (self.process_model_override) |model| alloc.free(model);
         self.session_picker.deinit(alloc);
         self.session_picker_load.deinit();

@@ -21,7 +21,7 @@ export type SavedSession = {
 export async function savedSession(home: string, id: string): Promise<SavedSession> {
   const result = await runLia(["session", "--id", id, "--json"], {
     cwd: home,
-    env: { HOME: home, LIA_SOUND: "0", LIA_AUTO_UPGRADE: "0" },
+    env: { HOME: home, LIA_SOUND: "0" },
   });
   if (result.code !== 0) throw new Error(`lia session --id ${id} exited ${result.code}: ${result.stderr}`);
   return JSON.parse(result.stdout);

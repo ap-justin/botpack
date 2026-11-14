@@ -4,6 +4,7 @@ const stream_provider = @import("../core/agent/stream_provider.zig");
 const image_attachments = @import("../core/images/image_attachments.zig");
 const io_mod = @import("../core/shared/io.zig");
 const model_capabilities = @import("../core/config/model_capabilities.zig");
+const settings_store = @import("../core/config/settings_store.zig");
 const tool_result_errors = @import("../core/tooling/tool_result_errors.zig");
 const types = @import("../core/shared/types.zig");
 const tool_call_ids = @import("tool_call_ids.zig");
@@ -490,7 +491,8 @@ fn validatePendingToolReviewMessages(
 }
 
 pub fn writeProviderOptions(writer: *std.Io.Writer, options: model_capabilities.ResolvedProviderOptions) !void {
-    const routing = options.provider_order.len > 0;
+    // `auto` is the user's opt-out of routing; the gateway picks the provider.
+    const routing = options.provider_order.len > 0 and !settings_store.isAutoProviderOrder(options.provider_order);
     if (options.ultrafast and options.provider_strict and routing) {
         var allows_openai = false;
         for (options.provider_order) |provider| {
@@ -1877,6 +1879,21 @@ test "buildGatewayRequestBodyWithOptions serializes provider routing options" {
     }, .auto);
     defer alloc.free(strict);
     try std.testing.expect(std.mem.find(u8, strict, "\"gateway\":{\"speed\":\"fast\",\"only\":[\"azure\",\"anthropic\"]}") != null);
+}
+
+test "the auto provider order sends no routing and keeps the other gateway options" {
+    const alloc = std.testing.allocator;
+    const messages = [_]ChatMessage{
+        .{ .role = .user, .content = "question" },
+    };
+    const body = try buildGatewayRequestBodyWithOptions(alloc, "[]", &messages, .{
+        .prompt_caching = true,
+        .provider_order = &.{"auto"},
+    }, .auto);
+    defer alloc.free(body);
+    try std.testing.expect(std.mem.find(u8, body, "\"gateway\":{\"caching\":\"auto\"}") != null);
+    try std.testing.expect(std.mem.find(u8, body, "\"order\"") == null);
+    try std.testing.expect(std.mem.find(u8, body, "\"only\"") == null);
 }
 
 test "formatGatewayRequestShapeSummary reports content kinds without request content" {

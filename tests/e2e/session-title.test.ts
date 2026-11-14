@@ -43,7 +43,6 @@ function baseEnv(root: FixtureRoot, gateway: { baseUrl: string; chatUrl: string 
     AI_GATEWAY_API_KEY: "synthetic-title",
     LIA_DISABLE_KEYCHAIN: "1",
     LIA_E2E_DISABLE_DOTENV: "1",
-    LIA_AUTO_UPGRADE: "0",
     LIA_SOUND: "0",
     LIA_TEST_SKIP_ONBOARDING: "1",
     LIA_MODEL: MAIN_MODEL,

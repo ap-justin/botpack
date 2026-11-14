@@ -33,7 +33,7 @@ for (const userHeavy of [false, true]) test(`automatic compaction ${userHeavy ? 
   const env = {
     PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: home, TMPDIR: root,
     AI_GATEWAY_API_KEY: "synthetic-compaction-policy", LIA_DISABLE_KEYCHAIN: "1", LIA_E2E_DISABLE_DOTENV: "1",
-    LIA_AUTO_UPGRADE: "0", LIA_SOUND: "0", LIA_MODEL: model,
+    LIA_SOUND: "0", LIA_MODEL: model,
     LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
     LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
   };

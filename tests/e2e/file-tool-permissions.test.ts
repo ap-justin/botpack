@@ -71,7 +71,6 @@ async function runWithFakeGateway(
         LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
         LIA_TEST_GATEWAY_CREDITS_URL: undefined,
         LIA_MODEL: FAKE_GATEWAY_MODEL,
-        LIA_AUTO_UPGRADE: "0",
       },
       timeoutMs: TIMEOUT,
     });

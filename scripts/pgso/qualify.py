@@ -845,7 +845,6 @@ def _measurement_environment(home: pathlib.Path) -> dict[str, str]:
     environment = hermetic_environment(home)
     environment.update(
         {
-            "LIA_AUTO_UPGRADE": "0",
             "LIA_DISABLE_KEYCHAIN": "1",
             "LIA_TEST_SKIP_ONBOARDING": "1",
             "LIA_SOUND": "0",

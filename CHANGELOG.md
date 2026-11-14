@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- Plain `lia` prints the help and exits 0. An unknown command answers `lia: unknown command: <word>` and exits 2, with a suggestion when one is close. `lia upgrade` says it was removed.
+- `lia logout` also deletes ChatGPT and Grok sign-in tokens (`chatgpt-auth.json` and `grok-auth.json` in the profile folder) that an older install left behind.
+- `lia ask --json --resume-id <id>` writes `--resume-id was removed; use --resume <id>` to stderr, as it does without `--json`, instead of failing with only `InvalidAskArgs` in the JSON.
+- `provider_order: "auto"` in settings (also `["auto"]`, `--provider-order auto` and `LIA_PROVIDER_ORDER=auto`) sends no provider order, so Anthropic models no longer go to Anthropic first and the gateway picks the provider. `auto` can't be mixed with other providers.
+- Removed the `libfx/*` ACP requests (`libfx/checkpoint`, `libfx/restore`, `libfx/new`, `libfx/steer`, `libfx/withdraw`, `libfx/handoff`, `libfx/follow_up`, `libfx/snapshot`, `libfx/journal_open` and `libfx/journal_images`), the `libfx` capability in `initialize`, and the prompt fields only they used. A client that sends one gets "Method not found". `_meta.lia.steer` steering and `libfx/hook` notifications are unchanged.
+
 ## lia 0.1.1
 
 ### Fixes

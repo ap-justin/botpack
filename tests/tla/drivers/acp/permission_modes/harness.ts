@@ -241,7 +241,6 @@ export class Fixture {
       AI_GATEWAY_API_KEY: "acp-modes-fake-key",
       LIA_DISABLE_KEYCHAIN: "1",
       LIA_TEST_SKIP_ONBOARDING: "1",
-      LIA_AUTO_UPGRADE: "0",
       LIA_SOUND: "0",
       LIA_GATEWAY_BASE_URL: this.gateway.baseUrl,
       LIA_GATEWAY_CHAT_URL: this.gateway.chatUrl,

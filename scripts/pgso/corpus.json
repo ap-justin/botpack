@@ -9,7 +9,6 @@
   "defaults": {
     "cwd": "tests/e2e",
     "env_set": {
-      "LIA_AUTO_UPGRADE": "0",
       "LIA_SOUND": "0"
     },
     "env_unset": [
