@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LIA_BIN, runLia } from "../evals/eval-helpers";
+import { expectModelFirst } from "./config-options";
 import {
   acpSpawnEnv,
   fakeGatewayFinalText,
@@ -1015,6 +1016,51 @@ function speedOptions(result: { configOptions?: Array<{ id: string; currentValue
 }
 
 describe("ACP speed options", () => {
+  test(
+    "keeps the model picker first and gives Fast and Ultrafast their own categories",
+    async () => {
+      const root = createIsolatedRoot();
+      const gateway = startFakeGateway([fakeGatewayFinalText("saved")], { models: speedCatalog() });
+      const env = fakeGatewayEnv(root, gateway);
+      const client = AcpClient.create(root.workspace, env);
+      try {
+        await client.request("initialize", { protocolVersion: 1 }, 1);
+        const created = await client.request("session/new", { mcpServers: [] }, 2);
+        const sessionId = created.result.sessionId as string;
+        const present = ["provider", "fast", "ultrafast"];
+        expectModelFirst(created.result.configOptions, { present });
+
+        const fast = await client.request("session/set_config_option", { sessionId, configId: "fast", value: "true" }, 3);
+        expectModelFirst(fast.result.configOptions, { present });
+        const ultra = await client.request("session/set_config_option", { sessionId, configId: "ultrafast", value: "true" }, 4);
+        expectModelFirst(ultra.result.configOptions, { present });
+        const saved = await client.prompt(sessionId, "Save this speed session.", 5);
+        expect(JSON.stringify(saved)).toContain("saved");
+        await client.close();
+
+        for (const method of ["session/load", "session/resume"]) {
+          const restoredClient = AcpClient.create(root.workspace, env);
+          try {
+            expect((await restoredClient.request("initialize", { protocolVersion: 1 }, 1)).error).toBeUndefined();
+            const restored = await restoredClient.request(method, { sessionId, mcpServers: [] }, 2);
+            expect(restored.error, `${method}: ${JSON.stringify(restored)}`).toBeUndefined();
+            expectModelFirst(restored.result.configOptions, { present });
+          } finally {
+            await restoredClient.close();
+          }
+        }
+      } finally {
+        try {
+          await client.close();
+        } finally {
+          gateway.stop();
+          rmSync(root.root, { recursive: true, force: true });
+        }
+      }
+    },
+    TIMEOUT,
+  );
+
   test(
     "lists Fast and Ultrafast only for models that offer them and keeps them exclusive",
     async () => {
