@@ -506,7 +506,6 @@ function baseEnv(root: ReturnType<typeof createRoot>) {
     PATH: `${root.bin}${delimiter}${process.env.PATH ?? ""}`,
     AI_GATEWAY_API_KEY: "fake-mcp-auth-key",
     VERCEL_OIDC_TOKEN: undefined,
-    LIA_AUTO_UPGRADE: "0",
     LIA_PERMISSION_MODE: "auto",
     LIA_MODEL: MODEL,
     LIA_TRACE_LOG: root.trace,

@@ -94,7 +94,6 @@ describe.skipIf(!HAS_API_KEY)(`eval: length-cut resend (${EVAL_MODEL})`, () => {
             HOME: home,
             LIA_SOUND: "0",
             LIA_MODEL: EVAL_MODEL,
-            LIA_AUTO_UPGRADE: "0",
             LIA_SKIP_ONBOARDING: "1",
             LIA_GATEWAY_CHAT_URL: `${proxy.url}/v4/ai/language-model`,
             LIA_GATEWAY_BASE_URL: proxy.url,

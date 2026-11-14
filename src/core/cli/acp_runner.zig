@@ -4,7 +4,6 @@ const process_provider = @import("../execution/process_provider.zig");
 const gateway_provider = @import("../gateway/gateway_provider.zig");
 const provider_set = @import("../gateway/provider_set.zig");
 const host = @import("../hosts/host.zig");
-const host_attachments = @import("../hosts/host_attachments.zig");
 const credentials = @import("../auth/credentials.zig");
 const model_provider = @import("../config/model_provider.zig");
 const mode_registry = @import("../modes/mode_registry.zig");
@@ -59,9 +58,6 @@ pub const Config = struct {
     /// credential; the host adds one at its fetch edge. Gateway keeps
     /// `auth_mode`.
     provider_auth_mode: credentials.AuthMode = .local,
-    /// For `minimal_kernel` runs: a settings-style providers object whose
-    /// providers the run may use. Borrowed for the server's lifetime.
-    configured_providers_json: ?[]const u8 = null,
     credential_override: ?[]const u8 = null,
     home_override: ?[]const u8 = null,
     workspace_root_override: ?[]const u8 = null,
@@ -71,10 +67,6 @@ pub const Config = struct {
     saved_directories_suppressed: bool = false,
     allow_acp_mcp: bool = true,
     allow_native_tools: bool = true,
-    minimal_kernel: bool = false,
-    /// Raw prompt image and checkpoint bytes from a libfx host. Null for
-    /// hosts that only speak standard ACP, such as `lia acp`.
-    host_attachments: ?host_attachments.Store = null,
 };
 
 pub const RunFn = *const fn (?*anyopaque, Allocator, Config) anyerror!void;

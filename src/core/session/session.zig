@@ -3,7 +3,6 @@ const agent_frame = @import("../shared/agent_frame.zig");
 const testing_allocator = @import("../shared/testing_allocator.zig");
 const kernel_agent = @import("../agent/runtime/agent.zig");
 const cache_warmer = @import("../agent/runtime/cache_warmer.zig");
-const host_target = @import("../hosts/target.zig");
 const core_types = @import("../shared/types.zig");
 const history_range = @import("../shared/history_range.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
@@ -1546,10 +1545,9 @@ pub const SessionRuntime = struct {
         debug_trace.logf("session", "stale shell handles note returned from dropped prompt turn_id={d}", .{turn_id});
     }
 
-    /// The conversation's cache warmer, created on first use. Null on
-    /// WebAssembly, which has no threads, or when it cannot be created.
+    /// The conversation's cache warmer, created on first use. Null when it
+    /// cannot be created.
     pub fn cacheWarmer(self: *SessionRuntime) ?*cache_warmer.Warmer {
-        if (comptime host_target.is_wasm) return null;
         if (self.cache_warmer == null) {
             self.cache_warmer = cache_warmer.Warmer.create() catch |err| {
                 debug_trace.logf("cache_warming", "event=unavailable err={s}", .{@errorName(err)});
@@ -1562,14 +1560,12 @@ pub const SessionRuntime = struct {
     /// Stops the warmer and its pings. The warmer is created again if the
     /// conversation is used after this.
     pub fn closeCacheWarmer(self: *SessionRuntime) void {
-        if (comptime host_target.is_wasm) return;
         const warmer = self.cache_warmer orelse return;
         self.cache_warmer = null;
         warmer.destroy();
     }
 
     fn disarmCacheWarming(self: *SessionRuntime, why: []const u8) void {
-        if (comptime host_target.is_wasm) return;
         if (self.cache_warmer) |warmer| warmer.disarm(why);
     }
 

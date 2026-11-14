@@ -2,6 +2,7 @@ const std = @import("std");
 const testing_allocator = @import("../core/shared/testing_allocator.zig");
 const stream_provider = @import("../core/agent/stream_provider.zig");
 const types = @import("../core/shared/types.zig");
+const settings_store = @import("../core/config/settings_store.zig");
 const model_tool_schema = @import("../core/tooling/model_tool_schema.zig");
 const tool_result_errors = @import("../core/tooling/tool_result_errors.zig");
 const image_attachments = @import("../core/images/image_attachments.zig");
@@ -170,7 +171,7 @@ fn validate_request(request: stream_provider.RequestData) Error!void {
     configured_provider.validate_model_id(request.model) catch return error.InvalidModel;
     const options = request.provider_options;
     if (options.reasoning != null or options.fast or options.prompt_caching) return error.UnsupportedProviderOption;
-    if (options.provider_order.len != 0) return error.UnsupportedProviderOption;
+    if (options.provider_order.len != 0 and !settings_store.isAutoProviderOrder(options.provider_order)) return error.UnsupportedProviderOption;
     if (request.response_format != null) return error.UnsupportedResponseFormat;
     // The vision tool runs through a separate provider request; inline image
     // content on user and tool-result messages serializes natively below.

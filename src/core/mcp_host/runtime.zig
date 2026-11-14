@@ -13,7 +13,6 @@ const observation = @import("../agent/runtime/observation.zig");
 const mcp = @import("../../mcp/mcp.zig");
 const mcp_contract = @import("../mcp/mcp_contract.zig");
 const io_mod = @import("../shared/io.zig");
-const host_target = @import("../hosts/target.zig");
 const debug_trace = @import("../shared/debug_trace.zig");
 const text_utils = @import("../shared/text_utils.zig");
 const url_opener = @import("../hosts/url_opener.zig");
@@ -46,7 +45,6 @@ const refresh_retry_ms: u32 = 20;
 /// servers than without. Hosts, their threads, and their memory are left to
 /// the exiting process, and a logout already waited for its revocation.
 pub fn signalServersForExit() void {
-    if (comptime host_target.is_wasm) return;
     mcp.stdio.signalAllForExit(io_mod.getIo());
 }
 

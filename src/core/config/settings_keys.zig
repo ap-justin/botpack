@@ -31,6 +31,8 @@ pub const Kind = enum {
     string_or_null,
     /// An array of strings.
     strings,
+    /// An array of strings, or the string `auto`.
+    strings_or_auto,
     /// An object whose values are strings, such as `models`.
     string_map,
     /// An object of switches, named by `children`.
@@ -127,7 +129,7 @@ pub const keys = [_]Key{
     .{ .name = "permission_mode", .where = .profile, .kind = .string, .values = &.{ "ask", "auto", "full-access", "yolo" }, .description = "How lia handles tool calls that need permission; yolo is an older name for full-access" },
     .{ .name = "prompt_history", .where = .profile, .kind = .switches, .children = &.{"enabled"}, .child_descriptions = &.{"Save prompts and slash commands for input history"}, .description = "Input history" },
     .{ .name = "provider", .where = .profile, .kind = .string, .description = "The service for model requests: gateway or a name under providers" },
-    .{ .name = "provider_order", .where = .project_safe, .kind = .strings, .max_items = 8, .description = "Preferred AI Gateway providers, in order; when unset, Anthropic models try Anthropic first" },
+    .{ .name = "provider_order", .where = .project_safe, .kind = .strings_or_auto, .max_items = 8, .description = "Preferred AI Gateway providers, in order; when unset, Anthropic models try Anthropic first; \"auto\" leaves routing to the gateway" },
     .{ .name = "provider_strict", .where = .project_safe, .kind = .boolean, .description = "Send AI Gateway requests only to the providers in provider_order" },
     .{ .name = "providers", .where = .profile, .kind = .object, .map = true, .top_level_only = true, .description = "Named custom model connections" },
     .{ .name = "review_model", .where = .profile, .kind = .string, .description = "The AI Gateway model that reviews actions in auto mode" },
@@ -346,7 +348,7 @@ test "every key says what it holds and what it does" {
         try std.testing.expect(!(key.workspace_only and key.top_level_only));
         if (key.values.len > 0) try std.testing.expectEqual(Kind.string, key.kind);
         if (key.minimum != null or key.maximum != null) try std.testing.expectEqual(Kind.integer, key.kind);
-        if (key.max_items != null) try std.testing.expectEqual(Kind.strings, key.kind);
+        if (key.max_items != null) try std.testing.expect(key.kind == .strings or key.kind == .strings_or_auto);
         if (key.superseded_by) |path| {
             const dot = std.mem.findScalar(u8, path, '.') orelse path.len;
             try std.testing.expect(find(path[0..dot]) != null);

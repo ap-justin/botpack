@@ -56,7 +56,6 @@ describe.skipIf(!HAS_API_KEY)("live web_search private backends", () => {
               cwd: root.workspace,
               env: {
                 HOME: root.home,
-                LIA_AUTO_UPGRADE: "0",
                 LIA_TRACE_LOG: traceLog,
                 LIA_TRACE_SCOPES: "agent,gateway,stream,web_search",
                 LIA_WEB_SEARCH_BACKEND: backend,

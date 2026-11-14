@@ -63,7 +63,6 @@ describe("eval helpers", () => {
       });
       const overrides: Record<string, string> = {
         AI_GATEWAY_API_KEY: "fake-key",
-        LIA_AUTO_UPGRADE: "0",
         LIA_SOUND: "0",
         LIA_GATEWAY_BASE_URL: `http://127.0.0.1:${gateway.port}`,
         LIA_GATEWAY_CHAT_URL: `http://127.0.0.1:${gateway.port}/v4/ai/language-model`,

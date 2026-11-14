@@ -1,7 +1,6 @@
 const std = @import("std");
 const testing_allocator = @import("../core/shared/testing_allocator.zig");
 const io_mod = @import("../core/shared/io.zig");
-const host_target = @import("../core/hosts/target.zig");
 const debug_trace = @import("../core/shared/debug_trace.zig");
 
 const Allocator = std.mem.Allocator;
@@ -383,15 +382,8 @@ pub const Reader = struct {
     }
 
     // Native ACP uses raw read(2) because Linux may pass socket-based stdin to
-    // child processes. WASI has no std.posix surface, so use the injected std.Io
-    // backend and let the host's fd_read import suspend through JSPI.
+    // child processes.
     fn readStdin(_: ?*anyopaque, destination: []u8) usize {
-        if (comptime host_target.is_wasm) {
-            return std.Io.File.stdin().readStreaming(
-                io_mod.getIo(),
-                &.{destination},
-            ) catch return 0;
-        }
         return std.posix.read(std.posix.STDIN_FILENO, destination) catch return 0;
     }
 
@@ -777,7 +769,7 @@ test "Writer keeps each frame on one line when caller JSON has line breaks" {
     var capture: Capture = .{};
     defer capture.bytes.deinit(alloc);
     var writer = Writer.initCallback(&capture, Capture.write);
-    try writer.writeRequest(alloc, .{ .integer = 1 }, "libfx/tool_call", "{\"name\":\"todo\",\"input\":" ++ input ++ "}");
+    try writer.writeRequest(alloc, .{ .integer = 1 }, "session/request_permission", "{\"name\":\"todo\",\"input\":" ++ input ++ "}");
     try writer.writeNotification(alloc, "session/update", input);
     try writer.writeResponse(alloc, .{ .integer = 2 }, input);
 

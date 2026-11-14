@@ -173,20 +173,6 @@ pub const Runtime = struct {
     }
 };
 
-/// Retains a provider tool's model and Gateway contracts without linking its
-/// unreachable local executor into minimal libfx builds.
-pub fn providerProjection(tool: tool_dispatch.Tool) tool_dispatch.Tool {
-    std.debug.assert(tool.provider_executed);
-    std.debug.assert(tool.write_provider_advertisement_fn != null);
-    var projected = tool;
-    projected.validate = null;
-    projected.decode = decode;
-    projected.call = call;
-    projected.reads_only_fn = readsOnly;
-    projected.irreversible_fn = irreversible;
-    return projected;
-}
-
 const RawInput = struct {
     json: []u8,
 };

@@ -1,13 +1,9 @@
-//! lia's side of the usage module: HTTP through the gateway client, or the
-//! JS host's `fetch` in WebAssembly, the clock, and which sign-in `/usage`
-//! reads with.
+//! lia's side of the usage module: HTTP through the gateway client, the
+//! clock, and which sign-in `/usage` reads with.
 
 const std = @import("std");
 const usage = @import("../../usage/usage.zig");
 const client = @import("../../gateway/client.zig");
-const js_host_stream_provider = @import("../../gateway/js_host_stream_provider.zig");
-const stream_provider = @import("../agent/stream_provider.zig");
-const host_target = @import("../hosts/target.zig");
 const auth_runtime = @import("../auth/auth_runtime.zig");
 const credentials = @import("../auth/credentials.zig");
 const oauth_session = @import("../auth/oauth_session.zig");
@@ -35,24 +31,6 @@ pub fn host(home: []const u8) usage.Host {
         .home = profile_paths.rootParent(home),
         .lia_dir_name = profile_paths.rootName(),
     };
-}
-
-/// `host` for the WebAssembly terminal, which runs each fetch inside its event
-/// loop: while a request waits on the JS host, it pulses `app` so the
-/// terminal keeps drawing and reading input. Quitting cancels the request.
-pub fn cooperativeHost(comptime App: type, app: *App, home: []const u8) usage.Host {
-    const Cooperative = struct {
-        fn fetch(ctx: ?*anyopaque, alloc: Allocator, request: usage.Request, cancel: *std.atomic.Value(bool)) usage.FetchError!usage.Response {
-            return send(alloc, request, cancel, .{ .ctx = ctx.?, .run = pulse });
-        }
-
-        fn pulse(ctx: *anyopaque) anyerror!void {
-            const owner: *App = @ptrCast(@alignCast(ctx));
-            try owner.cooperativeTransportPulse(owner.screenAgent());
-            if (owner.should_exit) return error.Cancelled;
-        }
-    };
-    return .{ .ctx = app, .fetch_fn = Cooperative.fetch, .now_fn = now, .io_fn = io, .home = home };
 }
 
 fn io(_: ?*anyopaque) std.Io {
@@ -134,16 +112,14 @@ fn fetch(
     request: usage.Request,
     cancel: *std.atomic.Value(bool),
 ) usage.FetchError!usage.Response {
-    return send(alloc, request, cancel, null);
+    return send(alloc, request, cancel);
 }
 
-/// One usage GET: through lia's HTTP client natively, and through the JS
-/// host's `fetch` in WebAssembly, pulsing `pulse` while it waits.
+/// One usage GET through lia's HTTP client.
 fn send(
     alloc: Allocator,
     request: usage.Request,
     cancel: *std.atomic.Value(bool),
-    pulse: ?stream_provider.CooperativePulse,
 ) usage.FetchError!usage.Response {
     const origin = switch (request.service) {
         .gateway => client.gatewayBaseUrl(),
@@ -152,11 +128,7 @@ fn send(
     const account: client.UsageAccount = .none;
     const url = try alloc.print("{s}{s}", .{ origin, request.path });
     defer alloc.free(url);
-    const sent = if (comptime host_target.is_wasm)
-        client.fetchUsageGetThroughHost(alloc, js_host_stream_provider.transport, request.bearer, request.team, account, url, cancel, pulse)
-    else
-        client.fetchUsageGet(alloc, request.bearer, request.team, account, url, cancel);
-    const result = sent catch |err| switch (err) {
+    const result = client.fetchUsageGet(alloc, request.bearer, request.team, account, url, cancel) catch |err| switch (err) {
         error.Cancelled => return error.Cancelled,
         error.OutOfMemory => return error.OutOfMemory,
         else => {

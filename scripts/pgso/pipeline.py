@@ -324,7 +324,6 @@ def _runtime_environment(paths: PipelinePaths) -> dict[str, str]:
     environment = hermetic_environment(paths.runtime_home)
     environment.update(
         {
-            "LIA_AUTO_UPGRADE": "0",
             "LIA_TEST_SKIP_ONBOARDING": "1",
             "LIA_SOUND": "0",
             "HOME": str(paths.runtime_home),

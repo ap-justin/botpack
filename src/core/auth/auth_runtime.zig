@@ -4,7 +4,6 @@ const api_key_validator = @import("api_key_validator.zig");
 const auth_transition = @import("auth_transition.zig");
 const credentials = @import("credentials.zig");
 const host = @import("../hosts/host.zig");
-const host_target = @import("../hosts/target.zig");
 const login_flow = @import("login_flow.zig");
 const oauth_session = @import("oauth_session.zig");
 const oauth = @import("oauth.zig");
@@ -184,8 +183,8 @@ pub const FailureSnapshot = struct {
 /// already recovers from.
 const request_path_verified_window_ms: u32 = 30_000;
 const source_none: u8 = std.math.maxInt(u8);
-// u32 keeps the stamp atomic-loadable on 32-bit wasm; wrapping subtraction
-// keeps window comparisons correct across the ~49 day wrap.
+// Wrapping subtraction keeps window comparisons correct across the ~49 day
+// wrap of the u32 stamp.
 var request_path_verified_ms = std.atomic.Value(u32).init(0);
 var request_path_verified_source = std.atomic.Value(u8).init(source_none);
 
@@ -1362,12 +1361,10 @@ pub const PickerView = struct {
         return switch (self.stage) {
             .root => if (self.include_skip)
                 connectionChoiceCount()
-            else if (comptime host_target.is_wasm)
-                3
             else
                 4,
             .connections => connectionChoiceCount(),
-            .provider => if (comptime host_target.is_wasm) 2 else 3,
+            .provider => 3,
             .sign_in, .api_key => 0,
             .change_team => teamFilter(self.teams, self.team_query).count(),
             .switch_credential => gatewaySourceCount(self.available_sources) + 1,
@@ -1376,14 +1373,7 @@ pub const PickerView = struct {
 
     pub fn choiceAt(self: PickerView, index: usize) ?Choice {
         return switch (self.stage) {
-            .root => if (self.include_skip) connectionChoiceAt(index) else if (comptime host_target.is_wasm)
-                switch (index) {
-                    0 => .{ .action = .connections },
-                    1 => .{ .action = .change_team },
-                    2 => .{ .action = .switch_credential },
-                    else => null,
-                }
-            else switch (index) {
+            .root => if (self.include_skip) connectionChoiceAt(index) else switch (index) {
                 0 => .{ .action = .connections },
                 1 => .{ .action = .switch_provider },
                 2 => .{ .action = .change_team },
@@ -1473,17 +1463,10 @@ pub const PickerView = struct {
 };
 
 fn connectionChoiceCount() usize {
-    return if (comptime host_target.is_wasm) 2 else 4;
+    return 4;
 }
 
 fn connectionChoiceAt(index: usize) ?Choice {
-    if (comptime host_target.is_wasm) {
-        return switch (index) {
-            0 => .{ .action = .login },
-            1 => .{ .action = .setup },
-            else => null,
-        };
-    }
     return switch (index) {
         0 => .{ .action = .login },
         1 => .{ .action = .setup },
@@ -2477,10 +2460,6 @@ pub const Runtime = struct {
         return self.sign_in_flow.pollTransition(alloc);
     }
 
-    pub fn pulseSignIn(self: *Self, alloc: Allocator) void {
-        self.sign_in_flow.pulse(alloc);
-    }
-
     pub fn appendSignInCodeByte(self: *Self, alloc: Allocator, byte: u8) !bool {
         if (!self.signInCodeEntryActive()) return false;
         if (byte <= 0x20 or byte > 0x7e) return true;
@@ -2866,7 +2845,6 @@ pub const Runtime = struct {
     }
 
     pub fn beginPromptCredentialRefresh(self: *Self) PromptCredentialRefreshStart {
-        if (comptime host_target.is_wasm) return .not_needed;
         if (self.auth_mode == .host_managed) return .not_needed;
         if (self.prompt_credential_refresh_task != null) return .pending;
         const credential = self.selected_credential orelse return .not_needed;

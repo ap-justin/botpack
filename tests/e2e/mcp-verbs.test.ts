@@ -37,7 +37,6 @@ function createRoot(profile?: unknown, project?: unknown) {
     env: {
       HOME: home,
       LIA_DISABLE_KEYCHAIN: "1",
-      LIA_AUTO_UPGRADE: "0",
       AI_GATEWAY_API_KEY: "fake-mcp-verbs-key",
       VERCEL_OIDC_TOKEN: undefined,
     },
