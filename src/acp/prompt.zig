@@ -8,23 +8,9 @@ const auth_runtime = @import("../core/auth/auth_runtime.zig");
 const credentials = @import("../core/auth/credentials.zig");
 const model_provider = @import("../core/config/model_provider.zig");
 const host = @import("../core/hosts/host.zig");
-const host_target = @import("../core/hosts/target.zig");
 const session_title_generation = @import("../core/session/session_title_generation.zig");
-const js_host_tools = if (host_target.is_wasm)
-    @import("../core/hosts/js_host_tools.zig")
-else
-    struct {};
-const js_host_journal = if (host_target.is_wasm)
-    @import("../core/hosts/js_host_journal.zig")
-else
-    struct {};
-const js_host_steering = if (host_target.is_wasm)
-    @import("../core/hosts/js_host_steering.zig")
-else
-    struct {};
 const io_mod = @import("../core/shared/io.zig");
 const select_watch = @import("../core/shared/select_watch.zig");
-const host_attachments = @import("../core/hosts/host_attachments.zig");
 const image_attachments = @import("../core/images/image_attachments.zig");
 const image_data = @import("../core/images/image_data.zig");
 const jsonrpc = @import("jsonrpc.zig");
@@ -50,9 +36,7 @@ const session_codec = @import("../core/session/session_codec.zig");
 const session_log = @import("../core/session/session_log.zig");
 const session_store = @import("../core/session/session_store.zig");
 const session_adapter = @import("../core/session/session_adapter.zig");
-const libfx_journal = @import("libfx_journal.zig");
-const journal_events = @import("../core/agent/runtime/journal.zig");
-const libfx_steering = @import("libfx_steering.zig");
+const acp_steering = @import("steering.zig");
 const session_child_store = @import("../core/session/session_child_store.zig");
 const session_runtime = @import("../core/session/session.zig");
 const subagent_agent_adapter = @import("../core/subagent/agent_adapter.zig");
@@ -147,46 +131,8 @@ fn promptInputFailure(err: anyerror) anyerror!TerminalOutcome {
             .code = ErrorCode.invalid_params,
             .message = "Image prompt exceeds size limit",
         } },
-        error.PromptImagesTooLarge => .{ .rpc_error = .{
-            .code = ErrorCode.invalid_params,
-            .message = "Prompt images exceed the libfx limit",
-        } },
         else => err,
     };
-}
-
-/// Whether `images` fit one libfx prompt: at most
-/// `image_attachments.max_libfx_prompt_images` of them, holding at most
-/// `max_libfx_prompt_images_bytes` together. An open stages its open turn's
-/// images on top of the session's image window, and counts on this.
-fn fitsLibfxPrompt(images: []const PendingPromptImage) bool {
-    if (images.len > image_attachments.max_libfx_prompt_images) return false;
-    var bytes: usize = 0;
-    for (images) |image| bytes += image.bytes.len;
-    return bytes <= image_attachments.max_libfx_prompt_images_bytes;
-}
-
-test "a libfx prompt holds at most its limit of images and image bytes" {
-    const alloc = std.testing.allocator;
-    var media_type = "image/png".*;
-    var byte: [1]u8 = .{0x89};
-    var images: [image_attachments.max_libfx_prompt_images + 1]PendingPromptImage = @splat(.{ .id = 1, .bytes = &byte, .media_type = &media_type });
-    try std.testing.expect(fitsLibfxPrompt(images[0..image_attachments.max_libfx_prompt_images]));
-    try std.testing.expect(!fitsLibfxPrompt(&images));
-    // Reference-only images count toward the number too.
-    var references = images;
-    for (&references) |*image| image.bytes = &.{};
-    try std.testing.expect(!fitsLibfxPrompt(&references));
-
-    const bytes = try alloc.alloc(u8, image_attachments.max_libfx_prompt_images_bytes + 1);
-    defer alloc.free(bytes);
-    const exact = [_]PendingPromptImage{.{ .id = 1, .bytes = bytes[1..], .media_type = &media_type }};
-    try std.testing.expect(fitsLibfxPrompt(&exact));
-    const over = [_]PendingPromptImage{
-        .{ .id = 1, .bytes = bytes[0..1024], .media_type = &media_type },
-        .{ .id = 2, .bytes = bytes[1024..], .media_type = &media_type },
-    };
-    try std.testing.expect(!fitsLibfxPrompt(&over));
 }
 
 fn promptExecutionFailure(err: anyerror) anyerror!TerminalOutcome {
@@ -282,9 +228,6 @@ const AcpContext = struct {
     /// closed by the turn itself at its finalizing boundary. Steering that
     /// was open and that the host closed is the user's cancel; a host that
     /// never opened steering cancels nothing this way.
-    saw_host_steering_open: bool = false,
-    closed_host_steering: bool = false,
-
     fn deinitPublishedToolCalls(self: *AcpContext) void {
         var keys = self.published_tool_calls.keyIterator();
         while (keys.next()) |key| self.alloc.free(key.*);
@@ -428,7 +371,6 @@ const AcpContext = struct {
     }
 
     fn mcpToolIdentity(self: *AcpContext, arena: Allocator, name: []const u8) ?catalog_state.ToolIdentity {
-        if (comptime host_target.is_wasm) return null;
         const session = if (self.state.active_session) |*active| active else return null;
         const h = session.mcp_host orelse return null;
         return h.catalog.toolIdentity(arena, name) catch |err| {
@@ -492,16 +434,14 @@ const AcpContext = struct {
         self: *AcpContext,
         tool_call_id: []const u8,
         outcome: types.ToolOutcome,
-        result: ?[]const u8,
     ) !void {
         const card = self.published_tool_calls.get(tool_call_id) orelse return;
         if (card != .awaiting_provider_terminal) return;
         const status = providerTerminalStatus(outcome.kind) orelse return;
 
-        const detail = if (self.state.cfg.minimal_kernel) result else null;
         switch (status) {
-            .completed => try self.sendToolCallCompletedWithCommandResult(tool_call_id, detail orelse "Web search completed", null),
-            .failed => try self.sendToolCallErrorWithCommandResult(tool_call_id, detail orelse "Web search failed", null),
+            .completed => try self.sendToolCallCompletedWithCommandResult(tool_call_id, "Web search completed", null),
+            .failed => try self.sendToolCallErrorWithCommandResult(tool_call_id, "Web search failed", null),
             .pending, .in_progress => unreachable,
         }
     }
@@ -630,7 +570,6 @@ const AcpContext = struct {
             .permission_grants = session.session_grants,
             .permission_rules = session.permission_rules,
             .tool_registry = self.toolRegistry(),
-            .host_tool_provider = hostToolProvider(self.state),
             .permission_reviewer_provider = self.state.cfg.provider_set.select(session.provider).permission_reviewer,
             .auto_classifier = self.auto_classifier,
             .subagent_host = self.state.subagent_host,
@@ -679,9 +618,7 @@ const AcpContext = struct {
                 .session_id = session.session_id,
             },
         };
-        if (comptime !host_target.is_wasm) {
-            if (session.mcp_host) |h| h.catalog.wire(&tc);
-        }
+        if (session.mcp_host) |h| h.catalog.wire(&tc);
         return tc;
     }
 
@@ -697,164 +634,6 @@ const AcpContext = struct {
 
 fn activeToolSet(state: *const server.ServerState) tool_set_contract.ToolSet {
     return tool_call_presentation.activeToolSet(state);
-}
-
-/// Runs again, through the host, the calls of a resumed turn the host asked
-/// to run again, as the turn's tools run.
-const ResumeRerun = struct {
-    ctx: *AcpContext,
-    cancel_flag: *std.atomic.Value(bool),
-    max_result_bytes: usize,
-    call_ids: []const []const u8,
-
-    pub fn rerun(self: ResumeRerun, call: types.ToolCall) bool {
-        for (self.call_ids) |id| {
-            if (!std.mem.eql(u8, id, call.id)) continue;
-            const tool = self.ctx.toolRegistry().lookup(call.name) orelse return false;
-            return tool.executor_kind == .host and !tool.provider_executed;
-        }
-        return false;
-    }
-
-    /// Null when the turn is cancelled or handed off, or no host can run it.
-    /// The client sees the call start and end as it would the first time.
-    pub fn run(self: ResumeRerun, alloc: Allocator, call: types.ToolCall) !?tool_dispatch.ToolResult {
-        const provider = hostToolProvider(self.ctx.state) orelse return null;
-        var arena_state = std.heap.ArenaAllocator.init(alloc);
-        defer arena_state.deinit();
-        const acp_id = self.ctx.sendToolCallPending(arena_state.allocator(), call) catch |err| blk: {
-            debug_trace.logf("session", "event=libfx_resume_rerun_unpublished call={s} err={s}", .{ call.id, @errorName(err) });
-            break :blk "call_unknown";
-        };
-        if (self.ctx.observer) |observer| observer.emit(.{ .tool_start = .{ .call = call, .rerun = true } });
-        const outcome = provider.call(alloc, call.name, call.id, call.arguments_json, self.max_result_bytes, self.cancel_flag) catch |err| {
-            if (self.ctx.observer) |observer| observer.emit(.{ .tool_end = .{
-                .call = call,
-                .status = if (err == error.Cancelled) "cancelled" else "failure",
-                .error_name = @errorName(err),
-            } });
-            if (err == error.Cancelled) return null;
-            return err;
-        };
-        const failed = switch (outcome) {
-            .success => false,
-            .failure => true,
-            .rich => |content| content.is_error,
-        };
-        const text: []const u8 = switch (outcome) {
-            .success, .failure => |value| value,
-            .rich => |content| content.text,
-        };
-        const shown = tool_call_presentation.toolUpdateContentText(failed, text);
-        if (self.ctx.observer) |observer| observer.emit(.{ .tool_end = .{
-            .call = call,
-            .status = if (failed) "failure" else "success",
-            .output = text,
-        } });
-        const sent = if (failed)
-            self.ctx.sendToolCallErrorWithCommandResult(acp_id, shown, null)
-        else
-            self.ctx.sendToolCallCompletedWithCommandResult(acp_id, shown, null);
-        sent catch |err| {
-            debug_trace.logf("session", "event=libfx_resume_rerun_result_unpublished call={s} err={s}", .{ call.id, @errorName(err) });
-        };
-        return outcome;
-    }
-};
-
-fn hostToolProvider(state: *server.ServerState) ?tool_dispatch.HostToolProvider {
-    if (state.host_tools.tools.len == 0) return null;
-    if (comptime host_target.is_wasm) return js_host_tools.provider();
-    return .{
-        .context = @ptrCast(state),
-        .call_fn = callHostTool,
-    };
-}
-
-fn callHostTool(
-    raw_state: *anyopaque,
-    alloc: Allocator,
-    name: []const u8,
-    call_id: []const u8,
-    arguments_json: []const u8,
-    max_result_bytes: usize,
-    cancel_flag: ?*std.atomic.Value(bool),
-) tool_dispatch.DispatchError!tool_dispatch.ToolResult {
-    const state: *server.ServerState = @ptrCast(@alignCast(raw_state));
-    if (cancel_flag) |flag| if (flag.load(.seq_cst)) return error.Cancelled;
-    const outbound_id = (server.beginOutboundRequest(state, .host_tool) catch
-        return .{ .failure = try alloc.dupe(u8, "Host tool request failed") }) orelse
-        return .{ .failure = try alloc.dupe(u8, "Host tool request limit reached") };
-    var awaiting = true;
-    errdefer if (awaiting) {
-        server.cancelOutboundRequest(state, outbound_id);
-        if (server.awaitOutboundResponse(state, outbound_id, .host_tool)) |owned| {
-            var abandoned = owned;
-            abandoned.deinit(state.alloc);
-        }
-    };
-
-    var params: std.Io.Writer.Allocating = .init(alloc);
-    defer params.deinit();
-    params.writer.writeAll("{\"sessionId\":") catch return error.OutOfMemory;
-    std.json.Stringify.value(
-        if (state.active_session) |*session| session.session_id else "",
-        .{},
-        &params.writer,
-    ) catch return error.OutOfMemory;
-    params.writer.writeAll(",\"name\":") catch return error.OutOfMemory;
-    std.json.Stringify.value(name, .{}, &params.writer) catch return error.OutOfMemory;
-    params.writer.writeAll(",\"toolCallId\":") catch return error.OutOfMemory;
-    std.json.Stringify.value(call_id, .{}, &params.writer) catch return error.OutOfMemory;
-    params.writer.writeAll(",\"input\":") catch return error.OutOfMemory;
-    params.writer.writeAll(arguments_json) catch return error.OutOfMemory;
-    params.writer.writeByte('}') catch return error.OutOfMemory;
-    state.writer.writeRequest(
-        alloc,
-        .{ .integer = @intCast(outbound_id) },
-        "libfx/tool_call",
-        params.written(),
-    ) catch return .{ .failure = try alloc.dupe(u8, "Host tool request failed") };
-
-    var response = server.awaitOutboundResponse(state, outbound_id, .host_tool) orelse
-        return .{ .failure = try alloc.dupe(u8, "Host tool request failed") };
-    awaiting = false;
-    defer response.deinit(state.alloc);
-    if (cancel_flag) |flag| if (flag.load(.seq_cst)) return error.Cancelled;
-    if (response.cancelled) {
-        if (cancel_flag) |flag| flag.store(true, .seq_cst);
-        return error.Cancelled;
-    }
-    if (response.error_json != null) {
-        return .{ .failure = try alloc.dupe(u8, "Host tool failed") };
-    }
-    const raw = response.result_json orelse
-        return .{ .failure = try alloc.dupe(u8, "Host tool returned no result") };
-    const parsed = std.json.parseFromSlice(std.json.Value, alloc, raw, .{}) catch
-        return .{ .failure = try alloc.dupe(u8, "Host tool returned an invalid result") };
-    defer parsed.deinit();
-    if (parsed.value != .object) {
-        return .{ .failure = try alloc.dupe(u8, "Host tool returned an invalid result") };
-    }
-    const content = parsed.value.object.get("content") orelse
-        return .{ .failure = try alloc.dupe(u8, "Host tool returned an invalid result") };
-    if (content == .string) {
-        if (parsed.value.object.get("contentType")) |kind| {
-            if (kind == .string and std.mem.eql(u8, kind.string, "rich")) {
-                const failed = if (parsed.value.object.get("isError")) |value| value == .bool and value.bool else false;
-                return @import("../core/tooling/tool_content.zig").parseRichResult(alloc, content.string, @min(state.max_tool_result_bytes, max_result_bytes), failed);
-            }
-        }
-    }
-    if (content != .string or content.string.len > @min(state.max_tool_result_bytes, max_result_bytes)) {
-        return .{ .failure = try alloc.dupe(u8, "Host tool result exceeded the configured limit") };
-    }
-    const owned = try alloc.dupe(u8, content.string);
-    const is_error = if (parsed.value.object.get("isError")) |value|
-        value == .bool and value.bool
-    else
-        false;
-    return if (is_error) .{ .failure = owned } else .{ .success = owned };
 }
 
 const AcpElicitationResponderContext = struct {
@@ -1006,45 +785,26 @@ pub fn handlePrompt(
         },
     };
 
-    var prior_image_catalog = try session.session_rt.snapshotImageCatalog(alloc, &.{});
+    const prior_image_catalog = try session.session_rt.snapshotImageCatalog(alloc, &.{});
     defer types.freeImageAttachmentSlice(alloc, prior_image_catalog);
-    // A journaled session's open turn carries the images it was given.
-    if (session.journal) |journal| {
-        if (journal.pending_resume) |pending| {
-            const merged = try session_runtime.merge_image_catalog_history_turn(alloc, prior_image_catalog, pending.interruptedTurn());
-            types.freeImageAttachmentSlice(alloc, prior_image_catalog);
-            prior_image_catalog = merged;
-        }
-    }
     const next_image_id = (try image_attachments.calculate_next_image_id(prior_image_catalog)).next_id;
     var prompt_input = parsePromptInputWithFirstImageId(
         alloc,
         params,
         next_image_id,
-        state.cfg.host_attachments,
     ) catch |err| return promptInputFailure(err);
     defer prompt_input.deinit(alloc);
     if (prompt_input.pending_images.len > 0) {
-        if (session.wasm_state == null and session.v2 == null) {
-            // libfx kernel session: images stay in memory and ride the kernel
-            // checkpoint, so no filesystem snapshot backend is needed.
-            if (!fitsLibfxPrompt(prompt_input.pending_images)) return promptInputFailure(error.PromptImagesTooLarge);
-            prompt_input.captureImagesInline(alloc) catch |err|
-                return promptInputFailure(err);
-            if (session.journal) |*journal| try prompt_input.noteStoredImages(state.alloc, journal);
-        } else {
-            if (comptime host_target.is_wasm) return promptInputFailure(error.UnsupportedPromptImage);
-            var temporary_snapshot_dir: ?[]u8 = null;
-            defer if (temporary_snapshot_dir) |path| alloc.free(path);
-            // Captured into a temporary folder; the turn keeps the bytes
-            // (D44).
-            const snapshot_dir = try session_store.imageSnapshotTempDir(alloc, &temporary_snapshot_dir);
-            defer alloc.free(snapshot_dir);
-            prompt_input.captureImages(alloc, snapshot_dir) catch |err|
-                return promptInputFailure(err);
-            image_attachments.inlineCapturedSnapshots(alloc, prompt_input.images) catch |err|
-                return promptInputFailure(err);
-        }
+        var temporary_snapshot_dir: ?[]u8 = null;
+        defer if (temporary_snapshot_dir) |path| alloc.free(path);
+        // Captured into a temporary folder; the turn keeps the bytes
+        // (D44).
+        const snapshot_dir = try session_store.imageSnapshotTempDir(alloc, &temporary_snapshot_dir);
+        defer alloc.free(snapshot_dir);
+        prompt_input.captureImages(alloc, snapshot_dir) catch |err|
+            return promptInputFailure(err);
+        image_attachments.inlineCapturedSnapshots(alloc, prompt_input.images) catch |err|
+            return promptInputFailure(err);
     }
     const prompt_text = prompt_input.text;
 
@@ -1089,89 +849,18 @@ pub fn handlePrompt(
 
     var hook_bridge: libfx_hooks.Bridge = undefined;
     if (session.observer_hooks) |hook_config| {
-        const turn_id = prompt_input.turn_id orelse if (session.journal) |*journal| journal.open_turn_id.slice() else null;
-        hook_bridge.init(alloc, &state.writer, session.session_id, turn_id, hook_config);
+        hook_bridge.init(alloc, &state.writer, session.session_id, prompt_input.turn_id, hook_config);
         if (hook_bridge.enabled) ctx.observer = &hook_bridge.observer;
     }
     defer if (ctx.observer) |observer| observer.endTurn(if (session.cancel_flag.load(.seq_cst)) .cancelled else .failed, null);
 
-    var recovery_checkpoint: ?session_codec.RecoveryCheckpoint = null;
-    defer if (recovery_checkpoint) |*checkpoint| checkpoint.deinit(alloc);
-    if (session.journal) |*journal| {
-        session.session_write_mutex.lockUncancelable(io_mod.getIo());
-        defer session.session_write_mutex.unlock(io_mod.getIo());
-        try journal.endUnplaced(alloc, state.alloc, session.session_id);
-    }
-    if (prompt_input.continue_recovery and session.journal != null) {
-        // A journaled libfx session resumes the turn its journal left open.
-        const journal = &session.journal.?;
-        const pending = journal.pending_resume orelse return .{
-            .rpc_error = .{
-                .code = ErrorCode.invalid_params,
-                .message = "No interrupted turn to resume",
-            },
-        };
-        // Inputs the crashed turn accepted and never placed go to the model
-        // with the resume, and its first progress places them.
-        const inputs = journal.takePendingInputs();
-        defer journal_events.freePendingInputs(state.alloc, inputs);
-        recovery_checkpoint = try libfx_journal.resumeCheckpoint(alloc, pending, inputs, journal.pending_resume_yielded);
-        const answered_step = journal.pending_resume_answered;
-        {
-            session.session_write_mutex.lockUncancelable(io_mod.getIo());
-            defer session.session_write_mutex.unlock(io_mod.getIo());
-            const ids = try alloc.alloc([]const u8, inputs.len);
-            defer alloc.free(ids);
-            for (inputs, ids) |input, *id| id.* = input.id;
-            try journal.notePlaced(state.alloc, ids);
-        }
-        journal.dropPendingResume(state.alloc);
-        // Calls the crash left running that the host asked to run again do
-        // so before the turn continues, and their results replace the answer
-        // that they may have partly run.
-        if (answered_step) |step| if (prompt_input.rerun_call_ids.len > 0) {
-            if (ctx.observer) |observer| observer.beginTurn(recovery_checkpoint.?.user.text, true);
-            _ = try libfx_journal.rerunCalls(alloc, &recovery_checkpoint.?, step, ResumeRerun{
-                .ctx = &ctx,
-                .cancel_flag = &session.cancel_flag,
-                .max_result_bytes = session.max_tool_result_bytes,
-                .call_ids = prompt_input.rerun_call_ids,
-            }, ctx.observer);
-        };
-    } else if (prompt_input.continue_recovery) {
+    if (prompt_input.continue_recovery) {
         return .{
             .rpc_error = .{
                 .code = ErrorCode.invalid_params,
                 .message = "This session does not support durable recovery",
             },
         };
-    } else if (session.journal) |*journal| {
-        // A new prompt instead of a resume ends the open turn as interrupted.
-        if (journal.pending_resume) |pending| {
-            try persistAcpHistoryTurn(alloc, session, pending.interruptedTurn(), null, null);
-            journal.dropPendingResume(state.alloc);
-        }
-    }
-
-    if (session.journal) |*journal| {
-        session.session_write_mutex.lockUncancelable(io_mod.getIo());
-        defer session.session_write_mutex.unlock(io_mod.getIo());
-        // A host that stores inputs first already holds the prompt.
-        journal.barrier_next_progress = !journal.inputs_durable;
-        journal.startYieldClock(prompt_input.yield_at_ms);
-        // A new turn's first progress records the host's id for it; a
-        // resumed turn keeps the id it started with.
-        journal.nameNextTurn(prompt_input.turn_id);
-        // A follow-up's turn places it in its first progress, a barrier. The
-        // web core records its acceptance only now.
-        if (prompt_input.input_id) |input_id| {
-            if (!prompt_input.input_accepted) try journal.append(alloc, session.session_id, .{ .input_accepted = .{
-                .id = input_id,
-                .text = prompt_input.text,
-                .kind = .follow_up,
-            } });
-            try journal.placeFollowUp(state.alloc, input_id);
-        }
     }
 
     // A v2 prompt opens its turn on disk before the model is asked, so a full
@@ -1189,17 +878,14 @@ pub fn handlePrompt(
     });
     defer tool_projection.deinit(alloc);
 
-    const owned_prompt = try alloc.dupe(
-        u8,
-        if (recovery_checkpoint) |checkpoint| checkpoint.user.text else prompt_text,
-    );
+    const owned_prompt = try alloc.dupe(u8, prompt_text);
     defer alloc.free(owned_prompt);
 
     var skill_catalog = state.skills.acquireCatalog();
     defer skill_catalog.deinit();
     const host_instructions = try client_instructions.compose(
         alloc,
-        state.host_instructions,
+        "",
         session.client_system_prompt,
     );
     defer alloc.free(host_instructions);
@@ -1217,15 +903,12 @@ pub fn handlePrompt(
     );
     defer alloc.free(root_user_intent_context);
 
-    const current_images = if (recovery_checkpoint) |checkpoint| checkpoint.user.images else prompt_input.images;
-    const authorized_image_catalog = if (recovery_checkpoint != null)
-        prior_image_catalog
-    else
-        try session.session_rt.snapshotImageCatalog(alloc, current_images);
-    defer if (recovery_checkpoint == null) types.freeImageAttachmentSlice(alloc, authorized_image_catalog);
+    const current_images = prompt_input.images;
+    const authorized_image_catalog = try session.session_rt.snapshotImageCatalog(alloc, current_images);
+    defer types.freeImageAttachmentSlice(alloc, authorized_image_catalog);
 
     const job: worker_runtime.QueuedPrompt = .{
-        .turn_id = if (recovery_checkpoint) |checkpoint| checkpoint.turn_id else 0,
+        .turn_id = 0,
         .prompt = @constCast(owned_prompt),
         .images = @constCast(current_images),
         .authorized_image_catalog = authorized_image_catalog,
@@ -1241,10 +924,6 @@ pub fn handlePrompt(
         .root_user_intent_context = root_user_intent_context,
         .grants = session.session_grants,
         .context_snapshot = context_snapshot,
-        .recovery_checkpoint = recovery_checkpoint,
-        // An ACP client keeps what the turn sent before it stopped; an engine
-        // in a new process says it holds none of it.
-        .recovery_source_already_presented = recovery_checkpoint != null and !prompt_input.fresh_output,
     };
 
     // A turn whose completions report no tokens sends no `usage_update`.
@@ -1263,7 +942,7 @@ pub fn handlePrompt(
         .custom_tool_guidance = tool_projection.custom_guidance,
     });
     agent_config.session_child_capability = sessionChildCapability(session);
-    maybeStartAcpTitleTask(state, session, owned_prompt, recovery_checkpoint != null, ctx.observer);
+    maybeStartAcpTitleTask(state, session, owned_prompt, ctx.observer);
     defer if (session.title_task != null) completeAcpTitleTask(state, session);
     agent_runtime.processAgentPrompt(&session.session_rt.agent, &deps, null, .{
         .view = state.lifecycle_view,
@@ -1274,31 +953,14 @@ pub fn handlePrompt(
         },
         .outcome_allocator = alloc,
     }, agent_config, job) catch |err| {
-        if (err == error.TurnYielded) {
-            // The journal keeps the turn open for a later resume; nothing
-            // ends it here.
-            prompt_input.retainImageSnapshots();
-            return .{ .stop_reason = .yielded };
-        }
         if (err == error.NonInteractivePermissionRequired) {
             ctx.stop_reason = .refused;
         } else if (err == error.Cancelled and session.cancel_flag.load(.seq_cst)) {
-            // A cancel that arrived while a journal barrier was pending ends
-            // the turn as interrupted, as a cancel anywhere else does.
             ctx.stop_reason = .cancelled;
-            // If the commit fails, the turn still ends below.
-            commitCancelledJournalTurn(alloc, state.alloc, session, &prompt_input) catch |commit_err| {
-                debug_trace.logf("session", "event=libfx_journal_interrupted_commit_failed err={s}", .{@errorName(commit_err)});
-            };
         } else {
-            // The turn's own failure is the one to report.
-            endJournalTurn(alloc, state.alloc, session) catch |end_err| {
-                debug_trace.logf("session", "event=libfx_journal_turn_end_failed err={s} turn_err={s}", .{ @errorName(end_err), @errorName(err) });
-            };
             return ctx.thrownTurnOutcome(session, err);
         }
     };
-    try endJournalTurn(alloc, state.alloc, session);
     debug_trace.logf("acp", "event=prompt_turn_ended session={s}", .{session.session_id});
     if (try runReportTurns(state, session, alloc, &ctx, &deps, agent_config, job)) |outcome| {
         prompt_input.retainImageSnapshots();
@@ -1310,8 +972,6 @@ pub fn handlePrompt(
     try sessions.sendActiveSessionUsageUpdate(state, alloc);
     debug_trace.logf("acp", "event=prompt_updates_sent session={s}", .{session.session_id});
 
-    // A steer's interrupt the turn finished before reaching is not a cancel.
-    if (state.cfg.minimal_kernel) server.releaseSteeringInterrupt(state);
     if (session.cancel_flag.load(.seq_cst)) return .{ .stop_reason = .cancelled };
     return ctx.turnOutcome(session);
 }
@@ -1324,14 +984,12 @@ fn maybeStartAcpTitleTask(
     state: *server.ServerState,
     session: *server.ActiveSessionState,
     prompt_text: []const u8,
-    recovery: bool,
     observer: ?*observation.Observer,
 ) void {
     // Unit tests share the real provider bundles; never spawn network side
     // calls from a test process. Wiring is covered by e2e mock servers.
     if (comptime @import("builtin").is_test) return;
-    if (comptime host_target.is_wasm) return;
-    if (!state.session_titles or recovery) return;
+    if (!state.session_titles) return;
     if (session.title_task != null) return;
     if (session.session_rt.agent.history.items.len != 0) return;
     const session_id = if (session.v2) |v2| v2.id() else return;
@@ -1481,21 +1139,18 @@ fn initialDynamicTools(
     ctx: *AcpContext,
     arena: Allocator,
 ) ![]const agent_stream_provider.DynamicFunctionTool {
-    const host_tools = ctx.state.host_tools.dynamic_tools;
-    if (comptime host_target.is_wasm) return host_tools;
-    const session = if (ctx.state.active_session) |*active| active else return host_tools;
+    const session = if (ctx.state.active_session) |*active| active else return &.{};
     const loaded = if (session.mcp_host) |h| try h.catalog.snapshotAlwaysLoadedTools(
         arena,
         session.permission_rules,
         ctx.state.context_limits,
         .unrestricted,
         &session.cancel_flag,
-    ) else return host_tools;
+    ) else return &.{};
     if (loaded.notice) |notice| try pushContextNotice(@ptrCast(ctx), notice);
-    if (loaded.tools.len == 0) return host_tools;
+    if (loaded.tools.len == 0) return &.{};
     var tools: std.ArrayList(agent_stream_provider.DynamicFunctionTool) = .empty;
-    try tools.ensureTotalCapacity(arena, host_tools.len + loaded.tools.len);
-    tools.appendSliceAssumeCapacity(host_tools);
+    try tools.ensureTotalCapacity(arena, loaded.tools.len);
     for (loaded.tools) |selected| {
         try runtime_gateway_step.recordSelectedDynamicTool(arena, &tools, selected);
     }
@@ -1526,7 +1181,7 @@ fn buildAgentConfig(
         .gateway_chat_url = state.cfg.gateway_chat_url,
         .advertised_tool_names = sections.advertised_tool_names,
         .advertised_functions = sections.advertised_functions,
-        .initial_dynamic_tools = sections.initial_dynamic_tools orelse state.host_tools.dynamic_tools,
+        .initial_dynamic_tools = sections.initial_dynamic_tools orelse &.{},
         .provider_capabilities = state.cfg.provider_set.select(session.provider).capabilities,
         .custom_tool_guidance = sections.custom_tool_guidance,
         .agent_step_limit = session.agent_step_limit,
@@ -1539,32 +1194,9 @@ fn buildAgentConfig(
         .first_call_tool_choice = session.first_call_tool_choice,
         .workspace_root = state.workspace_root,
         .access_scope = state.workspace_access.scope(state.workspace_root),
-        .enforce_response_language = !state.cfg.minimal_kernel,
+        .enforce_response_language = true,
         .context_limits = state.context_limits,
     };
-}
-
-test "libfx inline prompt source references survive capture without a filesystem" {
-    const alloc = std.testing.allocator;
-    var parsed = try parsePromptInput(alloc, "{\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"host:original\"}]}");
-    defer parsed.deinit(alloc);
-    try parsed.captureImagesInline(alloc);
-    try std.testing.expectEqual(@as(usize, 1), parsed.images.len);
-    try std.testing.expectEqualStrings("host:original", parsed.images[0].source_ref.?);
-    try std.testing.expect(parsed.images[0].inline_data == null);
-    try std.testing.expect(parsed.images[0].snapshot_path == null);
-    try std.testing.expectEqualStrings("[Image #1]", parsed.text);
-
-    try std.testing.expectError(error.InvalidPromptImage, parsePromptInput(alloc, "{\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"bad\\nref\"}]}"));
-    try std.testing.expectError(error.InvalidPromptImage, parsePromptInput(alloc, "{\"prompt\":[{\"type\":\"image\",\"mimeType\":\"text/plain\",\"sourceRef\":\"host:original\"}]}"));
-    try std.testing.expectError(error.InvalidPromptImage, parsePromptInput(alloc, "{\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"host:original\",\"data\":\"Zh==\"}]}"));
-
-    var attachments = TestAttachmentStore{ .id = 3, .bytes = "unused" };
-    var with_store = try parsePromptInputWithFirstImageId(alloc, "{\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"host:original\"}]}", 1, attachments.store());
-    defer with_store.deinit(alloc);
-    try with_store.captureImagesInline(alloc);
-    try std.testing.expectEqualStrings("host:original", with_store.images[0].source_ref.?);
-    try std.testing.expectEqual(@as(usize, 0), attachments.taken);
 }
 
 const PendingPromptImage = struct {
@@ -1572,8 +1204,6 @@ const PendingPromptImage = struct {
     bytes: []u8,
     media_type: []u8,
     source_ref: ?[]u8 = null,
-    /// The name the host stored the bytes under before it sent them.
-    stored_name: ?session_codec.ImageName = null,
 
     fn deinit(self: *PendingPromptImage, alloc: Allocator) void {
         alloc.free(self.bytes);
@@ -1583,28 +1213,11 @@ const PendingPromptImage = struct {
     }
 };
 
-/// The latest time a host may give, in milliseconds since the epoch: the
-/// largest integer a JavaScript number holds exactly.
-const max_host_time_ms: i64 = (1 << 53) - 1;
-
 const ParsedPromptInput = struct {
     text: []u8,
     continue_recovery: bool = false,
-    /// A resume whose host holds none of the turn's earlier output, such as
-    /// an engine in a new process: the turn sends its saved reply again.
-    fresh_output: bool = false,
-    /// The follow-up this prompt runs, which its first progress places.
-    input_id: ?[]u8 = null,
     /// The host's id for the turn this prompt starts.
     turn_id: ?[]u8 = null,
-    /// Calls a resumed turn's crash left running that the host asked to run
-    /// again instead of leaving them to the model.
-    rerun_call_ids: [][]u8 = &.{},
-    /// Whether the host already recorded the follow-up as accepted.
-    input_accepted: bool = false,
-    /// When a journaled turn stops, in milliseconds since the epoch: its
-    /// first model request at or after it yields instead of going out.
-    yield_at_ms: ?i64 = null,
     targets: []context_contract.ApplicableTarget = &.{},
     omissions: []context_contract.ContextOmissionInput = &.{},
     omission_summary: ?context_contract.ContextOmissionSummary = null,
@@ -1636,63 +1249,13 @@ const ParsedPromptInput = struct {
         self.images = images;
     }
 
-    /// libfx kernel sessions have no filesystem snapshot backend on either
-    /// host (native or wasm), so their prompt images keep validated bytes on
-    /// the attachment itself and serialize through the kernel checkpoint.
-    fn captureImagesInline(self: *ParsedPromptInput, alloc: Allocator) !void {
-        if (self.pending_images.len == 0) return;
-        const images = try alloc.alloc(types.ImageAttachment, self.pending_images.len);
-        var captured: usize = 0;
-        errdefer {
-            for (images[0..captured]) |attachment| {
-                types.freeImageAttachment(alloc, attachment);
-            }
-            alloc.free(images);
-        }
-        for (self.pending_images, 0..) |pending, index| {
-            var attachment = if (pending.bytes.len == 0) ref: {
-                if (pending.source_ref == null or !image_data.supportedMediaType(pending.media_type)) return error.InvalidPromptImage;
-                const path = try alloc.print(image_attachments.inline_image_path_prefix ++ "{d}", .{pending.id});
-                errdefer alloc.free(path);
-                break :ref types.ImageAttachment{
-                    .id = pending.id,
-                    .path = path,
-                    .media_type = try alloc.dupe(u8, pending.media_type),
-                };
-            } else try image_attachments.captureInlineImageBytesInMemory(
-                alloc,
-                pending.id,
-                pending.media_type,
-                pending.bytes,
-            );
-            errdefer types.freeImageAttachment(alloc, attachment);
-            if (pending.source_ref) |value| attachment.source_ref = try alloc.dupe(u8, value);
-            images[index] = attachment;
-            captured += 1;
-        }
-        self.images = images;
-    }
-
-    /// Tells `journal` which captured images the host stored before it sent
-    /// them, so its events name them. `captureImagesInline` keeps the order.
-    fn noteStoredImages(self: *const ParsedPromptInput, session_alloc: Allocator, journal: *libfx_journal.Journal) Allocator.Error!void {
-        std.debug.assert(self.images.len == self.pending_images.len);
-        for (self.images, self.pending_images) |image, pending| {
-            const name = pending.stored_name orelse continue;
-            try journal.noteStoredImage(session_alloc, image, name);
-        }
-    }
-
     fn retainImageSnapshots(self: *ParsedPromptInput) void {
         self.retain_image_snapshots = true;
     }
 
     fn deinit(self: *ParsedPromptInput, alloc: Allocator) void {
         alloc.free(self.text);
-        if (self.input_id) |id| alloc.free(id);
         if (self.turn_id) |id| alloc.free(id);
-        for (self.rerun_call_ids) |id| alloc.free(id);
-        if (self.rerun_call_ids.len > 0) alloc.free(self.rerun_call_ids);
         for (self.targets) |target| alloc.free(@constCast(target.path));
         if (self.targets.len > 0) alloc.free(self.targets);
         for (self.omissions) |omission| alloc.free(@constCast(omission.source));
@@ -1711,7 +1274,7 @@ const ParsedPromptInput = struct {
 };
 
 fn parsePromptInput(alloc: Allocator, params_json: []const u8) !ParsedPromptInput {
-    return parsePromptInputWithFirstImageId(alloc, params_json, 1, null);
+    return parsePromptInputWithFirstImageId(alloc, params_json, 1);
 }
 
 /// Decodes a standard ACP image block's canonical base64 `data`. Caller owns
@@ -1736,56 +1299,10 @@ fn decodePromptImageData(alloc: Allocator, data_value: std.json.Value) ![]u8 {
     return decoded;
 }
 
-/// Takes the raw image bytes a libfx host attached beside the prompt frame.
-/// Hosts without an attachment store cannot reference one. Caller owns the
-/// returned bytes.
-fn takePromptImageAttachment(
-    alloc: Allocator,
-    attachments: ?host_attachments.Store,
-    value: std.json.Value,
-) ![]u8 {
-    const store = attachments orelse return error.UnsupportedPromptImage;
-    const id = host_attachments.idFromJson(value) orelse return error.InvalidPromptImage;
-    const bytes = store.take(alloc, id, image_attachments.max_image_bytes) catch |err| return switch (err) {
-        error.OutOfMemory => error.OutOfMemory,
-        error.AttachmentTooLarge => error.ImageTooLarge,
-        error.AttachmentUnavailable => error.InvalidPromptImage,
-    };
-    if (bytes.len == 0) {
-        alloc.free(bytes);
-        return error.InvalidPromptImage;
-    }
-    return bytes;
-}
-
-/// At most this many calls of a resumed turn run again; a turn's response
-/// makes no more calls than its batch limit.
-const max_rerun_calls = 128;
-const max_call_id_bytes = 256;
-
-/// The call ids in `value`, a JSON array of strings, owned by the caller.
-/// Anything else, and ids that are empty or too long, are left out.
-fn ownedCallIds(alloc: Allocator, value: std.json.Value) Allocator.Error![][]u8 {
-    if (value != .array) return &.{};
-    var ids: std.ArrayList([]u8) = .empty;
-    errdefer {
-        for (ids.items) |id| alloc.free(id);
-        ids.deinit(alloc);
-    }
-    for (value.array.items) |item| {
-        if (ids.items.len == max_rerun_calls) break;
-        if (item != .string or item.string.len == 0 or item.string.len > max_call_id_bytes) continue;
-        try ids.append(alloc, try alloc.dupe(u8, item.string));
-    }
-    if (ids.items.len == 0) return &.{};
-    return ids.toOwnedSlice(alloc);
-}
-
 fn parsePromptInputWithFirstImageId(
     alloc: Allocator,
     params_json: []const u8,
     first_image_id: usize,
-    attachments: ?host_attachments.Store,
 ) !ParsedPromptInput {
     if (first_image_id == 0) return error.InvalidImageId;
     const parsed = std.json.parseFromSlice(std.json.Value, alloc, params_json, .{}) catch
@@ -1795,26 +1312,14 @@ fn parsePromptInputWithFirstImageId(
     if (parsed.value != .object) return .{ .text = try alloc.dupe(u8, "") };
 
     const continue_recovery = acp_types.liaMetaBool(parsed.value.object, "continueRecovery") orelse false;
-    const fresh_output = acp_types.liaMetaBool(parsed.value.object, "freshOutput") orelse false;
-    const input_id: ?[]const u8 = if (acp_types.liaMetaField(parsed.value.object, "inputId")) |value|
-        if (value == .string and libfx_steering.validInputId(value.string)) value.string else null
-    else
-        null;
-    const input_accepted = acp_types.liaMetaBool(parsed.value.object, "inputAccepted") orelse false;
     const turn_id: ?[]const u8 = if (acp_types.liaMetaField(parsed.value.object, "turnId")) |value|
-        if (value == .string and libfx_steering.validInputId(value.string)) value.string else null
-    else
-        null;
-    const rerun_value = acp_types.liaMetaField(parsed.value.object, "rerun");
-    // A JavaScript host gives a time it can hold as a number.
-    const yield_at_ms: ?i64 = if (acp_types.liaMetaInteger(parsed.value.object, "yieldAt")) |ms|
-        if (ms > 0 and ms <= max_host_time_ms) ms else null
+        if (value == .string and acp_steering.validInputId(value.string)) value.string else null
     else
         null;
 
     const prompt_arr = parsed.value.object.get("prompt") orelse
-        return .{ .text = try alloc.dupe(u8, ""), .continue_recovery = continue_recovery, .fresh_output = fresh_output };
-    if (prompt_arr != .array) return .{ .text = try alloc.dupe(u8, ""), .continue_recovery = continue_recovery, .fresh_output = fresh_output };
+        return .{ .text = try alloc.dupe(u8, ""), .continue_recovery = continue_recovery };
+    if (prompt_arr != .array) return .{ .text = try alloc.dupe(u8, ""), .continue_recovery = continue_recovery };
 
     var text_buf: std.ArrayList(u8) = .empty;
     defer text_buf.deinit(alloc);
@@ -1856,21 +1361,13 @@ fn parsePromptInputWithFirstImageId(
                 if (value != .string or !image_data.validSourceRef(value.string)) return error.InvalidPromptImage;
                 break :ref value.string;
             } else null;
-            const decoded = if (acp_types.liaMetaField(block.object, "attachment")) |attachment| bytes: {
-                if (block.object.get("data") != null) return error.InvalidPromptImage;
-                break :bytes try takePromptImageAttachment(alloc, attachments, attachment);
-            } else if (block.object.get("data")) |data_value|
+            const decoded = if (block.object.get("data")) |data_value|
                 try decodePromptImageData(alloc, data_value)
             else bytes: {
                 if (source_ref_value == null or !image_data.supportedMediaType(media_type_value.string)) return error.InvalidPromptImage;
                 break :bytes try alloc.alloc(u8, 0);
             };
             errdefer alloc.free(decoded);
-            // A host with an image store names the bytes it stored first.
-            const stored_name: ?session_codec.ImageName = if (acp_types.liaMetaField(block.object, "stored")) |value| name: {
-                if (value != .string or decoded.len == 0) return error.InvalidPromptImage;
-                break :name session_codec.imageName(value.string) orelse return error.InvalidPromptImage;
-            } else null;
 
             const image_id = std.math.add(usize, first_image_id, pending_images.items.len) catch
                 return error.ImageIdOverflow;
@@ -1889,7 +1386,6 @@ fn parsePromptInputWithFirstImageId(
                 .bytes = decoded,
                 .media_type = media_type,
                 .source_ref = source_ref,
-                .stored_name = stored_name,
             });
         } else if (std.mem.eql(u8, block_type.string, "resource")) {
             if (block.object.get("resource")) |resource| {
@@ -1943,14 +1439,9 @@ fn parsePromptInputWithFirstImageId(
     var result = ParsedPromptInput{
         .text = try alloc.dupe(u8, text_buf.items),
         .continue_recovery = continue_recovery,
-        .fresh_output = fresh_output,
-        .input_accepted = input_accepted,
-        .yield_at_ms = yield_at_ms,
     };
     errdefer result.deinit(alloc);
-    if (input_id) |id| result.input_id = try alloc.dupe(u8, id);
     if (turn_id) |id| result.turn_id = try alloc.dupe(u8, id);
-    if (rerun_value) |value| result.rerun_call_ids = try ownedCallIds(alloc, value);
     result.targets = try targets.toOwnedSlice(alloc);
     result.omissions = try omissions.toOwnedSlice(alloc);
     result.pending_images = try pending_images.toOwnedSlice(alloc);
@@ -2013,11 +1504,10 @@ fn localFileTargetPath(alloc: Allocator, uri_text: []const u8) Allocator.Error!?
 }
 
 /// The session's cache warmer, when the profile keeps it on. Unit tests
-/// share the real provider bundles and never ping, and a libfx host owns
-/// its sessions' lifetimes, so its kernel sends no requests of its own.
+/// share the real provider bundles and never ping.
 fn acpCacheWarmer(state: *server.ServerState, session: *server.ActiveSessionState) ?*@import("../core/agent/runtime/cache_warmer.zig").Warmer {
-    if (comptime @import("builtin").is_test or host_target.is_wasm) return null;
-    if (state.cfg.minimal_kernel or !state.cache_warming) return null;
+    if (comptime @import("builtin").is_test) return null;
+    if (!state.cache_warming) return null;
     return session.session_rt.cacheWarmer();
 }
 
@@ -2028,16 +1518,13 @@ fn agentRuntimeDeps(ctx: *AcpContext) agent_runtime.AgentRuntimeDeps {
         .observer = ctx.observer,
         .agent_stream_provider = server.streamProviderFor(ctx.state, ctx.state.active_session.?.provider),
         .report_usage = reportUsage,
-        .flush_assistant_stream_per_content_chunk = host_target.is_wasm,
+        .flush_assistant_stream_per_content_chunk = false,
         .render_assistant_text = false,
         .tool_registry = ctx.toolRegistry(),
         .context_registry = ctx.state.cfg.context_registry,
         .context_enabled = ctx.state.context_enabled,
         .finalize_turn = finalizeTurn,
         .take_steering_boundary = takeSteeringBoundary,
-        // The web core's host keeps its steering queue, so the core asks it
-        // while a reply streams whether a steer should cut it short.
-        .cooperative_transport_pulse = if (comptime host_target.is_wasm) .{ .ctx = @ptrCast(ctx), .run = pulseHostSteering } else null,
         .release_agent_terminal_lease = releaseAgentTerminalLease,
         .append_runtime_context = appendRuntimeContext,
         .append_static_context = appendStaticContext,
@@ -2057,23 +1544,11 @@ fn agentRuntimeDeps(ctx: *AcpContext) agent_runtime.AgentRuntimeDeps {
         .publish_committed_file_handoff = publishCommittedFileHandoff,
         .publish_deferred_tool_completion = publishDeferredToolCompletion,
         .propagate_history_turn = propagateHistoryTurn,
-        .append_turn_piece = if (session.v2 != null)
-            appendTurnPiece
-        else if (session.journal != null)
-            appendJournalToolIntent
-        else
-            null,
+        .append_turn_piece = if (session.v2 != null) appendTurnPiece else null,
         .record_usage = if (session.v2 != null) recordUsage else null,
         .cache_warmer = acpCacheWarmer(ctx.state, session),
         .save_prompt_images = if (session.v2 != null) savePromptImages else null,
         .commit_context_compaction = .{ .commit = commitContextCompaction },
-        .recovery_checkpoint = if (session.journal != null)
-            .{
-                .set = setJournalProgress,
-                .clear = clearJournalProgress,
-            }
-        else
-            null,
         .propagate_grant = retainAcpGrant,
         .push_event = pushEvent,
         .push_text = pushText,
@@ -2099,9 +1574,7 @@ fn agentRuntimeDeps(ctx: *AcpContext) agent_runtime.AgentRuntimeDeps {
 /// `session/prompt` with `_meta.lia.steer` during a turn; each delivered message
 /// is replayed as a user message where it joined the turn. A cancelled ACP
 /// turn stops instead of continuing with queued steering, and the steering
-/// prompt responses report what was dropped. A libfx turn continues past a
-/// cancel only when a steer interrupted its reply; after a user cancel it
-/// takes nothing, and its end hands back what was still queued.
+/// prompt responses report what was dropped.
 fn takeSteeringBoundary(
     raw_ctx: *anyopaque,
     arena: Allocator,
@@ -2109,66 +1582,16 @@ fn takeSteeringBoundary(
     kind: worker_runtime.SteeringBoundaryKind,
 ) !worker_runtime.SteeringBoundaryResult {
     const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
-    const close_if_empty = kind == .finalizing;
-    if (comptime host_target.is_wasm) {
-        server.noteSteeringBoundary(ctx.state);
-        // The host closes its steering when the user cancels the turn, which
-        // wins over a steer's interrupt. A handoff ends the turn here.
-        const host_steering = js_host_steering.state();
-        if (host_steering == .open and host_steering.open.handoff) {
-            // As on native: a handoff's interrupt is spent and the turn ends.
-            server.noteHostSteeringHandoff(ctx.state);
-            if (kind != .cancelled) return .handoff;
-            _ = server.takeSteeringInterrupt(ctx.state);
-            return .interrupt;
-        }
-        const steered = kind == .cancelled and host_steering != .closed and
-            server.takeSteeringInterrupt(ctx.state) != null;
-        const taken = try js_host_steering.takeAll(arena);
-        if (taken.len > 0) {
-            // As on native, an interrupt this boundary beat is spent here.
-            if (kind != .cancelled) server.releaseSteeringInterrupt(ctx.state);
-            try acceptHostSteering(ctx, taken);
-            const messages = try arena.alloc(worker_runtime.SteeringMessage, taken.len);
-            for (taken, messages) |entry, *message| {
-                message.* = .{ .text = entry.text };
-                try publishSteeringReplay(ctx, entry.text, null, entry.id);
-            }
-            return .{ .continue_turn = messages };
-        }
-        if (steered) return .{ .continue_turn = &.{} };
-        if (close_if_empty) {
-            ctx.closed_host_steering = true;
-            js_host_steering.close();
-        }
-        return if (kind == .cancelled) .interrupt else .none;
-    }
-    const kernel = ctx.state.cfg.minimal_kernel;
-    if (kind == .cancelled and !kernel) return .interrupt;
-    if (kind == .cancelled) {
-        // A user cancel ends the turn, and so does a handoff's interrupt.
-        const interrupt = server.takeSteeringInterrupt(ctx.state) orelse return .interrupt;
-        if (interrupt == .handoff) return .interrupt;
-    } else if (kernel and server.steeringHandoffPending(ctx.state)) {
-        // A steer that cannot join the turn runs next: the turn ends here, and
-        // its end hands back the steering it did not take.
-        return .handoff;
-    }
+    if (kind == .cancelled) return .interrupt;
     // ACP keeps accepting steering until the turn has fully returned: a
     // pending subagent can continue a turn past its final boundary, and a
     // steering prompt that arrives after input closes joins the worker from
     // the connection reader, which must never wait on work that needs it.
-    const drained = try server.takeSteering(ctx.state, arena, close_if_empty and kernel);
-    // A steer's interrupt continues the turn even when the steer was
-    // withdrawn meanwhile: the cut-off request goes out again.
-    if (drained.texts.len == 0) return if (kind == .cancelled) .{ .continue_turn = &.{} } else .none;
-    try noteJournalPlacement(ctx, drained.input_ids);
-    // A steer's interrupt that a later boundary beat is spent with its steer.
-    if (kernel and kind != .cancelled) server.releaseSteeringInterrupt(ctx.state);
-    // Steering shows where it joined the turn, a libfx steer by its input id.
-    for (drained.texts, drained.request_ids, 0..) |text, request_id, index| {
-        const input_id: ?[]const u8 = if (index < drained.input_ids.len) drained.input_ids[index] else null;
-        try publishSteeringReplay(ctx, text, request_id, input_id);
+    const drained = try server.takeSteering(ctx.state, arena);
+    if (drained.texts.len == 0) return .none;
+    // Steering shows where it joined the turn.
+    for (drained.texts, drained.request_ids) |text, request_id| {
+        try publishSteeringReplay(ctx, text, request_id);
     }
     // An ACP client's steering is the user's own.
     const messages = try arena.alloc(worker_runtime.SteeringMessage, drained.texts.len);
@@ -2176,62 +1599,7 @@ fn takeSteeringBoundary(
     return .{ .continue_turn = messages };
 }
 
-/// The host closes steering when the user cancels the turn, and the
-/// `session/cancel` it also sends waits on stdin until the prompt returns.
-/// Between sends nothing else carries the cancel, so a retry wait would sit
-/// it out. A host that never opened steering never closes it this way.
-fn cancelOnHostSteeringClosed(ctx: *AcpContext) void {
-    if (!ctx.saw_host_steering_open or ctx.closed_host_steering) return;
-    const session = if (ctx.state.active_session) |*active| active else return;
-    if (session.cancel_flag.swap(true, .seq_cst)) return;
-    debug_trace.eventf("interrupt", "cancel_requested", .{}, "source=host_steering_closed", .{});
-}
-
-/// The web core's cooperative pulse while a model reply streams: steering its
-/// host holds interrupts the reply under the same rule as the native kernel's.
-fn pulseHostSteering(raw_ctx: *anyopaque) anyerror!void {
-    const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
-    switch (js_host_steering.state()) {
-        .closed => cancelOnHostSteeringClosed(ctx),
-        .open => |open| {
-            ctx.saw_host_steering_open = true;
-            if (open.handoff) {
-                server.noteHostSteeringHandoff(ctx.state);
-            } else if (server.claimHostSteeringInterrupt(ctx.state, open.queued)) {
-                debug_trace.logf("acp", "host steering interrupts the streaming reply queued={d}", .{open.queued});
-            }
-        },
-    }
-}
-
-/// A journaled session's next progress places the inputs a boundary took.
-fn noteJournalPlacement(ctx: *AcpContext, input_ids: []const ?[]u8) !void {
-    const session = if (ctx.state.active_session) |*value| value else return;
-    session.session_write_mutex.lockUncancelable(io_mod.getIo());
-    defer session.session_write_mutex.unlock(io_mod.getIo());
-    const journal = if (session.journal) |*value| value else return;
-    for (input_ids) |maybe_id| {
-        const id = maybe_id orelse continue;
-        try journal.notePlaced(ctx.state.alloc, &.{id});
-    }
-}
-
-/// The web core takes steering from the host at a boundary, so a journaled
-/// session records each input as accepted when it arrives, and the next
-/// progress places it in the same barrier.
-fn acceptHostSteering(ctx: *AcpContext, taken: []const js_host_steering.Taken) !void {
-    const session = if (ctx.state.active_session) |*value| value else return;
-    session.session_write_mutex.lockUncancelable(io_mod.getIo());
-    defer session.session_write_mutex.unlock(io_mod.getIo());
-    const journal = if (session.journal) |*value| value else return;
-    for (taken) |entry| {
-        const id = entry.id orelse continue;
-        try journal.append(ctx.alloc, session.session_id, .{ .input_accepted = .{ .id = id, .text = entry.text } });
-        try journal.notePlaced(ctx.state.alloc, &.{id});
-    }
-}
-
-fn publishSteeringReplay(ctx: *AcpContext, text: []const u8, request_id: ?jsonrpc.RequestId, input_id: ?[]const u8) !void {
+fn publishSteeringReplay(ctx: *AcpContext, text: []const u8, request_id: ?jsonrpc.RequestId) !void {
     var message_id_storage: acp_types.MessageIdBuffer = undefined;
     const message_id = acp_types.generateMessageId(&message_id_storage);
     var update: std.Io.Writer.Allocating = .init(ctx.alloc);
@@ -2239,7 +1607,7 @@ fn publishSteeringReplay(ctx: *AcpContext, text: []const u8, request_id: ?jsonrp
     try update.writer.writeAll("{\"sessionId\":");
     try jsonrpc.writeJsonStr(ctx.session_id, &update.writer);
     try update.writer.writeAll(",\"update\":");
-    try acp_types.writeSteeringUserMessageChunk(&update.writer, message_id, text, request_id, input_id);
+    try acp_types.writeSteeringUserMessageChunk(&update.writer, message_id, text, request_id);
     try update.writer.writeByte('}');
     try ctx.state.writer.writeNotification(ctx.alloc, "session/update", update.written());
 }
@@ -2417,7 +1785,6 @@ fn appendStaticContext(raw_ctx: *anyopaque, arena: Allocator, messages: *std.Arr
     try ctx.state.cfg.context_registry.appendDefaultStatic(.{
         .project_context = ctx.modelVisibleProjectContext(),
     }, arena, messages);
-    if (ctx.state.cfg.minimal_kernel) return;
     const active_session = if (ctx.state.active_session) |*session| session else null;
     var snapshot = if (active_session) |session|
         if (session.mcp_host) |h|
@@ -2662,7 +2029,6 @@ fn describeToolActionDenied(raw_ctx: *anyopaque, arena: Allocator, call: ToolCal
 }
 
 fn lifecycleDynamicMcpToolAvailable(ctx: *AcpContext, name: []const u8, advertised_dynamic_tool_names: []const []const u8) bool {
-    if (comptime host_target.is_wasm) return false;
     const session = if (ctx.state.active_session) |*active| active else null;
     if (session) |s| if (s.mcp_host) |h| {
         const capabilities = h.catalog.runtimeCapabilities();
@@ -2716,10 +2082,7 @@ fn executeToolCall(
     tool_ctx.session_grants = request.session_grants;
     tool_ctx.advertised_dynamic_tool_names = request.advertised_dynamic_tool_names;
     tool_ctx.max_tool_result_bytes = request.max_tool_result_bytes;
-    const result = (if (comptime host_target.is_wasm)
-        tool_runtime.executeHostToolCallAuthorized(tool_ctx, request)
-    else
-        tool_runtime.executeToolCallAuthorized(tool_ctx, request)) catch |err| {
+    const result = tool_runtime.executeToolCallAuthorized(tool_ctx, request) catch |err| {
         const err_text = try formatToolExecutionError(
             raw_ctx,
             request.result_allocator,
@@ -2752,34 +2115,12 @@ fn completeAuthorizedToolCallTransport(
     return completeToolCallTransport(ctx, request.call, acp_id, result);
 }
 
-/// Records a finished call's result in a journaled libfx session, so a
-/// crash before the next progress answers it with what the model sees,
-/// its images too, instead of with "may have partly run". Nothing waits for
-/// it. A cancelled call did not finish and stays unanswered.
-fn recordJournalToolResult(ctx: *AcpContext, call: ToolCall, result: ToolExecutionResult) void {
-    if (result.cancelled) return;
-    const session = if (ctx.state.active_session) |*value| value else return;
-    session.session_write_mutex.lockUncancelable(io_mod.getIo());
-    defer session.session_write_mutex.unlock(io_mod.getIo());
-    const journal = if (session.journal) |*value| value else return;
-    journal.recordToolResult(ctx.alloc, session.session_id, .{
-        .id = call.id,
-        .name = call.name,
-        .failed = result.status == .failure,
-        .output = result.model_output,
-        .images = if (result.tool_result_memory) |memory| memory.tool_images else &.{},
-    }) catch |err| {
-        debug_trace.logf("session", "event=libfx_journal_tool_result_dropped call={s} err={s} answered_by=next_progress", .{ call.id, @errorName(err) });
-    };
-}
-
 fn completeToolCallTransport(
     ctx: *AcpContext,
     call: ToolCall,
     acp_id: []const u8,
     result: ToolExecutionResult,
 ) ToolExecutionResult {
-    recordJournalToolResult(ctx, call, result);
     const shell_text = tool_call_presentation.shellUpdateContentText(
         ctx.alloc,
         call.name,
@@ -2930,7 +2271,6 @@ fn propagateHistoryTurn(raw_ctx: *anyopaque, turn: HistoryTurn) !void {
             session,
             turn,
             ctx.current_prompt_input,
-            ctx.state.alloc,
         );
     }
 }
@@ -2975,83 +2315,6 @@ fn savePromptImages(raw_ctx: *anyopaque, alloc: std.mem.Allocator, images: []typ
     };
 }
 
-/// `AgentRuntimeDeps.append_turn_piece` for a journaled libfx session. The
-/// orchestrator calls it before any call in a batch runs: the calls reach the
-/// journal first, and a batch with a call lia runs itself waits until the host
-/// holds them, unless every such call runs ahead (see below). Finished pieces
-/// travel in `turn_progress` instead.
-fn appendJournalToolIntent(raw_ctx: *anyopaque, progress: agent_runtime.TurnProgress) !void {
-    if (progress.running_calls.len == 0) return;
-    const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
-    const session = if (ctx.state.active_session) |*value| value else return error.SessionPersistenceUnavailable;
-    const registry = ctx.toolRegistry();
-    const waits = for (progress.running_calls) |call| {
-        const tool = registry.lookup(call.name) orelse continue;
-        // A call the provider runs has no effect here to guard. A call to an
-        // idempotent tool that does not write runs ahead of its intent: a
-        // crash before the intent lands only makes the model ask again, and
-        // running a lookup twice under a new execution id is harmless. Every
-        // other call waits, so a call with effects is never unrecorded, and
-        // an idempotent writer keeps the execution id its effect is keyed
-        // on: only a stored intent reruns a call under the same id.
-        if (tool.provider_executed or (tool.host_idempotent and tool.host_concurrent)) continue;
-        break true;
-    } else false;
-    {
-        session.session_write_mutex.lockUncancelable(io_mod.getIo());
-        defer session.session_write_mutex.unlock(io_mod.getIo());
-        const journal = if (session.journal) |*value| value else return error.SessionPersistenceUnavailable;
-        try journal.appendMarked(ctx.alloc, session.session_id, .{ .tool_intent = progress.running_calls }, waits);
-    }
-    if (waits) return flushJournal(ctx.state, ctx.alloc, session.session_id);
-}
-
-/// Waits until the host holds every journal event sent so far.
-fn flushJournal(state: *server.ServerState, alloc: Allocator, session_id: []const u8) !void {
-    if (comptime host_target.is_wasm) return js_host_journal.flush();
-    const outbound_id = (server.beginOutboundRequest(state, .journal) catch
-        return error.JournalFlushFailed) orelse return error.JournalFlushFailed;
-    var awaiting = true;
-    errdefer if (awaiting) {
-        server.cancelOutboundRequest(state, outbound_id);
-        if (server.awaitOutboundResponse(state, outbound_id, .journal)) |owned| {
-            var abandoned = owned;
-            abandoned.deinit(state.alloc);
-        }
-    };
-    var params: std.Io.Writer.Allocating = .init(alloc);
-    defer params.deinit();
-    try params.writer.writeAll("{\"sessionId\":");
-    try jsonrpc.writeJsonStr(session_id, &params.writer);
-    try params.writer.writeByte('}');
-    state.writer.writeRequest(alloc, .{ .integer = @intCast(outbound_id) }, "libfx/journal_flush", params.written()) catch
-        return error.JournalFlushFailed;
-    var response = server.awaitOutboundResponse(state, outbound_id, .journal) orelse return error.JournalFlushFailed;
-    awaiting = false;
-    defer response.deinit(state.alloc);
-    if (response.cancelled) return error.Cancelled;
-    if (response.error_json != null or response.result_json == null) return error.JournalFlushFailed;
-}
-
-/// Records the libfx steers the ending turn accepted and never placed, as a
-/// user cancel leaves them, as withdrawn. The model never saw them, so the
-/// host may run them next. They are withdrawn before the turn's end, while
-/// they still belong to it. The caller holds `session_write_mutex`.
-/// `backing` owns the queued steering.
-fn handBackUnplacedSteersLocked(alloc: Allocator, backing: Allocator, session: *server.ActiveSessionState, journal: *libfx_journal.Journal) !void {
-    const ids = try session.steering.takeUnplacedInputs(backing, alloc);
-    defer {
-        for (ids) |id| alloc.free(id);
-        if (ids.len > 0) alloc.free(ids);
-    }
-    for (ids) |id| try journal.append(alloc, session.session_id, .{ .input_withdrawn = id });
-    if (ids.len > 0) debug_trace.logf("acp", "handed back unplaced libfx steers count={d}", .{ids.len});
-}
-
-/// Ends a journaled turn in the journal as it ended in the session. One that
-/// failed left no history entry, so its progress is cleared: resuming is for
-/// turns a stopped process left open. Inputs it took and never placed are
-/// settled. `session_alloc` owns the journal's state.
 /// The prompt ends once its whole tree is quiet: each report
 /// or message a subagent sends runs as the session's next turn, and a report
 /// shows on the subagent call that sent the work. A turn
@@ -3094,12 +2357,6 @@ fn runReportTurns(
                 },
             } });
         };
-        if (session.journal) |*journal| {
-            session.session_write_mutex.lockUncancelable(io_mod.getIo());
-            defer session.session_write_mutex.unlock(io_mod.getIo());
-            journal.barrier_next_progress = !journal.inputs_durable;
-            journal.nameNextTurn(null);
-        }
         if (session.v2) |v2| {
             session.session_write_mutex.lockUncancelable(io_mod.getIo());
             defer session.session_write_mutex.unlock(io_mod.getIo());
@@ -3129,9 +2386,6 @@ fn runReportTurns(
             },
             .outcome_allocator = alloc,
         }, agent_config, job) catch |err| {
-            endJournalTurn(alloc, state.alloc, session) catch |end_err| {
-                debug_trace.logf("session", "event=libfx_journal_turn_end_failed err={s} turn_err={s}", .{ @errorName(end_err), @errorName(err) });
-            };
             if (err == error.NonInteractivePermissionRequired) {
                 ctx.stop_reason = .refused;
                 return null;
@@ -3139,43 +2393,7 @@ fn runReportTurns(
             if (err == error.Cancelled and session.cancel_flag.load(.seq_cst)) return null;
             return try ctx.thrownTurnOutcome(session, err);
         };
-        try endJournalTurn(alloc, state.alloc, session);
     }
-}
-
-fn endJournalTurn(alloc: Allocator, session_alloc: Allocator, session: *server.ActiveSessionState) !void {
-    session.session_write_mutex.lockUncancelable(io_mod.getIo());
-    defer session.session_write_mutex.unlock(io_mod.getIo());
-    const journal = if (session.journal) |*value| value else return;
-    try handBackUnplacedSteersLocked(alloc, session_alloc, session, journal);
-    if (journal.progress_open) {
-        debug_trace.logf("session", "event=libfx_journal_turn_closed reason=ended_without_commit", .{});
-        try journal.clearProgress(alloc, session.session_id);
-    }
-    try journal.endUnplaced(alloc, session_alloc, session.session_id);
-    if (journal.takeCancelledProgress()) |checkpoint| {
-        var unused = checkpoint;
-        unused.deinit(session_alloc);
-    }
-}
-
-/// Commits the turn whose barrier a cancel interrupted as interrupted, from
-/// the progress that barrier held, to the session and its journal. A turn
-/// with finished steps was already committed on its way out.
-fn commitCancelledJournalTurn(alloc: Allocator, session_alloc: Allocator, session: *server.ActiveSessionState, prompt_input: *ParsedPromptInput) !void {
-    var cancelled = cancelled: {
-        session.session_write_mutex.lockUncancelable(io_mod.getIo());
-        defer session.session_write_mutex.unlock(io_mod.getIo());
-        const journal = if (session.journal) |*value| value else return;
-        var checkpoint = journal.takeCancelledProgress() orelse return;
-        if (!journal.progress_open) {
-            checkpoint.deinit(session_alloc);
-            return;
-        }
-        break :cancelled checkpoint;
-    };
-    defer cancelled.deinit(session_alloc);
-    try persistAcpHistoryTurn(alloc, session, cancelled.interruptedTurn(), prompt_input, session_alloc);
 }
 
 fn sessionChildCapability(session: *server.ActiveSessionState) ?*session_child_store.SessionChildCapability {
@@ -3183,34 +2401,17 @@ fn sessionChildCapability(session: *server.ActiveSessionState) ?*session_child_s
     return v2.childCapability() catch null;
 }
 
-/// `hand_back_alloc`, set when the running turn ends, owns its queued
-/// steering, which is handed back first.
 fn persistAcpHistoryTurn(
     alloc: Allocator,
     session: *server.ActiveSessionState,
     turn: HistoryTurn,
     current_prompt_input: ?*ParsedPromptInput,
-    hand_back_alloc: ?Allocator,
 ) !void {
     session.session_write_mutex.lockUncancelable(io_mod.getIo());
     defer session.session_write_mutex.unlock(io_mod.getIo());
     var prepared = try session.session_rt.prepareHistoryEntry(alloc, turn);
     var prepared_owned = true;
     defer if (prepared_owned) types.freeHistoryTurn(alloc, prepared);
-    if (session.journal) |*journal| {
-        // The running turn's own end hands back its unplaced steers; ending
-        // an earlier turn for a new prompt does not.
-        if (hand_back_alloc) |backing| try handBackUnplacedSteersLocked(alloc, backing, session, journal);
-        try journal.append(alloc, session.session_id, .{ .turn_committed = prepared });
-    }
-    if (comptime host_target.is_wasm) {
-        session.session_rt.commitPreparedHistoryEntry(alloc, prepared);
-        prepared_owned = false;
-        if (current_prompt_input) |prompt_input| prompt_input.retainImageSnapshots();
-        try keepImageWindow(alloc, session);
-        if (session.wasm_state != null) try sessions.commitWasmSessionLocked(alloc, session);
-        return;
-    }
     if (session.v2) |v2| {
         try v2.prepareTurn(&prepared);
         v2.commitTurn(prepared, session.session_rt.languageSnapshot()) catch |err| {
@@ -3223,20 +2424,10 @@ fn persistAcpHistoryTurn(
         if (current_prompt_input) |prompt_input| prompt_input.retainImageSnapshots();
         return;
     }
-    // No saved store: the turn lives in memory, within its image window.
+    // No saved store: the turn lives in memory.
     session.session_rt.commitPreparedHistoryEntry(alloc, prepared);
     prepared_owned = false;
     if (current_prompt_input) |prompt_input| prompt_input.retainImageSnapshots();
-    try keepImageWindow(alloc, session);
-}
-
-/// Keeps a libfx session within its image window once a turn enters its
-/// history (owned by `alloc`): its images are the newest, and older ones past
-/// the window give up their bytes. A turn that fails before it is recorded
-/// drops nothing, so a reopen keeps the same images.
-fn keepImageWindow(alloc: Allocator, session: *server.ActiveSessionState) Allocator.Error!void {
-    const journal = if (session.journal) |*value| value else return;
-    try journal.dropOutsideWindow(alloc, alloc, session.session_rt.agent.history.items);
 }
 
 fn commitContextCompaction(
@@ -3263,108 +2454,8 @@ fn commitContextCompaction(
             if (ctx.current_prompt_input) |input| input.retainImageSnapshots();
         }
     }
-    if (comptime host_target.is_wasm) {
-        if (session.wasm_state) |*base| {
-            var next = try base.dupe(ctx.alloc);
-            var next_owned = true;
-            defer if (next_owned) next.deinit(ctx.alloc);
-            const history = try session_runtime.snapshotOwnedContextHistory(ctx.alloc, prepared, 0, 0);
-            types.freeHistoryTurnSlice(ctx.alloc, next.history);
-            next.history = history;
-            const permission_state = try session.session_rt.snapshotPermissionState(ctx.alloc);
-            next.permission_state.deinit(ctx.alloc);
-            next.permission_state = permission_state;
-            next.context_history_start = 0;
-            next.conversation_language = session.session_rt.languageSnapshot();
-            next.updated_at_ms = io_mod.milliTimestamp();
-            const model = try ctx.alloc.dupe(u8, session.model);
-            ctx.alloc.free(next.preferences.model);
-            next.preferences.model = model;
-            next.preferences.provider = session.provider;
-            next.preferences.effort = session.effort;
-            next.preferences.fast_mode = session.fast_mode;
-            next.preferences.ultrafast_mode = session.ultrafast_mode;
-            const revision = try @import("../core/session/js_host_session_store.zig").commit(ctx.alloc, next, session.wasm_revision);
-            if (session.wasm_revision) |old| ctx.alloc.free(old);
-            base.deinit(ctx.alloc);
-            session.wasm_state = next;
-            session.wasm_revision = revision;
-            next_owned = false;
-            if (active_prefix != null) {
-                if (ctx.current_prompt_input) |input| input.retainImageSnapshots();
-            }
-        }
-    }
-    if (session.journal) |*journal| try journal.append(ctx.alloc, session.session_id, .{ .history_replaced = prepared });
     session.session_rt.commitCompactedHistory(ctx.alloc, prepared);
     prepared_owned = false;
-}
-
-/// `recovery_checkpoint.set` for a journaled libfx session: the open turn
-/// so far reaches the host before each model request.
-/// The first progress of a turn is a barrier: it holds the prompt, or a
-/// resumed turn's answers for calls a crash left running.
-///
-/// When the host gave the turn a time to stop at and it has passed, the
-/// progress before a model request is where the turn yields: the journal
-/// records the yield, the host stores both, and the request never goes out.
-fn setJournalProgress(raw_ctx: *anyopaque, checkpoint: session_codec.RecoveryCheckpoint) !void {
-    const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
-    const session = if (ctx.state.active_session) |*value| value else return error.SessionPersistenceUnavailable;
-    var yields = false;
-    const barrier = barrier: {
-        session.session_write_mutex.lockUncancelable(io_mod.getIo());
-        defer session.session_write_mutex.unlock(io_mod.getIo());
-        const journal = if (session.journal) |*value| value else return error.SessionPersistenceUnavailable;
-        try journal.appendProgress(ctx.alloc, ctx.state.alloc, session.session_id, checkpoint, session.model);
-        // Only the progress right before a request can yield; a compaction
-        // or a paused retry finishes where it is.
-        if (checkpoint.outstanding_reservation and checkpoint.cause != .compaction_prepared and
-            journal.yieldsAt(io_mod.milliTimestamp()))
-        {
-            try journal.appendMarked(ctx.alloc, session.session_id, .turn_yielded, true);
-            yields = true;
-        }
-        const barrier = journal.barrier_next_progress or yields;
-        journal.barrier_next_progress = false;
-        break :barrier barrier;
-    };
-    if (barrier) flushJournal(ctx.state, ctx.alloc, session.session_id) catch |err| {
-        // The turn commits from this progress as interrupted.
-        if (err == error.Cancelled) try keepCancelledProgress(ctx.state.alloc, session, checkpoint);
-        return err;
-    };
-    if (!yields) return;
-    {
-        session.session_write_mutex.lockUncancelable(io_mod.getIo());
-        defer session.session_write_mutex.unlock(io_mod.getIo());
-        const journal = if (session.journal) |*value| value else return error.SessionPersistenceUnavailable;
-        try journal.keepYielded(ctx.state.alloc, checkpoint);
-    }
-    debug_trace.logf("session", "event=libfx_journal_turn_yielded session={s}", .{session.session_id});
-    return error.TurnYielded;
-}
-
-fn keepCancelledProgress(session_alloc: Allocator, session: *server.ActiveSessionState, checkpoint: session_codec.RecoveryCheckpoint) !void {
-    var owned = try checkpoint.dupe(session_alloc);
-    errdefer owned.deinit(session_alloc);
-    session.session_write_mutex.lockUncancelable(io_mod.getIo());
-    defer session.session_write_mutex.unlock(io_mod.getIo());
-    const journal = if (session.journal) |*value| value else return error.SessionPersistenceUnavailable;
-    if (journal.cancelled_progress) |*old| old.deinit(session_alloc);
-    journal.cancelled_progress = owned;
-}
-
-fn clearJournalProgress(raw_ctx: *anyopaque) !void {
-    const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
-    const session = if (ctx.state.active_session) |*value| value else return error.SessionPersistenceUnavailable;
-    session.session_write_mutex.lockUncancelable(io_mod.getIo());
-    defer session.session_write_mutex.unlock(io_mod.getIo());
-    const journal = if (session.journal) |*value| value else return error.SessionPersistenceUnavailable;
-    // The turn ends here, cancelled or stopped: the steers it never placed
-    // are withdrawn while they still belong to it, before the clear ends it.
-    try handBackUnplacedSteersLocked(ctx.alloc, ctx.state.alloc, session, journal);
-    try journal.clearProgress(ctx.alloc, session.session_id);
 }
 
 /// Stores grants on the active ACP session without persisting them.
@@ -3380,14 +2471,6 @@ fn pushEvent(raw_ctx: *anyopaque, event: worker_runtime.WorkerEvent) !void {
     const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
     switch (event) {
         .clear_route_recovery_status => try ctx.clearModelRecoveryStatus(),
-        // A libfx steer cuts a streaming reply short, as in the lia CLI, but
-        // waits once the model streams a tool call's arguments.
-        .turn_phase_update => |update| if (ctx.state.cfg.minimal_kernel) {
-            server.noteSteeringPhase(ctx.state, update.step_id, switch (update.phase) {
-                .thinking, .generating => .reply,
-                .running, .waiting_for_subagent => .tools,
-            });
-        },
         else => {},
     }
     worker_runtime.freeWorkerEvent(std.heap.c_allocator, event);
@@ -3443,8 +2526,6 @@ fn pushToolLifecycle(raw_ctx: *anyopaque, event: types.ToolLifecycleEvent) !void
     const ctx: *AcpContext = @ptrCast(@alignCast(raw_ctx));
     switch (event) {
         .provisional => |provisional| {
-            // A tool call the model announced is no reply a steer cuts short.
-            if (ctx.state.cfg.minimal_kernel) server.noteSteeringToolsPhase(ctx.state);
             const tool_name = provisional.tool_name orelse return;
             if (!tool_presentation.isProviderSearchAlias(tool_name)) return;
             var arena_state = std.heap.ArenaAllocator.init(ctx.alloc);
@@ -3457,7 +2538,6 @@ fn pushToolLifecycle(raw_ctx: *anyopaque, event: types.ToolLifecycleEvent) !void
             });
         },
         .authoritative_started => |started| {
-            if (ctx.state.cfg.minimal_kernel) server.noteSteeringTool(ctx.state, started.id.call_id, true);
             var arena_state = std.heap.ArenaAllocator.init(ctx.alloc);
             defer arena_state.deinit();
             _ = try ctx.sendToolCallPending(arena_state.allocator(), .{
@@ -3468,8 +2548,7 @@ fn pushToolLifecycle(raw_ctx: *anyopaque, event: types.ToolLifecycleEvent) !void
             });
         },
         .terminal => |terminal| {
-            if (ctx.state.cfg.minimal_kernel) server.noteSteeringTool(ctx.state, terminal.id.call_id, false);
-            try ctx.sendProviderTerminal(terminal.id.call_id, terminal.outcome, terminal.result);
+            try ctx.sendProviderTerminal(terminal.id.call_id, terminal.outcome);
         },
         .progress, .turn_finished => {},
     }
@@ -4108,36 +3187,12 @@ test "parsePromptInput accepts explicit recovery continuation metadata" {
     defer result.deinit(alloc);
     try std.testing.expectEqual(@as(usize, 0), result.text.len);
     try std.testing.expect(result.continue_recovery);
-    try std.testing.expect(!result.fresh_output);
-    try std.testing.expectEqual(@as(usize, 0), result.rerun_call_ids.len);
-}
-
-test "parsePromptInput reads whether a resume's host holds the turn's earlier output" {
-    const alloc = std.testing.allocator;
-    const params =
-        "{\"sessionId\":\"s1\",\"prompt\":[],\"_meta\":{\"lia\":{\"continueRecovery\":true,\"freshOutput\":true}}}";
-    var result = try parsePromptInput(alloc, params);
-    defer result.deinit(alloc);
-    try std.testing.expect(result.continue_recovery);
-    try std.testing.expect(result.fresh_output);
-}
-
-test "parsePromptInput keeps the call ids a resume runs again and drops the rest" {
-    const alloc = std.testing.allocator;
-    const params =
-        "{\"sessionId\":\"s1\",\"prompt\":[],\"_meta\":{\"lia\":{\"continueRecovery\":true,\"rerun\":[\"call-1\",7,\"\",\"call-2\"]}}}";
-    var result = try parsePromptInput(alloc, params);
-    defer result.deinit(alloc);
-    try std.testing.expect(result.continue_recovery);
-    try std.testing.expectEqual(@as(usize, 2), result.rerun_call_ids.len);
-    try std.testing.expectEqualStrings("call-1", result.rerun_call_ids[0]);
-    try std.testing.expectEqualStrings("call-2", result.rerun_call_ids[1]);
 }
 
 test "parsePromptInput accepts image blocks as owned pending images" {
     const alloc = std.testing.allocator;
     const params = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"text\",\"text\":\"Only text\"},{\"type\":\"image\",\"data\":\"aGVsbG8=\",\"mimeType\":\"image/png\"}]}";
-    var parsed = try parsePromptInputWithFirstImageId(alloc, params, 7, null);
+    var parsed = try parsePromptInputWithFirstImageId(alloc, params, 7);
     defer parsed.deinit(alloc);
 
     try std.testing.expectEqualStrings("Only text\n[Image #7]", parsed.text);
@@ -4145,40 +3200,6 @@ test "parsePromptInput accepts image blocks as owned pending images" {
     try std.testing.expectEqual(@as(usize, 7), parsed.pending_images[0].id);
     try std.testing.expectEqualStrings("hello", parsed.pending_images[0].bytes);
     try std.testing.expectEqualStrings("image/png", parsed.pending_images[0].media_type);
-}
-
-test "captureImagesInline retains validated bytes on the attachment" {
-    const alloc = std.testing.allocator;
-    const png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR42mNkAAAAAgAB4iG8MwAAAABJRU5ErkJggg==";
-    const params = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"text\",\"text\":\"describe\"},{\"type\":\"image\",\"data\":\"" ++ png_b64 ++ "\",\"mimeType\":\"image/png\"}]}";
-    var parsed = try parsePromptInputWithFirstImageId(alloc, params, 4, null);
-    defer parsed.deinit(alloc);
-
-    try parsed.captureImagesInline(alloc);
-    try std.testing.expectEqual(@as(usize, 1), parsed.images.len);
-    const image = parsed.images[0];
-    try std.testing.expectEqual(@as(usize, 4), image.id);
-    try std.testing.expectEqualStrings("image/png", image.media_type);
-    try std.testing.expect(image.inline_data != null);
-    try std.testing.expect(image.snapshot_path == null);
-    var verified = try image_attachments.loadVerifiedSnapshot(alloc, image, .{});
-    defer verified.deinit(alloc);
-    const expected = try alloc.alloc(u8, try std.base64.standard.Decoder.calcSizeForSlice(png_b64));
-    defer alloc.free(expected);
-    try std.base64.standard.Decoder.decode(expected, png_b64);
-    try std.testing.expectEqualStrings(expected, verified.bytes);
-
-    parsed.retainImageSnapshots();
-}
-
-test "captureImagesInline rejects a declared media type that contradicts the bytes" {
-    const alloc = std.testing.allocator;
-    const png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR42mNkAAAAAgAB4iG8MwAAAABJRU5ErkJggg==";
-    const params = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"image\",\"data\":\"" ++ png_b64 ++ "\",\"mimeType\":\"image/jpeg\"}]}";
-    var parsed = try parsePromptInput(alloc, params);
-    defer parsed.deinit(alloc);
-    try std.testing.expectError(error.ImageSnapshotMediaTypeMismatch, parsed.captureImagesInline(alloc));
-    try std.testing.expectEqual(@as(usize, 0), parsed.images.len);
 }
 
 test "prompt image decoding uses only decoded storage" {
@@ -4219,92 +3240,6 @@ test "parsePromptInput rejects empty image data" {
     const alloc = std.testing.allocator;
     const params = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"image\",\"data\":\"\",\"mimeType\":\"image/png\"}]}";
     try std.testing.expectError(error.InvalidPromptImage, parsePromptInput(alloc, params));
-}
-
-const TestAttachmentStore = struct {
-    id: host_attachments.Id,
-    bytes: ?[]const u8,
-    too_large: bool = false,
-    taken: usize = 0,
-
-    fn store(self: *TestAttachmentStore) host_attachments.Store {
-        return .{ .context = self, .take_fn = take, .put_fn = put };
-    }
-
-    fn take(
-        raw: ?*anyopaque,
-        alloc: Allocator,
-        id: host_attachments.Id,
-        max_bytes: usize,
-    ) host_attachments.TakeError![]u8 {
-        const self: *TestAttachmentStore = @ptrCast(@alignCast(raw.?));
-        if (id != self.id) return error.AttachmentUnavailable;
-        const bytes = self.bytes orelse return error.AttachmentUnavailable;
-        self.bytes = null;
-        self.taken += 1;
-        if (self.too_large or bytes.len > max_bytes) return error.AttachmentTooLarge;
-        return alloc.dupe(u8, bytes);
-    }
-
-    fn put(_: ?*anyopaque, _: []const u8) host_attachments.PutError!host_attachments.Id {
-        return error.AttachmentStoreFull;
-    }
-};
-
-test "parsePromptInput takes raw image bytes from a host attachment" {
-    const alloc = std.testing.allocator;
-    const cases = [_][]const u8{
-        "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"text\",\"text\":\"look\"},{\"type\":\"image\",\"mimeType\":\"image/png\",\"_meta\":{\"lia\":{\"attachment\":3}}}]}",
-        "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"text\",\"text\":\"look\"},{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"host:raw\",\"_meta\":{\"lia\":{\"attachment\":3}}}]}",
-    };
-    for (cases, 0..) |params, index| {
-        var attachments = TestAttachmentStore{ .id = 3, .bytes = "\x89PNG\r\n\x1a\nraw" };
-        var parsed = try parsePromptInputWithFirstImageId(alloc, params, 2, attachments.store());
-        defer parsed.deinit(alloc);
-
-        try std.testing.expectEqualStrings("look\n[Image #2]", parsed.text);
-        try std.testing.expectEqual(@as(usize, 1), parsed.pending_images.len);
-        try std.testing.expectEqual(@as(usize, 2), parsed.pending_images[0].id);
-        try std.testing.expectEqualStrings("\x89PNG\r\n\x1a\nraw", parsed.pending_images[0].bytes);
-        try std.testing.expectEqualStrings("image/png", parsed.pending_images[0].media_type);
-        if (index == 0) {
-            try std.testing.expect(parsed.pending_images[0].source_ref == null);
-        } else {
-            try std.testing.expectEqualStrings("host:raw", parsed.pending_images[0].source_ref.?);
-        }
-        try std.testing.expectEqual(@as(usize, 1), attachments.taken);
-    }
-}
-
-test "parsePromptInput rejects unusable image attachment references" {
-    const alloc = std.testing.allocator;
-    const reference = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"host:original\",\"_meta\":{\"lia\":{\"attachment\":3}}}]}";
-
-    // Standard ACP hosts have no attachment store.
-    try std.testing.expectError(error.UnsupportedPromptImage, parsePromptInput(alloc, reference));
-
-    var missing = TestAttachmentStore{ .id = 4, .bytes = "x" };
-    try std.testing.expectError(error.InvalidPromptImage, parsePromptInputWithFirstImageId(alloc, reference, 1, missing.store()));
-
-    var empty = TestAttachmentStore{ .id = 3, .bytes = "" };
-    try std.testing.expectError(error.InvalidPromptImage, parsePromptInputWithFirstImageId(alloc, reference, 1, empty.store()));
-
-    var oversized = TestAttachmentStore{ .id = 3, .bytes = "x", .too_large = true };
-    try std.testing.expectError(error.ImageTooLarge, parsePromptInputWithFirstImageId(alloc, reference, 1, oversized.store()));
-
-    const zero_id = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"_meta\":{\"lia\":{\"attachment\":0}}}]}";
-    var unused = TestAttachmentStore{ .id = 0, .bytes = "x" };
-    try std.testing.expectError(error.InvalidPromptImage, parsePromptInputWithFirstImageId(alloc, zero_id, 1, unused.store()));
-    try std.testing.expectEqual(@as(usize, 0), unused.taken);
-
-    const ambiguous = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"host:original\",\"data\":\"aGVsbG8=\",\"_meta\":{\"lia\":{\"attachment\":3}}}]}";
-    var stored = TestAttachmentStore{ .id = 3, .bytes = "x" };
-    try std.testing.expectError(error.InvalidPromptImage, parsePromptInputWithFirstImageId(alloc, ambiguous, 1, stored.store()));
-    try std.testing.expectEqual(@as(usize, 0), stored.taken);
-
-    const invalid_ref = "{\"sessionId\":\"s1\",\"prompt\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"sourceRef\":\"bad\\nref\",\"_meta\":{\"lia\":{\"attachment\":3}}}]}";
-    try std.testing.expectError(error.InvalidPromptImage, parsePromptInputWithFirstImageId(alloc, invalid_ref, 1, stored.store()));
-    try std.testing.expectEqual(@as(usize, 0), stored.taken);
 }
 
 test "parsePromptInput preserves resource text and accepts only local absolute file targets" {

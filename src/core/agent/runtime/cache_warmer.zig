@@ -89,8 +89,8 @@ const Snapshot = struct {
     }
 };
 
-/// Pings run on the warmer's own concurrent task, so a build without threads,
-/// such as libfx's WebAssembly core, keeps nothing warm.
+/// Pings run on the warmer's own concurrent task, so a build without threads
+/// keeps nothing warm.
 const threads = !builtin.single_threaded;
 
 /// The longest a ping may take before it counts as failed. A ping reads a

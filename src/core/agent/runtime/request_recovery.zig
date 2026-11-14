@@ -384,10 +384,9 @@ pub const RequestRecovery = struct {
     /// - TUI (`app_callbacks.agentPushRouteRecoveryStatus`): copies the event
     ///   with `std.heap.c_allocator` and queues it under `worker_mutex`.
     /// - ACP (`AcpContext.sendModelRecoveryStatus`): formats into a local
-    ///   writer and writes one frame under `jsonrpc.Writer.mutex`; libfx's
-    ///   writer callback queues under its own mutex. The allocator is the
-    ///   server loop's (`processAllocator()` for `lia acp`, `c_allocator` for
-    ///   libfx, and `state.alloc` for subagent children), never an arena, and
+    ///   writer and writes one frame under `jsonrpc.Writer.mutex`. The
+    ///   allocator is the server loop's (`processAllocator()` for `lia acp`
+    ///   and `state.alloc` for subagent children), never an arena, and
     ///   the loop thread already shares it with the prompt thread.
     /// - `lia ask` (`pushRouteRecoveryStatus`): writes only its two recovery
     ///   fields. During a send their only other writer is the clear from

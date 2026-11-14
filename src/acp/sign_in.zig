@@ -12,7 +12,6 @@ const login_flow = @import("../core/auth/login_flow.zig");
 const oauth_session = @import("../core/auth/oauth_session.zig");
 const config_runtime = @import("../core/config/config_runtime.zig");
 const provider_activation = @import("../core/cli/provider_activation.zig");
-const host_target = @import("../core/hosts/target.zig");
 const debug_trace = @import("../core/shared/debug_trace.zig");
 const io_mod = @import("../core/shared/io.zig");
 const types = @import("../core/shared/types.zig");
@@ -356,7 +355,6 @@ fn start(state: *ServerState, id: ?jsonrpc.RequestId) !void {
 /// saved sign-in becomes this connection's Gateway credential, adopted as
 /// `refreshPendingAuth` allows while a turn runs.
 pub fn reap(state: *ServerState, wait: bool) void {
-    if (comptime host_target.is_wasm) return;
     const job = state.sign_in orelse return;
     if (!wait and !job.finished.load(.seq_cst)) return;
     job.thread.join();
@@ -404,7 +402,6 @@ pub const SessionModel = struct {
 /// switched the profile since the last session, its folder is this one, the
 /// model is fixed for the process, or the pick is the current model.
 pub fn modelForSession(state: *const ServerState, workspace_root: []const u8) ?SessionModel {
-    if (comptime host_target.is_wasm) return null;
     const switched_root = state.sign_in_root orelse return null;
     if (std.mem.eql(u8, switched_root, workspace_root)) return null;
     if (state.provider != .gateway or state.process_model_override) return null;
@@ -442,7 +439,6 @@ pub fn sessionActivated(state: *ServerState, picked: ?SessionModel) void {
 /// Stops the sign-in that would answer `requested` and answers that request
 /// as cancelled at once. False when no sign-in answers that request.
 pub fn cancelRequest(state: *ServerState, requested: jsonrpc.RequestId) bool {
-    if (comptime host_target.is_wasm) return false;
     const job = state.sign_in orelse return false;
     job.mutex.lockUncancelable(io_mod.getIo());
     const waiting = job.waiting;
@@ -465,7 +461,6 @@ pub fn cancelRequest(state: *ServerState, requested: jsonrpc.RequestId) bool {
 /// its worker. A waiting `authenticate` is answered as cancelled, or `{}`
 /// when the approval was already saved, while the channel still takes it.
 pub fn stop(state: *ServerState) void {
-    if (comptime host_target.is_wasm) return;
     const job = state.sign_in orelse return;
     job.stop.store(true, .seq_cst);
     job.thread.join();
@@ -490,7 +485,6 @@ fn writeCancelled(state: *ServerState, alloc: Allocator, id: jsonrpc.RequestId) 
 
 /// Why this machine cannot save a `lia login` sign-in, or null when it can.
 pub fn signInBlock() ?acp_types.SignInBlock {
-    if (comptime host_target.is_wasm) return null;
     oauth_session.requireSignInStorage() catch {
         const home = io_mod.homeDir() orelse return .home_unavailable;
         var home_dir = std.Io.Dir.openDirAbsolute(io_mod.getIo(), home, .{}) catch return .home_unavailable;

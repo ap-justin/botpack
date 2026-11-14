@@ -16,11 +16,6 @@ const pathing = @import("../workspace/pathing.zig");
 const text_utils = @import("../shared/text_utils.zig");
 
 pub const max_image_bytes: usize = 20 * 1024 * 1024;
-/// The most images, and image bytes together, one libfx prompt holds: the
-/// limits `sdk/lia-sdk.js` takes a prompt within (`maxPromptImages` and
-/// `maxPromptImagesBytes`), which the core holds a prompt to as well.
-pub const max_libfx_prompt_images: usize = 8;
-pub const max_libfx_prompt_images_bytes: usize = 6 * 1024 * 1024;
 const max_encoded_image_bytes: usize = 5 * 1024 * 1024;
 pub const image_too_large_notice = "image exceeds the 20 MiB limit";
 pub const image_preparation_failed_notice = "Unable to prepare this image for upload. Use a smaller image.";

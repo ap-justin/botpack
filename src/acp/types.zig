@@ -36,12 +36,6 @@ pub fn liaMetaBool(object: std.json.ObjectMap, key: []const u8) ?bool {
     return if (value == .bool) value.bool else null;
 }
 
-/// Returns `_meta.lia.<key>` when it is a JSON integer.
-pub fn liaMetaInteger(object: std.json.ObjectMap, key: []const u8) ?i64 {
-    const value = liaMetaField(object, key) orelse return null;
-    return if (value == .integer) value.integer else null;
-}
-
 const model_recovery_update_prefix = "{\"sessionUpdate\":\"session_info_update\",\"_meta\":{\"lia\":{\"modelResponseRecovery\":";
 
 /// What a session load reports for a request an earlier lia process was
@@ -471,14 +465,12 @@ pub fn writeSteeringPromptResponse(w: *std.Io.Writer, reason: StopReason, delive
     try w.writeAll("}}}");
 }
 
-/// Replays delivered steering where the agent inserted it into the turn. A
-/// libfx steer carries the input id its host gave it.
+/// Replays delivered steering where the agent inserted it into the turn.
 pub fn writeSteeringUserMessageChunk(
     w: *std.Io.Writer,
     message_id: []const u8,
     text: []const u8,
     request_id: ?jsonrpc.RequestId,
-    input_id: ?[]const u8,
 ) !void {
     try w.writeAll("{\"sessionUpdate\":\"user_message_chunk\",\"messageId\":");
     try writeJsonStr(message_id, w);
@@ -486,25 +478,15 @@ pub fn writeSteeringUserMessageChunk(
     try writeJsonStr(text, w);
     try w.writeAll("},\"_meta\":{\"lia\":{\"steering\":{\"requestId\":");
     try jsonrpc.Writer.writeId(w, request_id);
-    if (input_id) |id| {
-        try w.writeAll(",\"inputId\":");
-        try writeJsonStr(id, w);
-    }
     try w.writeAll("}}}}");
 }
 
-test "steering replay carries a libfx input id only when it has one" {
+test "steering replay carries the request id of its prompt" {
     var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
     defer out.deinit();
-    try writeSteeringUserMessageChunk(&out.writer, "m1", "use tabs", .{ .integer = 4 }, null);
+    try writeSteeringUserMessageChunk(&out.writer, "m1", "use tabs", .{ .integer = 4 });
     try std.testing.expectEqualStrings(
         "{\"sessionUpdate\":\"user_message_chunk\",\"messageId\":\"m1\",\"content\":{\"type\":\"text\",\"text\":\"use tabs\"},\"_meta\":{\"lia\":{\"steering\":{\"requestId\":4}}}}",
-        out.written(),
-    );
-    out.clearRetainingCapacity();
-    try writeSteeringUserMessageChunk(&out.writer, "m2", "be brief", null, "s1");
-    try std.testing.expectEqualStrings(
-        "{\"sessionUpdate\":\"user_message_chunk\",\"messageId\":\"m2\",\"content\":{\"type\":\"text\",\"text\":\"be brief\"},\"_meta\":{\"lia\":{\"steering\":{\"requestId\":null,\"inputId\":\"s1\"}}}}",
         out.written(),
     );
 }
