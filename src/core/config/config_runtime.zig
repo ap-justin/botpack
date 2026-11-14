@@ -749,6 +749,9 @@ fn parseProviderOrderListInner(alloc: Allocator, raw: []const u8) !?[][]const u8
         if (slug.len == 0) continue;
         if (!settings_store.validateProviderSlug(slug)) return error.InvalidProviderSlug;
         if (slugs.items.len >= settings_store.max_provider_order_entries) return error.TooManyProviderSlugs;
+        if (std.mem.eql(u8, slug, settings_store.auto_provider_order) and
+            (slugs.items.len > 0 or tokenizer.rest().len > 0)) return error.InvalidProviderSlug;
+        if (slugs.items.len == 1 and std.mem.eql(u8, slugs.items[0], settings_store.auto_provider_order)) return error.InvalidProviderSlug;
         for (slugs.items) |existing| {
             if (std.mem.eql(u8, existing, slug)) return error.DuplicateProviderSlug;
         }
@@ -1899,9 +1902,16 @@ fn pathHasDotDotComponent(path: []const u8) bool {
 }
 
 fn parseProjectSafeFields(settings: *Settings, alloc: Allocator, root: std.json.Value) !void {
-    if (root.object.get("provider_order")) |order_value| {
-        if (order_value != .array) return error.InvalidProviderOrderType;
-        const items = order_value.array.items;
+    if (root.object.get("provider_order")) |written_order| {
+        // The string `auto` is the one-slug list `["auto"]`.
+        const auto_list = [_]std.json.Value{.{ .string = settings_store.auto_provider_order }};
+        const items: []const std.json.Value = if (written_order == .string and
+            std.mem.eql(u8, written_order.string, settings_store.auto_provider_order))
+            &auto_list
+        else if (written_order == .array)
+            written_order.array.items
+        else
+            return error.InvalidProviderOrderType;
         // An empty array explicitly clears an inherited routing list.
         if (items.len > settings_store.max_provider_order_entries) {
             return error.InvalidProviderOrderValue;
@@ -1912,6 +1922,9 @@ fn parseProjectSafeFields(settings: *Settings, alloc: Allocator, root: std.json.
         errdefer for (order[0..filled]) |slug| alloc.free(@constCast(slug));
         for (items, 0..) |item, index| {
             if (item != .string or !settings_store.validateProviderSlug(item.string)) {
+                return error.InvalidProviderOrderValue;
+            }
+            if (items.len > 1 and std.mem.eql(u8, item.string, settings_store.auto_provider_order)) {
                 return error.InvalidProviderOrderValue;
             }
             for (items[0..index]) |previous| {
@@ -2436,6 +2449,38 @@ test "provider routing project defaults apply when profile is silent" {
     try std.testing.expectEqualStrings("azure", order[0]);
     try std.testing.expectEqualStrings("openai", order[1]);
     try std.testing.expectEqual(true, settings.provider_strict.?);
+}
+
+test "provider_order auto reads as the string or a one-slug list, and cannot mix with other slugs" {
+    const alloc = std.testing.allocator;
+    for ([_][]const u8{ "\"auto\"", "[\"auto\"]" }) |written| {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        try tmp.dir.createDirPath(io_mod.getIo(), "home/.lia");
+        try tmp.dir.createDirPath(io_mod.getIo(), "workspace");
+        const home_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "home");
+        defer alloc.free(home_root);
+        const workspace_root = try io_mod.dirRealpathAlloc(alloc, tmp.dir, "workspace");
+        defer alloc.free(workspace_root);
+        const text = try alloc.print("{{\"provider_order\":{s}}}", .{written});
+        defer alloc.free(text);
+        try writeFixtureFile(tmp.dir, "home/.lia/settings.json", text);
+
+        var settings = try loadMergedSettingsFromHome(alloc, home_root, workspace_root);
+        defer settings.deinit(alloc);
+        try std.testing.expect(settings_store.isAutoProviderOrder(settings.provider_order.?));
+    }
+
+    var mixed = try std.json.parseFromSlice(std.json.Value, alloc, "{\"provider_order\":[\"auto\",\"azure\"]}", .{});
+    defer mixed.deinit();
+    var settings: Settings = .{};
+    defer settings.deinit(alloc);
+    try std.testing.expectError(error.InvalidProviderOrderValue, parseProjectSafeFields(&settings, alloc, mixed.value));
+    try std.testing.expect(parseProviderOrderList(alloc, "auto,azure") == .invalid);
+    try std.testing.expect(parseProviderOrderList(alloc, "azure,auto") == .invalid);
+    const only_auto = parseProviderOrderList(alloc, "auto");
+    defer alloc.free(only_auto.ok.?);
+    defer for (only_auto.ok.?) |slug| alloc.free(@constCast(slug));
 }
 
 test "provider routing empty list clears an inherited order" {
@@ -4671,6 +4716,7 @@ test "the settings list gives the types, values, and bounds the settings parser 
                 .string => try alloc.print("\"{s}\"", .{if (key.values.len > 0) key.values[0] else "dark"}),
                 .string_or_null => try alloc.dupe(u8, "\"auto\""),
                 .strings => try alloc.dupe(u8, "[]"),
+                .strings_or_auto => try alloc.dupe(u8, "\"auto\""),
                 .switches => try alloc.print("{{\"{s}\": true}}", .{key.children[0]}),
                 else => try alloc.dupe(u8, "{}"),
             };

@@ -42,6 +42,8 @@ test "an Anthropic model defaults to Anthropic unless the user routes" {
     try std.testing.expect(defaultProviderOrder("anthropic/claude-sonnet-5.5", .{ .prompt_caching = true, .provider_order = &.{"bedrock"} }) == null);
     try std.testing.expect(defaultProviderOrder("anthropic/claude-sonnet-5.5", .{ .prompt_caching = true, .provider_strict = true }) == null);
     try std.testing.expect(defaultProviderOrder("anthropic/claude-sonnet-5.5", .{ .prompt_caching = true, .ultrafast = true }) == null);
+    // `auto` opts out of the default.
+    try std.testing.expect(defaultProviderOrder("anthropic/claude-sonnet-5.5", .{ .prompt_caching = true, .provider_order = &.{"auto"} }) == null);
     const cached: model_capabilities.ResolvedProviderOptions = .{ .prompt_caching = true };
     try std.testing.expect(defaultProviderOrder("openai/gpt-6.1-sol", cached) == null);
     try std.testing.expect(defaultProviderOrder("bedrock/anthropic.claude", cached) == null);

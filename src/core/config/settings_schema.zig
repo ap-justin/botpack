@@ -112,6 +112,25 @@ fn writeKey(jw: *std.json.Stringify, key: settings_keys.Key) !void {
                 try jw.write(max_items);
             }
         },
+        .strings_or_auto => {
+            try jw.objectField("oneOf");
+            try jw.beginArray();
+            try jw.beginObject();
+            try field(jw, "type", "array");
+            try jw.objectField("items");
+            try jw.beginObject();
+            try field(jw, "type", "string");
+            try jw.endObject();
+            if (key.max_items) |max_items| {
+                try jw.objectField("maxItems");
+                try jw.write(max_items);
+            }
+            try jw.endObject();
+            try jw.beginObject();
+            try field(jw, "const", "auto");
+            try jw.endObject();
+            try jw.endArray();
+        },
         .string_map => {
             try field(jw, "type", "object");
             try jw.objectField("additionalProperties");
