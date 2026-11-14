@@ -38,7 +38,7 @@ export function hashFile(path: string): string {
 }
 
 /// A minimal environment for a lia process under test: no inherited
-/// credentials, sound, keychain, upgrade check, or dotenv.
+/// credentials, sound, keychain, or dotenv.
 export function testEnvironment(values: Record<string, string>, inherited = process.env): Record<string, string> {
   const result: Record<string, string> = {};
   for (const key of ["PATH", "TERM", "COLORTERM", "LANG", "LC_ALL", "TMPDIR"]) {

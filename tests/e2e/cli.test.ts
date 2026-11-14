@@ -928,6 +928,10 @@ describe("cli: status", () => {
         expect(schema.properties.permission_mode.enum).toEqual(["ask", "auto", "full-access", "yolo"]);
         expect(schema.properties.auto_compact_percent).toMatchObject({ type: "integer", minimum: 10, maximum: 80 });
         expect(schema.properties.statusLine.deprecated).toBe(true);
+        expect(schema.properties.provider_order.oneOf).toEqual([
+          { type: "array", items: { type: "string" }, maxItems: 8 },
+          { const: "auto" },
+        ]);
         expect(schema.properties.workspaces.additionalProperties).toEqual({ $ref: "#/$defs/workspace" });
         expect(schema.properties.additional_directories).toBeUndefined();
         expect(schema.$defs.workspace.properties.additional_directories.type).toBe("array");
@@ -937,6 +941,7 @@ describe("cli: status", () => {
         expect(project.code).toBe(0);
         const projectSchema = JSON.parse(project.stdout);
         expect(projectSchema.$id).toBeUndefined();
+        expect(projectSchema.properties.provider_order.oneOf).toEqual(schema.properties.provider_order.oneOf);
         expect(Object.keys(projectSchema.properties)).toEqual([
           "$schema",
           "context",
@@ -950,6 +955,50 @@ describe("cli: status", () => {
         expect(misplaced.code).toBe(2);
         expect(misplaced.stdout).toBe("");
         expect(misplaced.stderr).toContain("usage: lia config [list|get <key>|set <key> <value>|unset <key>|schema [--project]]");
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "provider_order auto is a settings.json string, mixing auto with slugs is rejected",
+    async () => {
+      const home = realpathSync(mkdtempSync(join(tmpdir(), "lia-e2e-provider-order-auto-")));
+      try {
+        mkdirSync(join(home, ".lia"), { recursive: true });
+        const settingsPath = join(home, ".lia", "settings.json");
+        const env = { ...NO_GATEWAY_AUTH, ...NO_SETTING_ENV, HOME: home, LIA_DISABLE_KEYCHAIN: "1" };
+
+        writeFileSync(settingsPath, '{"provider_order":"auto"}\n', { mode: 0o600 });
+        const list = await runLia(["config", "list", "--show-origin"], { env });
+        expect(list.code).toBe(0);
+        expect(list.stdout).toContain("file:~/.lia/settings.json\tprovider_order=auto\n");
+
+        // lia config never writes provider_order, auto included.
+        const set = await runLia(["config", "set", "provider_order", "auto"], { env });
+        expect([set.code, set.stdout]).toEqual([2, ""]);
+        expect(set.stderr).toBe(
+          "lia config: can't change provider_order with lia config; use --provider-order for one run, or edit ~/.lia/settings.json\n",
+        );
+        expect(readFileSync(settingsPath, "utf8")).toBe('{"provider_order":"auto"}\n');
+
+        // Any other bare string, and auto inside a list, make the file malformed.
+        for (const bad of ['"azure"', '["auto","azure"]']) {
+          writeFileSync(settingsPath, `{"provider_order":${bad}}\n`, { mode: 0o600 });
+          const get = await runLia(["config", "get", "provider_order"], { env });
+          expect([get.code, get.stdout, get.stderr]).toEqual([1, "", "lia: config user: malformed_settings\n"]);
+        }
+
+        // --provider-order takes auto alone; the mixed form fails in flag parsing.
+        const mixed = await runLia(["ask", "--provider-order", "auto,azure", "hi"], { env });
+        expect([mixed.code, mixed.stdout]).toEqual([2, ""]);
+        expect(mixed.stderr).toStartWith("lia ask: invalid value for --provider-order: auto,azure\nusage: lia ask");
+        writeFileSync(settingsPath, "{}\n", { mode: 0o600 });
+        const alone = await runLia(["ask", "--provider-order", "auto", "hi"], { env });
+        expect(alone.stderr).not.toContain("invalid value for --provider-order");
+        expect(alone.stderr).toContain("lia needs access to Vercel AI Gateway");
       } finally {
         rmSync(home, { recursive: true, force: true });
       }
@@ -2495,6 +2544,62 @@ describe("cli: logout", () => {
         const again = await runLia(["logout"], { env });
         expect(again.stdout).toBe("No lia login session found.\n");
       } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "lia logout fails when leftover ChatGPT and Grok sign-in tokens cannot be deleted",
+    async () => {
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-legacy-failure-"));
+      const root = join(realpathSync(home), ".lia");
+      try {
+        mkdirSync(root, { recursive: true });
+        // A directory in a token's place cannot be deleted as a file.
+        mkdirSync(join(root, "chatgpt-auth.json", "inner"), { recursive: true });
+        writeFileSync(join(root, "grok-auth.json"), "{}");
+        const env = { HOME: realpathSync(home), LIA_DISABLE_KEYCHAIN: "1" };
+        const logout = await runLia(["logout"], { env });
+
+        expect(logout.code).toBe(1);
+        // The token that could be deleted is still reported.
+        expect(logout.stdout).toBe("Removed saved ChatGPT and Grok sign-in tokens left by an older install.\n");
+        expect(logout.stderr).toBe("lia logout: failed to remove leftover ChatGPT and Grok sign-in tokens\n");
+        expect(existsSync(join(root, "chatgpt-auth.json"))).toBe(true);
+        expect(existsSync(join(root, "grok-auth.json"))).toBe(false);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "lia logout removes leftover ChatGPT and Grok tokens alongside a saved lia login",
+    async () => {
+      const home = mkdtempSync(join(tmpdir(), "lia-e2e-logout-legacy-with-login-"));
+      const issuer = startLogoutIssuer([200, 200]);
+      const root = join(realpathSync(home), ".lia");
+      try {
+        writeSeededLiaAuth(home, undefined, issuer.issuerUrl);
+        const legacy = ["chatgpt-auth.json", "chatgpt-auth.lock", "grok-auth.json", "grok-auth.lock"];
+        for (const name of legacy) writeFileSync(join(root, name), "{}");
+
+        const logout = await runLia(["logout"], {
+          env: { ...NO_GATEWAY_AUTH, HOME: realpathSync(home), LIA_DISABLE_KEYCHAIN: "1" },
+        });
+
+        expect(logout.code).toBe(0);
+        expect(logout.stdout).toBe(
+          "Signed out of lia.\nRemoved saved ChatGPT and Grok sign-in tokens left by an older install.\n",
+        );
+        expect(logout.stderr).toBe("");
+        expect(existsSync(join(root, "auth.json"))).toBe(false);
+        for (const name of legacy) expect(existsSync(join(root, name))).toBe(false);
+      } finally {
+        issuer.stop();
         rmSync(home, { recursive: true, force: true });
       }
     },
@@ -4544,6 +4649,8 @@ describe("cli: interactive startup", () => {
         try {
           const r = await runLia(args, { env: { HOME: home } });
           expect(r.code).toBe(0);
+          expect(r.stdout).toContain("Fast, native coding agent for the terminal.");
+          expect(r.stdout).toContain("Usage:\n");
           expect(r.stdout).toContain("lia ask");
           expect(r.stderr).toBe("");
           expect(readdirSync(home)).toEqual([]);
@@ -5632,6 +5739,8 @@ describe("cli: workspace access", () => {
         { env: enabled },
       );
       expect(duplicate.code).toBe(0);
+      expect(duplicate.stdout).toContain("Fast, native coding agent for the terminal.");
+      expect(duplicate.stdout).toContain("lia ask");
       expect(duplicate.stderr).toBe("");
 
       const badMode = await runLia(["--permission-mode", "never"], { env: enabled });

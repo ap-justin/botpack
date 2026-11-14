@@ -3431,11 +3431,14 @@ describe("acp: model-independent", () => {
         const sessionId = created.result.sessionId as string;
         await client.readLine();
 
-        expect(await client.request("libfx/checkpoint", { sessionId }, 3)).toMatchObject({
-          jsonrpc: "2.0",
-          id: 3,
-          error: { code: -32601, message: "Method not found" },
-        });
+        const removed = ["libfx/checkpoint", "libfx/restore", "libfx/new"];
+        for (const [index, method] of removed.entries()) {
+          expect(await client.request(method, { sessionId }, 3 + index)).toMatchObject({
+            jsonrpc: "2.0",
+            id: 3 + index,
+            error: { code: -32601, message: "Method not found" },
+          });
+        }
 
         const followUp = await runPrompt(client, "Keep using the original ACP session.", TIMEOUT);
         expect(followUp.promptResult.result.stopReason).toBe("end_turn");
