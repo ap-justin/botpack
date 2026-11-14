@@ -67,7 +67,6 @@ describe("host-managed authentication", () => {
       AI_GATEWAY_API_KEY: undefined,
       VERCEL_OIDC_TOKEN: undefined,
       LIA_AUTH_MODE: "host-managed",
-      LIA_AUTO_UPGRADE: "0",
       LIA_DISABLE_KEYCHAIN: "1",
       LIA_TEST_SKIP_ONBOARDING: "1",
       LIA_SOUND: "0",

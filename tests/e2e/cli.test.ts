@@ -53,7 +53,7 @@ const NO_GATEWAY_AUTH = {
 const NO_SETTING_ENV = Object.fromEntries(
   [
     "LIA_PROVIDER", "LIA_MODEL", "LIA_ULTRAFAST", "LIA_REVIEW_MODEL", "LIA_PROVIDER_ORDER", "LIA_PROVIDER_STRICT",
-    "LIA_PERMISSION_MODE", "LIA_MAX_AGENT_STEPS", "LIA_AUTO_COMPACT_PERCENT", "LIA_THEME", "LIA_SOUND", "LIA_AUTO_UPGRADE",
+    "LIA_PERMISSION_MODE", "LIA_MAX_AGENT_STEPS", "LIA_AUTO_COMPACT_PERCENT", "LIA_THEME", "LIA_SOUND",
   ].map((name) => [name, undefined]),
 );
 const MISSING_AUTH_MESSAGE =
@@ -594,7 +594,6 @@ describe("cli: output errors", () => {
               PATH: process.env.PATH,
               HOME: home,
               LIA_SOUND: "0",
-              LIA_AUTO_UPGRADE: "0",
               LIA_DISABLE_KEYCHAIN: "1",
               LIA_TRACE_LOG: tracePath,
               LIA_TRACE_SCOPES: "core",
@@ -639,7 +638,6 @@ describe("cli: output errors", () => {
               AI_GATEWAY_API_KEY: "closed-stdout-key",
               LIA_MODEL: FAKE_GATEWAY_MODEL,
               LIA_DISABLE_KEYCHAIN: "1",
-              LIA_AUTO_UPGRADE: "0",
               LIA_SOUND: "0",
               LIA_GATEWAY_BASE_URL: gateway.baseUrl,
               LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
@@ -697,7 +695,7 @@ describe("cli: closed output pipe", () => {
     async () => {
       const home = createIsolatedTestHome();
       try {
-        const env = { PATH: process.env.PATH, HOME: home, LIA_SOUND: "0", LIA_AUTO_UPGRADE: "0", LIA_DISABLE_KEYCHAIN: "1" };
+        const env = { PATH: process.env.PATH, HOME: home, LIA_SOUND: "0", LIA_DISABLE_KEYCHAIN: "1" };
         // `lia --version` ends before lia's I/O starts, so SIGPIPE ends it;
         // `lia status` gets the closed pipe as a failed write.
         for (const args of [["--version"], ["status"]]) {
@@ -729,7 +727,6 @@ describe("cli: closed output pipe", () => {
             AI_GATEWAY_API_KEY: "reader-gone-key",
             LIA_MODEL: FAKE_GATEWAY_MODEL,
             LIA_DISABLE_KEYCHAIN: "1",
-            LIA_AUTO_UPGRADE: "0",
             LIA_SOUND: "0",
             LIA_GATEWAY_BASE_URL: gateway.baseUrl,
             LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
@@ -772,7 +769,6 @@ describe("cli: status", () => {
           AI_GATEWAY_API_KEY: "mcp-config-diagnostic-key",
           VERCEL_OIDC_TOKEN: undefined,
           LIA_DISABLE_KEYCHAIN: "1",
-          LIA_AUTO_UPGRADE: "0",
           LIA_MODEL: FAKE_GATEWAY_MODEL,
           LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
         };
@@ -2804,7 +2800,6 @@ describe("cli: Keychain authentication", () => {
               LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_MODEL: FAKE_GATEWAY_MODEL,
-              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: TIMEOUT,
           },
@@ -2909,7 +2904,6 @@ describe("cli: missing durable home", () => {
         const baseEnv = {
           HOME: home,
           VERCEL_OIDC_TOKEN: undefined,
-          LIA_AUTO_UPGRADE: "0",
           LIA_DISABLE_KEYCHAIN: "1",
         };
 
@@ -3725,7 +3719,6 @@ function modelsGatewayEnv(home: string, modelsUrl: string) {
     VERCEL_OIDC_TOKEN: undefined,
     HOME: home,
     LIA_DISABLE_KEYCHAIN: "1",
-    LIA_AUTO_UPGRADE: "0",
     LIA_TEST_GATEWAY_MODELS_URL: modelsUrl,
   };
 }
@@ -4240,7 +4233,6 @@ describe("cli: models", () => {
               ...scenario.authEnv,
               HOME: realpathSync(home),
               LIA_DISABLE_KEYCHAIN: "1",
-              LIA_AUTO_UPGRADE: "0",
               LIA_GATEWAY_BASE_URL: `http://127.0.0.1:${server.port}`,
               LIA_TEST_GATEWAY_MODELS_URL: undefined,
               LIA_TRACE_LOG: tracePath,
@@ -4673,7 +4665,6 @@ describe("cli: ask success", () => {
               LIA_GATEWAY_BASE_URL: gateway.baseUrl,
               LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_MODEL: FAKE_GATEWAY_MODEL,
-              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: TIMEOUT,
           },
@@ -4739,7 +4730,6 @@ describe("cli: ask success", () => {
                 LIA_GATEWAY_BASE_URL: gateway.baseUrl,
                 LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
                 LIA_MODEL: FAKE_GATEWAY_MODEL,
-                LIA_AUTO_UPGRADE: "0",
               },
               stdin: prompt,
               timeoutMs: 60_000,
@@ -5010,7 +5000,6 @@ describe("cli: ask success", () => {
               LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
               LIA_MODEL: FAKE_GATEWAY_MODEL,
-              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: 60_000,
           },
@@ -5077,7 +5066,6 @@ describe("cli: ask success", () => {
               LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_MODEL: FAKE_GATEWAY_MODEL,
-              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: 60_000,
           },
@@ -5118,7 +5106,6 @@ describe("cli: ask success", () => {
               LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_MODEL: FAKE_GATEWAY_MODEL,
-              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: 60_000,
           },
@@ -5157,7 +5144,6 @@ describe("cli: ask success", () => {
               LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
               LIA_MODEL: FAKE_GATEWAY_MODEL,
-              LIA_AUTO_UPGRADE: "0",
             },
             timeoutMs: 60_000,
           },
@@ -5237,7 +5223,6 @@ describe("cli: ask success", () => {
           LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
           LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
           LIA_MODEL: FAKE_GATEWAY_MODEL,
-          LIA_AUTO_UPGRADE: "0",
         };
 
         const first = await runLia(
@@ -5324,7 +5309,6 @@ describe("cli: ask success", () => {
           LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
           LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
           LIA_MODEL: FAKE_GATEWAY_MODEL,
-          LIA_AUTO_UPGRADE: "0",
         };
 
         const unrelated = await runLia(
@@ -5511,7 +5495,6 @@ describe("cli: error handling", () => {
           LIA_GATEWAY_BASE_URL: gateway.baseUrl,
           LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
           LIA_MODEL: FAKE_GATEWAY_MODEL,
-          LIA_AUTO_UPGRADE: "0",
         };
 
         const rejected = await runLia(["ask", "--definitely-unknown"], {
@@ -5591,7 +5574,6 @@ describe("cli: error handling", () => {
           LIA_GATEWAY_BASE_URL: gateway.baseUrl,
           LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
           LIA_MODEL: FAKE_GATEWAY_MODEL,
-          LIA_AUTO_UPGRADE: "0",
         };
 
         for (const args of [
@@ -6116,7 +6098,6 @@ describe("cli: MCP profile", () => {
           AI_GATEWAY_API_KEY: "mcp-unreadable-key",
           VERCEL_OIDC_TOKEN: undefined,
           LIA_DISABLE_KEYCHAIN: "1",
-          LIA_AUTO_UPGRADE: "0",
           LIA_MODEL: FAKE_GATEWAY_MODEL,
           LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
         };

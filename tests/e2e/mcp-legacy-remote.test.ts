@@ -92,7 +92,6 @@ function fixtureEnv(
     HOME: root.home,
     AI_GATEWAY_API_KEY: "fake-mcp-legacy-key",
     VERCEL_OIDC_TOKEN: undefined,
-    LIA_AUTO_UPGRADE: "0",
     LIA_PERMISSION_MODE: "auto",
     LIA_GATEWAY_BASE_URL: activeGateway.baseUrl,
     LIA_GATEWAY_CHAT_URL: activeGateway.chatUrl,
@@ -608,7 +607,7 @@ describe("version-scoped legacy MCP remote transports", () => {
       const started = Date.now();
       const result = await runLia(["mcp", "show", "fixture", "--json"], {
         cwd: root.workspace,
-        env: { HOME: root.home, LIA_AUTO_UPGRADE: "0" },
+        env: { HOME: root.home },
         timeoutMs: 90_000,
       });
       expect(result.signal).toBeNull();
@@ -629,7 +628,7 @@ describe("version-scoped legacy MCP remote transports", () => {
       const started = Date.now();
       const result = await runLia(["mcp", "show", "fixture", "--json"], {
         cwd: root.workspace,
-        env: { HOME: root.home, LIA_AUTO_UPGRADE: "0" },
+        env: { HOME: root.home },
         timeoutMs: 90_000,
       });
       expect(result.signal).toBeNull();

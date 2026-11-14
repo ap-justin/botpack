@@ -78,7 +78,6 @@ function permissionEnv(
     LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
     LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
     LIA_MODEL: FAKE_GATEWAY_MODEL,
-    LIA_AUTO_UPGRADE: "0",
     NO_COLOR: "1",
   };
 }
@@ -122,7 +121,6 @@ describe("generic permission typed errors", () => {
             LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
             LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
             LIA_MODEL: FAKE_GATEWAY_MODEL,
-            LIA_AUTO_UPGRADE: "0",
           },
           timeoutMs: TIMEOUT,
         });

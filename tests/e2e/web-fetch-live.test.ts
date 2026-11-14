@@ -138,7 +138,6 @@ function fakeGatewayEnv(
     HOME: root.home,
     AI_GATEWAY_API_KEY: "fake-live-web-fetch-key",
     VERCEL_OIDC_TOKEN: undefined,
-    LIA_AUTO_UPGRADE: "0",
     LIA_GATEWAY_BASE_URL: gateway.baseUrl,
     LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
     LIA_MODEL: OUTER_MODEL,

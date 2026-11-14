@@ -81,7 +81,7 @@ function start(s: Scene, label: string, args = ["mcp", "list", "--json"]): Proc 
   const trace = join(s.f.base, `${label}.trace`);
   const env = {
     PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: s.f.home, USER: s.account, TMPDIR: process.env.TMPDIR ?? "/tmp",
-    LIA_NO_OPEN_BROWSER: "1", LIA_AUTO_UPGRADE: "0", LIA_SOUND: "0", LIA_TEST_SKIP_ONBOARDING: "1", LIA_E2E_DISABLE_DOTENV: "1",
+    LIA_NO_OPEN_BROWSER: "1", LIA_SOUND: "0", LIA_TEST_SKIP_ONBOARDING: "1", LIA_E2E_DISABLE_DOTENV: "1",
     LIA_TRACE_LOG: trace, LIA_TRACE_SCOPES: "mcp,keychain", AI_GATEWAY_API_KEY: "fake-store-lock-key",
   };
   const started = awakeMs();

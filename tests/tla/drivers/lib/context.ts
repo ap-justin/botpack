@@ -48,7 +48,6 @@ export function testEnvironment(values: Record<string, string>, inherited = proc
     ...result,
     LIA_SOUND: "0",
     LIA_DISABLE_KEYCHAIN: "1",
-    LIA_AUTO_UPGRADE: "0",
     LIA_E2E_DISABLE_DOTENV: "1",
     ...values,
   };

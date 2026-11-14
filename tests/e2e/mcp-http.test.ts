@@ -114,7 +114,6 @@ function fixtureEnv(
     HOME: root.home,
     AI_GATEWAY_API_KEY: "fake-mcp-http-key",
     VERCEL_OIDC_TOKEN: undefined,
-    LIA_AUTO_UPGRADE: "0",
     LIA_PERMISSION_MODE: "auto",
     LIA_GATEWAY_BASE_URL: activeGateway.baseUrl,
     LIA_GATEWAY_CHAT_URL: activeGateway.chatUrl,
@@ -246,7 +245,6 @@ describe("modern MCP Streamable HTTP", () => {
         env: {
           HOME: root.home,
           LIA_DISABLE_KEYCHAIN: "1",
-          LIA_AUTO_UPGRADE: "0",
           LIA_TEST_SKIP_ONBOARDING: "1",
           LIA_SOUND: "0",
           AI_GATEWAY_API_KEY: "local-fixture-key",
@@ -278,7 +276,6 @@ describe("modern MCP Streamable HTTP", () => {
           HOME: root.home,
           AI_GATEWAY_API_KEY: undefined,
           VERCEL_OIDC_TOKEN: undefined,
-          LIA_AUTO_UPGRADE: "0",
           LIA_TRACE_LOG: root.traceLogPath,
           LIA_TRACE_SCOPES: "mcp",
         },
@@ -311,7 +308,6 @@ describe("modern MCP Streamable HTTP", () => {
           HOME: root.home,
           AI_GATEWAY_API_KEY: undefined,
           VERCEL_OIDC_TOKEN: undefined,
-          LIA_AUTO_UPGRADE: "0",
           LIA_TRACE_LOG: root.traceLogPath,
           LIA_TRACE_SCOPES: "mcp",
         },
@@ -343,7 +339,6 @@ describe("modern MCP Streamable HTTP", () => {
           HOME: root.home,
           AI_GATEWAY_API_KEY: undefined,
           VERCEL_OIDC_TOKEN: undefined,
-          LIA_AUTO_UPGRADE: "0",
           LIA_TRACE_LOG: root.traceLogPath,
           LIA_TRACE_SCOPES: "mcp",
         },
@@ -376,7 +371,6 @@ describe("modern MCP Streamable HTTP", () => {
           HOME: root.home,
           AI_GATEWAY_API_KEY: undefined,
           VERCEL_OIDC_TOKEN: undefined,
-          LIA_AUTO_UPGRADE: "0",
         },
       },
     );
@@ -389,11 +383,11 @@ describe("modern MCP Streamable HTTP", () => {
     const atAdd = fixture.requests.length;
     const quiet = await runLia(
       ["mcp", "add", "--no-login", "quiet", fixture.url],
-      { cwd: root.workspace, env: { HOME: root.home, AI_GATEWAY_API_KEY: undefined, VERCEL_OIDC_TOKEN: undefined, LIA_AUTO_UPGRADE: "0" } },
+      { cwd: root.workspace, env: { HOME: root.home, AI_GATEWAY_API_KEY: undefined, VERCEL_OIDC_TOKEN: undefined } },
     );
     expect(quiet.code).toBe(0);
     expect(fixture.requests).toHaveLength(atAdd);
-    expect((await runLia(["mcp", "remove", "quiet"], { cwd: root.workspace, env: { HOME: root.home, LIA_AUTO_UPGRADE: "0" } })).code).toBe(0);
+    expect((await runLia(["mcp", "remove", "quiet"], { cwd: root.workspace, env: { HOME: root.home } })).code).toBe(0);
 
     gateway = startFakeGateway([
       fakeGatewayToolCall("top_level_select", "mcp_select_tool", { name: TOOL_NAME }),

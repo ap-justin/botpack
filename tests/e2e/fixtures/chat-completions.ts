@@ -51,7 +51,7 @@ export function createConfiguredProviderFixture(respond?: (body: any) => Respons
     AI_GATEWAY_API_KEY: "unrelated-gateway-token", VERCEL_OIDC_TOKEN: undefined,
     LIA_GATEWAY_CHAT_URL: `http://127.0.0.1:${server.port}/unexpected-gateway`,
     LIA_GATEWAY_BASE_URL: `http://127.0.0.1:${server.port}/unexpected-gateway`,
-    LIA_TEST_PROVIDER_TOKEN: "own-provider-token", LIA_AUTO_UPGRADE: "0", LIA_SOUND: "0", NO_COLOR: "1",
+    LIA_TEST_PROVIDER_TOKEN: "own-provider-token", LIA_SOUND: "0", NO_COLOR: "1",
   };
   return { home, workspace, requests, env, settings, settingsPath, save, close() { server.stop(true); cleanupIsolatedTestHome(home); } };
 }

@@ -255,7 +255,6 @@ function gatewayEnv(
     LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl,
     LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
     LIA_MODEL: MODEL,
-    LIA_AUTO_UPGRADE: "0",
     ...extra,
   };
 }
@@ -1011,7 +1010,6 @@ describe("filesystem path handling", () => {
             cwd: root.workspace,
             env: {
               HOME: root.home,
-              LIA_AUTO_UPGRADE: "0",
               LIA_GATEWAY_BASE_URL: undefined,
               LIA_GATEWAY_CHAT_URL: undefined,
               LIA_MODEL: process.env.LIA_WORKSPACE_ACCESS_LIVE_MODEL ?? EVAL_MODEL,
@@ -1901,7 +1899,6 @@ describe("filesystem path handling", () => {
             cwd: root.workspace,
             env: {
               HOME: root.home,
-              LIA_AUTO_UPGRADE: "0",
               LIA_GATEWAY_BASE_URL: undefined,
               LIA_GATEWAY_CHAT_URL: undefined,
               LIA_MODEL: process.env.LIA_WORKSPACE_ACCESS_LIVE_MODEL ?? EVAL_MODEL,

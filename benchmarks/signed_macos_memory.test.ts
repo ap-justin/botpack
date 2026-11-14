@@ -49,7 +49,7 @@ test("signed macOS variants preserve the image flow and native resource accounti
         const child = Bun.spawn([binary, "ask", "--json", "--auto", "--no-save", "Get an image from the fixture"], {
           cwd: workspace, stdin: "ignore", stdout: "pipe", stderr: "pipe",
           env: { PATH: process.env.PATH ?? "", TMPDIR: dir, LANG: "en_US.UTF-8", TZ: "UTC",
-            HOME: profile, AI_GATEWAY_API_KEY: "fake-fixture-key", LIA_AUTO_UPGRADE: "0", LIA_SOUND: "0",
+            HOME: profile, AI_GATEWAY_API_KEY: "fake-fixture-key", LIA_SOUND: "0",
             LIA_DISABLE_KEYCHAIN: "1", LIA_TEST_SKIP_ONBOARDING: "1", LIA_PERMISSION_MODE: "auto", LIA_MODEL: model,
             LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
             LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl },

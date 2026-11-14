@@ -191,7 +191,7 @@ export async function runTurn(ctx: RunContext, spec: TurnSpec): Promise<Observed
   const env = {
     PATH: "/usr/bin:/bin:/usr/sbin:/sbin", HOME: home, TMPDIR: root, SHELL: "/bin/zsh", LANG: "en_US.UTF-8",
     AI_GATEWAY_API_KEY: "synthetic-shell-contract", LIA_DISABLE_KEYCHAIN: "1", LIA_E2E_DISABLE_DOTENV: "1",
-    LIA_TEST_SKIP_ONBOARDING: "1", LIA_SOUND: "0", LIA_AUTO_UPGRADE: "0", LIA_MODEL: helpers.FAKE_GATEWAY_MODEL,
+    LIA_TEST_SKIP_ONBOARDING: "1", LIA_SOUND: "0", LIA_MODEL: helpers.FAKE_GATEWAY_MODEL,
     LIA_GATEWAY_BASE_URL: gateway.baseUrl, LIA_GATEWAY_CHAT_URL: gateway.chatUrl,
     LIA_TEST_GATEWAY_CHAT_URL: gateway.chatUrl, LIA_TEST_GATEWAY_MODELS_URL: `${gateway.baseUrl}/coding-agent/v1/models`,
     LIA_TRACE_LOG: join(root, "trace.log"), LIA_TRACE_SCOPES: "tool,terminal",

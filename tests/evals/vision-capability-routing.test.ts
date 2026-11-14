@@ -57,7 +57,6 @@ function liveEnv(root: Root, model: string) {
   return {
     HOME: root.home,
     LIA_MODEL: model,
-    LIA_AUTO_UPGRADE: "0",
     LIA_DISABLE_KEYCHAIN: "1",
     LIA_TEST_SKIP_ONBOARDING: "1",
     LIA_TRACE_LOG: root.tracePath,

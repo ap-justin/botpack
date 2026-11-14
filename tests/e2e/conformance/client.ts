@@ -135,7 +135,6 @@ const liaEnv = {
   ...(authScenario ? { DISPLAY: process.env.DISPLAY || ":0" } : {}),
   AI_GATEWAY_API_KEY: "mcp-conformance-placeholder",
   VERCEL_OIDC_TOKEN: "",
-  LIA_AUTO_UPGRADE: "0",
   LIA_DISABLE_KEYCHAIN: "1",
   ...(scenarioContext.client_secret
     ? {
